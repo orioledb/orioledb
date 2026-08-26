@@ -260,6 +260,26 @@ extern void add_undo_drop_relnode(ORelOids oids, OIndexKey *trees,
 extern void add_undo_create_relnode(ORelOids oids, OIndexKey *trees,
 									int numTrees, bool fsync);
 extern void check_pending_truncates(void);
+
+/*
+ * Recovery-only carry reconciliation for the native table-rewrite adoption.
+ *
+ * On the standby, the sys-tree WAL for an adoption deletes the transient
+ * heap's primary OIndex row and then re-inserts the old heap's primary OIndex
+ * row at the SAME relnode (the filled primary tree Rnew is carried).  The
+ * master suppresses the tree drop via o_drop_table_ext(carry_primary=true),
+ * but that signal is not in the WAL, so recovery_apply_systree_modify() queues
+ * a drop undo item for Rnew that would wipe the just-filled tree at commit.
+ *
+ * prescan walks the transaction's on-commit undo chain (read-only) and records
+ * each relnode seen in a drop (oldTrees) and in a create (newTrees); a relnode
+ * in both is "carried".  btree_relnode_undo_callback() then skips the
+ * data-destroying cleanup for carried relnodes.  Built/cleared around the
+ * recovery commit walk (UndoLogSystem only) by on_commit_undo_stack().
+ */
+extern void btree_relnode_recovery_prescan_carried(UndoLogType undoType,
+												   OXid oxid);
+extern void btree_relnode_recovery_clear_carried(void);
 extern UndoLocation walk_undo_range_with_buf(UndoLogType undoType, UndoLocation location,
 											 UndoLocation toLoc,
 											 OXid oxid, OUndoCallbackStage stage,

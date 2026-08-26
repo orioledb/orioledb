@@ -907,6 +907,245 @@ check_pending_truncates(void)
 		pfree(trees);
 }
 
+/*
+ * Recovery-only carry reconciliation: see btree/undo.h.
+ *
+ * A relnode is "carried" when the same transaction's on-commit undo chain
+ * contains both a drop (oldTrees) and a create (newTrees) for it -- exactly
+ * the native table-rewrite adoption, where the transient heap's primary OIndex
+ * row is deleted and the old heap's re-inserted at the same relnode so the
+ * filled primary tree survives.  The entry records which sides referenced the
+ * relnode; only relnodes seen on BOTH sides suppress the commit-time cleanup.
+ *
+ * A drop and a create of the SAME relnode can also happen for a table that is
+ * created and then dropped in one transaction (create_relnode +
+ * drop_relnode).  That must NOT be treated as a carry: the file should be
+ * deleted.  The adoption differs in that the relnode's ownership MOVES between
+ * two distinct OTables -- the transient heap (dropped) and the old heap
+ * (re-created) -- so the drop undo item and the create undo item carry
+ * different `relid`s (RelnodeUndoStackItem.relid).  Track the relid seen on
+ * each side and require a carry only when the dropped relid differs from the
+ * created relid, so create-then-drop (same relid on both sides) still drops
+ * the file.
+ */
+typedef struct
+{
+	Oid			datoid;
+	Oid			relnode;
+} CarriedRelnodeKey;
+
+/*
+ * Cap on the number of distinct OTable relids tracked per side per relnode.
+ * A relnode is owned by at most a handful of OTables in one transaction
+ * (e.g. the adoption's transient heap + old heap), so a small fixed array is
+ * ample; a relid seen past the cap is folded into the last slot (still marked
+ * present, which only makes the carry test more conservative -- it would
+ * suppress fewer drops, never wrongly suppress one).
+ */
+#define CARRY_MAX_RELIDS 8
+
+typedef struct
+{
+	CarriedRelnodeKey key;
+	bool		dropped;
+	bool		created;
+	int			numDropRelids;
+	int			numCreateRelids;
+	Oid			dropRelids[CARRY_MAX_RELIDS];
+	Oid			createRelids[CARRY_MAX_RELIDS];
+} CarriedRelnodeEntry;
+
+static MemoryContext carried_relnodes_cxt = NULL;
+static HTAB *carried_relnodes = NULL;
+
+static void
+carried_relnode_add_relid(Oid *arr, int *num, Oid relid)
+{
+	int			i;
+
+	for (i = 0; i < *num; i++)
+	{
+		if (arr[i] == relid)
+			return;
+	}
+	if (*num < CARRY_MAX_RELIDS)
+		arr[(*num)++] = relid;
+}
+
+static void
+carried_relnode_mark(Oid datoid, Oid relnode, Oid relid, bool isDrop)
+{
+	CarriedRelnodeEntry *entry;
+	bool		found;
+
+	Assert(carried_relnodes != NULL);
+	entry = (CarriedRelnodeEntry *) hash_search(carried_relnodes,
+											   &(CarriedRelnodeKey)
+											   {datoid, relnode},
+											   HASH_ENTER, &found);
+	if (!found)
+	{
+		entry->dropped = false;
+		entry->created = false;
+		entry->numDropRelids = 0;
+		entry->numCreateRelids = 0;
+	}
+	if (isDrop)
+	{
+		entry->dropped = true;
+		carried_relnode_add_relid(entry->dropRelids, &entry->numDropRelids,
+								  relid);
+	}
+	else
+	{
+		entry->created = true;
+		carried_relnode_add_relid(entry->createRelids, &entry->numCreateRelids,
+								  relid);
+	}
+}
+
+static bool
+carried_relnode_is_carried(Oid datoid, Oid relnode)
+{
+	CarriedRelnodeEntry *entry;
+	int			i,
+				j;
+
+	if (carried_relnodes == NULL)
+		return false;
+	entry = (CarriedRelnodeEntry *) hash_search(carried_relnodes,
+												&(CarriedRelnodeKey)
+												{datoid, relnode},
+												HASH_FIND, NULL);
+
+	/*
+	 * A carry requires both a drop and a create of this relnode.  Crucially,
+	 * the create must come from an OTable (relid) that did NOT also drop the
+	 * relnode: that is the adoption signature -- the filled primary tree is
+	 * dropped by the transient heap's OTable and re-referenced (created) by the
+	 * old heap's OTable, so the tree survives under a new owner.  When the only
+	 * OTable that created the relnode is the same one that dropped it
+	 * (create-then-drop of a fresh table), the tree must be deleted, so it is
+	 * not a carry.
+	 */
+	if (entry == NULL || !entry->dropped || !entry->created)
+		return false;
+
+	for (i = 0; i < entry->numCreateRelids; i++)
+	{
+		bool		createRelidWasDropped = false;
+
+		for (j = 0; j < entry->numDropRelids; j++)
+		{
+			if (entry->createRelids[i] == entry->dropRelids[j])
+			{
+				createRelidWasDropped = true;
+				break;
+			}
+		}
+		if (!createRelidWasDropped)
+			return true;
+	}
+	return false;
+}
+
+/*
+ * Walk the current process's on-commit undo chain for `undoType` read-only and
+ * record every relnode referenced by a RelnodeUndoStackItem's oldTrees (drop)
+ * or newTrees (create).  Other on-commit item types (invalidate, rewind,
+ * comparator) are skipped -- only their onCommitLocation link is followed to
+ * keep walking the chain.  Uses undo_read() directly (no callbacks) so no
+ * commit/abort side effects fire during the prescan.
+ */
+void
+btree_relnode_recovery_prescan_carried(UndoLogType undoType, OXid oxid)
+{
+	UndoStackSharedLocations *sharedLocations;
+	UndoLocation location;
+	Pointer		buf = NULL;
+	Size		bufSize = 0;
+
+	if (carried_relnodes_cxt == NULL)
+	{
+		carried_relnodes_cxt = AllocSetContextCreate(TopMemoryContext,
+													 "orioledb carried relnodes",
+													 ALLOCSET_DEFAULT_SIZES);
+	}
+	else
+	{
+		MemoryContextReset(carried_relnodes_cxt);
+	}
+
+	{
+		HASHCTL		ctl;
+
+		MemSet(&ctl, 0, sizeof(ctl));
+		ctl.keysize = sizeof(CarriedRelnodeKey);
+		ctl.entrysize = sizeof(CarriedRelnodeEntry);
+		ctl.hcxt = carried_relnodes_cxt;
+		carried_relnodes = hash_create("orioledb carried relnodes",
+									   8, &ctl,
+									   HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+	}
+
+	sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS(undoType);
+	location = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
+
+	while (UndoLocationIsValid(location))
+	{
+		UndoStackItem header;
+
+		undo_read(undoType, location, sizeof(UndoStackItem),
+				  (Pointer) &header);
+
+		if (header.type == RelnodeUndoItemType)
+		{
+			RelnodeUndoStackItem *item;
+			int			i;
+
+			if (header.itemSize > bufSize)
+			{
+				if (buf)
+					pfree(buf);
+				bufSize = header.itemSize;
+				buf = palloc(bufSize);
+			}
+			undo_read(undoType, location, header.itemSize, buf);
+			item = (RelnodeUndoStackItem *) buf;
+
+			for (i = 0; i < item->oldNumTrees; i++)
+				carried_relnode_mark(item->trees[i].oids.datoid,
+									 item->trees[i].oids.relnode,
+									 item->relid, true);
+			for (i = 0; i < item->newNumTrees; i++)
+				carried_relnode_mark(item->trees[item->oldNumTrees + i].oids.datoid,
+									 item->trees[item->oldNumTrees + i].oids.relnode,
+									 item->relid, false);
+
+			location = item->header.onCommitLocation;
+		}
+		else
+		{
+			OnCommitUndoStackItem fItem;
+
+			undo_read(undoType, location, sizeof(OnCommitUndoStackItem),
+					  (Pointer) &fItem);
+			location = fItem.onCommitLocation;
+		}
+	}
+
+	if (buf)
+		pfree(buf);
+}
+
+void
+btree_relnode_recovery_clear_carried(void)
+{
+	if (carried_relnodes_cxt != NULL)
+		MemoryContextReset(carried_relnodes_cxt);
+	carried_relnodes = NULL;
+}
+
 void
 btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 							UndoStackItem *baseItem,
@@ -1019,6 +1258,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 		for (i = 0; i < dropNumTrees; i++)
 		{
 			bool		dropBridgeMarker = false;
+			bool		carried = false;
 
 			if (!recovery)
 				o_tables_rel_lock_exclusive_no_inval_no_log(&dropTrees[i].oids);
@@ -1026,41 +1266,62 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 												AccessExclusiveLock, true);
 			if (doCleanup)
 			{
-				cleanup_btree(dropTrees[i], cleanupFiles, true);
-				o_delete_chkp_num(dropTrees[i].oids.datoid,
-								  dropTrees[i].oids.relnode,
-								  dropTrees[i].oids.spcoid);
-
 				/*
-				 * A bridge index (reloid == relnode) reserved its relnode
-				 * with a standard-path marker file (o_bridge_new_relnode).
-				 * Now that the bridge is durably dropped, remove the marker
-				 * so PG can reuse the relnode.  The locator is rebuilt from
-				 * the undo item's (datoid, spcoid, relnode) -- all carried in
-				 * ORelOids -- so this is correct in recovery too.  Only on
-				 * commit: an aborted create's marker is removed by the
-				 * register_delete pending-delete instead.
-				 *
-				 * NB: reloid == relnode identifies a bridge only by
-				 * convention -- o_bridge_new_relnode() sets reloid to the
-				 * relnode it allocated -- and an ordinary index matches it
-				 * too until its first rewrite, since CREATE INDEX leaves
-				 * relfilenode == oid.  Dropping such a tree while pg_class
-				 * still points at that relnode unlinks a live relation file:
-				 * that is how issue #906 turned the moved table unreadable
-				 * ("could not open file ..." from every plan over it) on top
-				 * of emptying the index.  Every path that drops an index tree
-				 * at commit now gives the index a fresh relnode first, so the
-				 * locator dropped here is always stale -- but the test itself
-				 * is still a heuristic, not an identity.  Making it exact
-				 * means marking the bridge in RelnodeUndoStackItem, which
-				 * changes the undo record layout and so needs an
-				 * ORIOLEDB_BINARY_VERSION bump; that was left out of the #906
-				 * fix deliberately rather than changing an on-disk format as
-				 * a side effect of a correctness fix.
+				 * On the standby a relnode can appear in both a drop and a
+				 * create within one transaction's on-commit undo chain: the
+				 * native table-rewrite adoption deletes the transient heap's
+				 * primary OIndex row and re-inserts the old heap's at the same
+				 * relnode, carrying the filled primary tree.  The master
+				 * suppresses that tree's drop via carry_primary, but that
+				 * signal is not in the WAL, so recovery re-derived a drop undo
+				 * item that would wipe the carried tree.  Skip the
+				 * data-destroying cleanup (tree wipe, checkpoint-number drop,
+				 * bridge marker unlink) for a carried relnode so the filled
+				 * tree survives.  Locks and oid invalidation still run: the
+				 * tree's ownership moved between OTables, so invalidating
+				 * cached descriptors is correct.
 				 */
-				dropBridgeMarker = (stage == OUndoCallbackStageCommit &&
-									dropTrees[i].oids.reloid == dropTrees[i].oids.relnode);
+				carried = (recovery &&
+						   carried_relnode_is_carried(dropTrees[i].oids.datoid,
+													  dropTrees[i].oids.relnode));
+				if (!carried)
+				{
+					cleanup_btree(dropTrees[i], cleanupFiles, true);
+					o_delete_chkp_num(dropTrees[i].oids.datoid,
+									  dropTrees[i].oids.relnode,
+									  dropTrees[i].oids.spcoid);
+
+					/*
+					 * A bridge index (reloid == relnode) reserved its relnode
+					 * with a standard-path marker file (o_bridge_new_relnode).
+					 * Now that the bridge is durably dropped, remove the marker
+					 * so PG can reuse the relnode.  The locator is rebuilt from
+					 * the undo item's (datoid, spcoid, relnode) -- all carried in
+					 * ORelOids -- so this is correct in recovery too.  Only on
+					 * commit: an aborted create's marker is removed by the
+					 * register_delete pending-delete instead.
+					 *
+					 * NB: reloid == relnode identifies a bridge only by
+					 * convention -- o_bridge_new_relnode() sets reloid to the
+					 * relnode it allocated -- and an ordinary index matches it
+					 * too until its first rewrite, since CREATE INDEX leaves
+					 * relfilenode == oid.  Dropping such a tree while pg_class
+					 * still points at that relnode unlinks a live relation file:
+					 * that is how issue #906 turned the moved table unreadable
+					 * ("could not open file ..." from every plan over it) on top
+					 * of emptying the index.  Every path that drops an index tree
+					 * at commit now gives the index a fresh relnode first, so the
+					 * locator dropped here is always stale -- but the test itself
+					 * is still a heuristic, not an identity.  Making it exact
+					 * means marking the bridge in RelnodeUndoStackItem, which
+					 * changes the undo record layout and so needs an
+					 * ORIOLEDB_BINARY_VERSION bump; that was left out of the #906
+					 * fix deliberately rather than changing an on-disk format as
+					 * a side effect of a correctness fix.
+					 */
+					dropBridgeMarker = (stage == OUndoCallbackStageCommit &&
+										dropTrees[i].oids.reloid == dropTrees[i].oids.relnode);
+				}
 			}
 			o_invalidate_oids(dropTrees[i].oids);
 			if (!recovery)

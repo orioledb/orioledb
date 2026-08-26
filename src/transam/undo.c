@@ -1518,7 +1518,26 @@ precommit_undo_stack(UndoLogType undoType, OXid oxid, bool changeCountsValid)
 void
 on_commit_undo_stack(UndoLogType undoType, OXid oxid, bool changeCountsValid)
 {
-	walk_undo_stack(undoType, oxid, NULL, false, changeCountsValid);
+	/*
+	 * On the standby, the native table-rewrite adoption reuses a relnode
+	 * across an OIndex delete+insert within one transaction; the carry is
+	 * not signalled in the WAL, so the commit walk would otherwise wipe the
+	 * carried (filled) primary tree.  Prescan the on-commit undo chain
+	 * (read-only, UndoLogSystem only -- relnode undo items live there) and
+	 * record the relnodes seen in both a drop and a create, then have the
+	 * commit walk skip the data-destroying cleanup for those.  Clear it
+	 * afterwards so it never leaks across transactions or processes.
+	 */
+	if (undoType == UndoLogSystem && is_recovery_in_progress())
+	{
+		btree_relnode_recovery_prescan_carried(undoType, oxid);
+		walk_undo_stack(undoType, oxid, NULL, false, changeCountsValid);
+		btree_relnode_recovery_clear_carried();
+	}
+	else
+	{
+		walk_undo_stack(undoType, oxid, NULL, false, changeCountsValid);
+	}
 }
 
 bool
