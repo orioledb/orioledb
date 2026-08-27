@@ -5,9 +5,13 @@ on:
     branches: ["main"]
     paths-ignore:
       - "test/antithesis/**"
+      - "test/integration/**"
+      - "doc/**"
   pull_request:
     paths-ignore:
       - "test/antithesis/**"
+      - "test/integration/**"
+      - "doc/**"
   workflow_dispatch:
 
 jobs:

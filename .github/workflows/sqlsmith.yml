@@ -8,10 +8,14 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - "test/antithesis/**"
+      - "test/**"
+      - "doc/**"
+      - "**/*.md"
   pull_request:
     paths-ignore:
-      - "test/antithesis/**"
+      - "test/**"
+      - "doc/**"
+      - "**/*.md"
   workflow_dispatch:
     inputs:
       seconds:

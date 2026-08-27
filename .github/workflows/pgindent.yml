@@ -3,11 +3,13 @@ name: pgindent
 on:
   push:
     branches: ["main"]
-    paths-ignore:
-      - "test/antithesis/**"
+    paths:
+      - "**/*.[ch]"
+      - "**/*.py"
   pull_request:
-    paths-ignore:
-      - "test/antithesis/**"
+    paths:
+      - "**/*.[ch]"
+      - "**/*.py"
   workflow_dispatch:
 
 jobs:

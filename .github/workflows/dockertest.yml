@@ -3,10 +3,14 @@ name: dockerTEST
 on:
   push:
     paths-ignore:
-      - "test/antithesis/**"
+      - "test/**"
+      - "doc/**"
+      - "**/*.md"
   pull_request:
     paths-ignore:
-      - "test/antithesis/**"
+      - "test/**"
+      - "doc/**"
+      - "**/*.md"
 
 defaults:
   run:
