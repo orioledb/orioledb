@@ -3589,6 +3589,100 @@ get_opclass(Oid opclass, Oid actual_datatype)
 	return result;
 }
 
+/*
+ * orioledb_amdrop - index AM amdrop callback, fired from PG's index_drop()
+ * right before RelationDropStorage(), for every orioledb (native or
+ * bridged) index drop.  Replaces the former OAT_DROP RelationRelationId
+ * index branch, which had to reverse-engineer the drop context from
+ * dropflags + drop_index_list + o_reuse_indices.  Here we get the real
+ * PERFORM_DELETION_* `flags` directly.
+ *
+ * Decision table (mirrors the old OAT branch):
+ *   - whole-table drop (PERFORM_DELETION_OF_RELATION): keep -- the OTable
+ *     drop (OAT_DROP Rel subId==0 / o_drop_table) drops all OIndexes at
+ *     once.  (The partition-index-dependency bookkeeping for this flag is
+ *     still done in the OAT_DROP branch.)
+ *   - reused (member of o_reuse_indices): keep -- ALTER TYPE reuse.
+ *   - PERFORM_DELETION_CONCURRENT_LOCK: drop -- REINDEX CONCURRENTLY _ccold.
+ *   - not PERFORM_DELETION_INTERNAL: drop -- explicit DROP INDEX.
+ *   - internal + in drop_index_list: drop + remove from list -- ALTER TYPE
+ *     incompatible index.
+ *   - otherwise (internal, not in list): keep -- ALTER TYPE compatible
+ *     reuse.
+ */
+void
+orioledb_amdrop(Relation index, int flags)
+{
+	Relation	tbl;
+	OIndexNumber ix_num;
+	OTableDescr *descr;
+	String	   *relname;
+
+	/* Whole-table drop: OTable drop owns all OIndexes; amdrop is a no-op. */
+	if (flags & PERFORM_DELETION_OF_RELATION)
+		return;
+
+	tbl = relation_open(index->rd_index->indrelid, AccessShareLock);
+
+	if (!((tbl->rd_rel->relkind == RELKIND_RELATION ||
+		   tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
+		  is_orioledb_rel(tbl)))
+	{
+		relation_close(tbl, AccessShareLock);
+		return;
+	}
+
+	descr = relation_get_descr(tbl);
+	Assert(descr != NULL);
+
+	ix_num = o_find_ix_num_by_name(descr, index->rd_rel->relname.data);
+
+	/*
+	 * REINDEX CONCURRENTLY renames the old index to "<orig>_ccold" before
+	 * dropping it, so a name-based lookup misses the OIndex (still stored
+	 * under the original name).  Fall back to a pg_class.oid match -- the
+	 * oid is stable across index_concurrently_swap.
+	 */
+	if (ix_num == InvalidIndexNumber)
+		ix_num = o_find_ix_num_by_reloid(descr, index->rd_rel->oid);
+
+	if (ix_num == InvalidIndexNumber)
+	{
+		relation_close(tbl, AccessShareLock);
+		return;
+	}
+
+	if (descr->indices[ix_num]->primaryIsCtid)
+		ix_num--;
+
+	relname = makeString(index->rd_rel->relname.data);
+
+	if (list_member_oid(o_reuse_indices, index->rd_rel->oid))
+	{
+		/* Do not drop index if it is set for reuse. */
+		elog(DEBUG1, "amdrop: skipping index %u drop as it is set for reuse",
+			 index->rd_rel->oid);
+	}
+	else if ((flags & PERFORM_DELETION_CONCURRENT_LOCK) ||
+			 !(flags & PERFORM_DELETION_INTERNAL) ||
+			 list_member(drop_index_list, relname))
+	{
+		/*
+		 * Drop the OIndex.  PERFORM_DELETION_CONCURRENT_LOCK covers
+		 * REINDEX CONCURRENTLY's "_ccold" drop (post-swap name doesn't
+		 * match drop_index_list and the drop is otherwise INTERNAL).
+		 * !(PERFORM_DELETION_INTERNAL) is an explicit DROP INDEX.
+		 * Internal + member of drop_index_list is an ALTER TYPE
+		 * incompatible index.
+		 */
+		drop_index_list = list_delete(drop_index_list, relname);
+		o_index_drop(tbl, ix_num);
+	}
+	/* else: internal, not in drop_index_list -> ALTER TYPE compatible reuse. */
+
+	relation_close(tbl, AccessShareLock);
+}
+
 static void
 orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							int subId, void *arg)
@@ -3713,77 +3807,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					}
 					o_table_free(o_table);
 				}
-			}
-			else if (rel->rd_rel->relkind == RELKIND_INDEX &&
-					 !(drop_arg->dropflags & PERFORM_DELETION_OF_RELATION))
-			{
-				/*
-				 * dropflags == PERFORM_DELETION_OF_RELATION ignored, to not
-				 * drop indices when whole table dropped
-				 */
-				Relation	tbl = relation_open(rel->rd_index->indrelid,
-												AccessShareLock);
-
-				if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
-					 tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
-					is_orioledb_rel(tbl))
-				{
-					OIndexNumber ix_num;
-					OTableDescr *descr = relation_get_descr(tbl);
-
-					Assert(descr != NULL);
-					ix_num = o_find_ix_num_by_name(descr,
-												   rel->rd_rel->relname.data);
-
-					/*
-					 * REINDEX CONCURRENTLY renames the old index to
-					 * "<orig>_ccold" before dropping it, so a name-based
-					 * lookup will miss the corresponding OIndex (still stored
-					 * under the original name).  Fall back to a pg_class.oid
-					 * match -- the oid is stable across
-					 * index_concurrently_swap.
-					 */
-					if (ix_num == InvalidIndexNumber)
-						ix_num = o_find_ix_num_by_reloid(descr,
-														 rel->rd_rel->oid);
-
-					if (ix_num != InvalidIndexNumber)
-					{
-						String	   *relname;
-
-						if (descr->indices[ix_num]->primaryIsCtid)
-							ix_num--;
-						relation_close(rel, AccessShareLock);
-						is_open = false;
-
-						relname = makeString(rel->rd_rel->relname.data);
-						if (list_member_oid(o_reuse_indices, objectId))
-						{
-							/* Do not drop index if it is set for reuse */
-							elog(DEBUG1, "object_access_hook: skipping index %d drop as it is set for reuse", objectId);
-						}
-						else if (!(drop_arg->dropflags &
-								   PERFORM_DELETION_INTERNAL) ||
-								 list_member(drop_index_list, relname) ||
-								 (drop_arg->dropflags &
-								  PERFORM_DELETION_CONCURRENT_LOCK))
-						{
-							/*
-							 * PERFORM_DELETION_CONCURRENT_LOCK is set only on
-							 * REINDEX CONCURRENTLY's "_ccold" drop after
-							 * index_concurrently_swap.  Without this branch
-							 * the OIndex would leak in our sys-tree because
-							 * the post-swap name doesn't match
-							 * drop_index_list and the drop is otherwise
-							 * marked INTERNAL.
-							 */
-							drop_index_list = list_delete(drop_index_list,
-														  relname);
-							o_index_drop(tbl, ix_num);
-						}
-					}
-				}
-				relation_close(tbl, AccessShareLock);
 			}
 			else if (rel->rd_rel->relkind == RELKIND_COMPOSITE_TYPE &&
 					 (subId != 0))

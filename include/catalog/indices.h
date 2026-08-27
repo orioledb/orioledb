@@ -125,6 +125,13 @@ extern void o_index_drop(Relation tbl, OIndexNumber ix_num);
 extern OIndexNumber o_find_ix_num_by_name(OTableDescr *descr,
 										  char *ix_name);
 extern OIndexNumber o_find_ix_num_by_reloid(OTableDescr *descr, Oid reloid);
+
+/*
+ * orioledb_amdrop - index AM amdrop callback.  Fired from PG's index_drop()
+ * for every orioledb (native or bridged) index drop, with the real
+ * PERFORM_DELETION_* flags.  Replaces the former OAT_DROP index branch.
+ */
+extern void orioledb_amdrop(Relation index, int flags);
 extern Jsonb *cic_stopevent_params(ORelOids idx_oids, const char *idx_name);
 extern bool is_in_indexes_rebuild(void);
 

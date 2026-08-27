@@ -160,6 +160,7 @@ orioledb_btree_handler(void)
 
 	amroutine->ambuild = orioledb_ambuild;
 	amroutine->amreuse = orioledb_amreuse;
+	amroutine->amdrop = orioledb_amdrop;
 	amroutine->ambuildempty = orioledb_ambuildempty;
 	amroutine->aminsert = NULL;
 	amroutine->aminsertextended = orioledb_aminsert;
@@ -239,11 +240,12 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 				bridged_ams = lappend(bridged_ams, bridged);
 				bridged->amhandler = amhandler;
 				bridged->original_routine = (IndexAmRoutine *) DatumGetPointer(datum);
-				bridged->routine = *bridged->original_routine;
-				bridged->routine.ambuild = bridged_ambuild;
-				bridged->routine.aminsertextended = bridged_aminsert;
-				bridged->routine.ambeginscan = bridged_ambeginscan;
-				bridged->routine.amcanreturn = NULL;
+			bridged->routine = *bridged->original_routine;
+			bridged->routine.ambuild = bridged_ambuild;
+			bridged->routine.aminsertextended = bridged_aminsert;
+			bridged->routine.ambeginscan = bridged_ambeginscan;
+			bridged->routine.amcanreturn = NULL;
+			bridged->routine.amdrop = orioledb_amdrop;
 				MemoryContextSwitchTo(old_mcxt);
 				amroutine = palloc0(sizeof(IndexAmRoutine));
 				memcpy(amroutine, &bridged->routine, sizeof(IndexAmRoutine));
