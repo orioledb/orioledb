@@ -140,7 +140,6 @@ static List *alter_type_exprs = NIL;
 static List *o_alter_generated_column_id = NIL;
 static bool o_composite_alter_index_safe = false;
 List	   *o_reuse_indices = NIL;
-static bool in_rewrite = false;
 static bool in_cluster_rebuild = false;
 List	   *reindex_list = NIL;
 static IndexBuildResult o_pkey_result = {0};
@@ -173,6 +172,26 @@ static void orioledb_utility_command(PlannedStmt *pstmt,
 static void orioledb_object_access_hook(ObjectAccessType access, Oid classId,
 										Oid objectId, int subId, void *arg);
 static void maybe_auto_upgrade_refresh(void);
+
+/*
+ * o_alter_table_rewrite_pending - has PG decided that an ALTER TABLE on
+ * `relid` requires a table rewrite?
+ *
+ * Reads PG's own phase-1 verdict (tab->rewrite) via the
+ * LookupAlteredTableInfo() accessor exposed by the patched postgres.  This
+ * replaces the former in_rewrite global, which orioledb set by re-deriving
+ * the rewrite decision with its own duplicate of PG's
+ * ATColumnChangeRequiresRewrite().  Returns false when no ALTER TABLE phase 2
+ * is in progress (e.g. CREATE TABLE, or a non-ALTER path), matching the old
+ * in_rewrite==false default.
+ */
+static bool
+o_alter_table_rewrite_pending(Oid relid)
+{
+	AlteredTableInfo *tab = LookupAlteredTableInfo(relid);
+
+	return tab != NULL && tab->rewrite != 0;
+}
 
 static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 								Relation rel);
@@ -1028,7 +1047,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	/* Is this enough? */
 	if (isTopLevel)
 	{
-		in_rewrite = false;
 		o_skip_primary_ambuild = false;
 		o_rewrite_in_progress = false;
 		ORelOidsSetInvalid(o_rewrite_old_oids);
@@ -2100,92 +2118,6 @@ o_find_composite_type_dependencies(Oid typeOid, Relation origRelation)
 	systable_endscan(depScan);
 
 	relation_close(depRel, AccessShareLock);
-}
-
-static bool
-ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field, Oid objectId,
-							  int subId)
-{
-	ParseState *pstate = make_parsestate(NULL);
-	Node	   *expr = NULL;
-	bool		rewrite = false;
-	ListCell   *lc;
-	bool		append_transform = false;
-
-	foreach(lc, alter_type_exprs)
-	{
-		AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
-		Oid			oid = intVal(lsecond((List *) lfirst(lc)));
-		const char *attname = ((String *) (lfourth((List *) lfirst(lc))))->sval;
-
-		if (attnum == subId)
-		{
-			expr = (Node *) lthird((List *) lfirst(lc));
-			append_transform = strcmp(attname, field->name.data) == 0 && objectId != oid;
-			break;
-		}
-	}
-
-	/* code from ATPrepAlterColumnType */
-	if (!expr)
-	{
-		expr = (Node *) makeVar(1, subId, old_field->typid, old_field->typmod,
-								old_field->collation, 0);
-		append_transform = true;
-	}
-	expr = coerce_to_target_type(pstate, expr, exprType(expr), field->typid,
-								 field->typmod, COERCION_EXPLICIT,
-								 COERCE_IMPLICIT_CAST, -1);
-	if (expr != NULL)
-	{
-		if (append_transform)
-		{
-			char	   *field_name = pstrdup(field->name.data);
-
-			/* cppcheck-suppress unknownEvaluationOrder */
-			alter_type_exprs = lappend(alter_type_exprs, list_make4(makeInteger(subId), makeInteger(objectId), expr, makeString(field_name)));
-		}
-		assign_expr_collations(pstate, expr);
-		expr = (Node *) expression_planner((Expr *) expr);
-
-		while (!rewrite)
-		{
-			/* only one varno, so no need to check that */
-			if (IsA(expr, Var) && ((Var *) expr)->varattno == subId)
-				break;
-			else if (IsA(expr, RelabelType))
-				expr = (Node *) ((RelabelType *) expr)->arg;
-			else if (IsA(expr, CoerceToDomain))
-			{
-				CoerceToDomain *d = (CoerceToDomain *) expr;
-
-				if (DomainHasConstraints(d->resulttype))
-					rewrite = true;
-				expr = (Node *) d->arg;
-			}
-			else if (IsA(expr, FuncExpr))
-			{
-				FuncExpr   *f = (FuncExpr *) expr;
-
-				switch (f->funcid)
-				{
-					case F_TIMESTAMPTZ_TIMESTAMP:
-					case F_TIMESTAMP_TIMESTAMPTZ:
-						if (TimestampTimestampTzRequiresRewrite())
-							rewrite = true;
-						else
-							expr = linitial(f->args);
-						break;
-					default:
-						rewrite = true;
-				}
-			}
-			else
-				rewrite = true;
-		}
-	}
-
-	return rewrite;
 }
 
 static void
@@ -4165,7 +4097,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					 * another access_hook call only after the default value
 					 * is created in pg catalog.
 					 */
-					if (get_typtype(field->typid) == TYPTYPE_DOMAIN && !in_rewrite)
+					if (get_typtype(field->typid) == TYPTYPE_DOMAIN && !o_alter_table_rewrite_pending(RelationGetRelid(rel)))
 					{
 						o_table_fill_constr(o_table, rel, subId - 1, NULL, field);
 					}
@@ -4290,7 +4222,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						}
 						else if (rel->rd_rel->relam == BTREE_AM_OID)
 						{
-							if (!in_rewrite && !rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
+							if (!o_alter_table_rewrite_pending(RelationGetRelid(tbl)) && !rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
 							{
 								OBTOptions *options = (OBTOptions *) rel->rd_options;
 
@@ -4390,7 +4322,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			{
 				OTableField old_field;
 				OTableField *field;
-				bool		changed;
 
 				old_field = o_table->fields[subId - 1];
 				CommandCounterIncrement();
@@ -4398,19 +4329,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				orioledb_attr_to_field(field,
 									   TupleDescAttr(rel->rd_att, subId - 1));
 
-				/* TODO: Probably use CheckIndexCompatible here */
-				changed = old_field.typid != field->typid ||
-					old_field.typmod != field->typmod ||
-					old_field.collation != field->collation;
-
-				if (changed)
-				{
-					if (ATColumnChangeRequiresRewrite(&old_field, field, objectId,
-													  subId))
-						in_rewrite = true;
-				}
-
-				if (!in_rewrite)
+				/*
+				 * PG's own rewrite verdict (tab->rewrite, finalized in phase
+				 * 1) tells us whether this ALTER COLUMN TYPE rewrites the
+				 * table.  When it does, begin_heap_rewrite/finish_heap_swap
+				 * owns the OTable rebuild, so skip the in-place constr re-fill
+				 * here.
+				 */
+				if (!o_alter_table_rewrite_pending(objectId))
 				{
 					o_table_fill_constr(o_table, rel, subId - 1,
 										&old_field, field);
@@ -4489,27 +4415,16 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						old_field.typmod != field->typmod ||
 						old_field.collation != field->collation;
 
-					if (changed_ty)
-					{
-						if (ATColumnChangeRequiresRewrite(&old_field, field, objectId,
-														  subId))
-							in_rewrite = true;
-					}
-
 					/*
-					 * Alter table on generated column triggers table rewrite
-					 * due to need of recalculating column value for existing
-					 * rows
+					 * Whether this ALTER COLUMN TYPE forces a table rewrite is
+					 * PG's own phase-1 verdict (tab->rewrite), which already
+					 * accounts for non-binary-coercible type changes and for
+					 * generated columns whose values need recomputing.  When a
+					 * rewrite is pending, begin_heap_rewrite/finish_heap_swap
+					 * owns the OTable rebuild, so the in-place sys-tree update
+					 * below is skipped.
 					 */
-					if (old_field.generated)
-					{
-						in_rewrite = true;
-						o_alter_generated_column_id = lappend(o_alter_generated_column_id,
-						/* cppcheck-suppress unknownEvaluationOrder */
-															  list_make2(makeInteger(objectId), makeInteger(subId)));
-					}
-
-					if (!in_rewrite)
+					if (!o_alter_table_rewrite_pending(objectId))
 					{
 						orioledb_save_collation(field->collation);
 						fill_current_oxid_osnapshot(&oxid, &oSnapshot);
@@ -5052,7 +4967,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				}
 
 				elog(WARNING, "We cannot just reuse index for primary key in orioledb, because secondary indices contain primary index fields, rebuilding all indices");
-				if (!in_rewrite)
+				if (!o_alter_table_rewrite_pending(RelationGetRelid(tbl)))
 				{
 					Assert(ix_num != InvalidIndexNumber);
 
@@ -5660,7 +5575,6 @@ o_ddl_cleanup(void)
 	{
 		o_rewrite_bridging = false;
 		o_rewrite_bridge_relnode = InvalidRelFileNumber;
-		in_rewrite = false;
 		o_skip_primary_ambuild = false;
 		o_rewrite_in_progress = false;
 	}
