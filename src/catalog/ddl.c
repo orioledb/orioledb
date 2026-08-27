@@ -136,8 +136,6 @@ static object_access_hook_type old_objectaccess_hook = NULL;
 
 static List *drop_index_list = NIL;
 static List *partition_drop_index_list = NIL;
-static List *alter_type_exprs = NIL;
-static List *o_alter_generated_column_id = NIL;
 static bool o_composite_alter_index_safe = false;
 List	   *o_reuse_indices = NIL;
 static bool in_cluster_rebuild = false;
@@ -193,9 +191,6 @@ o_alter_table_rewrite_pending(Oid relid)
 	return tab != NULL && tab->rewrite != 0;
 }
 
-static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
-								Relation rel);
-static Node *o_get_alter_type_expr(Relation rel, int attidx);
 static void o_fill_new_slot(OTable *new_o_table, Relation rel, int attidx,
 							Node *expr, TupleTableSlot *old_slot,
 							TupleTableSlot *new_slot, TupleTableSlot *scan_slot);
@@ -1102,12 +1097,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		objtype = atstmt->objtype;
 
 		/*
-		 * alter_type_exprs is expected to be allocated in PortalContext so it
-		 * isn't freed by us and pointer may be invalid there
-		 */
-		alter_type_exprs = NIL;
-
-		/*
 		 * ALTER TYPE ADD ATTRIBUTE on a composite type does not alter the
 		 * on-disk representation or comparison order of stored composite
 		 * values: existing tuples keep their natts count and the extra fields
@@ -1239,20 +1228,17 @@ orioledb_utility_command(PlannedStmt *pstmt,
 							break;
 					}
 
-					switch (cmd->subtype)
-					{
-						case AT_AlterColumnType:
-							o_alter_column_type(cmd, queryString, rel);
-							break;
-						case AT_ReplicaIdentity:
-							o_validate_replica_identity(rel, (ReplicaIdentityStmt *) cmd->def);
-							break;
-						case AT_AddColumn:
-							o_process_added_column(cmd);
-							break;
-						default:
-							break;
-					}
+				switch (cmd->subtype)
+				{
+					case AT_ReplicaIdentity:
+						o_validate_replica_identity(rel, (ReplicaIdentityStmt *) cmd->def);
+						break;
+					case AT_AddColumn:
+						o_process_added_column(cmd);
+						break;
+					default:
+						break;
+				}
 				}
 			}
 			else if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
@@ -1797,12 +1783,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		list_free_deep(drop_index_list);
 		drop_index_list = NIL;
 
-		list_free_deep(alter_type_exprs);
-		alter_type_exprs = NIL;
-
-		list_free_deep(o_alter_generated_column_id);
-		o_alter_generated_column_id = NIL;
-
 		o_composite_alter_index_safe = false;
 
 		/*
@@ -1875,45 +1855,6 @@ o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt)
 	else if (stmt->identity_type == REPLICA_IDENTITY_INDEX)
 	{
 		elog(ERROR, "replica identity type INDEX is not supported for OrioleDB tables yet");
-	}
-}
-
-static void
-o_alter_column_type(AlterTableCmd *cmd, const char *queryString, Relation rel)
-{
-	ColumnDef  *def = (ColumnDef *) cmd->def;
-
-	if (def->raw_default)
-	{
-		Node	   *cooked_default;
-		ParseState *pstate;
-		ParseNamespaceItem *nsitem;
-		AttrNumber	attnum;
-
-		pstate = make_parsestate(NULL);
-		pstate->p_sourcetext = queryString;
-		nsitem = addRangeTableEntryForRelation(pstate, rel, AccessShareLock,
-											   NULL, false, true);
-		addNSItemToQuery(pstate, nsitem, false, true, true);
-		cooked_default = transformExpr(pstate, def->raw_default,
-									   EXPR_KIND_ALTER_COL_TRANSFORM);
-#if PG_VERSION_NUM >= 180000
-
-		/*
-		 * If the USING expression references a virtual generated column,
-		 * substitute the underlying generation expression before stashing it
-		 * away; the rewrite loop later hands this expression to
-		 * ExecPrepareExpr / o_eval_default, which would otherwise raise
-		 * "unexpected virtual generated column reference" on the bare Var.
-		 */
-		cooked_default = expand_generated_columns_in_expr(cooked_default,
-														  rel, 1);
-#endif
-		attnum = get_attnum(RelationGetRelid(rel), cmd->name);
-		alter_type_exprs =
-			lappend(alter_type_exprs,
-		/* cppcheck-suppress unknownEvaluationOrder */
-					list_make4(makeInteger(attnum), makeInteger(rel->rd_rel->oid), cooked_default, makeString(cmd->name)));
 	}
 }
 
@@ -2910,7 +2851,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table,
 			if (old_attr->attgenerated)
 				continue;
 
-			expr = o_get_alter_type_expr(rel, i);
+			expr = NULL;
 
 			/*
 			 * old_slot may not contain all new properties if there are
@@ -3015,20 +2956,18 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table,
 			if (!old_attr->attgenerated)
 				continue;
 
-			expr = o_get_alter_type_expr(rel, i);
+			expr = NULL;
 
 			/*
-			 * Build new value for GENERATED column if the generation
-			 * expression has been updated using ALTER TABLE ... SET
-			 * EXPRESSION ..., if the value was not present in the existing
-			 * row, or if the column type has changed.
+			 * Build new value for GENERATED column if the value was not
+			 * present in the existing row.  (The legacy per-column
+			 * o_alter_generated_column_id list, which forced a recompute on
+			 * ALTER COLUMN TYPE of a generated column, is gone: such rewrites
+			 * are now driven by PG's tab->rewrite verdict and the native
+			 * begin_heap_rewrite/finish_heap_swap fill, not by rewrite_table,
+			 * which is now SET-TABLESPACE-only.)
 			 */
-			if (expr || (old_slot->tts_isnull[i] ||
-						 (o_alter_generated_column_id != NIL
-						  && list_member(
-										 o_alter_generated_column_id,
-			/* cppcheck-suppress unknownEvaluationOrder */
-										 list_make2(makeInteger(RelationGetRelid(rel)), makeInteger(i + 1))))))
+			if (old_slot->tts_isnull[i])
 			{
 				Node	   *defaultexpr = build_column_default(rel, i + 1);
 
@@ -3314,11 +3253,7 @@ orioledb_relation_set_tablespace_finish(Relation rel,
 	{
 		case RELKIND_RELATION:
 		case RELKIND_MATVIEW:
-			/*
-			 * SET TABLESPACE copies rows verbatim (no ALTER COLUMN TYPE
-			 * expressions), so alter_type_exprs must be empty.
-			 */
-			Assert(alter_type_exprs == NIL);
+			/* SET TABLESPACE copies rows verbatim (no type expressions). */
 			rewrite_table(tbl, old_o_table, new_o_table, true);
 			break;
 		default:
@@ -5565,11 +5500,6 @@ o_ddl_cleanup(void)
 		list_free_deep(reindex_list);
 		reindex_list = NIL;
 	}
-	if (alter_type_exprs)
-	{
-		list_free_deep(alter_type_exprs);
-		alter_type_exprs = NIL;
-	}
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
 	if (GetCurrentTransactionNestLevel() == 1)
 	{
@@ -5577,11 +5507,6 @@ o_ddl_cleanup(void)
 		o_rewrite_bridge_relnode = InvalidRelFileNumber;
 		o_skip_primary_ambuild = false;
 		o_rewrite_in_progress = false;
-	}
-	if (o_alter_generated_column_id)
-	{
-		list_free_deep(o_alter_generated_column_id);
-		o_alter_generated_column_id = NIL;
 	}
 
 	/*
@@ -5592,32 +5517,6 @@ o_ddl_cleanup(void)
 	o_in_add_column = false;
 	create_stmt = NULL;
 	memset(&o_movedb_data, 0, sizeof(o_movedb_data));
-}
-
-static Node *
-o_get_alter_type_expr(Relation rel, int attidx)
-{
-	ListCell   *lc;
-	Node	   *expr = NULL;
-
-	foreach(lc, alter_type_exprs)
-	{
-		AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
-		Oid			relOid = intVal(lsecond((List *) lfirst(lc)));
-
-		/*
-		 * To get correct expression we need check both relation and attribute
-		 * number. Because of postgres inheritance allows different attribute
-		 * number for the same column in parent and child relations.
-		 */
-		if (relOid == rel->rd_rel->oid && attnum == attidx + 1)
-		{
-			expr = (Node *) lthird((List *) lfirst(lc));
-			break;
-		}
-	}
-
-	return expr;
 }
 
 static void
