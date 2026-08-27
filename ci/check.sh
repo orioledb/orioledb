@@ -201,6 +201,12 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
             for tbl in $(psql -p 5432 -tA -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE tableowner = current_user AND tablename IN (SELECT relname FROM pg_class WHERE relpersistence = 'u')" "$db" 2>/dev/null); do
                 exclude_flags="$exclude_flags --exclude-table=$tbl"
             done
+            # pg_dump -Fd refuses a non-empty directory, and sort_dump.py
+            # would otherwise diff this pass's dump against files left by the
+            # previous one.  Both matter once REPEATS > 1.
+            rm -rf "/tmp/primary_${db}_data" "/tmp/replica_${db}_data" \
+                   "/tmp/primary_${db}_sorted" "/tmp/replica_${db}_sorted"
+
             pg_dump -a -Fd --compress=0 -p 5432 $exclude_flags -f "/tmp/primary_${db}_data" "$db"
             pg_dump -a -Fd --compress=0 -p 5433 $exclude_flags -f "/tmp/replica_${db}_data" "$db"
             python3 ../orioledb/ci/sort_dump.py "/tmp/primary_${db}_data" "/tmp/primary_${db}_sorted"
