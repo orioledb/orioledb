@@ -161,7 +161,9 @@ for index in "${!modes[@]}"; do
 			--description "$description" \
 			--source "$source_name" \
 			--duration "${duration_minutes}m" \
-			--recipients 'paul.bauer@supabase.io' \
+			--recipients "${ANTITHESIS_REPORT_EMAIL}" \
+			--param antithesis.integrations.slack.callback_url="${ANTITHESIS_SLACK_CALLBACK_URL}" \
+			--param antithesis.integrations.slack.token="${ANTITHESIS_SLACK_TOKEN}" \
 			--webhook basic_test
 	)"
 	printf '%s\n' "$launch_output"
