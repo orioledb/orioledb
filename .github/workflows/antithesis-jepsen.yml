@@ -184,6 +184,9 @@ jobs:
       - name: Validate, push, and launch RR and RC runs
         env:
           ANTITHESIS_API_KEY: ${{ secrets.ANTITHESIS_API_KEY }}
+          ANTITHESIS_REPORT_EMAIL: ${{ secrets.ANTITHESIS_REPORT_EMAIL }}
+          ANTITHESIS_SLACK_CALLBACK_URL: ${{ secrets.ANTITHESIS_SLACK_CALLBACK_URL }}
+          ANTITHESIS_SLACK_TOKEN: ${{ secrets.ANTITHESIS_SLACK_TOKEN }}
           DURATION_MINUTES: ${{ steps.target.outputs.duration_minutes }}
           ORIOLEDB_REF: ${{ steps.target.outputs.ref }}
           TARGET_BRANCH: ${{ steps.target.outputs.branch }}
