@@ -112,6 +112,25 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         for pass in $(seq 1 "$REPEATS"); do
         pass_banner "pg_tests orioledb" "$pass"
 
+        # orioledb.strict_mode is PGC_POSTMASTER, and the isolation phase below
+        # turns it on.  Without putting it back, every pass would start where
+        # the previous one left off: the regression runs would see strict mode
+        # and REFRESH MATERIALIZED VIEW CONCURRENTLY would raise an ERROR where
+        # pass 1 got a WARNING -- the filter knows the warning and not the
+        # error.  Rewrite rather than append, so the file does not grow a line
+        # per pass.
+        sed -i '/^orioledb\.strict_mode/d' $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+        echo "orioledb.strict_mode = false" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+        pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
+
+        # pg_regress recreates its databases, but a tablespace is a cluster
+        # object and test_setup's CREATE TABLESPACE would hit "already exists"
+        # on every pass after the first.  Drop the databases that hold objects
+        # in it first, or the tablespace will not go.
+        psql postgres -p 5432 -c 'DROP DATABASE IF EXISTS regression' || true
+        psql postgres -p 5432 -c 'DROP DATABASE IF EXISTS isolation_regression' || true
+        psql postgres -p 5432 -c 'DROP TABLESPACE IF EXISTS regress_tblspace' || true
+
         cd src/test/regress
         make installcheck-tests EXTRA_REGRESS_OPTS="--load-extension=orioledb --schedule=$GITHUB_WORKSPACE/parallel_schedule_no_segfaults" TESTS="" -j $(nproc) || true
         cd ../../..
@@ -124,6 +143,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
           [ -s src/test/regress_filtered.diffs ] || rm -f src/test/regress_filtered.diffs src/test/regress/regression.diffs
         fi
 
+        sed -i '/^orioledb\.strict_mode/d' $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
         echo "orioledb.strict_mode = true" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
         make -C src/test/isolation EXTRA_REGRESS_OPTS="--load-extension=orioledb" installcheck -j $(nproc) || true
