@@ -254,8 +254,10 @@ class DDLTest(BaseTest):
 			self.assertIn("canceling statement due to statement timeout",
 			              str(e.exception))
 
-			# The failed drop left the index in place and valid.
-			self.assertEqual([(True, )],
+			# The timed-out drop left the index in place but, as in upstream
+			# PG, invalid: index_drop() commits indisvalid = false before
+			# WaitForLockers() blocks, so the cancel does not roll it back.
+			self.assertEqual([(False, )],
 			                 dropper.execute("""
 								 SELECT indisvalid FROM pg_index
 									 WHERE indexrelid =
