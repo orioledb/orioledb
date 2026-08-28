@@ -485,6 +485,30 @@ wait_for_tuple(BTreeDescr *desc, OTuple tuple, OXid oxid,
 	wait_for_oxid(oxid, false);
 }
 
+/*
+ * Refuse to continue when replay meets a conflicting version it may not take
+ * back.  See recovery_can_rollback_conflict(), which decides that; anything it
+ * rejects is a page state replay should not have been able to reach, and
+ * saying so beats spinning on it forever.
+ */
+static void
+o_btree_modify_reject_recovery_conflict(BTreeDescr *desc, OXid oxid,
+										BTreeLeafTuphdr *conflictTupHdr)
+{
+	UndoMeta   *meta = get_undo_meta_by_type(desc->undoType);
+
+	ereport(ERROR,
+			(errcode(ERRCODE_DATA_CORRUPTED),
+			 errmsg("orioledb recovery met a conflicting version of "
+					"unfinished transaction " UINT64_FORMAT,
+					(uint64) oxid),
+			 errdetail("Undo location " UINT64_FORMAT " against the undo "
+					   "[" UINT64_FORMAT ", " UINT64_FORMAT ") the checkpoint retained.",
+					   (uint64) UndoLocationGetValue(conflictTupHdr->undoLocation),
+					   (uint64) pg_atomic_read_u64(&meta->checkpointRetainStartLocation),
+					   (uint64) pg_atomic_read_u64(&meta->checkpointRetainEndLocation))));
+}
+
 static ConflictResolution
 o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 {
@@ -545,6 +569,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 		else
 		{
 			CommitSeqNo csn;
+			bool		rollbackConflict;
 
 			/*
 			 * Test hook: parks the backend here, with the leaf-page-content
@@ -570,7 +595,23 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				return ConflictResolutionRetry;
 			}
 
-			if (COMMITSEQNO_IS_ABORTED(csn))
+			/*
+			 * Replay never waits for a conflicting transaction, so decide
+			 * here whether this version can be taken back.  The check either
+			 * approves the rollback or raises -- see its comment.
+			 */
+			rollbackConflict = COMMITSEQNO_IS_ABORTED(csn);
+			if (!rollbackConflict && is_recovery_process() &&
+				COMMITSEQNO_IS_INPROGRESS(csn))
+			{
+				if (!recovery_can_rollback_conflict(desc->undoType, oxid,
+													context->conflictTupHdr.undoLocation))
+					o_btree_modify_reject_recovery_conflict(desc, oxid,
+															&context->conflictTupHdr);
+				rollbackConflict = true;
+			}
+
+			if (rollbackConflict)
 			{
 				/*
 				 * Transaction changes should be undone by the transaction

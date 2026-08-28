@@ -28,6 +28,8 @@ extern Size recovery_shmem_needs(void);
 extern void recovery_shmem_init(Pointer ptr, bool found);
 extern bool is_recovery_process(void);
 extern CommitSeqNo recovery_map_oxid_csn(OXid oxid, bool *found);
+extern bool recovery_can_rollback_conflict(UndoLogType undoType, OXid oxid,
+										   UndoLocation undoLocation);
 extern void idx_workers_shutdown(void);
 extern void recovery_send_worker_oids(dsm_handle seg_handle);
 extern bool recovery_idx_workers_all_alive(void);

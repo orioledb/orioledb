@@ -9,6 +9,8 @@ import time
 from testgres import NodeStatus
 
 from .base_test import BaseTest
+from .base_test import ThreadQueryExecutor
+from .base_test import wait_checkpointer_stopevent
 
 
 class RecoveryLivelockTest(BaseTest):
@@ -49,7 +51,8 @@ class RecoveryLivelockTest(BaseTest):
 	def setUp(self):
 		super().setUp()
 		self.node.append_conf(
-		    'postgresql.conf', "checkpoint_timeout = 1h\n"
+		    'postgresql.conf', "orioledb.enable_stopevents = true\n"
+		    "checkpoint_timeout = 1h\n"
 		    "max_wal_size = 10GB\n")
 
 	def test_recovery_livelock_on_orphaned_joint_commit(self):
@@ -158,9 +161,124 @@ class RecoveryLivelockTest(BaseTest):
 		self.assertEqual(node.execute("SELECT count(*) FROM h_drop;")[0][0], 1)
 		node.stop()
 
+	def test_replay_conflict_with_unsettled_version(self):
+		"""The same spin reached without any heap xid: a transaction that
+		WAL mentions and never finishes.
+
+		A checkpoint pins replayStartPtr and only afterwards walks the tables
+		and writes their images, so a change made in between is both in the
+		image and above the point replay starts from -- replay applies it a
+		second time.  Park the checkpointer in that window and put two
+		transactions in it.
+
+		B opens first and writes enough rows to overflow its 8 KB local WAL
+		buffer, which puts its WAL_REC_XID on the wire.  That matters: an oxid
+		the checkpoint named but WAL never mentions is settled ABORTED by
+		read_xids() (!state->wal_xid) and page_item_rollback() disposes of it
+		on the first try.  Once WAL does mention it, recovery_map_oxid_csn()
+		answers with the stored COMMITSEQNO_INPROGRESS instead, and B never
+		writes a finish record.
+
+		A then takes the contended row and commits, so its records are
+		replayed; B touches the same row after A released it and never
+		finishes, so B's mark is what the image carries.  Replay re-applies
+		A's record onto that image and conflicts with an oxid it cannot
+		settle.
+		"""
+		node = self.prepare_unsettled(
+		    "UPDATE o_unsettled SET v = 100 WHERE id = 1;")
+		self.assert_recovery_completes(node)
+
+	def test_replay_conflict_with_unsettled_row_lock(self):
+		"""Same shape, but B leaves only a row lock.
+
+		row_lock_conflicts() drops a locker's record once it can see the
+		locker finished.  One that replay cannot settle keeps its lock for the
+		rest of recovery, so the conflict is reported again on every retry.
+		"""
+		node = self.prepare_unsettled(
+		    "SELECT * FROM o_unsettled WHERE id = 1 FOR SHARE;")
+		self.assert_recovery_completes(node)
+
+	def prepare_unsettled(self, b_marks_row):
+		"""Run A and B inside the checkpoint's double-apply window, then crash."""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_unsettled (\n"
+		    "  id int NOT NULL,\n"
+		    "  v int NOT NULL,\n"
+		    "  PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n"
+		    "INSERT INTO o_unsettled SELECT g, 0 "
+		    "FROM generate_series(1, 2000) g;\n")
+		node.safe_psql('postgres', "CHECKPOINT;")
+
+		ctl = node.connect()
+		ctl.execute("SELECT pg_stopevent_set('checkpoint_table_start',\n"
+		            "format(E'$.table.reloid == \\045s',\n"
+		            "'o_unsettled'::regclass::oid)::jsonpath);")
+		ctl.commit()
+
+		con_ck = node.connect()
+		t_ck = ThreadQueryExecutor(con_ck, "CHECKPOINT;")
+		t_ck.start()
+		wait_checkpointer_stopevent(node)
+
+		# replayStartPtr is pinned; o_unsettled's image is not written yet.
+
+		# B overflows its local WAL buffer, so replay sees this oxid exists.
+		con_b = node.connect()
+		con_b.begin()
+		con_b.execute(
+		    "UPDATE o_unsettled SET v = 7 WHERE id BETWEEN 100 AND 1600;")
+
+		# A takes the contended row and commits: its records are replayed.
+		con_a = node.connect()
+		con_a.begin()
+		con_a.execute("UPDATE o_unsettled SET v = 1 WHERE id = 1;")
+		con_a.commit()
+		con_a.close()
+
+		# B marks the row after A released it, and never finishes.
+		con_b.execute(b_marks_row)
+
+		ctl.execute("SELECT pg_stopevent_reset('checkpoint_table_start');")
+		t_ck.join()
+		con_ck.close()
+
+		node.stop(['-m', 'immediate'])
+		con_b.close()
+		ctl.close()
+		return node
+
+	def assert_recovery_completes(self, node):
+		try:
+			node.start(params=['-t', '20'])
+			opened = self.wait_until_accepting(node, timeout=20)
+		except Exception:
+			opened = self.wait_until_accepting(node, timeout=20)
+		if not opened:
+			self.report_stuck(node)
+			self.kill_cluster(node)
+		self.assertTrue(
+		    opened, "cluster did not finish crash recovery: replay is "
+		    "livelocked in o_btree_modify_handle_conflicts()")
+		self.assertEqual(
+		    node.execute("SELECT v FROM o_unsettled WHERE id = 1;")[0][0], 1)
+
 	def wait_until_accepting(self, node, timeout):
+		"""Wait for the cluster to open.
+
+		Give up as soon as replay reports that its conflict retry is not
+		converging: from there the cluster never opens, and sitting out the
+		whole timeout only makes the failure slower to report.
+		"""
 		deadline = time.time() + timeout
 		while time.time() < deadline:
+			if self.saw_non_convergence(node):
+				return False
 			try:
 				if node.status() != NodeStatus.Running:
 					time.sleep(0.5)
@@ -189,23 +307,44 @@ class RecoveryLivelockTest(BaseTest):
 			pass
 		print("data dir kept at", node.data_dir)
 
-	def kill_cluster(self, node):
-		"""Take a livelocked cluster down.  A fast shutdown never completes --
-		the startup process is not at an interrupt point -- so go straight to
-		immediate, and fall back to signalling the postmaster by hand."""
+	def saw_non_convergence(self, node):
+		log = os.path.join(node.logs_dir, "postgresql.log")
 		try:
-			node.stop(['-m', 'immediate'])
-			return
+			with open(log) as f:
+				return "not converging" in f.read()
 		except Exception:
-			pass
+			return False
+
+	def kill_cluster(self, node):
+		"""Take a livelocked cluster down.
+
+		A fast shutdown never completes -- the startup process is not at an
+		interrupt point -- and an immediate one reports success while leaving
+		the children running, including the recovery worker burning a core.
+		So collect the children first and signal them all by hand.
+		"""
 		try:
 			with open(os.path.join(node.data_dir, "postmaster.pid")) as f:
 				pid = int(f.readline().strip())
 		except Exception:
 			return
+
+		victims = [pid] + self.child_pids(pid)
 		for sig in (signal.SIGQUIT, signal.SIGKILL):
-			try:
-				os.kill(pid, sig)
-			except Exception:
-				pass
+			for victim in victims:
+				try:
+					os.kill(victim, sig)
+				except OSError:
+					pass
 			time.sleep(1)
+
+	def child_pids(self, pid):
+		out = subprocess.run(["ps", "-eo", "pid=,ppid="],
+		                     capture_output=True,
+		                     text=True).stdout
+		kids = []
+		for line in out.splitlines():
+			fields = line.split()
+			if len(fields) == 2 and fields[1] == str(pid):
+				kids.append(int(fields[0]))
+		return kids
