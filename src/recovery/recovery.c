@@ -1615,6 +1615,48 @@ is_recovery_process(void)
 	return iam_recovery;
 }
 
+/*
+ * May replay take back a version left by an unfinished transaction?
+ *
+ * Replay never waits for one: it is serialized, so nobody is going to finish
+ * that transaction while the startup process holds still, and the startup
+ * process cannot even be cancelled -- the wait degenerates into a spin that
+ * never ends and the cluster never opens.
+ *
+ * A version replay did not apply itself can only have come from a checkpoint
+ * image, put there by a transaction that was in flight when the checkpoint
+ * captured the page.  The checkpoint names those transactions in its xids
+ * file and retains exactly their undo, so both halves of that story are
+ * checkable, and both must hold.  Relative to the record being replayed such
+ * a version is the future: take it back, and let forward replay put it there
+ * again if WAL says so.
+ *
+ * The undo position is filled in even for an insertion, which has no previous
+ * version to point at: it is stored alongside the InvalidUndoLocation flag
+ * rather than instead of it.
+ */
+bool
+recovery_can_rollback_conflict(UndoLogType undoType, OXid oxid,
+							   UndoLocation undoLocation)
+{
+	RecoveryXidState *state;
+	UndoMeta   *meta;
+	UndoLocation location;
+	bool		found;
+
+	Assert(is_recovery_process());
+
+	state = hash_search(recovery_xid_state_hash, &oxid, HASH_FIND, &found);
+	if (!found || !state->checkpoint_xid)
+		return false;
+
+	location = UndoLocationGetValue(undoLocation);
+	meta = get_undo_meta_by_type(undoType);
+
+	return location >= pg_atomic_read_u64(&meta->checkpointRetainStartLocation) &&
+		location < pg_atomic_read_u64(&meta->checkpointRetainEndLocation);
+}
+
 CommitSeqNo
 recovery_map_oxid_csn(OXid oxid, bool *found)
 {

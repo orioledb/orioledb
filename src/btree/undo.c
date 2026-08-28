@@ -1837,9 +1837,22 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				 * transactions.
 				 */
 				csn = oxid_get_csn(oxid, false);
+
+				/*
+				 * A locker replay cannot settle would hold its lock for the
+				 * rest of recovery, and waiting for it is exactly what makes
+				 * the conflict retry spin.  Where the checkpoint vouches for
+				 * the locker its lock is void, so drop the record as if the
+				 * transaction had finished.  Where it does not, leave the
+				 * conflict standing: o_btree_modify_handle_conflicts() raises
+				 * on it rather than quietly ignoring a row lock.
+				 */
 				if (COMMITSEQNO_IS_ABORTED(csn) ||
 					COMMITSEQNO_IS_NORMAL(csn) ||
-					COMMITSEQNO_IS_FROZEN(csn))
+					COMMITSEQNO_IS_FROZEN(csn) ||
+					(is_recovery_process() &&
+					 recovery_can_rollback_conflict(undoType, oxid,
+													curTuphdr.undoLocation)))
 				{
 					delete_record = true;
 				}
