@@ -17,6 +17,7 @@ import unittest
 
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
+from .base_test import wait_stopevent
 
 # An always-true but per-row-expensive filter makes the parallel bitmap path
 # win, so the planner picks Gather over a parallel custom bitmap scan.
@@ -201,6 +202,75 @@ class ParallelBitmapScanTest(BaseTest):
 			    "SELECT orioledb_evict_pages('o_bm'::regclass::oid, 0);")
 
 		self._run_parked("val < 50", mutate, bridged=True)
+
+	# A bridged bitmap page is retired once page_ntuples rows have been seen,
+	# which assumes the primary scan only ever hands back rows the keybitmap
+	# wants.  It does not: when a leaf changes shape underneath it,
+	# btree_seq_scan falls back to a plain range iterator that walks everything
+	# from the downlink's low key on.  Those rows used to consume the page's
+	# quota, so a page whose first examined rows all miss lost every row it
+	# held -- silently.
+	#
+	# Park the writer instead of the scan: stop events are enabled only in the
+	# inserting session, so it stops inside page_split with the rightmost leaf
+	# half-split, and the scan (lock-free, and with stop events off) reads
+	# through that state.  The insert only adds non-matching rows, so the
+	# answer must not move.
+	#
+	# The scan is parallel here to match the rest of the file, but this is not
+	# about parallelism: with max_parallel_workers_per_gather = 0 the row is
+	# lost just the same.
+	def test_bridged_survives_split_in_progress(self):
+		node = self.node
+		self._load(bridged=True)
+		cond = "val < 50"
+		reference = self._reference(cond)
+		self.assertGreater(len(reference), 500)
+
+		scan_con = node.connect()
+		ctrl_con = node.connect()
+		dml_con = node.connect()
+		try:
+			# Deliberately not _scan_setup(): the scanner must NOT enable stop
+			# events, or it would park on page_split itself.
+			for g in ("SET enable_seqscan = off;",
+			          "SET enable_indexscan = off;",
+			          "SET enable_indexonlyscan = off;",
+			          "SET parallel_setup_cost = 0;",
+			          "SET parallel_tuple_cost = 0;",
+			          "SET min_parallel_table_scan_size = 0;",
+			          "SET min_parallel_index_scan_size = 0;",
+			          "SET max_parallel_workers_per_gather = 3;"):
+				scan_con.execute(g)
+			self._assert_parallel_plan(scan_con, cond)
+			self._evict()
+
+			dml_con.execute("SET orioledb.enable_stopevents = true;")
+			# Read the pid before the thread takes the connection: asking for
+			# it later runs a query on a connection that is already busy.
+			dml_pid = dml_con.pid
+			ctrl_con.execute("SELECT pg_stopevent_set('page_split',\n"
+			                 "'$.treeName == \"o_bm_pkey\"');")
+			ctrl_con.commit()
+
+			ins = ThreadQueryExecutor(
+			    dml_con, "INSERT INTO o_bm SELECT i, 500 FROM "
+			    "generate_series(1000000, 1080000) i;")
+			ins.start()
+			try:
+				wait_stopevent(node, dml_pid)
+				result = sorted(
+				    r[0] for r in scan_con.execute(self._scan_sql(cond)))
+			finally:
+				ctrl_con.execute("SELECT pg_stopevent_reset('page_split');")
+				ins.join()
+			dml_con.commit()
+
+			self.assertEqual(result, reference)
+		finally:
+			scan_con.close()
+			ctrl_con.close()
+			dml_con.close()
 
 	# Two parallel bitmap scans parked at once; cross DML lands while both are
 	# parked, then both are released together.

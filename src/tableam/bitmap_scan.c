@@ -1882,7 +1882,25 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 					pfree(tuple.data);
 				}
 
-				BRIDGE_NEXT_TUPLE(bridge_iter);
+				/*
+				 * Only a row the bitmap accepted stands for one of this
+				 * page's offsets.  The primary scan does not only ever hand
+				 * back wanted rows: when a leaf changes shape underneath it,
+				 * btree_seq_scan falls back to a plain range iterator, which
+				 * is no longer key-directed and walks everything from the
+				 * downlink's low key onwards.  Counting those against
+				 * page_ntuples retires the page before its wanted rows are
+				 * reached, and they are lost with no error -- a page whose
+				 * first examined rows all miss loses every row it held.
+				 *
+				 * Rows the bitmap rejects are therefore just skipped.  A page
+				 * that never reaches page_ntuples is retired where the
+				 * primary scan runs out, which is handled above -- the same
+				 * exit that already covers the opposite skew, where dead
+				 * bridge_ctids leave fewer live PKs than offsets.
+				 */
+				if (in_bitmap)
+					BRIDGE_NEXT_TUPLE(bridge_iter);
 			}
 		}
 
