@@ -144,6 +144,7 @@ static IndexBuildResult o_pkey_result = {0};
 bool		o_in_add_column = false;
 static CreateStmt *create_stmt = NULL;
 static List *o_added_columns = NIL;
+static List *alter_type_exprs = NIL;
 static movedb_params o_movedb_data = {InvalidOid, InvalidOid, InvalidOid};
 
 /*
@@ -197,6 +198,11 @@ static void o_fill_new_slot(OTable *new_o_table, Relation rel, int attidx,
 static void o_find_collation_dependencies(Oid colloid);
 static void redefine_indices(Relation rel, OTable *new_o_table, bool primary,
 							 Oid oldRelnode);
+static void rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table,
+			  bool carry_secondary);
+static Node *o_get_alter_type_expr(Relation rel, int attidx);
+static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
+								Relation rel);
 
 static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
@@ -1236,6 +1242,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					case AT_AddColumn:
 						o_process_added_column(cmd);
 						break;
+					case AT_AlterColumnType:
+						o_alter_column_type(cmd, queryString, rel);
+						break;
 					default:
 						break;
 				}
@@ -1790,6 +1799,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		 * mechanism
 		 */
 		o_added_columns = NIL;
+		alter_type_exprs = NIL;
 	}
 	else if (IsA(pstmt->utilityStmt, RenameStmt))
 	{
@@ -2602,7 +2612,37 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 		table_close(toast_rel, AccessShareLock);
 	}
 
-	recreate_o_table_ext(old_o_table, new_o_table, false);
+	/*
+	 * Add new_o_table to the sys-tree so relation_get_descr(oldrel) resolves
+	 * to the adopted primary at Rnew, then rewrite_table() scans old_o_table
+	 * (still at Rold) and inserts each row into it, applying USING/default
+	 * expressions for ALTER COLUMN TYPE.  rewrite_table also drops old_o_table
+	 * at Rold (with undo for commit-time tree cleanup), replacing
+	 * recreate_o_table_ext's drop+add.  The data copy happens post-swap under
+	 * the final table identity, so WAL records resolve correctly for both
+	 * physical replication and logical decoding.
+	 */
+	{
+		OSnapshot	oSnapshot;
+		OXid		oxid;
+		OIndexKey  *trees;
+		int			numTrees;
+		bool		is_temp;
+
+		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+		o_tables_table_meta_lock(NULL);
+		o_tables_add(new_o_table, oxid, oSnapshot.csn);
+		o_tables_table_meta_unlock(NULL, InvalidOid);
+
+		trees = o_table_make_index_keys(new_o_table, &numTrees);
+		is_temp = new_o_table->persistence == RELPERSISTENCE_TEMP;
+		add_undo_create_relnode(new_o_table->oids, trees, numTrees, !is_temp);
+		pfree(trees);
+	}
+
+	recreate_table_descr_by_oids(old_oids);
+
+	rewrite_table(oldrel, old_o_table, new_o_table, false);
 
 	o_table_free(old_o_table);
 	o_table_free(new_o_table);
@@ -2851,7 +2891,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table,
 			if (old_attr->attgenerated)
 				continue;
 
-			expr = NULL;
+			expr = o_get_alter_type_expr(rel, i);
 
 			/*
 			 * old_slot may not contain all new properties if there are
@@ -5537,9 +5577,61 @@ o_ddl_cleanup(void)
 	 * mechanism
 	 */
 	o_added_columns = NIL;
+	alter_type_exprs = NIL;
 	o_in_add_column = false;
 	create_stmt = NULL;
 	memset(&o_movedb_data, 0, sizeof(o_movedb_data));
+}
+
+static Node *
+o_get_alter_type_expr(Relation rel, int attidx)
+{
+	ListCell   *lc;
+	Node	   *expr = NULL;
+
+	foreach(lc, alter_type_exprs)
+	{
+		AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
+		Oid			relOid = intVal(lsecond((List *) lfirst(lc)));
+
+		if (relOid == rel->rd_rel->oid && attnum == attidx + 1)
+		{
+			expr = (Node *) lthird((List *) lfirst(lc));
+			break;
+		}
+	}
+
+	return expr;
+}
+
+static void
+o_alter_column_type(AlterTableCmd *cmd, const char *queryString, Relation rel)
+{
+	ColumnDef  *def = (ColumnDef *) cmd->def;
+
+	if (def->raw_default)
+	{
+		Node	   *cooked_default;
+		ParseState *pstate;
+		ParseNamespaceItem *nsitem;
+		AttrNumber	attnum;
+
+		pstate = make_parsestate(NULL);
+		pstate->p_sourcetext = queryString;
+		nsitem = addRangeTableEntryForRelation(pstate, rel, AccessShareLock,
+											   NULL, false, true);
+		addNSItemToQuery(pstate, nsitem, false, true, true);
+		cooked_default = transformExpr(pstate, def->raw_default,
+									   EXPR_KIND_ALTER_COL_TRANSFORM);
+#if PG_VERSION_NUM >= 180000
+		cooked_default = expand_generated_columns_in_expr(cooked_default,
+														  rel, 1);
+#endif
+		attnum = get_attnum(RelationGetRelid(rel), cmd->name);
+		alter_type_exprs =
+			lappend(alter_type_exprs,
+					list_make4(makeInteger(attnum), makeInteger(rel->rd_rel->oid), cooked_default, makeString(cmd->name)));
+	}
 }
 
 static void
