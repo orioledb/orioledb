@@ -66,6 +66,22 @@
 #include "miscadmin.h"
 #include "utils/wait_event.h"
 
+/* SCRATCH: per-page navigation tally, read and reset by bitmap_scan.c */
+extern int	o_bm_ev_jump, o_bm_ev_singleleaf, o_bm_ev_rv_ok, o_bm_ev_rv_no,
+			o_bm_ev_leafdisk, o_bm_ev_leafmem, o_bm_ev_iter, o_bm_ev_itertup,
+			o_bm_ev_exhausted;
+
+int			o_bm_ev_jump = 0;
+int			o_bm_ev_singleleaf = 0;
+int			o_bm_ev_rv_ok = 0;
+int			o_bm_ev_rv_no = 0;
+int			o_bm_ev_leafdisk = 0;
+int			o_bm_ev_leafmem = 0;
+int			o_bm_ev_iter = 0;
+int			o_bm_ev_itertup = 0;
+int			o_bm_ev_exhausted = 0;
+
+
 typedef enum
 {
 	BTreeSeqScanInMemory,
@@ -1028,17 +1044,6 @@ get_next_key(BTreeSeqScan *scan, BTreePageItemLocator *intLoc, OFixedKey *nextKe
  * is then unusable and the next get_next_downlink() call re-reads the page whole
  * before touching it.
  */
-/* SCRATCH: per-page navigation tally, read and reset by bitmap_scan.c */
-int			o_bm_ev_jump = 0;
-int			o_bm_ev_singleleaf = 0;
-int			o_bm_ev_rv_ok = 0;
-int			o_bm_ev_rv_no = 0;
-int			o_bm_ev_leafdisk = 0;
-int			o_bm_ev_leafmem = 0;
-int			o_bm_ev_iter = 0;
-int			o_bm_ev_itertup = 0;
-int			o_bm_ev_exhausted = 0;
-
 static void
 internal_skip_to_next_key(BTreeSeqScan *scan, Page page,
 						  BTreePageItemLocator *intLoc, OTuple boundary)
@@ -2266,9 +2271,10 @@ iterate_internal_page(BTreeSeqScan *scan)
 static bool
 load_next_disk_leaf_page(BTreeSeqScan *scan)
 {
-	o_bm_ev_leafdisk++;
 	BTreeSeqScanDiskDownlink downlink;
 	ParallelOScanDesc poscan = scan->poscan;
+
+	o_bm_ev_leafdisk++;
 
 	/*
 	 * Loop to skip disk pages that are entirely before the scan range. Each
