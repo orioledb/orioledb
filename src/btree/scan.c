@@ -902,6 +902,7 @@ scan_make_iterator(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRangeHigh)
 	 * work through a freed iterator.  Tuples still come from the executor's
 	 * context, where the scan's caller expects them.
 	 */
+	o_bm_ev_iter++;
 	mctx = MemoryContextSwitchTo(btree_seqscan_context);
 	if (!O_TUPLE_IS_NULL(keyRangeLow))
 	{
@@ -1027,6 +1028,17 @@ get_next_key(BTreeSeqScan *scan, BTreePageItemLocator *intLoc, OFixedKey *nextKe
  * is then unusable and the next get_next_downlink() call re-reads the page whole
  * before touching it.
  */
+/* SCRATCH: per-page navigation tally, read and reset by bitmap_scan.c */
+int			o_bm_ev_jump = 0;
+int			o_bm_ev_singleleaf = 0;
+int			o_bm_ev_rv_ok = 0;
+int			o_bm_ev_rv_no = 0;
+int			o_bm_ev_leafdisk = 0;
+int			o_bm_ev_leafmem = 0;
+int			o_bm_ev_iter = 0;
+int			o_bm_ev_itertup = 0;
+int			o_bm_ev_exhausted = 0;
+
 static void
 internal_skip_to_next_key(BTreeSeqScan *scan, Page page,
 						  BTreePageItemLocator *intLoc, OTuple boundary)
@@ -1150,10 +1162,12 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 					else
 						clear_fixed_key(&jumpKey);
 
+					o_bm_ev_jump++;
 					if (!scan->cb->getNextKey(&jumpKey, BTreeKeyNonLeafKey,
 											  true, scan->arg))
 					{
 						/* Nothing left in the bitmap. */
+						o_bm_ev_exhausted++;
 						clear_fixed_key(keyRangeLow);
 						clear_fixed_key(keyRangeHigh);
 						return false;
@@ -1167,6 +1181,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 												 true))
 					{
 						/* Single leaf page (tree has no internal level). */
+						o_bm_ev_singleleaf++;
 						scan->isSingleLeafPage = true;
 						clear_fixed_key(keyRangeLow);
 						clear_fixed_key(keyRangeHigh);
@@ -2075,8 +2090,14 @@ iterate_internal_page(BTreeSeqScan *scan)
 		scan->enteredRange = false;
 
 		if (scan->cb && scan->cb->isRangeValid)
+		{
 			valid_downlink = scan->cb->isRangeValid(scan->keyRangeLow.tuple, scan->keyRangeHigh.tuple,
 													scan->arg);
+			if (valid_downlink)
+				o_bm_ev_rv_ok++;
+			else
+				o_bm_ev_rv_no++;
+		}
 		else if (scan->needSampling)
 		{
 			if (scan->samplingNumber < scan->samplingNext)
@@ -2152,6 +2173,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 					leafPartial = &scan->leafPartial;
 				}
 
+				o_bm_ev_leafmem++;
 				result = o_btree_try_read_page(scan->desc,
 											   DOWNLINK_GET_IN_MEMORY_BLKNO(downlink),
 											   DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(downlink),
@@ -2244,6 +2266,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 static bool
 load_next_disk_leaf_page(BTreeSeqScan *scan)
 {
+	o_bm_ev_leafdisk++;
 	BTreeSeqScanDiskDownlink downlink;
 	ParallelOScanDesc poscan = scan->poscan;
 
@@ -2639,6 +2662,9 @@ btree_seq_scan_get_tuple_from_iterator(BTreeSeqScan *scan,
 		scan->iterSkipKey = false;
 		break;
 	}
+
+	if (!O_TUPLE_IS_NULL(result))
+		o_bm_ev_itertup++;
 
 	if (O_TUPLE_IS_NULL(result))
 	{
