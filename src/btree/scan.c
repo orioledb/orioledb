@@ -69,7 +69,8 @@
 /* SCRATCH: per-page navigation tally, read and reset by bitmap_scan.c */
 extern int	o_bm_ev_jump, o_bm_ev_singleleaf, o_bm_ev_rv_ok, o_bm_ev_rv_no,
 			o_bm_ev_leafdisk, o_bm_ev_leafmem, o_bm_ev_iter, o_bm_ev_itertup,
-			o_bm_ev_exhausted;
+			o_bm_ev_exhausted, o_bm_ev_locok, o_bm_ev_locbad, o_bm_ev_ondisk,
+			o_bm_ev_loop;
 
 int			o_bm_ev_jump = 0;
 int			o_bm_ev_singleleaf = 0;
@@ -80,6 +81,10 @@ int			o_bm_ev_leafmem = 0;
 int			o_bm_ev_iter = 0;
 int			o_bm_ev_itertup = 0;
 int			o_bm_ev_exhausted = 0;
+int			o_bm_ev_locok = 0;
+int			o_bm_ev_locbad = 0;
+int			o_bm_ev_ondisk = 0;
+int			o_bm_ev_loop = 0;
 
 
 typedef enum
@@ -1124,6 +1129,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 
 		while (true)
 		{
+			o_bm_ev_loop++;
 
 			/* Try to load next internal page if needed */
 			if (!pageIsLoaded)
@@ -1254,6 +1260,11 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				}
 				Assert(!scan->intPartialFailed);
 			}
+
+			if (BTREE_PAGE_LOCATOR_IS_VALID(scan->context.img, &scan->intLoc))
+				o_bm_ev_locok++;
+			else
+				o_bm_ev_locbad++;
 
 			if (BTREE_PAGE_LOCATOR_IS_VALID(scan->context.img, &scan->intLoc))
 			{
@@ -2150,6 +2161,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 					return true;
 				}
 
+				o_bm_ev_ondisk++;
 				add_on_disk_downlink(scan, downlink, scan->context.imgReadCsn,
 									 scan->pageFullyInRange);
 			}
