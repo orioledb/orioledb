@@ -164,7 +164,7 @@ static bool probe_active = false;
 static void
 probe_flush(const char *where)
 {
-	if (probe_active && probe_nemit < probe_nkeys)
+	if (probe_active && (probe_nemit < probe_nkeys || probe_nkeys < probe_noff))
 		elog(WARNING, "BMPROBE %s blk=%u offs=" UINT64_FORMAT " keys="
 			 UINT64_FORMAT " emitted=" UINT64_FORMAT, where, probe_blk,
 			 probe_noff, probe_nkeys, probe_nemit);
@@ -2205,6 +2205,8 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 #endif
 	probe_nkeys = probe_nemit = probe_noff = 0;
 	probe_active = true;
+	/* every page this process is handed, so a skipped page shows as absent */
+	elog(WARNING, "BMPAGE blk=%u", probe_blk);
 	iter->cur_tuple = 0;
 	iter->page_ntuples = 0;
 
