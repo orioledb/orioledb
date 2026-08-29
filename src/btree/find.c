@@ -1042,6 +1042,18 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				}
 			}
 
+			/*
+			 * A caller that steps to siblings navigates items[index - 1]
+			 * through parentImg, so the descent must hand it back bound to
+			 * parentImg -- unless the fastpath deliberately deferred the copy
+			 * (parentImgDeferred), which find_right_page()/find_left_page()
+			 * materialize before use.
+			 */
+			if ((imageFlag || keepParentFlag) && context->index > 0 &&
+				!context->parentImgDeferred)
+				ASSERT_PARENT_LOCATOR_LOCAL(context,
+											context->items[context->index - 1].locator);
+
 			O_TUPLE_SET_NULL(context->insertTuple);
 			return OFindPageResultSuccess;
 		}
@@ -1513,6 +1525,18 @@ retry:
 	context->items[context->index].locator = loc;
 	context->items[context->index].blkno = intCxt.blkno;
 	context->items[context->index].pageChangeCount = intCxt.pageChangeCount;
+
+	/*
+	 * refind_page() re-finds one page by a cached hint; it never revisits the
+	 * parent slot.  A caller that steps to siblings therefore keeps whatever
+	 * the previous descent left in items[index - 1], so enforce the parent
+	 * invariant here too rather than only where find_page() builds it.
+	 */
+	if ((BTREE_PAGE_FIND_IS(context, IMAGE) ||
+		 BTREE_PAGE_FIND_IS(context, KEEP_PARENT)) &&
+		context->index > 0 && !context->parentImgDeferred)
+		ASSERT_PARENT_LOCATOR_LOCAL(context,
+									context->items[context->index - 1].locator);
 	return OFindPageResultSuccess;
 }
 

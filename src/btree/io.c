@@ -1687,11 +1687,7 @@ load_page(OBTreeFindPageContext *context)
 	int			target_level;
 	Page		page;
 	char		pg_attribute_aligned(sizeof(uint32)) buf[ORIOLEDB_BLCKSZ];
-	bool		was_modify;
-	bool		was_downlink_location;
-	bool		was_fetch = false;
-	bool		was_image = false;
-	bool		was_keep_lokey = false;
+	uint16		saved_flags;
 	OReadPageResult read_result;
 	uint32		chkpNum = 0;
 
@@ -1808,24 +1804,33 @@ load_page(OBTreeFindPageContext *context)
 		STOPEVENT(STOPEVENT_LOAD_PAGE_REFIND, params);
 	}
 
-	/* re-find parent page (it might be changed due to concurrent operations) */
+	/*
+	 * Re-find the parent page (it might have changed due to concurrent
+	 * operations).  That descent is a scratch use of the caller's context: it
+	 * needs its own flags, and nothing it does to them may be visible to the
+	 * caller afterwards -- find_page() maintains parentImg for a KEEP_PARENT
+	 * caller, clears the LOKEY_* results a KEEP_LOKEY caller is about to
+	 * read, and leaves refind_page() handing back a parent slot that belongs
+	 * to neither descent.
+	 *
+	 * So save the whole flags word and put it back, rather than listing the
+	 * flags to preserve one by one: that list is what went wrong here, and a
+	 * flag added later would silently join the ones already missing from it.
+	 */
+	saved_flags = context->flags;
 	csn = context->csn;
-	was_modify = BTREE_PAGE_FIND_IS(context, MODIFY);
-	was_image = BTREE_PAGE_FIND_IS(context, IMAGE);
-	BTREE_PAGE_FIND_UNSET(context, IMAGE);
-	if (!was_modify)
+
+	if (!BTREE_PAGE_FIND_IS(context, MODIFY))
 	{
-		was_fetch = BTREE_PAGE_FIND_IS(context, FETCH);
-		Assert(was_fetch || was_image);
+		Assert(BTREE_PAGE_FIND_IS(context, FETCH) ||
+			   BTREE_PAGE_FIND_IS(context, IMAGE));
 		BTREE_PAGE_FIND_UNSET(context, FETCH);
 		BTREE_PAGE_FIND_SET(context, MODIFY);
 	}
-	was_keep_lokey = BTREE_PAGE_FIND_IS(context, KEEP_LOKEY);
-	if (was_keep_lokey)
-		BTREE_PAGE_FIND_UNSET(context, KEEP_LOKEY);
-	was_downlink_location = BTREE_PAGE_FIND_IS(context, DOWNLINK_LOCATION);
-	if (!was_downlink_location)
-		BTREE_PAGE_FIND_SET(context, DOWNLINK_LOCATION);
+	BTREE_PAGE_FIND_UNSET(context, IMAGE);
+	BTREE_PAGE_FIND_UNSET(context, KEEP_LOKEY);
+	BTREE_PAGE_FIND_UNSET(context, KEEP_PARENT);
+	BTREE_PAGE_FIND_SET(context, DOWNLINK_LOCATION);
 	context->csn = COMMITSEQNO_INPROGRESS;
 	if (PAGE_GET_LEVEL(page) != target_level)
 		ereport(PANIC, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -1872,18 +1877,7 @@ load_page(OBTreeFindPageContext *context)
 
 	/* restore context state */
 	context->csn = csn;
-	if (!was_modify)
-	{
-		if (was_fetch)
-			BTREE_PAGE_FIND_SET(context, FETCH);
-		BTREE_PAGE_FIND_UNSET(context, MODIFY);
-	}
-	if (was_image)
-		BTREE_PAGE_FIND_SET(context, IMAGE);
-	if (was_keep_lokey)
-		BTREE_PAGE_FIND_SET(context, KEEP_LOKEY);
-	if (!was_downlink_location)
-		BTREE_PAGE_FIND_UNSET(context, DOWNLINK_LOCATION);
+	context->flags = saved_flags;
 
 	context_index = context->index;
 	parent_blkno = context->items[context_index].blkno;
