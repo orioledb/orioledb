@@ -154,6 +154,23 @@ static BTreeSeqScanCallbacks bitmap_seq_scan_callbacks = {
 	.getNextKey = o_bitmap_get_next_key
 };
 
+/* SCRATCH PROBE: per bitmap page, offsets seen / keys resolved / rows emitted */
+static uint64 probe_nkeys = 0;
+static uint64 probe_nemit = 0;
+static uint64 probe_noff = 0;
+static uint32 probe_blk = 0;
+static bool probe_active = false;
+
+static void
+probe_flush(const char *where)
+{
+	if (probe_active && probe_nemit < probe_nkeys)
+		elog(WARNING, "BMPROBE %s blk=%u offs=" UINT64_FORMAT " keys="
+			 UINT64_FORMAT " emitted=" UINT64_FORMAT, where, probe_blk,
+			 probe_noff, probe_nkeys, probe_nemit);
+	probe_active = false;
+}
+
 #define UINT64_HIGH_BIT (UINT64CONST(1) << 63)
 
 static uint64
@@ -1764,6 +1781,7 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 		{
 			if (!bridge_iterate(bridge_iter))
 			{
+				probe_flush("end");
 				/* No more pages in the bitmap */
 				slot = ExecClearTuple(node->ss.ss_ScanTupleSlot);
 				fetched = true;
@@ -1900,7 +1918,10 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 				 * bridge_ctids leave fewer live PKs than offsets.
 				 */
 				if (in_bitmap)
+				{
+					probe_nemit++;
 					BRIDGE_NEXT_TUPLE(bridge_iter);
+				}
 			}
 		}
 
@@ -2176,6 +2197,14 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 #endif
 
 	iter = &scan->bridge_iter;
+	probe_flush("nextpage");
+#if PG_VERSION_NUM >= 180000
+	probe_blk = iter->tbmres.blockno;
+#else
+	probe_blk = iter->tbmres->blockno;
+#endif
+	probe_nkeys = probe_nemit = probe_noff = 0;
+	probe_active = true;
 	iter->cur_tuple = 0;
 	iter->page_ntuples = 0;
 
@@ -2223,6 +2252,7 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 			bridge_bound.n_row_keys = 0;
 			bridge_bound.row_keys = NULL;
 
+			probe_noff++;
 			bridge_tup = o_btree_find_tuple_by_key(&bridge->desc,
 												   (Pointer) &bridge_bound, BTreeKeyBound,
 												   &o_non_deleted_snapshot, &tupleCsn,
@@ -2232,6 +2262,7 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 			{
 				data = seconary_tuple_get_pk_data(bridge_tup, bridge);
 				o_keybitmap_insert(scan->arg.bitmap, data);
+				probe_nkeys++;
 
 				pfree(bridge_tup.data);
 			}
