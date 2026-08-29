@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import re
 import unittest
 
 from .base_test import BaseTest
@@ -10,6 +11,13 @@ from .base_test import wait_checkpointer_stopevent
 from .base_test import wait_bgwriter_stopevent
 
 INDEX_NOT_LOADED_TMPLT = "Index {relname}_pkey: not loaded"
+
+# 400-byte keys fit ~19 entries to a page, so the index below reaches three
+# levels (leaves, one internal level, root) while the data stays small.  The
+# internal level is the point: the invariant tested there is about the parent
+# slot, items[index - 1].
+KEEP_PARENT_ROWS = 2000
+KEEP_PARENT_KEYLEN = 400
 
 
 class EvictionTest(BaseTest):
@@ -28,6 +36,73 @@ class EvictionTest(BaseTest):
 				return True
 
 		return False
+
+	def test_index_only_scan_over_evicted_tree(self):
+		"""An ordered index-only scan of a tree whose downlinks are on disk.
+
+		load_page() re-finds the parent of the page it loads by borrowing the
+		caller's find context as scratch space, so whatever that descent does
+		to the context's flags must not be visible to the caller.  A caller
+		that navigates siblings sets KEEP_PARENT, and letting the scratch
+		descent see it rebinds the caller's parent image and locator onto a
+		descent it never asked for.
+
+		Nothing here is a race: orioledb_evict_pages() puts the downlinks on
+		disk, which is the path load_page() serves, and the first descent
+		after it is enough.  Before the fix this aborted the backend on
+		ASSERT_PARENT_LOCATOR_LOCAL() in refind_page().
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_keep_parent (
+				id int8 NOT NULL,
+				val text NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			INSERT INTO o_keep_parent
+				SELECT i, lpad(i::text, {KEEP_PARENT_KEYLEN}, '0')
+				FROM generate_series(1, {KEEP_PARENT_ROWS}) i;
+			CREATE INDEX o_keep_parent_val ON o_keep_parent (val);
+			ANALYZE o_keep_parent;
+			CHECKPOINT;
+		""")
+
+		# A root sitting directly above the leaves would leave no parent slot
+		# to corrupt, and this would pass for the wrong reason.  Say so.
+		root = node.execute(
+		    'postgres', "SELECT orioledb_idx_structure("
+		    "'o_keep_parent'::regclass, 'o_keep_parent_val', 'n', 1)")[0][0]
+		m = re.search(r"level = (\d+)", root)
+		self.assertIsNotNone(m, "could not read the index root level")
+		self.assertGreaterEqual(
+		    int(m.group(1)), 2,
+		    "index is too shallow to exercise the parent slot")
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT orioledb_evict_pages('o_keep_parent'::regclass::oid, 0);")
+
+		con = node.connect()
+		try:
+			con.execute("SET enable_seqscan = off;")
+			con.execute("SET enable_bitmapscan = off;")
+			# Pin the serial plan: it is the one that walks the secondary
+			# index with KEEP_PARENT.
+			con.execute("SET max_parallel_workers_per_gather = 0;")
+
+			plan = "\n".join(r[0] for r in con.execute(
+			    "EXPLAIN (COSTS OFF) SELECT count(val) FROM o_keep_parent;"))
+			self.assertIn("index only scan of: o_keep_parent_val", plan)
+
+			self.assertEqual(
+			    con.execute("SELECT count(val) FROM o_keep_parent;")[0][0],
+			    KEEP_PARENT_ROWS)
+		finally:
+			con.close()
+		node.stop()
 
 	def test_eviction_txn(self):
 		node = self.node
