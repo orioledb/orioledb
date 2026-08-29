@@ -70,7 +70,9 @@
 extern int	o_bm_ev_jump, o_bm_ev_singleleaf, o_bm_ev_rv_ok, o_bm_ev_rv_no,
 			o_bm_ev_leafdisk, o_bm_ev_leafmem, o_bm_ev_iter, o_bm_ev_itertup,
 			o_bm_ev_exhausted, o_bm_ev_locok, o_bm_ev_locbad, o_bm_ev_ondisk,
-			o_bm_ev_loop;
+			o_bm_ev_loop, o_bm_ev_skip_none, o_bm_ev_skip_exh,
+			o_bm_ev_skip_beyond, o_bm_ev_skip_partial, o_bm_ev_skip_within,
+			o_bm_ev_skip_rightmost;
 
 int			o_bm_ev_jump = 0;
 int			o_bm_ev_singleleaf = 0;
@@ -85,6 +87,12 @@ int			o_bm_ev_locok = 0;
 int			o_bm_ev_locbad = 0;
 int			o_bm_ev_ondisk = 0;
 int			o_bm_ev_loop = 0;
+int			o_bm_ev_skip_none = 0;
+int			o_bm_ev_skip_exh = 0;
+int			o_bm_ev_skip_beyond = 0;
+int			o_bm_ev_skip_partial = 0;
+int			o_bm_ev_skip_within = 0;
+int			o_bm_ev_skip_rightmost = 0;
 
 
 typedef enum
@@ -1057,18 +1065,24 @@ internal_skip_to_next_key(BTreeSeqScan *scan, Page page,
 
 	/* A leftmost gap has no key to probe with; fall back to sequential. */
 	if (O_TUPLE_IS_NULL(boundary))
+	{
+		o_bm_ev_skip_none++;
 		return;
+	}
 
 	copy_fixed_key(scan->desc, &probe, boundary);
 	if (!scan->cb->getNextKey(&probe, BTreeKeyNonLeafKey, true, scan->arg))
 	{
 		/* Nothing left in the bitmap anywhere. */
+		o_bm_ev_skip_exh++;
 		BTREE_PAGE_LOCATOR_SET_INVALID(intLoc);
 		return;
 	}
 
 	/* Beyond this page: let the caller descend to the covering page. */
-	if (!O_PAGE_IS(page, RIGHTMOST))
+	if (O_PAGE_IS(page, RIGHTMOST))
+		o_bm_ev_skip_rightmost++;
+	else
 	{
 		OFixedKey	hikey;
 
@@ -1076,6 +1090,7 @@ internal_skip_to_next_key(BTreeSeqScan *scan, Page page,
 		if (o_btree_cmp(scan->desc, &probe.tuple, BTreeKeyNonLeafKey,
 						&hikey.tuple, BTreeKeyNonLeafKey) >= 0)
 		{
+			o_bm_ev_skip_beyond++;
 			BTREE_PAGE_LOCATOR_SET_INVALID(intLoc);
 			return;
 		}
@@ -1091,9 +1106,11 @@ internal_skip_to_next_key(BTreeSeqScan *scan, Page page,
 	if (!btree_page_search(scan->desc, page, (Pointer) &probe.tuple,
 						   BTreeKeyNonLeafKey, &scan->context.partial, intLoc))
 	{
+		o_bm_ev_skip_partial++;
 		scan->intPartialFailed = true;
 		return;
 	}
+	o_bm_ev_skip_within++;
 	BTREE_PAGE_LOCATOR_PREV(page, intLoc);
 	if (scan->context.partial.isPartial &&
 		!partial_load_chunk(&scan->context.partial, page, intLoc->chunkOffset,
