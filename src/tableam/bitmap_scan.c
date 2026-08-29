@@ -161,13 +161,18 @@ static uint64 probe_noff = 0;
 static uint32 probe_blk = 0;
 static bool probe_active = false;
 
+static int64 probe_kmin = 0;
+static int64 probe_kmax = 0;
+static int64 uint64_to_int64(uint64 val);
+
 static void
 probe_flush(const char *where)
 {
-	if (probe_active && (probe_nemit < probe_nkeys || probe_nkeys < probe_noff))
+	if (probe_active)
 		elog(WARNING, "BMPROBE %s blk=%u offs=" UINT64_FORMAT " keys="
-			 UINT64_FORMAT " emitted=" UINT64_FORMAT, where, probe_blk,
-			 probe_noff, probe_nkeys, probe_nemit);
+			 UINT64_FORMAT " emitted=" UINT64_FORMAT " kmin=" INT64_FORMAT
+			 " kmax=" INT64_FORMAT, where, probe_blk, probe_noff,
+			 probe_nkeys, probe_nemit, probe_kmin, probe_kmax);
 	probe_active = false;
 }
 
@@ -2204,9 +2209,8 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 	probe_blk = iter->tbmres->blockno;
 #endif
 	probe_nkeys = probe_nemit = probe_noff = 0;
+	probe_kmin = probe_kmax = 0;
 	probe_active = true;
-	/* every page this process is handed, so a skipped page shows as absent */
-	elog(WARNING, "BMPAGE blk=%u", probe_blk);
 	iter->cur_tuple = 0;
 	iter->page_ntuples = 0;
 
@@ -2265,6 +2269,17 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 				data = seconary_tuple_get_pk_data(bridge_tup, bridge);
 				o_keybitmap_insert(scan->arg.bitmap, data);
 				probe_nkeys++;
+				if (probe_nkeys == 1)
+					probe_kmin = probe_kmax = uint64_to_int64(data);
+				else
+				{
+					int64		k = uint64_to_int64(data);
+
+					if (k < probe_kmin)
+						probe_kmin = k;
+					if (k > probe_kmax)
+						probe_kmax = k;
+				}
 
 				pfree(bridge_tup.data);
 			}
