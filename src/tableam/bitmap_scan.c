@@ -166,7 +166,8 @@ extern int	o_bm_ev_jump, o_bm_ev_singleleaf, o_bm_ev_rv_ok, o_bm_ev_rv_no,
 			o_bm_ev_exhausted, o_bm_ev_locok, o_bm_ev_locbad, o_bm_ev_ondisk,
 			o_bm_ev_loop, o_bm_ev_skip_none, o_bm_ev_skip_exh,
 			o_bm_ev_skip_beyond, o_bm_ev_skip_partial, o_bm_ev_skip_within,
-			o_bm_ev_skip_rightmost, o_bm_ev_exit;
+			o_bm_ev_skip_rightmost, o_bm_ev_exit, o_bm_ev_pf_inblock,
+			o_bm_ev_pf_pre, o_bm_ev_pf_set, o_bm_ev_firstloaded;
 
 static int64 probe_kmin = 0;
 static int64 probe_kmax = 0;
@@ -182,7 +183,7 @@ probe_flush(const char *where)
 			 " | jump=%d single=%d rvOk=%d rvNo=%d leafDisk=%d leafMem=%d "
 			 "iter=%d iterTup=%d exh=%d locOk=%d locBad=%d onDisk=%d loop=%d"
 			 " | skip: none=%d exh=%d beyond=%d partial=%d within=%d rightmost=%d"
-			 " exit=%d",
+			 " exit=%d pf: set=%d inblock=%d pre=%d fl=%d",
 			 where, probe_blk, probe_noff,
 			 probe_nkeys, probe_nemit, probe_kmin, probe_kmax,
 			 o_bm_ev_jump, o_bm_ev_singleleaf, o_bm_ev_rv_ok, o_bm_ev_rv_no,
@@ -190,7 +191,8 @@ probe_flush(const char *where)
 			 o_bm_ev_exhausted, o_bm_ev_locok, o_bm_ev_locbad, o_bm_ev_ondisk,
 			 o_bm_ev_loop, o_bm_ev_skip_none, o_bm_ev_skip_exh,
 			 o_bm_ev_skip_beyond, o_bm_ev_skip_partial, o_bm_ev_skip_within,
-			 o_bm_ev_skip_rightmost, o_bm_ev_exit);
+			 o_bm_ev_skip_rightmost, o_bm_ev_exit, o_bm_ev_pf_set,
+			 o_bm_ev_pf_inblock, o_bm_ev_pf_pre, o_bm_ev_firstloaded);
 	probe_active = false;
 }
 
@@ -2235,7 +2237,8 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 	o_bm_ev_ondisk = o_bm_ev_loop = 0;
 	o_bm_ev_skip_none = o_bm_ev_skip_exh = o_bm_ev_skip_beyond = 0;
 	o_bm_ev_skip_partial = o_bm_ev_skip_within = o_bm_ev_skip_rightmost = 0;
-	o_bm_ev_exit = 0;
+	o_bm_ev_exit = o_bm_ev_pf_inblock = o_bm_ev_pf_pre = 0;
+	o_bm_ev_pf_set = o_bm_ev_firstloaded = 0;
 	iter->cur_tuple = 0;
 	iter->page_ntuples = 0;
 

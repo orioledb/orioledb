@@ -72,7 +72,8 @@ extern int	o_bm_ev_jump, o_bm_ev_singleleaf, o_bm_ev_rv_ok, o_bm_ev_rv_no,
 			o_bm_ev_exhausted, o_bm_ev_locok, o_bm_ev_locbad, o_bm_ev_ondisk,
 			o_bm_ev_loop, o_bm_ev_skip_none, o_bm_ev_skip_exh,
 			o_bm_ev_skip_beyond, o_bm_ev_skip_partial, o_bm_ev_skip_within,
-			o_bm_ev_skip_rightmost, o_bm_ev_exit;
+			o_bm_ev_skip_rightmost, o_bm_ev_exit, o_bm_ev_pf_inblock,
+			o_bm_ev_pf_pre, o_bm_ev_pf_set, o_bm_ev_firstloaded;
 
 int			o_bm_ev_jump = 0;
 int			o_bm_ev_singleleaf = 0;
@@ -94,6 +95,10 @@ int			o_bm_ev_skip_partial = 0;
 int			o_bm_ev_skip_within = 0;
 int			o_bm_ev_skip_rightmost = 0;
 int			o_bm_ev_exit = 0;
+int			o_bm_ev_pf_inblock = 0;
+int			o_bm_ev_pf_pre = 0;
+int			o_bm_ev_pf_set = 0;
+int			o_bm_ev_firstloaded = 0;
 
 
 typedef enum
@@ -398,7 +403,7 @@ seq_int_partial_ensure_hikeys(BTreeSeqScan *scan)
 
 	if (!partial_load_hikeys_chunk(&scan->context.partial, scan->context.img))
 	{
-		scan->intPartialFailed = true;
+		o_bm_ev_pf_set++, scan->intPartialFailed = true;
 		return false;
 	}
 	return true;
@@ -419,7 +424,7 @@ seq_int_partial_ensure(BTreeSeqScan *scan, BTreePageItemLocator *loc)
 	if (!partial_load_chunk(&scan->context.partial, scan->context.img,
 							loc->chunkOffset, NULL))
 	{
-		scan->intPartialFailed = true;
+		o_bm_ev_pf_set++, scan->intPartialFailed = true;
 		return false;
 	}
 	return true;
@@ -627,7 +632,7 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 			 */
 			if (PAGE_GET_LEVEL(scan->context.img) != 1)
 			{
-				scan->intPartialFailed = true;
+				o_bm_ev_pf_set++, scan->intPartialFailed = true;
 				continue;
 			}
 
@@ -1108,7 +1113,7 @@ internal_skip_to_next_key(BTreeSeqScan *scan, Page page,
 						   BTreeKeyNonLeafKey, &scan->context.partial, intLoc))
 	{
 		o_bm_ev_skip_partial++;
-		scan->intPartialFailed = true;
+		o_bm_ev_pf_set++, scan->intPartialFailed = true;
 		return;
 	}
 	o_bm_ev_skip_within++;
@@ -1116,7 +1121,7 @@ internal_skip_to_next_key(BTreeSeqScan *scan, Page page,
 	if (scan->context.partial.isPartial &&
 		!partial_load_chunk(&scan->context.partial, page, intLoc->chunkOffset,
 							NULL))
-		scan->intPartialFailed = true;
+		o_bm_ev_pf_set++, scan->intPartialFailed = true;
 }
 
 /*
@@ -1182,6 +1187,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 						 */
 						if (O_PAGE_IS(scan->context.img, RIGHTMOST))
 						{
+							o_bm_ev_firstloaded++;
 							clear_fixed_key(keyRangeLow);
 							clear_fixed_key(keyRangeHigh);
 							o_bm_ev_exit = 1;
@@ -1269,6 +1275,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 			{
 				OTuple		resumeKey;
 
+				o_bm_ev_pf_pre++;
 				if (scan->haveIntResumeKey)
 					resumeKey = scan->intResumeKey.tuple;
 				else
@@ -1331,6 +1338,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 						return false;
 					}
 					Assert(!scan->intPartialFailed);
+					o_bm_ev_pf_inblock++;
 					continue;
 				}
 
