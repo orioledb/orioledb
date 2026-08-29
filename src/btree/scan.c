@@ -72,7 +72,7 @@ extern int	o_bm_ev_jump, o_bm_ev_singleleaf, o_bm_ev_rv_ok, o_bm_ev_rv_no,
 			o_bm_ev_exhausted, o_bm_ev_locok, o_bm_ev_locbad, o_bm_ev_ondisk,
 			o_bm_ev_loop, o_bm_ev_skip_none, o_bm_ev_skip_exh,
 			o_bm_ev_skip_beyond, o_bm_ev_skip_partial, o_bm_ev_skip_within,
-			o_bm_ev_skip_rightmost;
+			o_bm_ev_skip_rightmost, o_bm_ev_exit;
 
 int			o_bm_ev_jump = 0;
 int			o_bm_ev_singleleaf = 0;
@@ -93,6 +93,7 @@ int			o_bm_ev_skip_beyond = 0;
 int			o_bm_ev_skip_partial = 0;
 int			o_bm_ev_skip_within = 0;
 int			o_bm_ev_skip_rightmost = 0;
+int			o_bm_ev_exit = 0;
 
 
 typedef enum
@@ -1183,6 +1184,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 						{
 							clear_fixed_key(keyRangeLow);
 							clear_fixed_key(keyRangeHigh);
+							o_bm_ev_exit = 1;
 							return false;
 						}
 						copy_fixed_hikey(scan->desc, &jumpKey, scan->context.img);
@@ -1198,6 +1200,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 						o_bm_ev_exhausted++;
 						clear_fixed_key(keyRangeLow);
 						clear_fixed_key(keyRangeHigh);
+						o_bm_ev_exit = 2;
 						return false;
 					}
 
@@ -1213,6 +1216,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 						scan->isSingleLeafPage = true;
 						clear_fixed_key(keyRangeLow);
 						clear_fixed_key(keyRangeHigh);
+						o_bm_ev_exit = 3;
 						return false;
 					}
 
@@ -1241,11 +1245,15 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 						scan->isSingleLeafPage = true;
 						clear_fixed_key(keyRangeLow);
 						clear_fixed_key(keyRangeHigh);
+						o_bm_ev_exit = 4;
 						return false;
 					}
 
 					if (scan->iter)
+					{
+						o_bm_ev_exit = 5;
 						return false;
+					}
 				}
 			}
 
@@ -1273,6 +1281,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 					scan->isSingleLeafPage = true;
 					clear_fixed_key(keyRangeLow);
 					clear_fixed_key(keyRangeHigh);
+					o_bm_ev_exit = 6;
 					return false;
 				}
 				Assert(!scan->intPartialFailed);
@@ -1318,6 +1327,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 						scan->isSingleLeafPage = true;
 						clear_fixed_key(keyRangeLow);
 						clear_fixed_key(keyRangeHigh);
+						o_bm_ev_exit = 7;
 						return false;
 					}
 					Assert(!scan->intPartialFailed);
@@ -1341,11 +1351,15 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 					internal_skip_to_next_key(scan, scan->context.img,
 											  &scan->intLoc, keyRangeHigh->tuple);
 
+				o_bm_ev_exit = 8;
 				return true;
 			}
 
 			if (O_PAGE_IS(scan->context.img, RIGHTMOST))
+			{
+				o_bm_ev_exit = 9;
 				return false;
+			}
 
 			pageIsLoaded = false;
 		}
@@ -1373,6 +1387,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				SpinLockRelease(&poscan->intpageAccess);
 				scan->haveHistImg = false;
 				BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
+				o_bm_ev_exit = 10;
 				return false;
 			}
 
@@ -1390,6 +1405,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				{
 					Assert(O_PAGE_IS(nextPage->img, RIGHTMOST));
 					SpinLockRelease(&poscan->intpageAccess);
+					o_bm_ev_exit = 11;
 					return false;
 				}
 				curPage->status = OParallelScanPageInProgress;
@@ -1411,6 +1427,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 					clear_fixed_key(keyRangeHigh);
 					SpinLockRelease(&poscan->intpageAccess);
 					LWLockRelease(&poscan->intpageLoad);
+					o_bm_ev_exit = 12;
 					return false;
 				}
 
@@ -1423,7 +1440,10 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				LWLockRelease(&poscan->intpageLoad);
 
 				if (scan->iter)
+				{
+					o_bm_ev_exit = 13;
 					return false;
+				}
 				continue;
 			}
 			else if (curPage->status == OParallelScanPageInProgress)
@@ -1461,7 +1481,10 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				LWLockRelease(&poscan->intpageLoad);
 
 				if (scan->iter)
+				{
+					o_bm_ev_exit = 14;
 					return false;
+				}
 				continue;
 			}
 
@@ -1488,6 +1511,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				pg_atomic_fetch_add_u32(&poscan->downlinksWritersInProgress, 1);
 
 				SpinLockRelease(&poscan->intpageAccess);
+				o_bm_ev_exit = 15;
 				return true;
 			}
 			else
