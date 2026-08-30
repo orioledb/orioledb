@@ -102,10 +102,20 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         fi
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
 
-        pg_basebackup -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -Fp -Xs -P
+        # Stream through a permanent slot rather than bare streaming.  Each
+        # pass below restarts the primary, and a restart makes the standby
+        # resume from the START of the segment it was in.  With wal_keep_size
+        # at its default 0 that segment is only safe until the next
+        # RemoveOldXlogFiles -- and DROP DATABASE forces an immediate
+        # checkpoint, so the reset prologue can recycle it inside the
+        # standby's 5s reconnect window.  The standby then never catches up:
+        # "requested WAL segment ... has already been removed", forever.  A
+        # slot pins the segment until the standby has actually consumed it.
+        pg_basebackup -C -S orioledb_standby -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -Fp -Xs -P
         touch $GITHUB_WORKSPACE/pgsql/rep_pgdata/standby.signal
         echo "port = 5433" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         echo "primary_conninfo = 'host=/tmp port=5432'" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
+        echo "primary_slot_name = 'orioledb_standby'" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         echo "allow_in_place_tablespaces = true" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log start
 
@@ -244,6 +254,9 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         done
 
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
+        # The standby is gone, so nothing will consume the slot; leaving it
+        # behind would pin WAL for the whole subscription/recovery run below.
+        psql postgres -p 5432 -c "SELECT pg_drop_replication_slot('orioledb_standby')" || true
         if [ $PG_VERSION != "16" ]; then
             make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
             make -C src/test/recovery installcheck-oriole -j $(nproc) || status=$?
