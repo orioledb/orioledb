@@ -67,6 +67,7 @@ PG_FUNCTION_INFO_V1(orioledb_insert_sys_xid_undo_location);
 PG_FUNCTION_INFO_V1(orioledb_undo_size);
 PG_FUNCTION_INFO_V1(orioledb_get_undo_meta);
 PG_FUNCTION_INFO_V1(orioledb_get_proc_retain_undo_locations);
+PG_FUNCTION_INFO_V1(orioledb_poke_proc_snapshot_retain_location);
 
 #define GET_UNDO_REC(undoType, loc) (o_undo_buffers[(int) (undoType)] + \
 	(loc) % o_undo_circular_sizes[(int) (undoType)])
@@ -3867,6 +3868,47 @@ orioledb_get_undo_meta(PG_FUNCTION_ARGS)
 	}
 
 	return (Datum) 0;
+}
+
+/*
+ * Testing aid: overwrite another backend's snapshot retain location.
+ *
+ * The row_lock_conflicts() loop is only reachable in its degenerate form when
+ * a backend's snapshotRetainUndoLocation has fallen below
+ * minProcRetainLocation, which no legitimate code path produces -- a live
+ * snapshot pins the horizon it claims.  Reproducing the field state therefore
+ * means putting the broken value there directly.  Test-only; never call this
+ * from anything else.
+ */
+Datum
+orioledb_poke_proc_snapshot_retain_location(PG_FUNCTION_ARGS)
+{
+	int			pid = PG_GETARG_INT32(0);
+	char	   *typeName = text_to_cstring(PG_GETARG_TEXT_PP(1));
+	int64		location = PG_GETARG_INT64(2);
+	UndoLogType undoType;
+	int			i;
+
+	if (strcmp(typeName, "row") == 0)
+		undoType = UndoLogRegular;
+	else if (strcmp(typeName, "page") == 0)
+		undoType = UndoLogRegularPageLevel;
+	else if (strcmp(typeName, "system") == 0)
+		undoType = UndoLogSystem;
+	else
+		elog(ERROR, "unknown undo log type: %s", typeName);
+
+	for (i = 0; i < max_procs; i++)
+	{
+		if (GetPGProcByNumber(i)->pid != pid)
+			continue;
+
+		pg_atomic_write_u64(&oProcData[i].undoRetainLocations[(int) undoType].snapshotRetainUndoLocation,
+							(UndoLocation) location);
+		PG_RETURN_BOOL(true);
+	}
+
+	PG_RETURN_BOOL(false);
 }
 
 Datum

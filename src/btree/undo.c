@@ -1780,9 +1780,19 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				finalTuphdr;
 	UndoLocation curUndoLocation,
 				finalUndoLocation;
-	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location(undoType);
+	UndoLocation retainedUndoLocation;
 	bool		foundFinal;
 	bool		result = false;
+
+	/*
+	 * Tests park here to poke this backend's snapshot retain location before
+	 * it is captured below, reproducing the field state where it sits under
+	 * minProcRetainLocation.
+	 */
+	if (STOPEVENTS_ENABLED())
+		STOPEVENT(STOPEVENT_ROW_LOCK_CONFLICTS_START, NULL);
+
+	retainedUndoLocation = get_snapshot_retained_undo_location(undoType);
 
 	finalTuphdr = curTuphdr = *pageTuphdr;
 	finalUndoLocation = curUndoLocation = InvalidUndoLocation;

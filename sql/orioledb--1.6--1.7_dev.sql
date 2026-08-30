@@ -57,3 +57,9 @@ CREATE FUNCTION orioledb_get_proc_retain_undo_locations(
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_poke_proc_snapshot_retain_location(
+    pid int4, undo_type text, location int8)
+RETURNS bool
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
