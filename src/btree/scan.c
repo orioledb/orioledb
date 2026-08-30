@@ -386,6 +386,7 @@ seq_int_partial_ensure(BTreeSeqScan *scan, BTreePageItemLocator *loc)
 	if (!scan->context.partial.isPartial)
 		return true;
 
+
 	if (!partial_load_chunk(&scan->context.partial, scan->context.img,
 							loc->chunkOffset, NULL))
 	{
@@ -1079,6 +1080,7 @@ internal_skip_to_next_key(BTreeSeqScan *scan, Page page,
 		scan->intPartialFailed = true;
 }
 
+
 /*
  * Gets the next downlink with it's keyrange (low and high keys of the
  * keyrange).
@@ -1273,6 +1275,17 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 						return false;
 					}
 					Assert(!scan->intPartialFailed);
+
+					/*
+					 * The page has just been re-read and intLoc positioned on
+					 * it, so say so: without this the next pass re-enters the
+					 * "load the next internal page" block above, and its jump
+					 * path reads firstPageIsLoaded together with a rightmost
+					 * image as "the tree is fully scanned" and ends the scan
+					 * with downlinks still unvisited.  For a bitmap scan that
+					 * silently drops every remaining key of the walk.
+					 */
+					pageIsLoaded = true;
 					continue;
 				}
 
