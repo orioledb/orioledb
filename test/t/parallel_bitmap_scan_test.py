@@ -13,10 +13,12 @@
 # read-only bitmap and the cooperative primary fetch stay correct while the tree
 # changes shape underneath the scan.
 
+import time
 import unittest
 
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
+from .base_test import wait_stopevent
 from .base_test import wait_stopevent
 
 # An always-true but per-row-expensive filter makes the parallel bitmap path
@@ -267,6 +269,81 @@ class ParallelBitmapScanTest(BaseTest):
 			dml_con.commit()
 
 			self.assertEqual(result, reference)
+		finally:
+			scan_con.close()
+			ctrl_con.close()
+			dml_con.close()
+
+	def test_bitmap_scan_survives_chunk_load_race(self):
+		"""Park on the chunk boundary, then bump the page under the scan.
+
+		The load that has to lose its race is the on-demand read of the chunk
+		holding the *next* downlink, and which downlink that is depends on
+		where the chunk boundaries fall -- so the stop event reports it
+		(lastInChunk, nextChunkLoaded) and the test parks exactly there.
+
+		Ids are sparse so the mutation can insert *between* existing rows
+		across the whole range: that splits leaves everywhere, so whichever
+		level-1 page the scan is holding gets a downlink inserted into it.
+		The inserted rows do not match, so the answer does not move.
+		"""
+		node = self.node
+		node.safe_psql(
+		    'postgres', f"""
+			DROP TABLE IF EXISTS o_chunk;
+			CREATE TABLE o_chunk (id int8 NOT NULL, val int8 NOT NULL,
+				PRIMARY KEY (id)) USING orioledb WITH (index_bridging);
+			INSERT INTO o_chunk SELECT i * 10, i % 1000
+				FROM generate_series(1, {NROWS}) i;
+			CREATE INDEX o_chunk_val ON o_chunk USING btree (val)
+				WITH (orioledb_index = off);
+			ANALYZE o_chunk;
+			CHECKPOINT;
+		""")
+		sql = f"SELECT id FROM o_chunk WHERE (val < 50) AND {FILTER}"
+		reference = sorted(r[0] for r in node.execute('postgres', sql))
+		self.assertGreater(len(reference), 500)
+
+		scan_con = node.connect()
+		ctrl_con = node.connect()
+		dml_con = node.connect()
+		try:
+			scan_con.execute("SET orioledb.enable_stopevents = true;")
+			for g in ("SET enable_seqscan = off;",
+			          "SET enable_indexscan = off;",
+			          "SET enable_indexonlyscan = off;",
+			          "SET max_parallel_workers_per_gather = 0;"):
+				scan_con.execute(g)
+			scan_pid = scan_con.pid
+
+			node.safe_psql(
+			    'postgres',
+			    "SELECT orioledb_evict_pages('o_chunk'::regclass::oid, 0);")
+			ctrl_con.execute(
+			    "SELECT pg_stopevent_set('seq_scan_int_next_key',\n"
+			    "'$.treeName == \"o_chunk_pkey\" && $.isPartial == true"
+			    " && $.firstPass == true && $.lastInChunk == true"
+			    " && $.nextChunkLoaded == false');")
+			ctrl_con.commit()
+
+			scan = ThreadQueryExecutor(scan_con, sql)
+			scan.start()
+			try:
+				deadline = time.time() + 30
+				while not node.execute(
+				    "SELECT EXISTS(SELECT 1 FROM pg_stopevents() se"
+				    " WHERE se.waiter_pids @> ARRAY[%d])" % scan_pid)[0][0]:
+					self.assertLess(time.time(), deadline,
+					                "the scan never parked")
+					time.sleep(0.01)
+				dml_con.execute("INSERT INTO o_chunk SELECT i * 10 + 5, 500 "
+				                f"FROM generate_series(1, {NROWS}) i;")
+				dml_con.commit()
+			finally:
+				ctrl_con.execute(
+				    "SELECT pg_stopevent_reset('seq_scan_int_next_key');")
+
+			self.assertEqual(sorted(r[0] for r in scan.join()), reference)
 		finally:
 			scan_con.close()
 			ctrl_con.close()

@@ -1082,6 +1082,49 @@ internal_skip_to_next_key(BTreeSeqScan *scan, Page page,
 
 
 /*
+ * Params for STOPEVENT_SEQ_SCAN_INT_NEXT_KEY: enough to tell whether the
+ * get_next_key() below is about to materialize a chunk it has not read yet.
+ * A test that wants the on-demand load to lose its race has to park exactly
+ * there -- where the chunk boundary falls is a property of the data, not
+ * something the test can arrange by choosing keys.  "firstPass" says the
+ * page was loaded in this very iteration, which is when the walk's local
+ * "the page is loaded" state is the one that can go stale.
+ */
+static Jsonb *
+seq_int_next_key_stopevent_params(BTreeSeqScan *scan, Page page,
+								  BTreePageItemLocator *loc, bool firstPass)
+{
+	JsonbParseState *state = NULL;
+	PartialPageState *partial = &scan->context.partial;
+	BTreePageItemLocator next = *loc;
+	bool		lastInChunk;
+	bool		nextChunkLoaded = true;
+	Jsonb	   *res;
+	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+	lastInChunk = (loc->itemOffset + 1 >= loc->chunkItemsCount);
+	if (lastInChunk)
+	{
+		BTREE_PAGE_LOCATOR_NEXT(page, &next);
+		if (BTREE_PAGE_LOCATOR_IS_VALID(page, &next) && partial->isPartial)
+			nextChunkLoaded = partial->chunkIsLoaded[next.chunkOffset];
+	}
+
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	btree_desc_stopevent_params_internal(scan->desc, &state);
+	jsonb_push_int8_key(&state, "level", PAGE_GET_LEVEL(page));
+	jsonb_push_int8_key(&state, "chunkOffset", loc->chunkOffset);
+	jsonb_push_bool_key(&state, "isPartial", partial->isPartial);
+	jsonb_push_bool_key(&state, "lastInChunk", lastInChunk);
+	jsonb_push_bool_key(&state, "nextChunkLoaded", nextChunkLoaded);
+	jsonb_push_bool_key(&state, "firstPass", firstPass);
+	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+	MemoryContextSwitchTo(mctx);
+
+	return res;
+}
+
+/*
  * Gets the next downlink with it's keyrange (low and high keys of the
  * keyrange).
  *
@@ -1109,6 +1152,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 
 		while (true)
 		{
+			bool		pageLoadedAtEntry = pageIsLoaded;
 
 			/* Try to load next internal page if needed */
 			if (!pageIsLoaded)
@@ -1248,7 +1292,14 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				 * internal locator
 				 */
 				if (!scan->intPartialFailed)
+				{
+					STOPEVENT(STOPEVENT_SEQ_SCAN_INT_NEXT_KEY,
+							  seq_int_next_key_stopevent_params(scan,
+																scan->context.img,
+																&scan->intLoc,
+																!pageLoadedAtEntry));
 					get_next_key(scan, &scan->intLoc, keyRangeHigh, scan->context.img);
+				}
 
 				if (scan->intPartialFailed)
 				{
