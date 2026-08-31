@@ -352,7 +352,14 @@ o_btree_find_tuples_start(BTreeDescr *desc, void *key,
 	OBTreeFindPageContext *context;
 	BTreePageHeader *header;
 	OTuple		result;
-	uint16		findFlags = BTREE_PAGE_FIND_FETCH;
+
+	/*
+	 * find_right_page()/find_left_page() navigate items[index - 1] through
+	 * parentImg, which find_page() only binds there for a KEEP_PARENT caller.
+	 * Without it the parent locator keeps pointing into the shared page and
+	 * the first sibling step reads a downlink from foreign memory.
+	 */
+	uint16		findFlags = BTREE_PAGE_FIND_FETCH | BTREE_PAGE_FIND_KEEP_PARENT;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
