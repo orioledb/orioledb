@@ -923,7 +923,8 @@ OTable *
 o_make_table_with_primary(Relation heaprel, Relation index,
 						  RelFileNumber primary_relnode,
 						  bool index_bridging,
-						  RelFileNumber bridge_relnode)
+						  RelFileNumber bridge_relnode,
+						  Oid adopt_reloid)
 {
 	ORelOids	oids;
 	OTable	   *o_table;
@@ -935,6 +936,8 @@ o_make_table_with_primary(Relation heaprel, Relation index,
 	Assert(index->rd_index->indisprimary);
 
 	ORelOidsSetFromRel(oids, heaprel);
+	if (OidIsValid(adopt_reloid))
+		oids.reloid = adopt_reloid;
 
 	o_table = o_table_tableam_create(oids, RelationGetDescr(heaprel),
 									 heaprel->rd_rel->relpersistence,
@@ -1036,7 +1039,7 @@ o_make_table_with_primary(Relation heaprel, Relation index,
 void
 o_build_primary_for_new_heap(Relation newheap, Relation index,
 							 RelFileNumber primary_relnode,
-							 bool index_bridging)
+							 bool index_bridging, Oid adopt_reloid)
 {
 	OTable	   *o_table;
 	OTableIndex *table_index;
@@ -1045,7 +1048,8 @@ o_build_primary_for_new_heap(Relation newheap, Relation index,
 	bool		is_temp;
 
 	o_table = o_make_table_with_primary(newheap, index, primary_relnode,
-										index_bridging, InvalidRelFileNumber);
+										index_bridging, InvalidRelFileNumber,
+										adopt_reloid);
 	table_index = &o_table->indices[0];
 
 	is_temp = (o_table->persistence == RELPERSISTENCE_TEMP);
