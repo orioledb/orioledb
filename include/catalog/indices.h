@@ -155,8 +155,9 @@ extern void drop_primary_index(Relation rel, OTable *o_table);
 extern OTable *o_make_table_with_primary(Relation heaprel, Relation index,
 										 RelFileNumber primary_relnode,
 										 bool index_bridging,
-										 RelFileNumber bridge_relnode);
+										 RelFileNumber bridge_relnode,
+										 Oid adopt_reloid);
 extern void o_build_primary_for_new_heap(Relation newheap, Relation index,
 										 RelFileNumber primary_relnode,
-										 bool index_bridging);
+										 bool index_bridging, Oid adopt_reloid);
 #endif							/* __INDICES_H__ */

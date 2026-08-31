@@ -366,6 +366,17 @@ o_tables_rel_meta_unlock(Relation rel, Oid oldRelnode)
 		ORelOids	oids;
 
 		ORelOidsSetFromRel(oids, rel);
+		/*
+		 * During a native heap rewrite the catalog maps the transient new
+		 * heap's OID (rel->oid) to a freshly allocated relfilenode Rnew, but
+		 * the OTable that owns the fill lives at the adopted permanent
+		 * identity (oldrel_oid, Rnew).  Redirect the META_UNLOCK WAL record's
+		 * oids to that identity so standby reconciliation (which looks up the
+		 * OTable by these oids) finds the surviving table rather than the
+		 * transient heap that is dropped after the swap.
+		 */
+		if (OidIsValid(rel->rd_rel->relrewrite))
+			oids.reloid = rel->rd_rel->relrewrite;
 		o_tables_meta_unlock(oids, oldRelnode);
 	}
 	else

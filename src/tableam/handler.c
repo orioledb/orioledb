@@ -513,9 +513,6 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 
-	if (OidIsValid(relation->rd_rel->relrewrite))
-		return slot;
-
 	o_serializable_lock_relation(RelationGetRelid(relation));
 
 	o_set_current_command(cid);
@@ -2631,6 +2628,17 @@ relation_get_descr(Relation rel)
 	Assert(rel != NULL);
 
 	ORelOidsSetFromRel(oids, rel);
+	/*
+	 * During a native heap rewrite (ALTER TABLE/CLUSTER/REFRESH MATVIEW),
+	 * PG fills the transient new heap whose pg_class.relfilenode is the
+	 * post-swap relnode Rnew but whose pg_class.oid is the transient heap
+	 * (dropped after swap).  The adopted OTable is created at the final
+	 * identity (oldrel_oid, Rnew) by begin_heap_rewrite_body so the fill's
+	 * WAL records carry the surviving identity for logical decoding and
+	 * physical replication.  Redirect the descr lookup there.
+	 */
+	if (OidIsValid(rel->rd_rel->relrewrite))
+		oids.reloid = rel->rd_rel->relrewrite;
 	if (!is_orioledb_rel(rel))
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
