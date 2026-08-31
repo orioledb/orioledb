@@ -59,7 +59,27 @@ rc=$?
 # NB invalid results (1) are model failures.
 # Those are reported per-anomaly by finally_jepsen-results,
 # so we return 0 for both case 0 and 1
+#
+# For 255
+#
+# When there are network partitions during setup, jepsen hard fails
+# resulting in a false-positive property failure.
+#
+# Ideally, there would be a way to run the jepsen setup before fault
+# injection starts. The jepsen workload could emit the setup_complete signal,
+# but that would mean we couldn't use the test template harness and need
+# to build a container entry point that provides similar functionality.
+#
+# Ideally jepsen would have Client/setup! separated from core/run-case!
+# Were setup and execution separated, we would ideally make
+# two java calls, one to setup the db run during "first_" to initialize the
+# db, and a second to run the tests.
+# But, calling Client/setup! is baked into the with-client+nemesis-setup-teardown macro.
+# Separating setup from test execution is a bit of a refactor that is only
+# needed when executed under Antithesis.
+# For now, we explicitly ignore crashed jepsen processes as the only observed
+# crash is during a startup network partition.
 case "$rc" in
-0 | 1) exit 0 ;;
+0 | 1 | 255) exit 0 ;;
 *) exit "$rc" ;;
 esac
