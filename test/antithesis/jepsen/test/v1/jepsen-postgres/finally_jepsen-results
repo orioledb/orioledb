@@ -198,7 +198,7 @@
           0))
 
       (:missing results-read)
-      ;; Crashed run. The singleton driver's exit code handles this case
+      ;; Crashed run. The singleton driver owns the exit code behavior for this case
       (do (log "no results at " results-file ": nothing to evaluate")
           0)
 
