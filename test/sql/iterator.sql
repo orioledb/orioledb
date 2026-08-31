@@ -33,6 +33,30 @@ SELECT unnest(orioledb_test_back_refind_skip_tail('o_back_refind'::regclass, 100
 
 DROP TABLE o_back_refind;
 
+-- A PG18 skip array is the one case where switch_to_next_range() recomputes
+-- ostate->exact, so a single scan can hold both kinds of range: the first binds
+-- the whole key and builds the iterator through o_btree_find_tuples_start(), a
+-- later one is a range and reuses that iterator to step to a sibling page.  The
+-- step reads the parent locator through parentImg, so the iterator has to have
+-- asked find_page() to keep it there.
+CREATE TABLE o_skip_step (
+	a int,
+	b int,
+	pad text,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_skip_step
+	SELECT g % 10, g / 10, repeat('x', 400) FROM generate_series(1, 10000) g;
+ANALYZE o_skip_step;
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
+SET enable_indexonlyscan = off;
+SELECT count(pad) FROM o_skip_step WHERE b = 500;
+RESET enable_seqscan;
+RESET enable_bitmapscan;
+RESET enable_indexonlyscan;
+DROP TABLE o_skip_step;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA iterator CASCADE;
 RESET search_path;
