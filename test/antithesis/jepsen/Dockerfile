@@ -14,6 +14,8 @@ WORKDIR /src
 # 2026-07-29: use antithesis-instrumented sql workload
 RUN git clone --depth=1 https://github.com/pmbauer/jepsen-sql.git sql \
     && cd sql \
+    # pin to v0.1.1sb-SNAPSHOT
+    && git checkout fc117a6e6c10b7408dfe49dad6bd6cadbcb0541a \
     && lein install
 
 # 2026-07-29: use antithesis-instrumented postgres driver
@@ -21,7 +23,7 @@ WORKDIR /src/jepsen-postgres
 RUN git init \
     && git remote add origin https://github.com/pmbauer/jepsen-postgres.git \
     && git fetch --depth=1 origin "${JEPSEN_POSTGRES_REF}" \
-    && git checkout --detach FETCH_HEAD \
+    && git checkout 1b99cd9dd11df56a2e45ec7c5638dae82c54446f \
     && cd postgres \
     && lein jar \
     && mkdir -p /opt/jepsen \
