@@ -356,6 +356,24 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	unlock_page(blkno);
 
 	/*
+	 * No page of this tree is locked here, so a concurrent drop can run
+	 * o_btree_cleanup_pages() -> free_meta_page() to completion.  Tests park
+	 * here to hold that window open.
+	 */
+	if (STOPEVENTS_ENABLED())
+	{
+		Jsonb	   *params;
+		JsonbParseState *state = NULL;
+
+		pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+		jsonb_push_int8_key(&state, "relnode", desc->oids.relnode);
+		jsonb_push_int8_key(&state, "level", level);
+		params = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+
+		STOPEVENT(STOPEVENT_MERGE_AFTER_TARGET_UNLOCK, params);
+	}
+
+	/*
 	 * Step 2: refind the parent.  We did release the target lock first: locks
 	 * shouldn't go bottom-up.
 	 */
