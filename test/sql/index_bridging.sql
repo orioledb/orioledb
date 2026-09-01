@@ -1315,6 +1315,30 @@ SELECT count(*), sum(id) FROM o_bridge_pk
 	WHERE tags @> ARRAY[3] OR id IN (5, 50, 500, 1500, 1999);
 DROP TABLE o_bridge_pk;
 
+-- the same, with a composite primary key: the densified uint64 bitmap key only
+-- carries one column, so this has to go through the fixed-width encoding --
+-- in the bridge path as well, which builds its own bitmap
+CREATE TABLE o_bridge_pk2 (
+	a int,
+	b int,
+	tags int[],
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_bridge_pk2
+	SELECT g / 50, g % 50, ARRAY[g % 7, g % 11] FROM generate_series(1, 2000) g;
+CREATE INDEX o_bridge_pk2_gin ON o_bridge_pk2 USING gin (tags);
+ANALYZE o_bridge_pk2;
+
+SET enable_seqscan = off;
+SET enable_indexscan = off;
+SELECT count(*), sum(a * 1000 + b) FROM o_bridge_pk2
+	WHERE tags @> ARRAY[3] OR (a, b) IN ((0, 5), (7, 10), (20, 40), (39, 49));
+RESET enable_indexscan;
+RESET enable_seqscan;
+SELECT count(*), sum(a * 1000 + b) FROM o_bridge_pk2
+	WHERE tags @> ARRAY[3] OR (a, b) IN ((0, 5), (7, 10), (20, 40), (39, 49));
+DROP TABLE o_bridge_pk2;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;
