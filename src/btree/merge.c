@@ -313,6 +313,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	OFixedKey	key;
 	int			level;
 	OBTreeFindPageContext find_context;
+	OFindPageResult findResult;
 	OInMemoryBlkno parent_blkno,
 				target_blkno = OInvalidInMemoryBlkno,
 				right_blkno,
@@ -381,13 +382,22 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 						   COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_MODIFY |
 						   BTREE_PAGE_FIND_NO_FIX_SPLIT |
+						   BTREE_PAGE_FIND_TRY_LOCK |
 						   BTREE_PAGE_FIND_DOWNLINK_LOCATION);
 
 	/* get a full find context for parent page and lock it */
 	if (!O_TUPLE_IS_NULL(key.tuple))
-		find_page(&find_context, &key.tuple, BTreeKeyPageHiKey, level + 1);
+		findResult = find_page(&find_context, &key.tuple, BTreeKeyPageHiKey, level + 1);
 	else
-		find_page(&find_context, NULL, BTreeKeyRightmost, level + 1);
+		findResult = find_page(&find_context, NULL, BTreeKeyRightmost, level + 1);
+
+	/*
+	 * The target was unlocked above, so the tree may have been dropped in the
+	 * meantime and the descent has nothing to walk.  Abandon the merge: no
+	 * page is locked and nothing has been modified yet.
+	 */
+	if (findResult != OFindPageResultSuccess)
+		return false;
 	parent_blkno = find_context.items[find_context.index].blkno;
 	parent_change_count = find_context.items[find_context.index].pageChangeCount;
 
