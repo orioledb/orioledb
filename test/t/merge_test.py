@@ -34,6 +34,115 @@ class MergeTest(BaseTest):
 		    ") USING orioledb;"
 		    "TRUNCATE o_merge;")
 
+	def test_merge_into_concurrently_dropped_tree(self):
+		"""btree_try_merge_and_unlock() must not merge a tree that has been dropped.
+
+		Step 1 of the merge releases the target page so that locks are not
+		taken bottom-up, and only then re-finds the parent.  In that window the
+		merging process holds no page of the tree, so a concurrent DROP runs
+		o_btree_cleanup_pages() -> free_meta_page() to completion.  The merge
+		then descends into a tree that is gone.
+
+		The evictor only merges a page it finds too sparse, and DELETE merges
+		eagerly whenever the neighbour is loaded -- so the sparse pages have to
+		be made with the pool too small to hold the neighbours, which is what
+		the narrow deletes below do.  Only the o_mNN trees are left sparse, so
+		every merge the evictor attempts is one of them; the scan that drives
+		the eviction runs over o_filler and therefore holds no lock on any of
+		them.
+		"""
+		NTABLES = 16
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.main_buffers = 8MB\n"
+		    "orioledb.undo_buffers = 32MB\n"
+		    "orioledb.bgwriter_num_workers = 0\n")
+		node.restart()
+
+		node.safe_psql(
+		    'postgres', "CREATE TABLE o_filler (id int PRIMARY KEY, pad text)"
+		    " USING orioledb;"
+		    "INSERT INTO o_filler"
+		    " SELECT g, repeat('f', 400) FROM generate_series(1, 150000) g;")
+		for i in range(NTABLES):
+			node.safe_psql(
+			    'postgres',
+			    "CREATE TABLE o_m%02d (id int PRIMARY KEY, pad text)"
+			    " USING orioledb;"
+			    "INSERT INTO o_m%02d"
+			    " SELECT g, repeat('x', 400) FROM generate_series(1, 25000) g;"
+			    % (i, i))
+		node.safe_psql('postgres', "CHECKPOINT;")
+
+		# narrow deletes: the neighbour is not resident, so DELETE cannot merge
+		# and the pages stay sparse until the evictor reaches them
+		with node.connect() as maker:
+			for i in range(NTABLES):
+				for k in range(1, 25000, 700):
+					maker.execute(
+					    "DELETE FROM o_m%02d WHERE id BETWEEN %d AND %d" %
+					    (i, k, k + 12))
+				maker.commit()
+
+		ctrl = node.connect()
+		ctrl.execute(
+		    "SELECT pg_stopevent_set('merge_after_target_unlock', 'true');")
+
+		presser = node.connect()
+		running = {'go': True}
+
+		def press():
+			while running['go']:
+				try:
+					presser.execute("SELECT count(pad) FROM o_filler;")
+				except Exception:
+					return
+
+		thread = Thread(target=press)
+		thread.start()
+		try:
+			deadline = time.time() + 90
+			parked = None
+			while time.time() < deadline:
+				pids = [
+				    p for row in ctrl.execute(
+				        "SELECT waiter_pids FROM pg_stopevents();") if row[0]
+				    for p in row[0]
+				]
+				if pids:
+					parked = pids[0]
+					break
+				time.sleep(0.2)
+			self.assertIsNotNone(parked, "nothing parked in the merge window")
+
+			# the merging tree is one of these; the presser holds no lock on any
+			names = ", ".join("o_m%02d" % i for i in range(NTABLES))
+			with node.connect() as dropper:
+				dropper.execute("DROP TABLE %s;" % names)
+				dropper.commit()
+
+			ctrl.execute(
+			    "SELECT pg_stopevent_reset('merge_after_target_unlock');")
+			time.sleep(10)
+		finally:
+			running['go'] = False
+			try:
+				ctrl.execute(
+				    "SELECT pg_stopevent_reset('merge_after_target_unlock');")
+			except Exception:
+				pass
+			thread.join(timeout=30)
+
+		with open(node.pg_log_file, errors='replace') as f:
+			log = f.read()
+		crashed = [
+		    line for line in log.splitlines()
+		    if 'TRAP' in line or 'terminated by signal' in line
+		]
+		self.assertEqual(
+		    crashed, [],
+		    "merge continued into the dropped tree: %s" % (crashed[:1], ))
+
 	def test_non_concurrent_merge_and_checkpoint(self):
 		node = self.node
 		node.execute("INSERT INTO o_merge"
