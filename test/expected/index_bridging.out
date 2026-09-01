@@ -61,8 +61,6 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
  p      | point     |           |          |         | plain    |              | 
  pk1    | integer   |           |          |         | plain    |              | 
  pk2    | integer   |           |          |         | plain    |              | 
-Not-null constraints:
-    "o_test_ix_ams_i_not_null" NOT NULL "i"
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
                 orioledb_tbl_indices                 
@@ -144,8 +142,6 @@ SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
  pk2    | integer   |           |          |         | plain    |              | 
 Indexes:
     "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
-Not-null constraints:
-    "o_test_ix_ams_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
@@ -845,10 +841,6 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
  k      | integer |           |          |         | plain   |              | 
 Indexes:
     "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
-Not-null constraints:
-    "o_test_ix_ams_i_not_null" NOT NULL "i"
-    "o_test_ix_ams_pk1_not_null" NOT NULL "pk1"
-    "o_test_ix_ams_pk2_not_null" NOT NULL "pk2"
 Options: index_bridging=true
 
 -- Don't update bridge_index when updated column not indexed by any bridged index
@@ -1146,10 +1138,6 @@ CREATE INDEX o_test_ix_ams_hash_ix ON o_test_ix_ams USING hash (k);
 Indexes:
     "o_test_ix_ams_hash_ix" hash (k)
     "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
-Not-null constraints:
-    "o_test_ix_ams_i_not_null" NOT NULL "i"
-    "o_test_ix_ams_pk1_not_null" NOT NULL "pk1"
-    "o_test_ix_ams_pk2_not_null" NOT NULL "pk2"
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
@@ -1344,10 +1332,6 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
 Indexes:
     "o_test_ix_ams_hash_ix" hash (k)
     "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
-Not-null constraints:
-    "o_test_ix_ams_i_not_null" NOT NULL "i"
-    "o_test_ix_ams_pk1_not_null" NOT NULL "pk1"
-    "o_test_ix_ams_pk2_not_null" NOT NULL "pk2"
 Options: index_bridging=true
 
 SELECT *, r IS NULL FROM o_test_ix_ams;
@@ -1419,10 +1403,6 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
 Indexes:
     "o_test_ix_ams_hash_ix" hash (k)
     "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
-Not-null constraints:
-    "o_test_ix_ams_i_not_null" NOT NULL "i"
-    "o_test_ix_ams_pk1_not_null" NOT NULL "pk1"
-    "o_test_ix_ams_pk2_not_null" NOT NULL "pk2"
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
@@ -1494,9 +1474,8 @@ EXPLAIN (COSTS OFF)
               QUERY PLAN               
 ---------------------------------------
  Seq Scan on o_test_ix_ams
-   Disabled: true
    Filter: (r @> '{11,11}'::integer[])
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_test_ix_ams WHERE r @> array[11, 11];
   i   |  j   |      p      | pk1  | pk2  |  k   |    r    
@@ -2067,14 +2046,14 @@ EXPLAIN (COSTS OFF)
 --------------------------------------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_bitmap_scans
    Bitmap heap scan
-   Recheck Cond: ((j = '{19,35}'::integer[]) OR (j <@ '{20,36,15}'::integer[]) OR (j > '{26,42}'::integer[]))
+   Recheck Cond: ((j = '{19,35}'::integer[]) OR (j > '{26,42}'::integer[]) OR (j <@ '{20,36,15}'::integer[]))
    ->  BitmapOr
          ->  Bitmap Index Scan on o_test_bitmap_scans_ix1
                Index Cond: (j = '{19,35}'::integer[])
-         ->  Bitmap Index Scan on o_test_bitmap_scans_ix3
-               Index Cond: (j <@ '{20,36,15}'::integer[])
          ->  Bitmap Index Scan on o_test_bitmap_scans_ix2
                Index Cond: (j > '{26,42}'::integer[])
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix3
+               Index Cond: (j <@ '{20,36,15}'::integer[])
 (10 rows)
 
 SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15] OR j > ARRAY[26, 42];
@@ -2092,14 +2071,14 @@ EXPLAIN (COSTS OFF)
 ------------------------------------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_bitmap_scans
    Bitmap heap scan
-   Recheck Cond: ((j > '{25,41}'::integer[]) OR (j2 < '{68,97}'::integer[]) OR (p <@ '(10,10),(8,8)'::box))
+   Recheck Cond: ((p <@ '(10,10),(8,8)'::box) OR (j2 < '{68,97}'::integer[]) OR (j > '{25,41}'::integer[]))
    ->  BitmapOr
-         ->  Bitmap Index Scan on o_test_bitmap_scans_ix2
-               Index Cond: (j > '{25,41}'::integer[])
-         ->  Bitmap Index Scan on o_test_bitmap_scans_ix5
-               Index Cond: (j2 < '{68,97}'::integer[])
          ->  Bitmap Index Scan on o_test_bitmap_scans_ix4
                Index Cond: (p <@ '(10,10),(8,8)'::box)
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix5
+               Index Cond: (j2 < '{68,97}'::integer[])
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix2
+               Index Cond: (j > '{25,41}'::integer[])
 (10 rows)
 
 SELECT * FROM o_test_bitmap_scans
@@ -2130,8 +2109,6 @@ CREATE INDEX o_test_index_bridging_options_ix1 ON o_test_index_bridging_options 
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
-Not-null constraints:
-    "o_test_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 CREATE INDEX o_test_index_bridging_options_ix2 ON o_test_index_bridging_options USING btree (i) WITH (orioledb_index = off);
@@ -2147,8 +2124,6 @@ DETAIL:  This feature is intended for testing purposes and is not recommended fo
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
     "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
-Not-null constraints:
-    "o_test_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 CREATE INDEX o_test_index_bridging_options_ix3 ON o_test_index_bridging_options USING hash (i);
@@ -2163,8 +2138,6 @@ Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
     "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
     "o_test_index_bridging_options_ix3" hash (i)
-Not-null constraints:
-    "o_test_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 CREATE INDEX o_test_index_bridging_options_ix4 ON o_test_index_bridging_options USING hash (i) WITH (fillfactor=65);
@@ -2180,8 +2153,6 @@ Indexes:
     "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
     "o_test_index_bridging_options_ix3" hash (i)
     "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65')
-Not-null constraints:
-    "o_test_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 CREATE INDEX o_test_index_bridging_options_ix5 ON o_test_index_bridging_options USING gist (p);
@@ -2198,8 +2169,6 @@ Indexes:
     "o_test_index_bridging_options_ix3" hash (i)
     "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65')
     "o_test_index_bridging_options_ix5" gist (p)
-Not-null constraints:
-    "o_test_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 CREATE INDEX o_test_index_bridging_options_ix6 ON o_test_index_bridging_options USING gin (j);
@@ -2217,8 +2186,6 @@ Indexes:
     "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65')
     "o_test_index_bridging_options_ix5" gist (p)
     "o_test_index_bridging_options_ix6" gin (j)
-Not-null constraints:
-    "o_test_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 CREATE INDEX o_test_index_bridging_options_ix7 ON o_test_index_bridging_options USING spgist (p);
@@ -2237,8 +2204,6 @@ Indexes:
     "o_test_index_bridging_options_ix5" gist (p)
     "o_test_index_bridging_options_ix6" gin (j)
     "o_test_index_bridging_options_ix7" spgist (p)
-Not-null constraints:
-    "o_test_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 CREATE INDEX o_test_index_bridging_options_ix8 ON o_test_index_bridging_options USING brin (i);
@@ -2258,8 +2223,6 @@ Indexes:
     "o_test_index_bridging_options_ix6" gin (j)
     "o_test_index_bridging_options_ix7" spgist (p)
     "o_test_index_bridging_options_ix8" brin (i)
-Not-null constraints:
-    "o_test_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 ALTER TABLE o_test_index_bridging_options RESET (index_bridging);
@@ -2280,8 +2243,6 @@ Indexes:
     "o_test_index_bridging_options_ix6" gin (j)
     "o_test_index_bridging_options_ix7" spgist (p)
     "o_test_index_bridging_options_ix8" brin (i)
-Not-null constraints:
-    "o_test_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 ALTER TABLE o_test_index_bridging_options SET (index_bridging);
@@ -2301,8 +2262,6 @@ Indexes:
     "o_test_index_bridging_options_ix6" gin (j)
     "o_test_index_bridging_options_ix7" spgist (p)
     "o_test_index_bridging_options_ix8" brin (i)
-Not-null constraints:
-    "o_test_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 ALTER INDEX o_test_index_bridging_options_ix2 RESET (orioledb_index);
@@ -2323,8 +2282,6 @@ Indexes:
     "o_test_index_bridging_options_ix6" gin (j)
     "o_test_index_bridging_options_ix7" spgist (p)
     "o_test_index_bridging_options_ix8" brin (i)
-Not-null constraints:
-    "o_test_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 ALTER INDEX o_test_index_bridging_options_ix1 SET (orioledb_index = off);
@@ -2345,8 +2302,6 @@ Indexes:
     "o_test_index_bridging_options_ix6" gin (j)
     "o_test_index_bridging_options_ix7" spgist (p)
     "o_test_index_bridging_options_ix8" brin (i)
-Not-null constraints:
-    "o_test_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 CREATE TABLE o_test_non_index_bridging_options (
@@ -2361,8 +2316,6 @@ CREATE TABLE o_test_non_index_bridging_options (
  i      | integer   |           | not null |         | plain    |              | 
  j      | integer[] |           |          |         | extended |              | 
  p      | point     |           |          |         | plain    |              | 
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 
 SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
                 orioledb_tbl_indices                 
@@ -2429,8 +2382,6 @@ ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
  i      | integer   |           | not null |         | plain    |              | 
  j      | integer[] |           |          |         | extended |              | 
  p      | point     |           |          |         | plain    |              | 
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 
 SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
                 orioledb_tbl_indices                 
@@ -2495,8 +2446,6 @@ ALTER TABLE o_test_non_index_bridging_options SET (index_bridging);
  i      | integer   |           | not null |         | plain    |              | 
  j      | integer[] |           |          |         | extended |              | 
  p      | point     |           |          |         | plain    |              | 
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
@@ -2580,8 +2529,6 @@ DETAIL:  This feature is intended for testing purposes and is not recommended fo
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_non_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 BEGIN;
@@ -2620,8 +2567,6 @@ ERROR:  cannot disable 'index_bridging' for a table with bridged indices
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_non_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 DROP INDEX o_test_non_index_bridging_options_ix2;
@@ -2633,8 +2578,6 @@ ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
  i      | integer   |           | not null |         | plain    |              | 
  j      | integer[] |           |          |         | extended |              | 
  p      | point     |           |          |         | plain    |              | 
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 
 SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
                 orioledb_tbl_indices                 
@@ -2768,8 +2711,6 @@ CREATE INDEX o_test_non_index_bridging_options_ix1 ON o_test_non_index_bridging_
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 
 CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
 WARNING:  using bridged btree index for orioledb
@@ -2786,8 +2727,6 @@ DETAIL:  index access method 'btree' is requested with index bridging for Oriole
 Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
     "o_test_non_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 ALTER INDEX o_test_non_index_bridging_options_ix2 RESET (orioledb_index);
@@ -2802,8 +2741,6 @@ ERROR:  Cannot change 'orioledb_index' option for existing indices
 Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
     "o_test_non_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 ALTER INDEX o_test_non_index_bridging_options_ix1 SET (orioledb_index = off);
@@ -2818,8 +2755,6 @@ ERROR:  Cannot change 'orioledb_index' option for existing indices
 Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
     "o_test_non_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 ALTER TABLE o_test_non_index_bridging_options SET (index_bridging);
@@ -2833,8 +2768,6 @@ ALTER TABLE o_test_non_index_bridging_options SET (index_bridging);
 Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
     "o_test_non_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
@@ -2875,8 +2808,6 @@ ERROR:  cannot disable 'index_bridging' for a table with bridged indices
 Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
     "o_test_non_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
@@ -2981,8 +2912,6 @@ Indexes:
     "o_test_non_index_bridging_options_pkey" PRIMARY KEY, btree (i)
     "o_test_non_index_bridging_options_ix1" btree (i)
     "o_test_non_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
@@ -3252,8 +3181,6 @@ ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_non_index_bridging_options_pkey" PRIMARY KEY, btree (i)
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 
 ALTER TABLE o_test_non_index_bridging_options DROP CONSTRAINT o_test_non_index_bridging_options_pkey;
 \d+ o_test_non_index_bridging_options
@@ -3263,8 +3190,6 @@ ALTER TABLE o_test_non_index_bridging_options DROP CONSTRAINT o_test_non_index_b
  i      | integer   |           | not null |         | plain    |              | 
  j      | integer[] |           |          |         | extended |              | 
  p      | point     |           |          |         | plain    |              | 
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 
 SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
                 orioledb_tbl_indices                 
@@ -3412,8 +3337,6 @@ DETAIL:  index access method 'btree' is requested with index bridging for Oriole
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_non_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
-Not-null constraints:
-    "o_test_non_index_bridging_options_i_not_null" NOT NULL "i"
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
