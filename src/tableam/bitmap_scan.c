@@ -593,7 +593,6 @@ o_pk_encode_leaf(OTuple tuple, OIndexDescr *id, uint8 *out)
 {
 	bool		isPrimary = (id->desc.type == oIndexPrimary);
 	int			npk = isPrimary ? id->nKeyFields : id->nPrimaryFields;
-	int			pk_from = id->nFields - id->nPrimaryFields;
 	AttrNumber	attnums[INDEX_MAX_KEYS] = {0};
 	Oid			types[INDEX_MAX_KEYS] = {0};
 	int			i;
@@ -606,8 +605,14 @@ o_pk_encode_leaf(OTuple tuple, OIndexDescr *id, uint8 *out)
 			attnums[i] = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, id, i + 1);
 		else
 			attnums[i] = id->primaryFieldsAttnums[i];
-		types[i] = TupleDescAttr(id->leafTupdesc,
-								 isPrimary ? attnums[i] - 1 : pk_from + i)->atttypid;
+
+		/*
+		 * Read the type from the very attribute the value is fetched from
+		 * below.  For an ordinary secondary index pk_from + i names the same
+		 * slot, but the bridge index does not lay its pk out that way and the
+		 * two disagree, yielding InvalidOid.
+		 */
+		types[i] = TupleDescAttr(id->leafTupdesc, attnums[i] - 1)->atttypid;
 		len += o_pk_fixed_width(types[i]);
 	}
 
@@ -2198,7 +2203,11 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 
 	if (scan->arg.bitmap)
 		o_keybitmap_free(scan->arg.bitmap);
-	scan->arg.bitmap = o_keybitmap_create();
+	if (o_keybitmap_pk_mode(GET_PRIMARY(scan->arg.tbl_desc),
+							NULL) == O_KEYBITMAP_FIXED)
+		scan->arg.bitmap = o_keybitmap_create_fixed();
+	else
+		scan->arg.bitmap = o_keybitmap_create();
 	if (scan->seq_scan)
 		free_btree_seq_scan(scan->seq_scan);
 	scan->seq_scan = make_btree_seq_scan_cb(&GET_PRIMARY(scan->arg.tbl_desc)->desc,
@@ -2247,8 +2256,26 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 
 			if (!O_TUPLE_IS_NULL(bridge_tup))
 			{
-				data = seconary_tuple_get_pk_data(bridge_tup, bridge);
-				o_keybitmap_insert(scan->arg.bitmap, data);
+				/*
+				 * Same choice of key encoding as o_index_getbitmap() makes.
+				 * The densified uint64 only carries a single pk column, so a
+				 * composite key has to go in as a fixed-width encoded key --
+				 * otherwise rows sharing a first column collapse onto one
+				 * bitmap entry.
+				 */
+				if (o_keybitmap_pk_mode(GET_PRIMARY(scan->arg.tbl_desc),
+										NULL) == O_KEYBITMAP_FIXED)
+				{
+					uint8		key[OKBM_FIXED_BYTES];
+
+					o_pk_encode_leaf(bridge_tup, bridge, key);
+					o_keybitmap_insert_key(scan->arg.bitmap, key);
+				}
+				else
+				{
+					data = seconary_tuple_get_pk_data(bridge_tup, bridge);
+					o_keybitmap_insert(scan->arg.bitmap, data);
+				}
 
 				pfree(bridge_tup.data);
 			}
