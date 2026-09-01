@@ -892,7 +892,24 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 				}
 				else
 				{
-					Assert(false);
+					OIndexDescr *primary = GET_PRIMARY(descr);
+					AttrNumber	attnum = primary->primaryIsCtid ? 2 : 1;
+					Datum		val;
+					bool		is_null;
+
+					/*
+					 * The scanned index is the primary itself -- a bitmap
+					 * index scan over it can be one arm of a bitmap qual
+					 * whose other arm is bridged, which is what puts us on
+					 * the tbm_result path.  The tuple in hand is already the
+					 * primary tuple, so take its bridge pointer directly
+					 * instead of looking the tuple up by its own key.
+					 */
+					val = o_toast_nocachegetattr(tuple, attnum,
+												 primary->leafTupdesc,
+												 &primary->leafSpec, &is_null);
+					Assert(!is_null);
+					tbm_add_tuples(tbm_result, DatumGetItemPointer(val), 1, false);
 				}
 			}
 			nTuples += 1;

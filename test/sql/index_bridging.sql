@@ -1292,6 +1292,29 @@ SELECT id FROM o_bridge_mixed WHERE tags @> ARRAY[99] ORDER BY id;
 SELECT id FROM o_bridge_mixed WHERE tags @> ARRAY[2] ORDER BY id;
 RESET enable_seqscan;
 
+-- A bitmap qual can pair a bridged index with the primary one.  The bridged
+-- arm puts the scan on the TIDBitmap path, and the primary arm then has to
+-- contribute its own bridge pointers there -- it used to assert instead.
+CREATE TABLE o_bridge_pk (
+	id int PRIMARY KEY,
+	tags int[]
+) USING orioledb;
+INSERT INTO o_bridge_pk
+	SELECT g, ARRAY[g % 7, g % 11] FROM generate_series(1, 2000) g;
+CREATE INDEX o_bridge_pk_gin ON o_bridge_pk USING gin (tags);
+ANALYZE o_bridge_pk;
+
+SET enable_seqscan = off;
+SET enable_indexscan = off;
+SELECT count(*), sum(id) FROM o_bridge_pk
+	WHERE tags @> ARRAY[3] OR id IN (5, 50, 500, 1500, 1999);
+RESET enable_indexscan;
+RESET enable_seqscan;
+-- same answer without the bitmap path
+SELECT count(*), sum(id) FROM o_bridge_pk
+	WHERE tags @> ARRAY[3] OR id IN (5, 50, 500, 1500, 1999);
+DROP TABLE o_bridge_pk;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;
