@@ -384,6 +384,7 @@ orioledb_tbl_structure(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(result);
 }
 
+#ifdef IS_DEV
 static inline void
 append_bytes(StringInfo str, Page p, OffsetNumber *offset, int len, int level,
 			 bool print_bytes)
@@ -897,6 +898,17 @@ orioledb_tbl_bin_structure(PG_FUNCTION_ARGS)
 
 	PG_RETURN_POINTER(result);
 }
+
+#else							/* !IS_DEV */
+Datum
+orioledb_tbl_bin_structure(PG_FUNCTION_ARGS)
+{
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("orioledb_tbl_bin_structure is no longer supported")));
+	PG_RETURN_NULL();
+}
+#endif							/* IS_DEV */
 
 Datum
 orioledb_idx_structure(PG_FUNCTION_ARGS)
