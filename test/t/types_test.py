@@ -44,6 +44,71 @@ class TypesTest(BaseTest):
 		cur_deleted = next((x[1] for x in rows if x[0] == True), 0)
 		self.assertEqual((cur_total, cur_deleted), (total, deleted))
 
+	def test_drop_type_isolated_between_databases(self):
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE DATABASE type_source;")
+		node.safe_psql("type_source", """
+			CREATE EXTENSION orioledb;
+			CREATE TYPE shared_enum AS ENUM ('one', 'two');
+			CREATE DOMAIN shared_domain AS integer CHECK (VALUE > 0);
+			CREATE TYPE shared_composite AS (value integer);
+			CREATE TABLE o_test (
+				id integer PRIMARY KEY,
+				enum_value shared_enum NOT NULL,
+				domain_value shared_domain NOT NULL,
+				composite_value shared_composite NOT NULL
+			) USING orioledb;
+			INSERT INTO o_test VALUES (1, 'one', 1, ROW(1));
+		""")
+		node.safe_psql("CREATE DATABASE type_target TEMPLATE type_source;")
+
+		oid_query = """
+			SELECT 'shared_enum'::regtype::oid,
+				   'shared_domain'::regtype::oid,
+				   'shared_composite'::regtype::oid,
+				   'o_test'::regclass::oid;
+		"""
+		self.assertEqual(node.execute("type_source", oid_query),
+		                 node.execute("type_target", oid_query))
+
+		description_query = """
+			SELECT orioledb_table_description('o_test'::regclass);
+		"""
+		source_description = node.execute("type_source", description_query)
+		node.safe_psql("type_target", """
+			DROP TYPE shared_enum CASCADE;
+			DROP DOMAIN shared_domain CASCADE;
+			DROP TYPE shared_composite CASCADE;
+			INSERT INTO o_test (id) VALUES (2);
+		""")
+		self.assertEqual([(1, ), (2, )],
+		                 node.execute("type_target",
+		                              "SELECT * FROM o_test ORDER BY id;"))
+		self.assertEqual(source_description,
+		                 node.execute("type_source", description_query))
+
+		node.safe_psql("type_source", """
+			INSERT INTO o_test VALUES (2, 'two', 2, ROW(2));
+		""")
+		self.assertEqual([(1, 'one', 1, 1), (2, 'two', 2, 2)], node.execute(
+		    "type_source", """
+				SELECT id, enum_value::text, domain_value,
+					   (composite_value).value
+					FROM o_test ORDER BY id;
+			"""))
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(source_description,
+		                 node.execute("type_source", description_query))
+		self.assertEqual([(1, 'one', 1, 1), (2, 'two', 2, 2)], node.execute(
+		    "type_source", """
+				SELECT id, enum_value::text, domain_value,
+					   (composite_value).value
+					FROM o_test ORDER BY id;
+			"""))
+
 	def test_enum_index_recovery(self):
 		enum_amount = 0
 		enumoid_amount = 0

@@ -113,6 +113,7 @@ typedef struct
 {
 	OXid		oxid;
 	CommitSeqNo csn;
+	Oid			datoid;
 	Oid			type_oid;
 	Form_pg_type type_data;
 } OTablesDropAllWithTypeArg;
@@ -2596,6 +2597,9 @@ o_tables_drop_columns_with_type_callback(OTable *o_table, void *arg)
 	bool		updated = false;
 	OTablesDropAllWithTypeArg *drop_arg = (OTablesDropAllWithTypeArg *) arg;
 
+	if (drop_arg->datoid != o_table->oids.datoid)
+		return;
+
 	/* Ignore search for rows of own class in table and base types */
 	if (drop_arg->type_data->typtype == TYPTYPE_BASE ||
 		(drop_arg->type_data->typtype == TYPTYPE_COMPOSITE &&
@@ -2626,7 +2630,8 @@ o_tables_drop_columns_with_type_callback(OTable *o_table, void *arg)
  * Drops all columns of a specific type
  */
 void
-o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid type_oid)
+o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid datoid,
+							  Oid type_oid)
 {
 	OTablesDropAllWithTypeArg arg;
 	HeapTuple	tuple;
@@ -2639,6 +2644,7 @@ o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid type_oid)
 
 	arg.oxid = oxid;
 	arg.csn = csn;
+	arg.datoid = datoid;
 	arg.type_oid = type_oid;
 	arg.type_data = (Form_pg_type) GETSTRUCT(tuple);
 
