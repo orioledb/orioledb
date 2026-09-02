@@ -618,99 +618,97 @@ o_buffers_unlink_blocks_range(OBuffersDesc *desc, uint32 tag,
 }
 
 /*
- * Discard items in [cleanupStart, cleanupEnd) that are no longer kept by the
- * retain set [chkpRetainStart, chkpRetainEnd) U [transactionRetainStart, +inf).
- * Fully covered files are unlinked.  The leading file is also unlinked when
- * it lies entirely outside the retain set, so successive concurrent calls
- * with non-file-aligned boundaries don't leave orphan partial-coverage files.
+ * Move a reclaim cursor forward, never back.
+ *
+ * The cursors are only a hint that saves a call from redoing the previous
+ * one's work, so a concurrent caller that computed a lower value may lose the
+ * race harmlessly -- the worst outcome is one repeated sweep over files that
+ * are already gone.
+ */
+static void
+advance_cursor(pg_atomic_uint64 *cursor, int64 fileNumber)
+{
+	uint64		old = pg_atomic_read_u64(cursor);
+
+	while (old < (uint64) fileNumber)
+	{
+		if (pg_atomic_compare_exchange_u64(cursor, &old, (uint64) fileNumber))
+			break;
+	}
+}
+
+/*
+ * Unlink every file that holds nothing the retain set still needs.
+ *
+ * The retain set is [chkpRetainStart, chkpRetainEnd) U [transactionRetainStart,
+ * +inf), so the dead items form two intervals; a file is reclaimable exactly
+ * when it lies wholly inside one of them.  Rounding each interval inwards to
+ * whole files gives those files directly, without walking the range.
+ *
+ * The point of deciding per file against the *current* retain set, rather than
+ * per byte range against one caller-supplied range, is that a file straddling
+ * an interval edge is simply retried on every later call, until the edge has
+ * moved past its end.  The previous scheme unlinked only what a single range
+ * covered wholly and never revisited an older range, so the file holding the
+ * upper edge of a retired checkpoint retain range stayed on disk for good --
+ * one leaked file per checkpoint.
+ *
+ * Both cursors are low-water marks of "already reclaimed up to here", kept so
+ * that a call does not redo the work of the previous one; leaving them at 0
+ * only costs one extra sweep, which is how a cluster carrying files leaked by
+ * an earlier version reclaims them.
+ *
  * itemsPerBlock is the count of caller-defined items in one ORIOLEDB_BLCKSZ
  * block.
- *
- * Partition of items in [cleanupStart, cleanupEnd) against the new retain set:
- *
- *   1. item < retainStart                                  -- unlink
- *   2. item in [retainStart, chkpRetainEnd)                -- chkp, keep
- *   3. item in [chkpRetainEnd, transactionRetainStart)      -- gap, unlink
- *      (only reachable when chkpRetainEnd < transactionRetainStart)
- *   4. item >= transactionRetainStart                       -- active, keep
- *
- * When the chkp range is empty, retainStart = transactionRetainStart, the gap
- * branch is skipped, and everything below transactionRetainStart falls into
- * case 1.
  */
 void
-unlink_unretained_o_buffers(OBuffersDesc *desc, uint32 tag, int64 itemsPerBlock,
-							int64 cleanupStart, int64 cleanupEnd,
+o_buffers_unlink_dead_files(OBuffersDesc *desc, uint32 tag,
+							int64 itemsPerBlock,
+							pg_atomic_uint64 *belowCursor,
+							pg_atomic_uint64 *gapCursor,
 							int64 chkpRetainStart, int64 chkpRetainEnd,
 							int64 transactionRetainStart)
 {
 	int64		blocksPerFile = desc->singleFileSize / ORIOLEDB_BLCKSZ;
-	int64		retainStart;
-	int64		finish;
+	int64		itemsPerFile = blocksPerFile * itemsPerBlock;
+	bool		haveChkp = chkpRetainStart < chkpRetainEnd;
+	int64		firstFile,
+				lastFile;
 
 	/*
 	 * Block arithmetic below uses index / itemsPerBlock, which is only
 	 * correct when items align to block boundaries.  For straddling items
 	 * (e.g. RewindItem) the caller must compute block ranges itself and call
-	 * o_buffers_unlink_blocks_range directly.
+	 * o_buffers_unlink_blocks_range() directly.
 	 */
 	Assert(ORIOLEDB_BLCKSZ % itemsPerBlock == 0);
 
-	if (cleanupStart >= cleanupEnd)
-		return;
-
-	if (chkpRetainStart < chkpRetainEnd)
-		retainStart = Min(chkpRetainStart, transactionRetainStart);
-	else
-		retainStart = transactionRetainStart;
-
-	/* Case 1: items below the new persist start. */
-	finish = Min(cleanupEnd, retainStart);
-	if (cleanupStart < finish)
+	/*
+	 * Below the retain set entirely.  The checkpoint range can start above
+	 * the live tail, so the lower edge of the retain set is the smaller of
+	 * the two -- taking chkpRetainStart alone would reclaim live undo.
+	 */
+	firstFile = pg_atomic_read_u64(belowCursor);
+	lastFile = (haveChkp ? Min(chkpRetainStart, transactionRetainStart)
+				: transactionRetainStart) / itemsPerFile;
+	if (firstFile < lastFile)
 	{
-		int64		firstBlock = (cleanupStart + itemsPerBlock - 1) / itemsPerBlock;
-		int64		lastBlock = finish / itemsPerBlock - 1;
-		int64		retainBlock = retainStart / itemsPerBlock;
-		int64		leadFile = firstBlock / blocksPerFile;
-
-		/*
-		 * If the file containing the leading edge is entirely below retain,
-		 * extend the range down to its first block so the file is unlinked
-		 * rather than left as a stale partial-coverage shell.  The bytes
-		 * below cleanupStart in that file are below the previous cleaned
-		 * boundary and therefore already dead.
-		 */
-		if ((leadFile + 1) * blocksPerFile <= retainBlock)
-			firstBlock = leadFile * blocksPerFile;
-
-		o_buffers_unlink_blocks_range(desc, tag, firstBlock, lastBlock);
+		o_buffers_unlink_blocks_range(desc, tag, firstFile * blocksPerFile,
+									  lastFile * blocksPerFile - 1);
+		advance_cursor(belowCursor, lastFile);
 	}
 
-	/* Case 3: gap above chkpRetainEnd and below current retain. */
-	if (chkpRetainStart < chkpRetainEnd && chkpRetainEnd < transactionRetainStart)
+	/* The gap between the checkpoint range and the live tail. */
+	if (haveChkp)
 	{
-		int64		gapStart = Max(cleanupStart, chkpRetainEnd);
-		int64		gapEnd = Min(cleanupEnd, transactionRetainStart);
-
-		if (gapStart < gapEnd)
+		firstFile = (chkpRetainEnd + itemsPerFile - 1) / itemsPerFile;
+		firstFile = Max(firstFile, (int64) pg_atomic_read_u64(gapCursor));
+		lastFile = transactionRetainStart / itemsPerFile;
+		if (firstFile < lastFile)
 		{
-			int64		firstBlock = (gapStart + itemsPerBlock - 1) / itemsPerBlock;
-			int64		lastBlock = gapEnd / itemsPerBlock - 1;
-			int64		retainBlock = transactionRetainStart / itemsPerBlock;
-			int64		chkpEndBlock = (chkpRetainEnd + itemsPerBlock - 1) / itemsPerBlock;
-			int64		leadFile = firstBlock / blocksPerFile;
-			int64		leadFileFirst = leadFile * blocksPerFile;
-
-			/*
-			 * Extend only when the leading file sits entirely inside the gap
-			 * (above chkpRetainEnd and below transactionRetainStart): then
-			 * every item in it is dead.
-			 */
-			if (leadFileFirst >= chkpEndBlock &&
-				leadFileFirst + blocksPerFile <= retainBlock)
-				firstBlock = leadFileFirst;
-
-			o_buffers_unlink_blocks_range(desc, tag, firstBlock, lastBlock);
+			o_buffers_unlink_blocks_range(desc, tag, firstFile * blocksPerFile,
+										  lastFile * blocksPerFile - 1);
+			advance_cursor(gapCursor, lastFile);
 		}
 	}
 }

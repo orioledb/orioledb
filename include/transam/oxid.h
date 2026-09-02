@@ -34,6 +34,13 @@ typedef struct
 	pg_atomic_uint64 checkpointRetainXmin;
 	pg_atomic_uint64 checkpointRetainXmax;
 	pg_atomic_uint64 cleanedXmin;
+
+	/*
+	 * Lowest xidmap file number that may still exist.  See
+	 * o_buffers_unlink_dead_files().
+	 */
+	pg_atomic_uint64 cleanedFileCursor;
+	pg_atomic_uint64 cleanedGapFileCursor;
 	pg_atomic_uint64 cleanedCheckpointXmin;
 	pg_atomic_uint64 cleanedCheckpointXmax;
 

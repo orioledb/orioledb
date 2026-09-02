@@ -56,9 +56,10 @@ extern void o_buffers_unlink_blocks_range(OBuffersDesc *desc,
 										  uint32 tag,
 										  int64 firstBlockNumber,
 										  int64 lastBlockNumber);
-extern void unlink_unretained_o_buffers(OBuffersDesc *desc, uint32 tag,
+extern void o_buffers_unlink_dead_files(OBuffersDesc *desc, uint32 tag,
 										int64 itemsPerBlock,
-										int64 cleanupStart, int64 cleanupEnd,
+										pg_atomic_uint64 *belowCursor,
+										pg_atomic_uint64 *gapCursor,
 										int64 chkpRetainStart,
 										int64 chkpRetainEnd,
 										int64 transactionRetainStart);

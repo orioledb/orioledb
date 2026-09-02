@@ -257,6 +257,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/wal_savepoint_buffer_test.py \
 						test/t/toast_index_test.py \
 						test/t/trigger_test.py \
+						test/t/undo_cleanup_test.py \
 						test/t/unlogged_test.py \
 						test/t/vacuum_test.py \
 						test/t/transaction_test.py \

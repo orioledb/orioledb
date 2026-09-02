@@ -735,21 +735,14 @@ update_min_undo_locations(UndoLogType undoType,
 			   minRetainLocation / UNDO_FILE_SIZE >= oldCheckpointStartLocation / UNDO_FILE_SIZE);
 
 		/*
-		 * Old active retain that's no longer retained. Capped at the new
-		 * active retain start, since [minRetainLocation, +inf) is still kept.
+		 * Drop every undo file that holds nothing still retained.  The retain
+		 * set alone decides, so it does not matter how the cleaned boundary
+		 * happens to fall inside a file.
 		 */
-		unlink_unretained_o_buffers(&undoBuffersDesc, (uint32) undoType,
+		o_buffers_unlink_dead_files(&undoBuffersDesc, (uint32) undoType,
 									ORIOLEDB_BLCKSZ,
-									oldCleanedLocation, minRetainLocation,
-									newCheckpointStartLocation,
-									newCheckpointEndLocation,
-									minRetainLocation);
-
-		/* Old checkpoint retain range that's no longer retained. */
-		unlink_unretained_o_buffers(&undoBuffersDesc, (uint32) undoType,
-									ORIOLEDB_BLCKSZ,
-									oldCheckpointStartLocation,
-									oldCheckpointEndLocation,
+									&meta->cleanedFileCursor,
+									&meta->cleanedGapFileCursor,
 									newCheckpointStartLocation,
 									newCheckpointEndLocation,
 									minRetainLocation);

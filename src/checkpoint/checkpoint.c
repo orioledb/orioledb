@@ -288,6 +288,8 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 			pg_atomic_init_u64(&undo_meta->minProcTransactionRetainLocation, 0);
 			pg_atomic_init_u64(&undo_meta->minProcReservedLocation, 0);
 			pg_atomic_init_u64(&undo_meta->cleanedLocation, 0);
+			pg_atomic_init_u64(&undo_meta->cleanedFileCursor, 0);
+			pg_atomic_init_u64(&undo_meta->cleanedGapFileCursor, 0);
 			pg_atomic_init_u64(&undo_meta->checkpointRetainStartLocation, 0);
 			pg_atomic_init_u64(&undo_meta->checkpointRetainEndLocation, 0);
 			pg_atomic_init_u64(&undo_meta->cleanedCheckpointStartLocation, 0);
@@ -303,6 +305,8 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(&xid_meta->checkpointRetainXmin, FirstNormalTransactionId);
 		pg_atomic_init_u64(&xid_meta->checkpointRetainXmax, FirstNormalTransactionId);
 		pg_atomic_init_u64(&xid_meta->cleanedXmin, FirstNormalTransactionId);
+		pg_atomic_init_u64(&xid_meta->cleanedFileCursor, 0);
+		pg_atomic_init_u64(&xid_meta->cleanedGapFileCursor, 0);
 		pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmin, FirstNormalTransactionId);
 		pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmax, FirstNormalTransactionId);
 
