@@ -12,3 +12,8 @@ CREATE FUNCTION orioledb_test_back_refind_skip_tail(relid oid, fake_curkey int4)
 RETURNS int4[]
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_test_corrupt_page_undo(relid oid)
+RETURNS text
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;

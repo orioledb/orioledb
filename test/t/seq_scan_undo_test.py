@@ -110,3 +110,47 @@ class SeqScanUndoTest(BaseTest):
 
 		con.close()
 		node.stop()
+
+	def test_corrupt_undo_key_len(self):
+		"""
+		Corrupted key length in a page-level undo image must raise
+		ERRCODE_DATA_CORRUPTED instead of causing an OOB copy.
+		Without the fix the 64KB overflow crashes the backend (signal 11).
+		"""
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
+		    "orioledb.main_buffers = 8MB\n"
+		    "orioledb.debug_disable_pools_limit = true\n"
+		    "orioledb.debug_disable_bgwriter = true\n")
+		node.start()
+		node.safe_psql("CREATE EXTENSION orioledb;")
+		node.safe_psql("""
+			CREATE TABLE o_undo_corrupt (
+				id int PRIMARY KEY,
+				payload text
+			) USING orioledb;
+			INSERT INTO o_undo_corrupt
+				SELECT g, repeat('x', 200) FROM generate_series(1, 3000) g;
+		""")
+
+		# Pin an old snapshot.
+		reader = node.connect()
+		reader.begin('REPEATABLE READ')
+		reader.execute("SELECT count(*) FROM o_undo_corrupt;")
+
+		# Grow rows to trigger page splits, then corrupt the undo key length.
+		node.safe_psql("""
+			UPDATE o_undo_corrupt SET payload = repeat('y', 600);
+			SELECT orioledb_test_corrupt_page_undo('o_undo_corrupt'::regclass);
+		""")
+
+		# Reader must hit the corrupted undo and get a clean error.
+		reader.execute("SET LOCAL enable_indexscan = off;")
+		reader.execute("SET LOCAL enable_bitmapscan = off;")
+		with self.assertRaises(Exception) as cm:
+			reader.execute("SELECT * FROM o_undo_corrupt;")
+		self.assertIn("corrupted undo record", str(cm.exception))
+
+		reader.close()
+		node.stop(['-m', 'immediate'])
