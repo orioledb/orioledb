@@ -1208,17 +1208,41 @@ add_undo_create_relnode(ORelOids oids, OIndexKey *trees, int numTrees, bool fsyn
 	add_undo_relnode(invalid, NULL, 0, oids, trees, numTrees, fsync);
 }
 
+/*
+ * Validate a key length read from undo metadata.
+ */
+static inline void
+validate_undo_key_len(LocationIndex len)
+{
+	if (unlikely(len > O_BTREE_MAX_KEY_SIZE))
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("corrupted undo record: key length %u exceeds maximum %u",
+						(unsigned) len, (unsigned) O_BTREE_MAX_KEY_SIZE)));
+}
+
 static void
 read_hikey_from_undo(UndoLogType undoType, UndoLocation location,
 					 Page dest, LocationIndex *loc)
 {
+	OffsetNumber hikeysEnd;
+
 	undo_read(undoType, location, sizeof(BTreePageHeader), dest);
+	hikeysEnd = ((BTreePageHeader *) dest)->hikeysEnd;
+	if (unlikely(hikeysEnd < sizeof(BTreePageHeader) ||
+				 hikeysEnd > ORIOLEDB_BLCKSZ))
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("corrupted undo record: hikeysEnd %u out of range [%u, %u]",
+						(unsigned) hikeysEnd,
+						(unsigned) sizeof(BTreePageHeader),
+						(unsigned) ORIOLEDB_BLCKSZ)));
 	*loc = sizeof(BTreePageHeader);
 	undo_read(undoType,
 			  location + *loc,
-			  ((BTreePageHeader *) dest)->hikeysEnd - *loc,
+			  hikeysEnd - *loc,
 			  dest + *loc);
-	*loc = ((BTreePageHeader *) dest)->hikeysEnd;
+	*loc = hikeysEnd;
 }
 
 /*
@@ -1252,7 +1276,7 @@ reconstruct_merge_diff_half(BTreeDescr *desc, UndoLocation undoLocation,
 
 	undo_read(undoType, undoLocation,
 			  sizeof(mdHeader), (Pointer) &mdHeader);
-	Assert(mdHeader.boundaryLen <= O_BTREE_MAX_KEY_SIZE);
+	validate_undo_key_len(mdHeader.boundaryLen);
 	undo_read(undoType, undoLocation + MAXALIGN(sizeof(mdHeader)),
 			  mdHeader.boundaryLen, boundary.fixedData);
 	boundary.tuple.formatFlags = mdHeader.boundaryFlags;
@@ -1384,7 +1408,7 @@ reconstruct_split_diff(BTreeDescr *desc, UndoLocation undoLocation,
 
 	undo_read(undoType, undoLocation,
 			  sizeof(sdHeader), (Pointer) &sdHeader);
-	Assert(sdHeader.splitKeyLen <= O_BTREE_MAX_KEY_SIZE);
+	validate_undo_key_len(sdHeader.splitKeyLen);
 	undo_read(undoType, undoLocation + MAXALIGN(sizeof(sdHeader)),
 			  sdHeader.splitKeyLen, splitKey.fixedData);
 	splitKey.tuple.formatFlags = sdHeader.splitKeyFlags;
@@ -1504,6 +1528,7 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 		{
 			OFixedKey	splitKey;
 
+			validate_undo_key_len(header.splitKeyLen);
 			undo_read(undoType,
 					  left_loc + ORIOLEDB_BLCKSZ,
 					  header.splitKeyLen,
@@ -2288,3 +2313,107 @@ update_leaf_header_in_undo_if_exists(UndoLogType undoType,
 								sizeof(*tuphdr),
 								(Pointer) tuphdr);
 }
+
+#ifdef IS_DEV
+
+#include "access/relation.h"
+#include "btree/page_state.h"
+
+PG_FUNCTION_INFO_V1(orioledb_test_corrupt_page_undo);
+
+/*
+ * Walk the primary index btree of the given relation, find the first leaf page
+ * with a valid page-level undoLocation, and corrupt the key/hikey length field
+ * in its undo image header.  Returns the undo image type name on success, NULL
+ * if no page-level undo record was found.
+ *
+ * Test-only; guarded by IS_DEV.
+ */
+Datum
+orioledb_test_corrupt_page_undo(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	Relation	rel;
+	OTableDescr *descr;
+	OIndexDescr *idx;
+	BTreeDescr *desc;
+	OInMemoryBlkno blkno;
+	UndoLogType undoType;
+	const char *type_name = NULL;
+
+	orioledb_check_shmem();
+
+	rel = relation_open(relid, AccessShareLock);
+	descr = relation_get_descr(rel);
+	if (!descr)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("relation oid %u is not orioledb", relid)));
+
+	idx = descr->indices[0];
+	desc = &idx->desc;
+	o_btree_load_shmem(desc);
+	undoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
+	blkno = desc->rootInfo.rootPageBlkno;
+
+	/* Walk from root to a leaf with a valid page-level undo. */
+	lock_page(blkno);
+	while (true)
+	{
+		Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+		BTreePageHeader *header = (BTreePageHeader *) p;
+
+		if (O_PAGE_IS(p, LEAF))
+		{
+			if (UndoLocationIsValid(header->undoLocation))
+			{
+				/*
+				 * Split, SplitDiff and MergeDiff all start with {type, uint8
+				 * flags, LocationIndex len}, so the peek header already
+				 * covers the key-length field for all three.  Corrupt it with
+				 * 0xFFFF (~64KB), far past the ~2.7KB OFixedKey stack buffer.
+				 */
+				UndoPageImageSplitHeader peekHeader;
+
+				undo_read(undoType, header->undoLocation,
+						  sizeof(peekHeader), (Pointer) &peekHeader);
+				peekHeader.splitKeyLen = 0xFFFF;
+				undo_write(undoType, header->undoLocation,
+						   sizeof(peekHeader), (Pointer) &peekHeader);
+				type_name = "key";
+			}
+			unlock_page(blkno);
+			break;
+		}
+		else
+		{
+			/* Descend to leftmost child. */
+			BTreePageItemLocator loc;
+			BTreeNonLeafTuphdr *tuphdr;
+			OInMemoryBlkno child;
+
+			BTREE_PAGE_LOCATOR_FIRST(p, &loc);
+			tuphdr = (BTreeNonLeafTuphdr *)
+				BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+
+			if (!DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
+			{
+				unlock_page(blkno);
+				ereport(ERROR,
+						(errmsg("leftmost child is not in memory")));
+			}
+			child = DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink);
+			lock_page(child);
+			unlock_page(blkno);
+			blkno = child;
+		}
+	}
+
+	relation_close(rel, AccessShareLock);
+
+	if (type_name)
+		PG_RETURN_TEXT_P(cstring_to_text(type_name));
+	PG_RETURN_NULL();
+}
+
+#endif							/* IS_DEV */
