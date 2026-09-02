@@ -169,6 +169,10 @@ skip_hunk_errors = {
 	# both shapes.
 	r"ERROR:  role \"regress_user11\" (already exists|does not exist|cannot be dropped because some objects depend on it)":
 	["generated_stored", "generated_virtual"],
+	# Same race, constraint-level variant: both CREATE USER statements
+	# pass the existence check, then the second hits the unique index.
+	r"ERROR:  duplicate key value violates unique constraint \"pg_authid_rolname_index\"":
+	["generated_stored", "generated_virtual"],
 	# Same regress_user11 race, OID-based variant: when the other test's
 	# concurrent DROP USER removes the role's pg_authid tuple between this
 	# DROP USER's catalog lookup and its delete, the error names the role by
