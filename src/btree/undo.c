@@ -1894,8 +1894,8 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				/*
 				 * Undo gone — end of chain.  Return like the !delete_record
 				 * path; we cannot advance curTuphdr here, so falling through
-				 * to next_record would spin forever when
-				 * retainedUndoLocation <= undoLocation < minProcRetainLocation.
+				 * to next_record would spin forever when retainedUndoLocation
+				 * <= undoLocation < minProcRetainLocation.
 				 */
 				if (curTuphdr.chainHasLocks)
 				{
