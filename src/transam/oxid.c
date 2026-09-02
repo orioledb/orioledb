@@ -1543,14 +1543,14 @@ advance_global_xmin(OXid newXid)
 
 	if (doCleanup)
 	{
-		unlink_unretained_o_buffers(&buffersDesc, OXID_BUFFERS_TAG,
+		/*
+		 * Drop every xidmap file that holds nothing still retained; see
+		 * o_buffers_unlink_dead_files().
+		 */
+		o_buffers_unlink_dead_files(&buffersDesc, OXID_BUFFERS_TAG,
 									ORIOLEDB_BLCKSZ / sizeof(OXidMapItem),
-									oldCheckpointXmin, oldCheckpointXmax,
-									newCheckpointXmin, newCheckpointXmax,
-									globalXmin);
-		unlink_unretained_o_buffers(&buffersDesc, OXID_BUFFERS_TAG,
-									ORIOLEDB_BLCKSZ / sizeof(OXidMapItem),
-									oldCleanedXmin, globalXmin,
+									&xid_meta->cleanedFileCursor,
+									&xid_meta->cleanedGapFileCursor,
 									newCheckpointXmin, newCheckpointXmax,
 									globalXmin);
 	}

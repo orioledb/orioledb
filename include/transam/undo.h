@@ -178,6 +178,14 @@ typedef struct
 	 * during the last cleanup.
 	 */
 	pg_atomic_uint64 cleanedLocation;
+
+	/*
+	 * Lowest undo file number that may still exist.  Advanced only past files
+	 * that were actually unlinked, so nothing can be skipped; see
+	 * o_buffers_unlink_dead_files().
+	 */
+	pg_atomic_uint64 cleanedFileCursor;
+	pg_atomic_uint64 cleanedGapFileCursor;
 	pg_atomic_uint64 cleanedCheckpointStartLocation;
 	pg_atomic_uint64 cleanedCheckpointEndLocation;
 
