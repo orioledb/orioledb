@@ -3660,7 +3660,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 		fill_current_oxid_osnapshot_no_check(&oxid, &oSnapshot);
 
-		o_tables_drop_columns_by_type(oxid, oSnapshot.csn, objectId);
+		o_tables_drop_columns_by_type(oxid, oSnapshot.csn, MyDatabaseId,
+									  objectId);
 
 		tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(objectId));
 		Assert(tuple);

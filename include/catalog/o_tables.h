@@ -213,7 +213,8 @@ extern void o_tables_move_all(OXid oxid, CommitSeqNo csn, Oid database_id, Oid o
 extern void o_tables_evict(Oid datoid, List **evicted);
 
 /* Drops all columns of a specific type */
-extern void o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid type_oid);
+extern void o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn,
+										  Oid datoid, Oid type_oid);
 
 /* Drops all temporary tables that left after crash */
 extern void o_tables_truncate_all_unlogged(void);
