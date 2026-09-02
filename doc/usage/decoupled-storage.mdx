@@ -19,6 +19,10 @@ S3 storage is not required to use OrioleDB. It is an optional feature that can b
 
 OrioleDB has experimental support for the storage of all tables and materialized views data in the S3 bucket. It is useful for splitting compute and data storage instances, for increasing data safety, and for scaling and changing the architecture of compute instances preserving all data.
 
+:::caution
+S3 mode is an experimental feature available only in development builds (`IS_DEV=1`). On production builds `orioledb.s3_mode` can't be turned on.
+:::
+
 Local storage implements caching of the data most often accessed. Also, it ensures that adding and updating data will be done at the speed of writing to local storage, rather than the S3 transfer rate. Data are synced with S3 asynchronously. However, all requirements of data integrity are ensured for all the data on S3 storage as well. So you can re-connect to the S3 bucket by another empty PostgreSQL instance (initialized with the utility described below) with the OrioleDB extension configured to use S3 with this bucket and get back all the data from S3 in the state of the last PostgreSQL checkpoint.
 
 To use S3 functionality, the following parameters should be set before creating orioledb tables and materialized views:

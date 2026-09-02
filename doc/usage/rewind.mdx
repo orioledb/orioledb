@@ -15,6 +15,10 @@ This feature is experimental and imposes a significant performance penalty. It i
 
 ## Configuration
 
+:::caution
+Rewind is an experimental feature available only in development builds (`IS_DEV=1`). On production builds `orioledb.enable_rewind` can't be turned on.
+:::
+
 The following parameters control the rewind subsystem. These must be set in `postgresql.conf` or via `ALTER SYSTEM`.
 
 | Parameter | Type | Default | Range | Description |

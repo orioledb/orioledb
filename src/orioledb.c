@@ -430,29 +430,49 @@ static RmgrData rmgr =
 	.rm_decode = orioledb_decode
 };
 
-/*
- * We currently do not support restarting PG instance from within the extension
- * on certain systems. Refuse to enable rewind on those systems.
- */
+static bool
+orioledb_enable_s3_check_hook(bool *newval, void **extra, GucSource source)
+{
+#ifndef IS_DEV
+	if (*newval)
+	{
+		ereport(WARNING,
+				errmsg("orioledb.s3_mode is only available in development builds (IS_DEV=1), ignoring"));
+		*newval = false;
+	}
+#endif
+	return true;
+}
+
 static bool
 orioledb_enable_rewind_check_hook(bool *newval, void **extra, GucSource source)
 {
-#if defined(WIN32)
+#ifndef IS_DEV
 	if (*newval)
 	{
-		GUC_check_errcode(ERRCODE_FEATURE_NOT_SUPPORTED);
-		GUC_check_errdetail("Rewind is not supported on Windows.");
-		return false;
+		ereport(WARNING,
+				errmsg("orioledb.enable_rewind is only available in development builds (IS_DEV=1), ignoring"));
+		*newval = false;
+	}
+/*
+	 * We currently do not support restarting PG instance from within the
+	 * extension on certain systems.
+	 */
+#elif defined(WIN32)
+	if (*newval)
+	{
+		ereport(WARNING,
+				errmsg("orioledb.enable_rewind is not supported on Windows, ignoring"));
+		*newval = false;
 	}
 #elif !defined(HAVE_SETSID)
 	if (*newval)
 	{
-		GUC_check_errcode(ERRCODE_FEATURE_NOT_SUPPORTED);
-		GUC_check_errdetail("Rewind is not supported on systems without setsid(2).");
-		return false;
+		ereport(WARNING,
+				errmsg("orioledb.enable_rewind is not supported on systems without setsid(2), ignoring"));
+		*newval = false;
 	}
 #endif
-	/* Supported system or newval == false */
 	return true;
 }
 
@@ -1003,7 +1023,7 @@ _PG_init(void)
 							 false,
 							 PGC_POSTMASTER,
 							 0,
-							 NULL,
+							 orioledb_enable_s3_check_hook,
 							 NULL,
 							 NULL);
 
