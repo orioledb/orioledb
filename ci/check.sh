@@ -260,6 +260,11 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         if [ $PG_VERSION != "16" ]; then
             make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
             make -C src/test/recovery installcheck-oriole -j $(nproc) || status=$?
+            if [ -f src/test/recovery/tmp_check/regression.diffs ]; then
+              python3 ../orioledb/ci/filter_regression_diff.py --diff src/test/recovery/tmp_check/regression.diffs > src/test/recovery_filtered.diffs
+              rm src/test/recovery/tmp_check/regression.diffs
+              [ -s src/test/recovery_filtered.diffs ] || rm -f src/test/recovery_filtered.diffs
+            fi
         fi
     fi
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log stop
