@@ -716,6 +716,10 @@ update_min_undo_locations(UndoLogType undoType,
 
 	if (do_cleanup)
 	{
+		elog(LOG, "UNLINKPROBE begin type=%d from=%llu to=%llu",
+			 (int) undoType, (unsigned long long) oldCleanedLocation,
+			 (unsigned long long) minRetainLocation);
+
 		Assert(oldCheckpointStartLocation <= newCheckpointStartLocation || undoType == UndoLogSystem);
 		Assert(oldCheckpointEndLocation <= newCheckpointEndLocation);
 		Assert(oldCheckpointStartLocation <= oldCheckpointEndLocation);
@@ -753,6 +757,10 @@ update_min_undo_locations(UndoLogType undoType,
 									newCheckpointStartLocation,
 									newCheckpointEndLocation,
 									minRetainLocation);
+
+		elog(LOG, "UNLINKPROBE end   type=%d from=%llu to=%llu",
+			 (int) undoType, (unsigned long long) oldCleanedLocation,
+			 (unsigned long long) minRetainLocation);
 	}
 }
 
