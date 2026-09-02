@@ -562,20 +562,21 @@ o_btree_find_tuples_continue(BTreeIterator *it,
 		if (!O_TUPLE_IS_NULL(result))
 			return result;
 
-		if (it->combinedPage &&
-			page_contains_key(it, key, kind,
-							  it->undoIt.image, it->undoIt.lokey.tuple))
+		if (it->combinedPage)
 		{
-			btree_page_search(it->context.desc,
-							  it->undoIt.image,
-							  key, kind, NULL,
-							  &it->undoLoc);
-		}
-		else
-		{
-			/* The previous lookup may have returned our tuple before loading undo. */
-			load_page_from_undo(it, key,
-								kind != BTreeKeyRightmost ? kind : BTreeKeyNone);
+			if (page_contains_key(it, key, kind,
+								  it->undoIt.image, it->undoIt.lokey.tuple))
+			{
+				btree_page_search(it->context.desc,
+								  it->undoIt.image,
+								  key, kind, NULL,
+								  &it->undoLoc);
+			}
+			else
+			{
+				load_page_from_undo(it, key,
+									kind != BTreeKeyRightmost ? kind : BTreeKeyNone);
+			}
 		}
 
 		Assert(it->combinedPage);
