@@ -1740,6 +1740,9 @@ COMMIT\n""")
 	                 "'wal2json' is not installed")
 	def test_wal2json(self):
 		node = self.node
+		node.append_conf(
+		    'postgresql.conf',
+		    "output_plugin_libraries = 'pgoutput, test_decoding, wal2json'\n")
 		node.start()  # start PostgreSQL
 		node.safe_psql("""
 			CREATE EXTENSION IF NOT EXISTS orioledb;
