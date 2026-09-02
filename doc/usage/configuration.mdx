@@ -242,6 +242,10 @@ an `ERROR` instead, which is useful to catch unintended fallback in tests and CI
 
 ## Options for undo-based rewind (experimental)
 
+:::caution
+Rewind is an experimental feature available only in development builds (`IS_DEV=1`). On production builds `orioledb.enable_rewind` can't be turned on.
+:::
+
 ### `orioledb.enable_rewind`
 
 |             |     |
