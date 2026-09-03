@@ -1965,6 +1965,44 @@ evict_undo_to_disk(UndoLogType undoType,
 	LWLockRelease(&meta->undoWriteLock);
 }
 
+/*
+ * Opportunistic undo eviction from a backend.
+ *
+ * The bgwriter runs this very check, but it is a single process that also
+ * maintains the page pool, so under heavy undo production it falls behind.
+ * Backends then reach the point below with no headroom left, where eviction
+ * is mandatory and undoWriteLock is taken unconditionally -- so all of them
+ * queue up behind one multi-megabyte write.  Attempting the eviction here
+ * with a conditional acquire starts that write earlier, from whichever
+ * backend notices first, and lets the rest proceed untouched.
+ */
+static void
+try_evict_undo_opportunistically(UndoLogType undoType)
+{
+	UndoMeta   *meta = get_undo_meta_by_type(undoType);
+	Size		circularBufferSize = o_undo_circular_sizes[(int) undoType];
+	UndoLocation writeInProgressLocation,
+				lastUsedLocation,
+				minProcReservedLocation,
+				targetLocation;
+
+	writeInProgressLocation = pg_atomic_read_u64(&meta->writeInProgressLocation);
+	lastUsedLocation = pg_atomic_read_u64(&meta->lastUsedLocation);
+
+	/* Still more than 5% of the circular buffer free: leave it alone. */
+	if (writeInProgressLocation + circularBufferSize >=
+		lastUsedLocation + circularBufferSize / 20)
+		return;
+
+	/* Same target as the bgwriter: keep 5% of the buffer ahead of us. */
+	targetLocation = lastUsedLocation - (19 * circularBufferSize) / 20;
+	minProcReservedLocation = pg_atomic_read_u64(&meta->minProcReservedLocation);
+
+	if (targetLocation < minProcReservedLocation)
+		evict_undo_to_disk(undoType, targetLocation, minProcReservedLocation,
+						   true);
+}
+
 bool
 reserve_undo_size_extended(UndoLogType undoType, Size size,
 						   bool waitForUndoLocation)
@@ -2026,7 +2064,13 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 
 	if (location + size <=
 		pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize)
+	{
+		/* We have room, but help evict if the buffer is nearly full. */
+		if (waitForUndoLocation &&
+			(undoType != UndoLogSystem || !have_locked_pages()))
+			try_evict_undo_opportunistically(undoType);
 		return true;
+	}
 
 	if (undoType != UndoLogSystem || !have_locked_pages())
 		update_min_undo_locations(undoType, false, waitForUndoLocation);
@@ -2067,13 +2111,14 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		 * It should be enough to just wait for current in-progress write to
 		 * be finished.
 		 */
-		LWLockAcquire(&meta->undoWriteLock, LW_SHARED);
-		LWLockRelease(&meta->undoWriteLock);
+		if (LWLockAcquireOrWait(&meta->undoWriteLock, LW_SHARED))
+			LWLockRelease(&meta->undoWriteLock);
 
-		/* TODO: consider removing lock if assers are disabled */
+#ifdef USE_ASSERT_CHECKING
 		SpinLockAcquire(&meta->minUndoLocationsMutex);
 		Assert(location + size <= pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize);
 		SpinLockRelease(&meta->minUndoLocationsMutex);
+#endif
 		return true;
 	}
 
@@ -3429,8 +3474,8 @@ undo_write_internal(UndoLogType undoType, UndoLocation location,
 	/* Wait for in-progress write if needed */
 	if (pg_atomic_read_u64(&meta->writtenLocation) < memoryUndoLocation)
 	{
-		LWLockAcquire(&meta->undoWriteLock, LW_SHARED);
-		LWLockRelease(&meta->undoWriteLock);
+		if (LWLockAcquireOrWait(&meta->undoWriteLock, LW_SHARED))
+			LWLockRelease(&meta->undoWriteLock);
 		Assert(pg_atomic_read_u64(&meta->writtenLocation) >= memoryUndoLocation);
 	}
 
