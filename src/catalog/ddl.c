@@ -4579,19 +4579,23 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			case TYPTYPE_COMPOSITE:
 				{
 					OClassArg	arg = {0};
+					Oid			reloid;
+					Oid			reltype;
 
 					rel = relation_open(typeidTypeRelid(objectId), AccessShareLock);
 					o_find_composite_type_dependencies(objectId, rel);
+					reloid = rel->rd_rel->oid;
+					reltype = rel->rd_rel->reltype;
 					relation_close(rel, AccessShareLock);
 					CommandCounterIncrement();
-					o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
+					o_class_cache_update_if_needed(MyDatabaseId, reloid,
 												   (Pointer) &arg);
 					if (arg.found)
 					{
 						XLogRecPtr	cur_lsn;
 
 						o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
-						o_cache_type(MyDatabaseId, rel->rd_rel->reltype, InvalidOid,
+						o_cache_type(MyDatabaseId, reltype, InvalidOid,
 									 cur_lsn);
 					}
 				}
