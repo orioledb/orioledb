@@ -801,7 +801,7 @@ add_pending_truncate(ORelOids relOids, int numTrees, OIndexKey *trees)
 	offset += length;
 	length = sizeof(numTrees);
 
-	if (FileWrite(pendingTruncatesFile, (Pointer) &numTrees, length, 0,
+	if (FileWrite(pendingTruncatesFile, (Pointer) &numTrees, length, offset,
 				  WAIT_EVENT_BUFFILE_WRITE) != length)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not write pending truncates file %s: %m",
@@ -810,7 +810,7 @@ add_pending_truncate(ORelOids relOids, int numTrees, OIndexKey *trees)
 	offset += length;
 	length = sizeof(*trees) * numTrees;
 
-	if (FileWrite(pendingTruncatesFile, (Pointer) &trees, length, 0,
+	if (FileWrite(pendingTruncatesFile, (Pointer) trees, length, offset,
 				  WAIT_EVENT_BUFFILE_WRITE) != length)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not write pending truncates file %s: %m",
@@ -895,6 +895,8 @@ check_pending_truncates(void)
 							errmsg("could not read pending truncates file %s: %m",
 								   PENDING_TRUNCATES_FILENAME)));
 
+		offset += length;
+
 		for (int i = 0; i < numTrees; i++)
 			cleanup_btree_files(trees[i], true);
 	}
@@ -906,6 +908,25 @@ check_pending_truncates(void)
 	if (trees)
 		pfree(trees);
 }
+
+#ifdef IS_DEV
+
+/*
+ * SQL wrapper for pending_truncates_test.  Runs check_pending_truncates()
+ * synchronously in the calling backend, instead of waiting for the
+ * bgwriter's next cycle, so the test can process a pending-truncates record
+ * deterministically right after a backup ends.
+ */
+PG_FUNCTION_INFO_V1(orioledb_check_pending_truncates);
+
+Datum
+orioledb_check_pending_truncates(PG_FUNCTION_ARGS)
+{
+	check_pending_truncates();
+	PG_RETURN_VOID();
+}
+
+#endif
 
 void
 btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
