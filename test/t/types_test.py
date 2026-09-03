@@ -48,7 +48,8 @@ class TypesTest(BaseTest):
 		node = self.node
 		node.start()
 		node.safe_psql("CREATE DATABASE type_source;")
-		node.safe_psql("type_source", """
+		node.safe_psql(
+		    "type_source", """
 			CREATE EXTENSION orioledb;
 			CREATE TYPE shared_enum AS ENUM ('one', 'two');
 			CREATE DOMAIN shared_domain AS integer CHECK (VALUE > 0);
@@ -76,7 +77,8 @@ class TypesTest(BaseTest):
 			SELECT orioledb_table_description('o_test'::regclass);
 		"""
 		source_description = node.execute("type_source", description_query)
-		node.safe_psql("type_target", """
+		node.safe_psql(
+		    "type_target", """
 			DROP TYPE shared_enum CASCADE;
 			DROP DOMAIN shared_domain CASCADE;
 			DROP TYPE shared_composite CASCADE;
@@ -88,11 +90,13 @@ class TypesTest(BaseTest):
 		self.assertEqual(source_description,
 		                 node.execute("type_source", description_query))
 
-		node.safe_psql("type_source", """
+		node.safe_psql(
+		    "type_source", """
 			INSERT INTO o_test VALUES (2, 'two', 2, ROW(2));
 		""")
-		self.assertEqual([(1, 'one', 1, 1), (2, 'two', 2, 2)], node.execute(
-		    "type_source", """
+		self.assertEqual([(1, 'one', 1, 1), (2, 'two', 2, 2)],
+		                 node.execute(
+		                     "type_source", """
 				SELECT id, enum_value::text, domain_value,
 					   (composite_value).value
 					FROM o_test ORDER BY id;
@@ -102,8 +106,9 @@ class TypesTest(BaseTest):
 		node.start()
 		self.assertEqual(source_description,
 		                 node.execute("type_source", description_query))
-		self.assertEqual([(1, 'one', 1, 1), (2, 'two', 2, 2)], node.execute(
-		    "type_source", """
+		self.assertEqual([(1, 'one', 1, 1), (2, 'two', 2, 2)],
+		                 node.execute(
+		                     "type_source", """
 				SELECT id, enum_value::text, domain_value,
 					   (composite_value).value
 					FROM o_test ORDER BY id;
