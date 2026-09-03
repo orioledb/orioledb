@@ -1935,7 +1935,7 @@ static int
 o_calculate_index_workers(BTreeDescr *primary, bool shmem_loaded, int nindices)
 {
 	int			parallel_workers;
-	BlockNumber table_blocks;
+	BlockNumber table_pages;
 
 	if (IsTransactionState())
 	{
@@ -1946,8 +1946,8 @@ o_calculate_index_workers(BTreeDescr *primary, bool shmem_loaded, int nindices)
 			if (!shmem_loaded)
 				o_btree_load_shmem(primary);
 
-			table_blocks = (uint64) TREE_NUM_LEAF_PAGES(primary) * ORIOLEDB_BLCKSZ;
-			parallel_workers = o_estimate_parallel_workers(table_blocks, -1, max_parallel_maintenance_workers);
+			table_pages = TREE_NUM_LEAF_PAGES(primary);
+			parallel_workers = o_estimate_parallel_workers(table_pages, -1, max_parallel_maintenance_workers);
 			elog(DEBUG4, "o_calculate_index_workers: %d workers", parallel_workers);
 		}
 		else
