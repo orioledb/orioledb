@@ -37,6 +37,7 @@
 #include "utils/stopevent.h"
 
 #include "access/nbtree.h"
+#include "catalog/pg_opclass_d.h"
 #include "catalog/pg_opfamily.h"
 #include "common/hashfn.h"
 #include "executor/functions.h"
@@ -1905,6 +1906,29 @@ o_find_toastable_attrs(OTableDescr *tableDescr)
  * index/table metadata (datoid argument), not implicitly from the current
  * backend database.
  */
+/*
+ * Which inline comparison, if any, a field with this type and operator class
+ * qualifies for.  Restricted to the default btree operator classes: another
+ * class over the same type may order it differently.
+ */
+static OIndexFieldFastCmp
+field_fast_cmp_kind(Oid inputtype, Oid opclassoid)
+{
+	switch (opclassoid)
+	{
+		case INT2_BTREE_OPS_OID:
+			return inputtype == INT2OID ? OIndexFieldFastCmpInt2 : OIndexFieldFastCmpNone;
+		case INT4_BTREE_OPS_OID:
+			return inputtype == INT4OID ? OIndexFieldFastCmpInt4 : OIndexFieldFastCmpNone;
+		case INT8_BTREE_OPS_OID:
+			return inputtype == INT8OID ? OIndexFieldFastCmpInt8 : OIndexFieldFastCmpNone;
+		case OID_BTREE_OPS_OID:
+			return inputtype == OIDOID ? OIndexFieldFastCmpOid : OIndexFieldFastCmpNone;
+		default:
+			return OIndexFieldFastCmpNone;
+	}
+}
+
 void
 oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid,
 							   Oid exacttype, Oid exclusion_op, Oid hash_fn_oid)
@@ -1926,6 +1950,14 @@ oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid,
 	field->opfamily = opclass->opfamily;
 	field->comparator = o_find_opclass_comparator(opclass, field->collation,
 												  exacttype);
+
+	/*
+	 * A cross-type comparator does not compare two datums of the field's own
+	 * type, so the inline comparison would be reading the wrong width.
+	 */
+	field->fastCmp = (exacttype == opclass->inputtype)
+		? field_fast_cmp_kind(opclass->inputtype, opclassoid)
+		: OIndexFieldFastCmpNone;
 	if (OidIsValid(exclusion_op))
 		field->exclusion_fn = o_find_exclusion_op_fn(exclusion_op);
 	if (hash_fn_oid == O_DEFAULT_HASH_FN_OID)

@@ -589,6 +589,78 @@ cmp_inclusive2(uint8 f1, uint8 f2)
 	return cmp1 - cmp2;
 }
 
+/*
+ * Compare two datums of the field's own type without going through the cached
+ * comparator.  Returns false when the field does not qualify, leaving *result
+ * untouched; the caller then falls back to o_call_comparator().
+ *
+ * The sign convention matches the comparator: the field's ASC/DESC direction
+ * is applied by the caller, as before.
+ */
+static inline bool
+o_field_fast_cmp(OIndexField *field, Datum left, Datum right, int *result)
+{
+	switch (field->fastCmp)
+	{
+		case OIndexFieldFastCmpInt2:
+			{
+				int16		l = DatumGetInt16(left),
+							r = DatumGetInt16(right);
+
+				*result = (l < r) ? -1 : ((l > r) ? 1 : 0);
+				return true;
+			}
+		case OIndexFieldFastCmpInt4:
+			{
+				int32		l = DatumGetInt32(left),
+							r = DatumGetInt32(right);
+
+				*result = (l < r) ? -1 : ((l > r) ? 1 : 0);
+				return true;
+			}
+		case OIndexFieldFastCmpInt8:
+			{
+				int64		l = DatumGetInt64(left),
+							r = DatumGetInt64(right);
+
+				*result = (l < r) ? -1 : ((l > r) ? 1 : 0);
+				return true;
+			}
+		case OIndexFieldFastCmpOid:
+			{
+				Oid			l = DatumGetObjectId(left),
+							r = DatumGetObjectId(right);
+
+				*result = (l < r) ? -1 : ((l > r) ? 1 : 0);
+				return true;
+			}
+		case OIndexFieldFastCmpNone:
+			break;
+	}
+	return false;
+}
+
+/*
+ * o_call_comparator() with the inline shortcut in front of it.
+ */
+static inline int
+o_cmp_field_datums(OIndexField *field, Datum left, Datum right)
+{
+	int			cmp;
+
+	if (o_field_fast_cmp(field, left, right, &cmp))
+	{
+		/* The shortcut must agree with the comparator it stands in for. */
+		Assert(cmp == 0
+			   ? o_call_comparator(field->comparator, left, right) == 0
+			   : ((cmp < 0) ==
+				  (o_call_comparator(field->comparator, left, right) < 0)));
+		return cmp;
+	}
+
+	return o_call_comparator(field->comparator, left, right);
+}
+
 int
 o_idx_cmp_range_key_to_value(OBTreeValueBound *bound1, OIndexField *field,
 							 Datum value, bool isnull)
@@ -605,7 +677,7 @@ o_idx_cmp_range_key_to_value(OBTreeValueBound *bound1, OIndexField *field,
 			if (bound1->exclusion_fn)
 				cmp = o_call_exclusion_fn(bound1->exclusion_fn, bound1->value, value, field->collation);
 			else
-				cmp = o_call_comparator(field->comparator, bound1->value, value);
+				cmp = o_cmp_field_datums(field, bound1->value, value);
 		}
 		else
 		{
@@ -694,7 +766,7 @@ o_idx_cmp_tuples(OIndexDescr *id,
 
 			if (!isnull1 && !isnull2)
 			{
-				cmp = o_call_comparator(field->comparator, value1, value2);
+				cmp = o_cmp_field_datums(field, value1, value2);
 				if (!field->ascending)
 					cmp = -cmp;
 			}
