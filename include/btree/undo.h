@@ -208,6 +208,7 @@ extern UndoLocation make_merge_undo_image(BTreeDescr *desc, Pointer left,
 										  Pointer right, CommitSeqNo imageCsn);
 extern bool page_op_drops_tuple(BTreeDescr *desc, Pointer p,
 								CommitSeqNo imageCsn);
+extern bool tuple_is_deleted_for_csn(UndoLogType undoType, BTreeLeafTuphdr *pageTuphdr, CommitSeqNo my_csn);
 extern bool row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 							   BTreeLeafTuphdr *conflictTupHdr,
 							   UndoLogType undoType,
