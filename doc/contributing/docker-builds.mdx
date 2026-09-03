@@ -19,22 +19,22 @@ Open a terminal and navigate to the OrioleDB project directory, if you are not a
 
 - `cd path/to/orioledb`
 
-Build (Alpine) PostgreSQL 17 + OrioleDB extension:
+Build (Alpine) PostgreSQL 18 + OrioleDB extension:
 
-- `docker build -t orioletest:17 -f docker/Dockerfile --pull --network=host --progress=plain --build-arg PG_MAJOR="17" .`
+- `docker build -t orioletest:18 -f docker/Dockerfile --pull --network=host --progress=plain --build-arg PG_MAJOR="18" .`
 
 Start server:
 
-- `docker run --name orioletest17 -v orioletest17data:/var/lib/postgresql/data -e POSTGRES_PASSWORD=oriole123 -d orioletest:17`
+- `docker run --name orioletest18 -v orioletest18data:/var/lib/postgresql/data -e POSTGRES_PASSWORD=oriole123 -d orioletest:18`
 
 Connect to the server via psql:
 
-- `docker exec -ti orioletest17 psql -U postgres`
+- `docker exec -ti orioletest18 psql -U postgres`
 
 You should expect a similar psql message:
 
 ```
-psql (17.9 OrioleDB beta 16 PGTAG=patches17_20 alpine:3.21+clang build:2026-06-17T15:23:16+00:00 17.9)
+psql (18.6 OrioleDB beta 17 PGTAG=patches18_2 alpine:3.21+clang build:2026-09-03T12:44:05+00:00 18.6)
 Type "help" for help.
 postgres=#
 ```
@@ -49,7 +49,7 @@ Test some commands:
 postgres=# select orioledb_version();
  orioledb_version 
 ------------------
- OrioleDB beta 16
+ OrioleDB beta 17
 (1 row)
 
 postgres=# CREATE TABLE oriole_test (a int) USING orioledb;
@@ -75,22 +75,22 @@ Access method: orioledb
 
 
 postgres=# \d+
-                                             List of relations
- Schema |         Name         | Type  |  Owner   | Persistence | Access method |    Size    | Description
---------+----------------------+-------+----------+-------------+---------------+------------+-------------
- public | oriole_test          | table | postgres | permanent   | orioledb      | 8192 bytes |
- public | orioledb_index       | view  | postgres | permanent   |               | 0 bytes    |
- public | orioledb_index_descr | view  | postgres | permanent   |               | 0 bytes    |
- public | orioledb_table       | view  | postgres | permanent   |               | 0 bytes    |
- public | orioledb_table_descr | view  | postgres | permanent   |               | 0 bytes    |
+                                           List of relations
+ Schema |         Name         | Type  |  Owner   | Persistence | Access method |  Size   | Description
+--------+----------------------+-------+----------+-------------+---------------+---------+-------------
+ public | oriole_test          | table | postgres | permanent   | orioledb      | 16 kB   |
+ public | orioledb_index       | view  | postgres | permanent   |               | 0 bytes |
+ public | orioledb_index_descr | view  | postgres | permanent   |               | 0 bytes |
+ public | orioledb_table       | view  | postgres | permanent   |               | 0 bytes |
+ public | orioledb_table_descr | view  | postgres | permanent   |               | 0 bytes |
 (5 rows)
 
 postgres=# \dx
-                              List of installed extensions
-   Name   | Version |   Schema   |                     Description
-----------+---------+------------+------------------------------------------------------
- orioledb | 1.2     | public     | OrioleDB -- the next generation transactional engine
- plpgsql  | 1.0     | pg_catalog | PL/pgSQL procedural language
+                                       List of installed extensions
+   Name   | Version | Default version |   Schema   |                     Description
+----------+---------+-----------------+------------+------------------------------------------------------
+ orioledb | 1.9     | 1.9             | public     | OrioleDB -- the next generation transactional engine
+ plpgsql  | 1.0     | 1.0             | pg_catalog | PL/pgSQL procedural language
 (2 rows)
 
 postgres=# \dx+ orioledb
@@ -98,27 +98,50 @@ postgres=# \dx+ orioledb
                            Object description
 -------------------------------------------------------------------------
  access method orioledb
+ function fetch_read_page_checkpoint_stats()
  function orioledb_commit_hash()
  function orioledb_compression_max_level()
  function orioledb_evict_pages(oid,integer)
+ function orioledb_get_complete_oxid()
+ function orioledb_get_complete_xid()
+ function orioledb_get_current_heap_xid()
+ function orioledb_get_current_logical_xid()
+ function orioledb_get_current_oxid()
  function orioledb_get_evicted_trees()
  function orioledb_get_index_descrs()
+ function orioledb_get_proc_retain_undo_locations()
+ function orioledb_get_rewind_evicted_length()
+ function orioledb_get_rewind_queue_length()
  function orioledb_get_table_descrs()
+ function orioledb_get_undo_meta()
+ function orioledb_get_xid_meta()
  function orioledb_has_retained_undo()
  function orioledb_idx_structure(oid,text,character varying,integer)
  function orioledb_index_description(oid,oid,oid,text)
  function orioledb_index_oids()
  function orioledb_index_rows(oid)
+ function orioledb_insert_sys_xid_undo_location(integer,bigint)
+ function orioledb_int4range_immutable(text)
  function orioledb_page_stats()
  function orioledb_parallel_debug_start()
  function orioledb_parallel_debug_stop()
+ function orioledb_print_pool_pages(integer)
+ function orioledb_read_sys_xid_undo_location(integer)
  function orioledb_recovery_synchronized()
  function orioledb_relation_size(oid)
+ function orioledb_rewind_by_time(integer,boolean)
+ function orioledb_rewind_by_time(integer)
+ function orioledb_rewind_set_complete(integer,bigint)
+ function orioledb_rewind_sync()
+ function orioledb_rewind_to_timestamp(timestamp with time zone,boolean)
+ function orioledb_rewind_to_timestamp(timestamp with time zone)
+ function orioledb_rewind_to_transaction(integer,bigint,boolean)
+ function orioledb_rewind_to_transaction(integer,bigint)
  function orioledb_sys_tree_check(integer,boolean)
  function orioledb_sys_tree_rows(integer)
  function orioledb_sys_tree_structure(integer,character varying,integer)
- function orioledb_table_description(oid)
  function orioledb_table_description(oid,oid,oid)
+ function orioledb_table_description(oid)
  function orioledb_table_oids()
  function orioledb_table_pages(oid)
  function orioledb_tableam_handler(internal)
@@ -126,63 +149,73 @@ postgres=# \dx+ orioledb
  function orioledb_tbl_bin_structure(oid,boolean,integer)
  function orioledb_tbl_check(oid,boolean)
  function orioledb_tbl_compression_check(bigint,oid,integer[])
+ function orioledb_tbl_indices(oid,boolean,boolean)
  function orioledb_tbl_indices(oid)
  function orioledb_tbl_structure(oid,character varying,integer)
+ function orioledb_test_back_refind_skip_tail(oid,integer)
+ function orioledb_test_corrupt_page_undo(oid)
+ function orioledb_test_endkey_returned_skip(oid,integer)
+ function orioledb_tree_stat(regclass)
  function orioledb_ucm_check()
+ function orioledb_undo_size()
+ function orioledb_upgrade_refresh()
  function orioledb_version()
  function orioledb_write_pages(oid)
  function pg_stopevent_reset(text)
+ function pg_stopevent_set(text,jsonpath,text)
  function pg_stopevent_set(text,jsonpath)
  function pg_stopevents()
+ function reset_read_page_checkpoint_stats()
  function s3_get(text)
  function s3_put(text,text)
+ function verify_orioledb(regclass,boolean)
  type orioledb_index
- type orioledb_index[]
  type orioledb_index_descr
  type orioledb_index_descr[]
+ type orioledb_index[]
  type orioledb_table
- type orioledb_table[]
  type orioledb_table_descr
  type orioledb_table_descr[]
+ type orioledb_table[]
  view orioledb_index
  view orioledb_index_descr
  view orioledb_table
  view orioledb_table_descr
-(51 rows)
+(84 rows)
 ```
 
 Quit from the database: `\q`
 
 Stop the server:
 
-- `docker stop orioletest17`
+- `docker stop orioletest18`
 
 Remove container:
 
-- `docker container rm orioletest17`
+- `docker container rm orioletest18`
 
 Remove docker image:
 
-- `docker rmi orioletest:17`
+- `docker rmi orioletest:18`
 
 Remove the data volume:
 
-- `docker volume rm orioletest17data`
+- `docker volume rm orioletest18data`
 
 ## Building Docker Images
 
 To build a Docker image, use one of the following commands:
 
-#### To build PostgreSQL 17 + OrieleDB extension
+#### To build PostgreSQL 18 + OrioleDB extension
+
+```
+docker build -t orioletest:18 -f docker/Dockerfile --pull --network=host --progress=plain --build-arg PG_MAJOR="18" .
+```
+
+#### To build PostgreSQL 17 + OrioleDB extension
 
 ```
 docker build -t orioletest:17 -f docker/Dockerfile --pull --network=host --progress=plain --build-arg PG_MAJOR="17" .
-```
-
-#### To build PostgreSQL 16 + OrieleDB extension
-
-```
-docker build -t orioletest:16 -f docker/Dockerfile --pull --network=host --progress=plain --build-arg PG_MAJOR="16" .
 ```
 
 ## Supported environment variables
@@ -212,31 +245,31 @@ Please check the Dockerfiles for the full list of build args!
 Other important build args:
 - `--build-arg PG_MAJOR="17"`
   - Choose the main version of PostgreSQL. Default is `17`.
-  - You can choose from `16`, `17`.
+  - You can choose from `16`, `17`, `18`.
 - `--build-arg BUILD_CC_COMPILER="gcc"`
   - Choose the C compiler. Default is `clang`.
   - You can choose either `clang` or `gcc`.
 
-For example, to build an image using Alpine version `3.21`, the `gcc` compiler and PostgreSQL version `16`, use the following command:
+For example, to build an image using Alpine version `3.21`, the `gcc` compiler and PostgreSQL version `17`, use the following command:
 
 ```bash
 docker build --pull --network=host --progress=plain \
     --build-arg ALPINE_VERSION="3.21" \
     --build-arg BUILD_CC_COMPILER="gcc" \
-    --build-arg PG_MAJOR="16" \
+    --build-arg PG_MAJOR="17" \
     -f docker/Dockerfile \
-    -t orioletest:16-gcc-alpine3.21 .
+    -t orioletest:17-gcc-alpine3.21 .
 ```
 
-To build an image using Ubuntu version `devel`, the `clang` compiler and PostgreSQL version `17`, use the following command:
+To build an image using Ubuntu version `devel`, the `clang` compiler and PostgreSQL version `18`, use the following command:
 
 ```bash
 docker build --pull --network=host --progress=plain \
     --build-arg UBUNTU_VERSION="devel" \
     --build-arg BUILD_CC_COMPILER="clang" \
-    --build-arg PG_MAJOR="17" \
+    --build-arg PG_MAJOR="18" \
     -f docker/Dockerfile.ubuntu \
-    -t orioletest:17-clang-ubuntu-devel .
+    -t orioletest:18-clang-ubuntu-devel .
 ```
 The "devel" version is the latest development Ubuntu version, so it might not be stable.
 
