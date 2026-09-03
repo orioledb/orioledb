@@ -2638,7 +2638,6 @@ o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid datoid,
 
 	tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(type_oid));
 	Assert(HeapTupleIsValid(tuple));
-	ReleaseSysCache(tuple);
 
 	ASAN_UNPOISON_MEMORY_REGION(&arg, sizeof(arg));
 
@@ -2650,6 +2649,8 @@ o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid datoid,
 
 	o_tables_foreach(o_tables_drop_columns_with_type_callback,
 					 &o_in_progress_snapshot, &arg);
+
+	ReleaseSysCache(tuple);
 }
 
 /*
