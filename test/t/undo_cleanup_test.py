@@ -67,7 +67,10 @@ class UndoCleanupTest(BaseTest):
 		"""
 		node = self.node
 		node.append_conf('orioledb.undo_buffers = 256\n')
-		node.append_conf('orioledb.main_buffers = 8MB\n')
+		# The page pool only has to hold the concurrent updates; it plays no
+		# part in the bug.  8MB was enough locally but exhausted the pool on
+		# CI, where four 20 MB statements overlap.
+		node.append_conf('orioledb.main_buffers = 256MB\n')
 		node.append_conf('checkpoint_timeout = 1h\n')
 		node.append_conf('max_connections = 30\n')
 		node.start()
