@@ -113,10 +113,11 @@ static bool get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
 static bool write_page_to_disk(BTreeDescr *desc, FileExtent *extent,
 							   uint32 curChkpNum,
 							   Pointer page, off_t page_size);
-static void write_page(OBTreeFindPageContext *context,
+static bool write_page(OBTreeFindPageContext *context,
 					   OInMemoryBlkno blkno, Page img,
 					   uint32 checkpoint_number,
-					   bool evict, bool copy_blkno);
+					   bool evict, bool copy_blkno,
+					   uint32 meta_change_count);
 static int	tree_offsets_cmp(const void *a, const void *b);
 static void writeback_put_extent(IOWriteBack *writeback, BTreeDescr *desc,
 								 uint64 downlink);
@@ -1274,6 +1275,51 @@ store_read_page_checkpoint_stats(uint32 checkpointNum)
 	elog(DEBUG1, "Remember read_page_checkpoin: min %u max %u", min_read_page_checkpoint, max_read_page_checkpoint);
 }
 
+/*
+ * Free the meta page of a relation's primary index, simulating what
+ * evict_btree does when it frees the root and meta pages.  Data pages
+ * remain alive so walk_page_check_locked passes, exercising the
+ * meta_change_count check in write_page.
+ */
+PG_FUNCTION_INFO_V1(orioledb_test_free_meta_page);
+
+Datum
+orioledb_test_free_meta_page(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	OTableDescr *descr;
+	BTreeDescr *td;
+	Relation	rel;
+	OInMemoryBlkno metaBlkno;
+
+	orioledb_check_shmem();
+
+	rel = relation_open(relid, AccessShareLock);
+	descr = relation_get_descr(rel);
+	td = &descr->indices[0]->desc;
+
+	o_btree_load_shmem(td);
+	metaBlkno = td->rootInfo.metaPageBlkno;
+	if (OInMemoryBlknoIsValid(metaBlkno))
+	{
+		CLEAN_DIRTY(td->ppool, metaBlkno);
+		ppool_free_page(td->ppool, metaBlkno, false);
+
+		/*
+		 * Wipe everything after the page header to simulate page reuse. The
+		 * header (incl. change count) must survive so that the
+		 * meta_change_count check in write_page sees the ppool_free_page
+		 * increment; the seq_buf fields that perform_page_io dereferences
+		 * become garbage.
+		 */
+		memset(O_GET_IN_MEMORY_PAGE(metaBlkno) + O_PAGE_HEADER_SIZE,
+			   0, ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE);
+	}
+
+	relation_close(rel, AccessShareLock);
+	PG_RETURN_VOID();
+}
+
 #endif
 
 /*
@@ -2364,10 +2410,10 @@ prepare_non_leaf_page(Page p)
 /*
  * Evict the page, assuming target page and its parent are locked.
  */
-static void
+static bool
 write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 		   uint32 checkpoint_number,
-		   bool evict, bool copy_blkno)
+		   bool evict, bool copy_blkno, uint32 meta_change_count)
 {
 	BTreeDescr *desc = context->desc;
 	OInMemoryBlkno parent_blkno = OInvalidInMemoryBlkno;
@@ -2434,6 +2480,24 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 					old_downlink = 0;
 		bool		dirty_parent;
 
+		/*
+		 * Concurrent tree eviction (evict_btree) frees the meta page while we
+		 * still hold a cached desc whose nextChkp[].shared points into it.
+		 * Detect this via the meta page's change count, which ppool_free_page
+		 * increments.  Must check before modifying any shared state (parent
+		 * downlink, ionum).
+		 */
+		if (OMetaPageIsValid(desc) &&
+			O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(desc->rootInfo.metaPageBlkno)
+			!= meta_change_count)
+		{
+			unlock_io(ionum);
+			unlock_page(blkno);
+			if (!is_root)
+				unlock_page(parent_blkno);
+			return false;
+		}
+
 		/* Mark parent downlink as IO in-progress. */
 		if (evict)
 		{
@@ -2469,6 +2533,17 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 			CLEAN_DIRTY_CONCURRENT(blkno);
 			unlock_page(blkno);
 
+			/* Re-check after unlock: narrower window than the pre-lock check */
+			if (OMetaPageIsValid(desc) &&
+				O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(desc->rootInfo.metaPageBlkno)
+				!= meta_change_count)
+			{
+				page_desc->ionum = -1;
+				unlock_io(ionum);
+				perform_writeback(&io_writeback);
+				return false;
+			}
+
 			if (STOPEVENTS_ENABLED())
 			{
 				Jsonb	   *params;
@@ -2500,7 +2575,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 				page_desc->ionum = -1;
 				unlock_io(ionum);
 				perform_writeback(&io_writeback);
-				return;
+				return true;
 			}
 		}
 
@@ -2573,6 +2648,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 		ppool_free_page(desc->ppool, blkno, false);
 
 	perform_writeback(&io_writeback);
+	return true;
 }
 
 static void
@@ -3197,7 +3273,8 @@ walk_page(OInMemoryBlkno blkno, bool evict)
 				parent_page;
 	ORelOids	oids;
 	BTreeNonLeafTuphdr *int_hdr;
-	uint32		checkpoint_number;
+	uint32		checkpoint_number,
+				meta_change_count = 0;
 	bool		copy_blkno,
 				merge_tried = false;
 	OFindPageResult findResult;
@@ -3212,6 +3289,12 @@ retry:
 	desc = walk_page_prelock_check(blkno, evict, page_desc, p, &oids);
 	if (!desc)
 		return OWalkPageSkipped;
+
+	if (OMetaPageIsValid(desc))
+		meta_change_count = O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(
+															  desc->rootInfo.metaPageBlkno);
+
+	STOPEVENT(STOPEVENT_WALK_PAGE_BEFORE_LOCK, NULL);
 
 	if (!try_lock_page(blkno))
 		return OWalkPageSkipped;
@@ -3320,7 +3403,9 @@ retry:
 
 	STOPEVENT(STOPEVENT_BEFORE_WRITE_PAGE, NULL);
 
-	write_page(&context, blkno, img, checkpoint_number, evict, copy_blkno);
+	if (!write_page(&context, blkno, img, checkpoint_number, evict, copy_blkno,
+					meta_change_count))
+		return OWalkPageSkipped;
 
 	STOPEVENT(STOPEVENT_AFTER_WRITE_PAGE, NULL);
 

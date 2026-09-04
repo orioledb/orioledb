@@ -521,15 +521,25 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 		if (shared->location > 0)
 		{
 			off_t		offset = SEQBUF_FILE_OFFSET(shared, (off_t) shared->filePageNum);
+			size_t		data_size = shared->location - SEQBUF_DATA_OFF;
+			char		buf[SEQBUF_CHUNK_SIZE];
 
-			if (OFileWrite(seqBufPrivate->file, SEQBUF_DATA_POS(O_GET_IN_MEMORY_PAGE(shared->pages[shared->curPageNum])),
-						   shared->location - SEQBUF_DATA_OFF, offset, WAIT_EVENT_SLRU_WRITE) != shared->location - SEQBUF_DATA_OFF)
+			memcpy(buf,
+				   SEQBUF_DATA_POS(O_GET_IN_MEMORY_PAGE(shared->pages[shared->curPageNum])),
+				   data_size);
+
+			result = offset + data_size;
+			SpinLockRelease(&shared->lock);
+
+			if (OFileWrite(seqBufPrivate->file, buf, data_size,
+						   offset, WAIT_EVENT_SLRU_WRITE) != data_size)
 			{
-				SpinLockRelease(&shared->lock);
 				ereport(PANIC, (errcode_for_file_access(),
 								errmsg("could not finalize sequence buffer into file %s: %m",
 									   FilePathName(seqBufPrivate->file))));
 			}
+
+			goto done;
 		}
 	}
 
@@ -537,6 +547,7 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 		+ (shared->location - SEQBUF_DATA_OFF);
 	SpinLockRelease(&shared->lock);
 
+done:
 	seq_buf_close_file(seqBufPrivate);
 
 	if (result == 0)
