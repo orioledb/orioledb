@@ -1745,7 +1745,15 @@ read_disk_leaf_into_img(BTreeSeqScan *scan, uint64 downlinkLoc, CommitSeqNo csn)
 	read_result = read_page_from_disk(scan->desc, scan->leafImg, downlinkLoc,
 									  &extent);
 	header = (BTreePageHeader *) scan->leafImg;
-	if (header->csn >= csn)
+
+	/*
+	 * Only a normal csn asks for a historical image.  COMMITSEQNO_INPROGRESS
+	 * is 0, so without this test "header->csn >= csn" holds for every page
+	 * and a scan on such a snapshot walks a page log it has no business in --
+	 * o_btree_try_read_page() and load_first_historical_page() both make the
+	 * same check.
+	 */
+	if (COMMITSEQNO_IS_NORMAL(csn) && header->csn >= csn)
 		read_page_from_undo(scan->desc, scan->leafImg, header->undoLocation,
 							csn, NULL, BTreeKeyNone, NULL);
 
@@ -2073,7 +2081,6 @@ iterate_internal_page(BTreeSeqScan *scan)
 	while (get_next_downlink(scan, &downlink, &scan->keyRangeLow, &scan->keyRangeHigh))
 	{
 		bool		valid_downlink = true;
-		bool		readUndo;
 
 		/*
 		 * Check if this downlink's key range overlaps the scan's
@@ -2217,25 +2224,6 @@ iterate_internal_page(BTreeSeqScan *scan)
 					leafPartial = &scan->leafPartial;
 				}
 
-				/*
-				 * A sampling scan runs on COMMITSEQNO_INPROGRESS and must not
-				 * walk page-level undo.  imgReadCsn is a normal csn even then
-				 * -- it comes from the internal page image -- so without this
-				 * the leaf read would rebuild a historical image from the
-				 * page log.  ANALYZE deliberately drops its hold on that log
-				 * so a minutes-long sample does not pin the ring, and the
-				 * record it wanted is then gone:
-				 *
-				 * undo_read -> get_page_from_undo -> read_page_from_undo ->
-				 * o_btree_try_read_page -> iterate_internal_page
-				 *
-				 * Reading the live page instead may hand sampling a row or
-				 * two it would not have seen at its snapshot, which is of no
-				 * consequence to a sample.
-				 */
-				readUndo = !(scan->sampler != NULL &&
-							 !COMMITSEQNO_IS_NORMAL(scan->oSnapshot.csn));
-
 				result = o_btree_try_read_page(scan->desc,
 											   DOWNLINK_GET_IN_MEMORY_BLKNO(downlink),
 											   DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(downlink),
@@ -2244,7 +2232,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 											   NULL,
 											   BTreeKeyNone,
 											   leafPartial,
-											   readUndo,
+											   true,
 											   NULL);
 
 				if (result == ReadPageResultOK)
@@ -2572,7 +2560,20 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 	init_page_find_context(&scan->context, desc, COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_IMAGE |
 						   BTREE_PAGE_FIND_KEEP_LOKEY |
-						   BTREE_PAGE_FIND_READ_CSN);
+						   (sampler ? 0 : BTREE_PAGE_FIND_READ_CSN));
+
+	/*
+	 * Every page read below is made at context.imgReadCsn, which READ_CSN
+	 * fills in from the image actually read -- a normal csn, even though this
+	 * scan runs on COMMITSEQNO_INPROGRESS.  That is what sends the leaf reads
+	 * into the page log.  A sampling scan must stay out of it: ANALYZE drops
+	 * its hold on that log so a minutes-long sample does not pin the ring, so
+	 * the images are free to go.  Leave the csn non-normal for it, and every
+	 * read -- in memory or from disk -- takes the live page instead.
+	 * Sampling may then see a row or two it would not have seen at its
+	 * snapshot, which is of no consequence to a sample.
+	 */
+	scan->context.imgReadCsn = COMMITSEQNO_INPROGRESS;
 	clear_fixed_key(&scan->prevHikey);
 	clear_fixed_key(&scan->keyRangeHigh);
 	clear_fixed_key(&scan->keyRangeLow);
