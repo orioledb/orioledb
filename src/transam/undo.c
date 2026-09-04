@@ -561,6 +561,39 @@ get_undo_type_name(UndoLogType undoType)
 }
 
 /*
+ * Wait until undo up to writtenTarget has reached disk.
+ *
+ * A wake-up from LWLockAcquireOrWait() only says undoWriteLock was free at
+ * some moment; it does not say the write covering our location has landed.
+ * Several actors evict -- the bgwriter, any backend that finds the ring
+ * tight, the checkpoint flush -- so the holder we were queued behind need not
+ * be the one that published the frontier we read, and a release by any of
+ * them wakes us.  Acting on a single wake-up is how a caller ends up
+ * concluding its undo is on disk when writtenLocation is still short of it.
+ *
+ * So loop.  Finding the lock free with the write still missing means nobody
+ * is going to do it for us; report that instead of spinning, and let the
+ * caller write it itself.
+ *
+ * Returns true once writtenLocation covers writtenTarget.
+ */
+static bool
+wait_for_undo_written(UndoMeta *meta, UndoLocation writtenTarget)
+{
+	for (;;)
+	{
+		if (pg_atomic_read_u64(&meta->writtenLocation) >= writtenTarget)
+			return true;
+
+		if (LWLockAcquireOrWait(&meta->undoWriteLock, LW_SHARED))
+		{
+			LWLockRelease(&meta->undoWriteLock);
+			return pg_atomic_read_u64(&meta->writtenLocation) >= writtenTarget;
+		}
+	}
+}
+
+/*
  * Parameters for the undo_write_* stop events: which undo log we are in.
  */
 static Jsonb *
@@ -2209,19 +2242,13 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		pg_atomic_read_u64(&meta->writeInProgressLocation) + circularBufferSize)
 	{
 		/*
-		 * Current in-progress undo write should cover our required location.
-		 * It should be enough to just wait for current in-progress write to
-		 * be finished.
+		 * A write in progress should cover our required location, so waiting
+		 * for it to land is enough -- when it really does land.  If it turns
+		 * out nobody is writing it, fall through and do the eviction below.
 		 */
-		if (LWLockAcquireOrWait(&meta->undoWriteLock, LW_SHARED))
-			LWLockRelease(&meta->undoWriteLock);
-
-#ifdef USE_ASSERT_CHECKING
-		SpinLockAcquire(&meta->minUndoLocationsMutex);
-		Assert(location + size <= pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize);
-		SpinLockRelease(&meta->minUndoLocationsMutex);
-#endif
-		return true;
+		if (wait_for_undo_written(meta,
+								  location + size - circularBufferSize))
+			return true;
 	}
 
 	/*
@@ -2237,14 +2264,9 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		return true;
 
 	if (location + size <=
-		pg_atomic_read_u64(&meta->writeInProgressLocation) + circularBufferSize)
-	{
-		if (LWLockAcquireOrWait(&meta->undoWriteLock, LW_SHARED))
-			LWLockRelease(&meta->undoWriteLock);
-		if (location + size <=
-			pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize)
-			return true;
-	}
+		pg_atomic_read_u64(&meta->writeInProgressLocation) + circularBufferSize &&
+		wait_for_undo_written(meta, location + size - circularBufferSize))
+		return true;
 
 	evict_undo_to_disk(undoType, location + size - circularBufferSize,
 					   minProcReservedLocation, false);
@@ -3617,11 +3639,15 @@ undo_write_internal(UndoLogType undoType, UndoLocation location,
 	}
 
 	/* Wait for in-progress write if needed */
-	if (pg_atomic_read_u64(&meta->writtenLocation) < memoryUndoLocation)
+	while (!wait_for_undo_written(meta, memoryUndoLocation))
 	{
-		if (LWLockAcquireOrWait(&meta->undoWriteLock, LW_SHARED))
-			LWLockRelease(&meta->undoWriteLock);
-		Assert(pg_atomic_read_u64(&meta->writtenLocation) >= memoryUndoLocation);
+		/*
+		 * Nobody is writing it, so make it happen: this path needs the record
+		 * on disk before it can rewrite it in place.
+		 */
+		evict_undo_to_disk(undoType, memoryUndoLocation,
+						   pg_atomic_read_u64(&meta->minProcReservedLocation),
+						   false);
 	}
 
 	/* Finally perform writing to the file */
