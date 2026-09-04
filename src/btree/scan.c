@@ -2569,9 +2569,9 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 	 * into the page log.  A sampling scan must stay out of it: ANALYZE drops
 	 * its hold on that log so a minutes-long sample does not pin the ring, so
 	 * the images are free to go.  Leave the csn non-normal for it, and every
-	 * read -- in memory or from disk -- takes the live page instead.
-	 * Sampling may then see a row or two it would not have seen at its
-	 * snapshot, which is of no consequence to a sample.
+	 * read -- in memory or from disk -- takes the live page instead. Sampling
+	 * may then see a row or two it would not have seen at its snapshot, which
+	 * is of no consequence to a sample.
 	 */
 	scan->context.imgReadCsn = COMMITSEQNO_INPROGRESS;
 	clear_fixed_key(&scan->prevHikey);
