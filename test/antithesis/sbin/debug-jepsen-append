@@ -1,0 +1,312 @@
+#!/usr/bin/env bb
+
+(require '[babashka.deps :as deps])
+; works because bb now bundles JLine3
+(deps/add-deps '{:deps {io.github.TimoKramer/charm.clj {:git/sha "cf7a6c2fcfcccc44fcf04996e264183aa49a70d6"}}})
+
+(require '[babashka.cli :as cli]
+         '[babashka.process :as process :refer [$]]
+         '[charm.core :as charm]
+         '[cheshire.core :as json]
+         '[clojure.string :as string]
+         '[clojure.pprint :refer [pprint]]
+         '[clojure.edn :as edn]
+         '[clojure.java.io :as io])
+
+(def cli-spec {:run-id {:desc "Skip run selection and use this Antithesis run ID"
+                        :coerce :string}
+               :help {:desc "Show this help"
+                      :alias :h
+                      :coerce :boolean}})
+
+(defn usage []
+  (str "Wizard to launch MultiVerse Debugger sessions for Jepsen 'append' anomalies
+
+1. Choose a recent run (or pass --run-id)
+2. Choose a jepsen anomaly and detection moment
+3. Wizard prints results.edn report
+4. Wizard prints operation log events related to the anomaly
+5. Launch an MVD debug sesson at chosen log event
+
+Usage: select_jepsen_moment [options]\n\n"
+       (cli/format-opts {:spec cli-spec})))
+
+(defn parse-json-stdout [p]
+  (with-open [input (-> p :out io/reader)]
+    (let [out (vec (json/parsed-seq input true))]
+      (process/check p)
+      out)))
+
+(defn recent-runs []
+  (-> ($ snouty runs list --json --limit 20)
+      (parse-json-stdout)))
+
+(defn failing-jepsen-moments [run-id]
+  (->> ($ snouty runs properties --failing --json ~run-id)
+       (parse-json-stdout)
+       ;; converts a stream of json property failures
+       ;; 1. filters to only jepsen failures
+       ;; 2. and transforms moments into json records containing the four fields we want:
+       ;;      run_id, input_hash, vtime, type
+       ;; e.g.
+       ;; [{"counterexamples": [
+       ;;     { "moment": { "input_hash": "1422870779863559097", "vtime": 118.25533218565396 } }
+       ;;   ],
+       ;;   "name": "jepsen: no empty-transaction-graph anomalies",
+       ;;   ...}
+       ;;  ...]
+       ;; =>
+       ;; {:empty-transaction-graph
+       ;;  [{"run_id": "a2fb1a12237ed0535311feb56702daf1-58-11",
+       ;;    "input_hash": "1422870779863559097",
+       ;;    "vtime": 118.25533218565396}]
+       ;;  ...}
+       (into {}
+             (keep
+              (fn [{:keys [name counterexamples] :or {name ""}}]
+                (when-let [[_ anomaly-type] (re-matches #"^jepsen: no (?<type>.+) anomalies$" name)]
+                  [(keyword anomaly-type)
+                   (mapv (fn [{:keys [moment]}]
+                           (assoc (select-keys moment [:input_hash :vtime])
+                                  :run-id run-id))
+                         counterexamples)]))))))
+
+(defn moment-logs [{:keys [run-id input_hash vtime] :as _moment}]
+  (-> ($ snouty runs logs --json ~run-id ~input_hash ~vtime)
+      (parse-json-stdout)))
+
+(defn logs-between
+  "given a vector of log records with an :output_text key,
+  return a subvector containing the first set of log records
+  between :output_text matching start-pattern and end-pattern (exclusive).
+  NB: search is in reverse direction, biased to find patterns at end."
+  [logs start-pattern end-pattern]
+  (loop [i   (dec (count logs))
+         end nil]
+    (when-let [log-line (nth logs i nil)]
+      (let [text (:output_text log-line)]
+        (cond
+          (nil? text)
+          (recur (dec i) end)
+
+          (nil? end)
+          (recur (dec i)
+                 (when (re-find end-pattern text) i))
+
+          (re-find start-pattern text)
+          (subvec logs (inc i) end)
+
+          :else
+          (recur (dec i) end))))))
+
+(defn jepsen-results
+  "given a vector of log records, returns the jepsen results.edn
+  reconstructed from the log output"
+  [logs]
+  (->> (logs-between logs
+                     #".*jepsen results - jepsen.store Wrote .*results.edn.*"
+                     #".*Analysis invalid!.*")
+       (eduction
+        (map-indexed (fn [i log]
+                       (if (= i 0)
+                         (update log :output_text #(string/replace % #"^[^{]*" ""))
+                         log)))
+        (map :output_text))
+       (reduce str)
+       (edn/read-string)))
+
+(defn get-anomaly-example
+  [results anomaly-type]
+  (let [anomalies (get-in results [:workload :append :anomalies anomaly-type])]
+    (when (coll? anomalies)
+      (first anomalies))))
+
+(defn get-anomaly-keys
+  "Extracts the keys involved in the anomaly example.
+  Covers most (but not all) anomaly example schemas"
+  [{:keys [mop key steps] :as _example}]
+  (cond
+    (some? mop)   ; :internal :future-read :G1a :G1b :duplicate-elements :predicate-read-miss
+    #{(second mop)}
+
+    (some? key)   ; :incompatible-order :dirty-update :lost-update  
+    #{key}
+
+    (some? steps) ; :G0* :G1c* :G-single* :G-nonadjacent-* :G2-*
+    (into #{} (map :key) steps)
+
+    :else
+    nil))
+
+(defn anomaly-micro-op-logs
+  "finds log records associated with the micro-op for the specified anomaly.
+  Process:
+      1. find example for anomaly in results.edn
+      2. find keys associated with the anomaly-type
+      3. build a pattern to select 'read' and 'append' logs for that key
+      4. return associated logs"
+  [logs results anomaly-type]
+  (when-let [micro-op-pattern
+             (some-> (get-anomaly-example results anomaly-type) ; identify mop or cycle steps
+                     (get-anomaly-keys)                         ; e.g. #{2341 2339}
+                     (some->>
+                      (clojure.string/join "|")
+                      (format "jepsen worker.*:txn.*:(r|append) (%s)")
+                      (re-pattern)))] ; matches logs related to anomaly keys
+    (into []
+          (filter
+           (comp (every-pred some? ; not every log entry has :output_text
+                             (partial re-find micro-op-pattern))
+                 :output_text))
+          logs)))
+
+(defn update-ui [state event]
+  (cond
+    (or (charm/key-match? event "q")
+        (charm/key-match? event "ctrl+c"))
+    [state charm/quit-cmd]
+
+    (charm/key-match? event :enter)
+    [(assoc state :selected (charm/list-selected-item (:list state)))
+     charm/quit-cmd]
+
+    :else
+    (let [[new-list command] (charm/list-update (:list state) event)]
+      [(assoc state :list new-list) command])))
+
+(defn view-ui [{:keys [prompt list]}]
+  (str prompt "\n\n"
+       (charm/list-view list)
+       "\n\n↑/↓ or j/k: move  Enter: select  q: quit"))
+
+(defn choose [prompt values label-fn]
+  (when (seq values)
+    (let [items (mapv (fn [value]
+                        {:title (label-fn value)
+                         :value value})
+                      values)
+          result (charm/run
+                  {:init {:prompt prompt
+                          :list (charm/item-list items :height 20)}
+                   :update update-ui
+                   :view view-ui
+                   :hide-cursor false})]
+      (get-in result [:selected :value]))))
+
+(defn run-label [run]
+  (string/join
+   " | "
+   [(or (get-in run [:parameters :antithesis.description])
+        "-")
+    (or (:created_at run) "-")
+    (or (get-in run [:parameters :antithesis.source]) "-")]))
+
+(defn anomaly-label [[anomaly-type moments]]
+  (str (name anomaly-type) " (" (count moments) " moments)"))
+
+(defn moment-label [moment]
+  (str "input_hash=" (:input_hash moment)
+       "  vtime=" (:vtime moment)))
+
+(defn op-log-label [{:keys [output_text] :as _op-log}]
+  (if-let [[_ time worker status txn]
+           (re-matches #"^INFO \[\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2},\d{3})\] jepsen worker (\d+) - jepsen\.print \d+\s+(:\S+)\s+:txn\s+(.+)$"
+                       output_text)]
+    (format "[%s] w%s %-8s%s" time worker status txn)
+    output_text))
+
+(defn select-run-id [provided-run-id]
+  (or provided-run-id
+      (:run_id
+       (choose
+        (str "Select a run\n"
+             "description | created_at | source")
+        (recent-runs)
+        run-label))))
+
+(defn select-anomaly-moment [run-id]
+  (let [failures (failing-jepsen-moments run-id)]
+    (when-let [[anomaly-type moments]
+               (choose "\nSelect an anomaly type"
+                       failures
+                       anomaly-label)]
+      (when-let [moment
+                 (choose "\nSelect a counterexample moment"
+                         moments
+                         moment-label)]
+        (assoc moment :type anomaly-type)))))
+
+(defn select-debug-event [{:keys [type] :as detection-moment}]
+  (println "\nLoading logs. This may take a minute ...\n")
+  (let [logs (moment-logs detection-moment)]
+    (when-let [results (jepsen-results logs)]
+      (println "results.edn")
+      (pprint results)
+      (when-let [op-logs (anomaly-micro-op-logs logs results type)]
+        (when-let [event (choose "\nSelect moment to debug"
+                                 op-logs
+                                 op-log-label)]
+          event)))))
+
+(defn confirm-debug-session? [run-id moment]
+  (true?
+   (choose
+    (str "\nStart a debug session at\n" "run_id=" run-id "\n" "moment=" (pr-str moment) "?")
+    [true false]
+    #(if % "Yes" "No"))))
+
+(defn start-debug-session [run-id {:keys [input_hash vtime] :as _moment}]
+  (-> ($ snouty debug --run-id ~run-id --input-hash ~input_hash --vtime ~vtime)
+      (process/check) :out slurp))
+
+(defn -main [& args]
+  (try
+    (let [{:keys [help run-id]}
+          (cli/parse-opts args {:spec cli-spec :restrict true :restrict-args true})]
+      (cond
+        help
+        (println (usage))
+
+        (and run-id (string/blank? run-id))
+        (throw (ex-info "--run-id must not be blank" {}))
+
+        :else
+        (when-let [selected-run-id (select-run-id run-id)]
+          (if-let [detection-moment (select-anomaly-moment selected-run-id)]
+            (if-let [{:keys [moment] :as _debug-event}
+                     (select-debug-event detection-moment)]
+              (when (confirm-debug-session? selected-run-id moment)
+                (println)
+                (println (start-debug-session selected-run-id moment)))
+              (println "Anomaly type unsupported or no logs found."))
+            (println "No moment selected.")))))
+    (catch Throwable throwable
+      (println "Error:" (or (ex-message throwable) (str throwable)))
+      (System/exit 1))))
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (apply -main *command-line-args*))
+
+(comment
+  (def logs (-> (failing-jepsen-moments "a2fb1a12237ed0535311feb56702daf1-58-11")
+                (get-in [:empty-transaction-graph 0])
+                (moment-logs)))
+
+  (def moments (failing-jepsen-moments "c26f33cdddcdf2073daf581b58209555-58-11")) ; g0
+  (def logs (-> moments
+                (get-in [:G0 0])
+                (moment-logs)))
+
+  (def results (jepsen-results logs))
+  (get-in results [:workload :append :anomalies :internal 0 :mop 1])
+
+  (anomaly-micro-op-logs logs results :empty-transaction-graph)
+  (get-anomaly-example results :empty-transaction-graph)
+  (get-in results [:workload :append :anomalies :empty-transaction-graph])
+
+  (->> (anomaly-micro-op-logs logs results :internal)
+       (drop 15)
+       (take 1)
+       #_(map op-log-label))
+;;
+  )
