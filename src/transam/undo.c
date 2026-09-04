@@ -1887,39 +1887,6 @@ flush_dirty_undo_range(UndoLogType undoType,
 
 		LWLockRelease(&meta->undoWriteLock);
 
-		/*
-		 * Persisting the pages is not enough when the ring itself is running
-		 * out: the slots stay occupied because writtenLocation does not move,
-		 * so producers still block.  Once free space drops to what makes a
-		 * backend evict, turn this pass into a drain of what we have just
-		 * made durable.
-		 *
-		 * Hand the range to evict_undo_to_disk() rather than advancing
-		 * writtenLocation here.  Moving that frontier requires the
-		 * writeInProgressLocation handshake -- publish the target, let
-		 * in-place writers see it, wait out reserved locations -- and doing
-		 * it correctly is exactly what that function is.  It also rewrites
-		 * the pages we flushed through the o_buffers cache (their dirty bit
-		 * is clear now, so they take the write_undo_range_clean path), which
-		 * matters: the flush above deliberately bypasses that cache, and once
-		 * reads start answering from disk a stale cached page must not be
-		 * left behind.
-		 */
-		if (undo_free_space(meta, circularBufferSize) <
-			circularBufferSize / UNDO_FREE_FRACTION_BACKEND)
-		{
-			/*
-			 * Re-read the reserved frontier instead of reusing the one the
-			 * caller sampled: evictions since then may have pushed
-			 * writtenLocation past that older value, and evict_undo_to_disk()
-			 * clamps its target to what we pass, which would then land below
-			 * writtenLocation and trip its writeInProgressLocation assert.
-			 */
-			UndoLocation reservedNow = pg_atomic_read_u64(&meta->minProcReservedLocation);
-
-			evict_undo_to_disk(undoType, Min(pageLoc, reservedNow),
-							   reservedNow, true);
-		}
 	}
 }
 

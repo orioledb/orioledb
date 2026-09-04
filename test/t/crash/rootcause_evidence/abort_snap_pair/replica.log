@@ -1,35 +1,37 @@
-2026-08-16 10:51:28.702 GMT [29878] LOG:  registered custom resource manager "OrioleDB resource manager" with ID 129
-2026-08-16 10:51:28.726 GMT [29878] LOG:  starting PostgreSQL 18.4 on aarch64-apple-darwin25.6.0, compiled by Homebrew clang version 22.1.8, 64-bit
-2026-08-16 10:51:28.727 GMT [29878] LOG:  listening on IPv4 address "127.0.0.1", port 20109
-2026-08-16 10:51:28.727 GMT [29878] LOG:  listening on Unix socket "/tmp/.s.PGSQL.20109"
-2026-08-16 10:51:28.732 GMT [29886] LOG:  Cleanup of old files at startup. Checkpoint 1
-2026-08-16 10:51:28.733 GMT [29886] LOG:  database system was interrupted; last known up at 2026-08-16 10:51:28 GMT
-2026-08-16 10:51:28.733 GMT [29887] LOG:  orioledb background writer 0 started
-2026-08-16 10:51:28.836 GMT [29886] LOG:  starting backup recovery with redo LSN 0/2000028, checkpoint LSN 0/2000098, on timeline ID 1
-2026-08-16 10:51:28.836 GMT [29886] LOG:  entering standby mode
-2026-08-16 10:51:28.838 GMT [29886] LOG:  orioledb recovery started.
-2026-08-16 10:51:28.840 GMT [29892] LOG:  orioledb recovery worker 0 started.
-2026-08-16 10:51:28.840 GMT [29893] LOG:  orioledb recovery worker 3 started.
-2026-08-16 10:51:28.840 GMT [29894] LOG:  orioledb recovery worker 2 started.
-2026-08-16 10:51:28.840 GMT [29895] LOG:  orioledb recovery worker 1 started.
-2026-08-16 10:51:28.841 GMT [29886] LOG:  redo starts at 0/2000028
-2026-08-16 10:51:28.841 GMT [29886] LOG:  completed backup recovery with redo LSN 0/2000028 and end LSN 0/2000138
-2026-08-16 10:51:28.841 GMT [29886] LOG:  consistent recovery state reached at 0/2000138
-2026-08-16 10:51:28.841 GMT [29878] LOG:  database system is ready to accept read-only connections
-2026-08-16 10:51:28.843 GMT [29897] LOG:  orioledb recovery worker 5 started.
-2026-08-16 10:51:28.843 GMT [29898] LOG:  orioledb recovery worker 4 started.
-2026-08-16 10:51:28.847 GMT [29896] LOG:  started streaming WAL from primary at 0/3000000 on timeline 1
-2026-08-16 10:51:29.032 GMT [29909] LOG:  statement: select pg_catalog.pg_last_wal_replay_lsn() >= '0/30C35C0'::pg_lsn
-2026-08-16 10:51:30.047 GMT [29987] LOG:  statement: select pg_catalog.pg_last_wal_replay_lsn() >= '0/30C35C0'::pg_lsn
-2026-08-16 10:51:30.060 GMT [29989] LOG:  statement: SELECT pg_stopevent_set('replay_on_record', 'true');
-2026-08-16 10:51:30.082 GMT [29992] LOG:  statement: SELECT coalesce(array_length(waiter_pids, 1), 0) >= 1 FROM pg_stopevents() WHERE stopevent = 'replay_on_record'
-2026-08-16 10:51:30.445 GMT [29896] FATAL:  could not receive data from WAL stream: server closed the connection unexpectedly
+2026-09-04 13:36:47.142 GMT [18822] LOG:  registered custom resource manager "OrioleDB resource manager" with ID 129
+2026-09-04 13:36:47.171 GMT [18822] LOG:  starting PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by Homebrew clang version 22.1.8, 64-bit
+2026-09-04 13:36:47.172 GMT [18822] LOG:  listening on IPv4 address "127.0.0.1", port 20123
+2026-09-04 13:36:47.173 GMT [18822] LOG:  listening on Unix socket "/tmp/.s.PGSQL.20123"
+2026-09-04 13:36:47.180 GMT [18828] LOG:  Cleanup of old files at startup. Checkpoint 1
+2026-09-04 13:36:47.181 GMT [18829] LOG:  orioledb background writer 0 started
+2026-09-04 13:36:47.182 GMT [18828] LOG:  database system was interrupted; last known up at 2026-09-04 13:36:46 GMT
+2026-09-04 13:36:47.299 GMT [18828] LOG:  starting backup recovery with redo LSN 0/2000028, checkpoint LSN 0/2000098, on timeline ID 1
+2026-09-04 13:36:47.299 GMT [18828] LOG:  entering standby mode
+2026-09-04 13:36:47.301 GMT [18828] LOG:  orioledb recovery started.
+2026-09-04 13:36:47.303 GMT [18834] LOG:  orioledb recovery worker 1 started.
+2026-09-04 13:36:47.305 GMT [18835] LOG:  orioledb recovery worker 0 started.
+2026-09-04 13:36:47.308 GMT [18836] LOG:  orioledb recovery worker 3 started.
+2026-09-04 13:36:47.309 GMT [18837] LOG:  orioledb recovery worker 2 started.
+2026-09-04 13:36:47.310 GMT [18828] LOG:  redo starts at 0/2000028
+2026-09-04 13:36:47.311 GMT [18828] LOG:  completed backup recovery with redo LSN 0/2000028 and end LSN 0/2000138
+2026-09-04 13:36:47.311 GMT [18828] LOG:  consistent recovery state reached at 0/2000138
+2026-09-04 13:36:47.313 GMT [18839] LOG:  orioledb recovery worker 5 started.
+2026-09-04 13:36:47.313 GMT [18822] LOG:  database system is ready to accept read-only connections
+2026-09-04 13:36:47.314 GMT [18840] LOG:  orioledb recovery worker 4 started.
+2026-09-04 13:36:47.322 GMT [18841] LOG:  started streaming WAL from primary at 0/3000000 on timeline 1
+2026-09-04 13:36:47.579 GMT [18852] LOG:  statement: select pg_catalog.pg_last_wal_replay_lsn() >= '0/30C7B28'::pg_lsn
+2026-09-04 13:36:47.601 GMT [18855] LOG:  statement: SELECT pg_stopevent_set('replay_on_record', 'true');
+2026-09-04 13:36:47.630 GMT [18859] LOG:  statement: SELECT coalesce(array_length(waiter_pids, 1), 0) >= 1 FROM pg_stopevents() WHERE stopevent = 'replay_on_record'
+2026-09-04 13:36:48.270 GMT [18841] FATAL:  could not receive data from WAL stream: server closed the connection unexpectedly
 		This probably means the server terminated abnormally
 		before or while processing the request.
-2026-08-16 10:51:30.983 GMT [30070] LOG:  statement: SELECT pg_stopevent_reset('replay_on_record');
-2026-08-16 10:51:30.989 GMT [30071] LOG:  statement: SELECT pg_last_wal_replay_lsn() >= '0/316F7F8'::pg_lsn
-2026-08-16 10:51:31.070 GMT [29886] LOG:  invalid record length at 0/316A8C0: expected at least 24, got 0
-2026-08-16 10:51:31.081 GMT [30078] LOG:  started streaming WAL from primary at 0/3000000 on timeline 1
-2026-08-16 10:51:31.501 GMT [30117] LOG:  statement: SELECT pg_last_wal_replay_lsn() >= '0/316F7F8'::pg_lsn
-2026-08-16 10:51:32.008 GMT [30146] LOG:  statement: SELECT pg_last_wal_replay_lsn() >= '0/316F7F8'::pg_lsn
-2026-08-16 10:51:32.033 GMT [30149] LOG:  statement: SELECT pg_stopevent_reset('replay_on_record');
+2026-09-04 13:36:49.024 GMT [18940] LOG:  statement: SELECT pg_stopevent_reset('replay_on_record');
+2026-09-04 13:36:49.039 GMT [18942] LOG:  statement: SELECT pg_last_wal_replay_lsn() >= '0/3174F80'::pg_lsn
+2026-09-04 13:36:49.193 GMT [18828] LOG:  invalid magic number 0000 in WAL segment 000000010000000000000003, LSN 0/3170000, offset 1507328
+2026-09-04 13:36:49.205 GMT [18944] LOG:  started streaming WAL from primary at 0/3000000 on timeline 1
+2026-09-04 13:36:49.208 GMT [18828] LOG:  successfully skipped missing contrecord at 0/316EE28, overwritten at 2026-09-04 13:36:48.821997+00
+2026-09-04 13:36:49.208 GMT [18828] CONTEXT:  WAL redo at 0/3170018 for XLOG/OVERWRITE_CONTRECORD: lsn 0/316EE28; time 2026-09-04 13:36:48.821997+00
+2026-09-04 13:36:49.560 GMT [18961] LOG:  statement: SELECT pg_last_wal_replay_lsn() >= '0/3174F80'::pg_lsn
+2026-09-04 13:36:50.089 GMT [18992] LOG:  statement: SELECT pg_last_wal_replay_lsn() >= '0/3174F80'::pg_lsn
+2026-09-04 13:36:50.614 GMT [19018] LOG:  statement: SELECT pg_last_wal_replay_lsn() >= '0/3174F80'::pg_lsn
+2026-09-04 13:36:50.668 GMT [19022] LOG:  statement: SELECT pg_stopevent_reset('replay_on_record');

@@ -1,16 +1,16 @@
-2026-08-16 10:51:25.703 GMT [29681] LOG:  registered custom resource manager "OrioleDB resource manager" with ID 129
-2026-08-16 10:51:25.745 GMT [29681] LOG:  starting PostgreSQL 18.4 on aarch64-apple-darwin25.6.0, compiled by Homebrew clang version 22.1.8, 64-bit
-2026-08-16 10:51:25.746 GMT [29681] LOG:  listening on IPv4 address "127.0.0.1", port 20108
-2026-08-16 10:51:25.747 GMT [29681] LOG:  listening on Unix socket "/tmp/.s.PGSQL.20108"
-2026-08-16 10:51:25.757 GMT [29688] LOG:  Cleanup of old files at startup. Checkpoint 0
-2026-08-16 10:51:25.758 GMT [29689] LOG:  orioledb background writer 0 started
-2026-08-16 10:51:25.758 GMT [29688] LOG:  database system was shut down at 2026-08-16 10:51:25 GMT
-2026-08-16 10:51:25.762 GMT [29681] LOG:  database system is ready to accept connections
-2026-08-16 10:51:25.935 GMT [29686] LOG:  checkpoint starting: force wait
-2026-08-16 10:51:25.940 GMT [29686] LOG:  orioledb checkpoint 1 started
-2026-08-16 10:51:28.086 GMT [29686] LOG:  orioledb checkpoint 1 complete
-2026-08-16 10:51:28.091 GMT [29686] LOG:  checkpoint complete: wrote 0 buffers (0.0%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=2.151 s, sync=0.001 s, total=2.157 s; sync files=2, longest=0.001 s, average=0.001 s; distance=8650 kB, estimate=8650 kB; lsn=0/2000098, redo lsn=0/2000028
-2026-08-16 10:51:28.893 GMT [29902] LOG:  statement: 
+2026-09-04 13:36:43.954 GMT [18683] LOG:  registered custom resource manager "OrioleDB resource manager" with ID 129
+2026-09-04 13:36:43.999 GMT [18683] LOG:  starting PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by Homebrew clang version 22.1.8, 64-bit
+2026-09-04 13:36:44.000 GMT [18683] LOG:  listening on IPv4 address "127.0.0.1", port 20122
+2026-09-04 13:36:44.000 GMT [18683] LOG:  listening on Unix socket "/tmp/.s.PGSQL.20122"
+2026-09-04 13:36:44.014 GMT [18690] LOG:  Cleanup of old files at startup. Checkpoint 0
+2026-09-04 13:36:44.014 GMT [18690] LOG:  database system was shut down at 2026-09-04 13:36:43 GMT
+2026-09-04 13:36:44.015 GMT [18691] LOG:  orioledb background writer 0 started
+2026-09-04 13:36:44.018 GMT [18683] LOG:  database system is ready to accept connections
+2026-09-04 13:36:44.244 GMT [18688] LOG:  checkpoint starting: force wait
+2026-09-04 13:36:44.249 GMT [18688] LOG:  orioledb checkpoint 1 started
+2026-09-04 13:36:46.436 GMT [18688] LOG:  orioledb checkpoint 1 complete
+2026-09-04 13:36:46.442 GMT [18688] LOG:  checkpoint complete: wrote 0 buffers (0.0%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=2.191 s, sync=0.001 s, total=2.199 s; sync files=2, longest=0.001 s, average=0.001 s; distance=8650 kB, estimate=8650 kB; lsn=0/2000098, redo lsn=0/2000028
+2026-09-04 13:36:47.433 GMT [18846] LOG:  statement: 
 					CREATE EXTENSION orioledb;
 					CREATE TABLE o_abort_snap (
 						id int PRIMARY KEY,
@@ -19,72 +19,72 @@
 					INSERT INTO o_abort_snap
 						SELECT g, 0 FROM generate_series(1, 100) g;
 				
-2026-08-16 10:51:28.971 GMT [29907] LOG:  statement: CHECKPOINT;
-2026-08-16 10:51:28.972 GMT [29686] LOG:  checkpoint starting: immediate force wait
-2026-08-16 10:51:28.977 GMT [29686] LOG:  orioledb checkpoint 2 started
-2026-08-16 10:51:29.000 GMT [29686] LOG:  orioledb checkpoint 2 complete
-2026-08-16 10:51:29.006 GMT [29686] LOG:  checkpoint complete: wrote 111 buffers (0.7%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.028 s, sync=0.005 s, total=0.035 s; sync files=60, longest=0.001 s, average=0.001 s; distance=17165 kB, estimate=17165 kB; lsn=0/30C3548, redo lsn=0/30C34D8
-2026-08-16 10:51:29.012 GMT [29908] LOG:  statement: select pg_catalog.pg_current_wal_lsn()::text
-2026-08-16 10:51:30.076 GMT [29991] LOG:  statement: UPDATE o_abort_snap SET v = v + 1 WHERE id = 1;
-2026-08-16 10:51:30.096 GMT [29998] LOG:  statement: INSERT INTO o_abort_snap SELECT g, 0 FROM generate_series(101, 50100) g;
-2026-08-16 10:51:30.330 GMT [30001] LOG:  statement: BEGIN
-2026-08-16 10:51:30.330 GMT [30001] LOG:  statement: SET TRANSACTION ISOLATION LEVEL read committed
-2026-08-16 10:51:30.330 GMT [30001] LOG:  statement: UPDATE o_abort_snap SET v = -1 WHERE id = 1;
-2026-08-16 10:51:30.333 GMT [30001] LOG:  statement: SELECT orioledb_get_current_oxid();
-2026-08-16 10:51:30.334 GMT [30001] LOG:  statement: SELECT pg_backend_pid();
-2026-08-16 10:51:30.334 GMT [30001] LOG:  statement: SET orioledb.enable_stopevents = on;
-2026-08-16 10:51:30.345 GMT [30003] LOG:  statement: SELECT pg_stopevent_set('before_abort_vxids_clear', '$.oxid == 54');
-2026-08-16 10:51:30.347 GMT [30001] LOG:  statement: ROLLBACK;
-2026-08-16 10:51:30.350 GMT [30004] LOG:  statement: SELECT EXISTS(
+2026-09-04 13:36:47.496 GMT [18849] LOG:  statement: CHECKPOINT;
+2026-09-04 13:36:47.496 GMT [18688] LOG:  checkpoint starting: immediate force wait
+2026-09-04 13:36:47.500 GMT [18688] LOG:  orioledb checkpoint 2 started
+2026-09-04 13:36:47.535 GMT [18688] LOG:  orioledb checkpoint 2 complete
+2026-09-04 13:36:47.541 GMT [18688] LOG:  checkpoint complete: wrote 113 buffers (0.7%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.039 s, sync=0.005 s, total=0.045 s; sync files=60, longest=0.001 s, average=0.001 s; distance=17182 kB, estimate=17182 kB; lsn=0/30C7AB0, redo lsn=0/30C7A40
+2026-09-04 13:36:47.547 GMT [18851] LOG:  statement: select pg_catalog.pg_current_wal_lsn()::text
+2026-09-04 13:36:47.621 GMT [18857] LOG:  statement: UPDATE o_abort_snap SET v = v + 1 WHERE id = 1;
+2026-09-04 13:36:47.651 GMT [18861] LOG:  statement: INSERT INTO o_abort_snap SELECT g, 0 FROM generate_series(101, 50100) g;
+2026-09-04 13:36:47.955 GMT [18869] LOG:  statement: BEGIN
+2026-09-04 13:36:47.955 GMT [18869] LOG:  statement: SET TRANSACTION ISOLATION LEVEL read committed
+2026-09-04 13:36:47.955 GMT [18869] LOG:  statement: UPDATE o_abort_snap SET v = -1 WHERE id = 1;
+2026-09-04 13:36:47.958 GMT [18869] LOG:  statement: SELECT orioledb_get_current_oxid();
+2026-09-04 13:36:47.959 GMT [18869] LOG:  statement: SELECT pg_backend_pid();
+2026-09-04 13:36:47.959 GMT [18869] LOG:  statement: SET orioledb.enable_stopevents = on;
+2026-09-04 13:36:47.983 GMT [18871] LOG:  statement: SELECT pg_stopevent_set('before_abort_vxids_clear', '$.oxid == 54');
+2026-09-04 13:36:47.985 GMT [18869] LOG:  statement: ROLLBACK;
+2026-09-04 13:36:47.993 GMT [18872] LOG:  statement: SELECT EXISTS(
 								 SELECT se.*
 								 FROM pg_stopevents() se
-								 WHERE se.waiter_pids @> ARRAY[30001]
+								 WHERE se.waiter_pids @> ARRAY[18869]
 							  );
-2026-08-16 10:51:30.362 GMT [30006] LOG:  statement: UPDATE o_abort_snap SET v = v + 1 WHERE id = 2;
-2026-08-16 10:51:30.376 GMT [30008] LOG:  statement: CHECKPOINT;
-2026-08-16 10:51:30.377 GMT [29686] LOG:  checkpoint starting: immediate force wait
-2026-08-16 10:51:30.378 GMT [29686] LOG:  orioledb checkpoint 3 started
-2026-08-16 10:51:30.391 GMT [29686] LOG:  orioledb checkpoint 3 complete
-2026-08-16 10:51:30.392 GMT [29686] LOG:  checkpoint complete: wrote 12 buffers (0.1%), wrote 0 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.014 s, sync=0.001 s, total=0.015 s; sync files=7, longest=0.001 s, average=0.001 s; distance=668 kB, estimate=15515 kB; lsn=0/316A848, redo lsn=0/316A7D8
-2026-08-16 10:51:30.405 GMT [30010] LOG:  statement: SELECT pg_stopevent_reset('before_abort_vxids_clear');
-2026-08-16 10:51:30.442 GMT [29689] LOG:  orioledb bgwriter 0 is shut down
-2026-08-16 10:51:30.547 GMT [30016] LOG:  registered custom resource manager "OrioleDB resource manager" with ID 129
-2026-08-16 10:51:30.574 GMT [30016] LOG:  starting PostgreSQL 18.4 on aarch64-apple-darwin25.6.0, compiled by Homebrew clang version 22.1.8, 64-bit
-2026-08-16 10:51:30.575 GMT [30016] LOG:  listening on IPv4 address "127.0.0.1", port 20108
-2026-08-16 10:51:30.576 GMT [30016] LOG:  listening on Unix socket "/tmp/.s.PGSQL.20108"
-2026-08-16 10:51:30.583 GMT [30025] LOG:  Cleanup of old files at startup. Checkpoint 3
-2026-08-16 10:51:30.585 GMT [30026] LOG:  orioledb background writer 0 started
-2026-08-16 10:51:30.588 GMT [30025] LOG:  database system was interrupted; last known up at 2026-08-16 10:51:30 GMT
-2026-08-16 10:51:30.846 GMT [30025] LOG:  database system was not properly shut down; automatic recovery in progress
-2026-08-16 10:51:30.847 GMT [30025] LOG:  orioledb recovery started.
-2026-08-16 10:51:30.849 GMT [30042] LOG:  orioledb recovery worker 1 started.
-2026-08-16 10:51:30.849 GMT [30043] LOG:  orioledb recovery worker 0 started.
-2026-08-16 10:51:30.850 GMT [30044] LOG:  orioledb recovery worker 3 started.
-2026-08-16 10:51:30.851 GMT [30045] LOG:  orioledb recovery worker 2 started.
-2026-08-16 10:51:30.851 GMT [30025] LOG:  redo starts at 0/316A7D8
-2026-08-16 10:51:30.851 GMT [30025] LOG:  invalid record length at 0/316A8C0: expected at least 24, got 0
-2026-08-16 10:51:30.851 GMT [30045] LOG:  orioledb recovery worker 2 finished.
-2026-08-16 10:51:30.851 GMT [30045] LOG:  recovery on exit: 2
-2026-08-16 10:51:30.852 GMT [30042] LOG:  orioledb recovery worker 1 finished.
-2026-08-16 10:51:30.852 GMT [30043] LOG:  orioledb recovery worker 0 finished.
-2026-08-16 10:51:30.852 GMT [30042] LOG:  recovery on exit: 1
-2026-08-16 10:51:30.852 GMT [30043] LOG:  recovery on exit: 0
-2026-08-16 10:51:30.853 GMT [30046] LOG:  orioledb recovery worker 5 started.
-2026-08-16 10:51:30.853 GMT [30047] LOG:  orioledb recovery worker 4 started.
-2026-08-16 10:51:30.853 GMT [30047] LOG:  orioledb recovery worker 4 finished.
-2026-08-16 10:51:30.853 GMT [30047] LOG:  recovery on exit: 4
-2026-08-16 10:51:30.854 GMT [30046] LOG:  orioledb recovery worker 5 finished.
-2026-08-16 10:51:30.854 GMT [30046] LOG:  recovery on exit: 5
-2026-08-16 10:51:30.854 GMT [30044] LOG:  orioledb recovery worker 3 finished.
-2026-08-16 10:51:30.854 GMT [30044] LOG:  recovery on exit: 3
-2026-08-16 10:51:30.855 GMT [30025] LOG:  orioledb recovery finished.
-2026-08-16 10:51:30.855 GMT [30025] LOG:  redo done at 0/316A848 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.00 s
-2026-08-16 10:51:30.857 GMT [30023] LOG:  checkpoint starting: end-of-recovery immediate wait
-2026-08-16 10:51:30.859 GMT [30023] LOG:  orioledb checkpoint 4 started
-2026-08-16 10:51:30.869 GMT [30023] LOG:  orioledb checkpoint 4 complete
-2026-08-16 10:51:30.869 GMT [30023] LOG:  checkpoint complete: wrote 0 buffers (0.0%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.012 s, sync=0.001 s, total=0.013 s; sync files=2, longest=0.001 s, average=0.001 s; distance=0 kB, estimate=0 kB; lsn=0/316A8C0, redo lsn=0/316A8C0
-2026-08-16 10:51:30.869 GMT [30025] LOG:  orioledb: emitting WAL_REC_ROLLBACK for in-flight oxid 54 aborted by recovery_finish
-2026-08-16 10:51:30.870 GMT [30016] LOG:  database system is ready to accept connections
-2026-08-16 10:51:30.962 GMT [30065] LOG:  statement: UPDATE o_abort_snap SET v = v + 1 WHERE id = 3;
-2026-08-16 10:51:30.969 GMT [30066] LOG:  statement: SELECT pg_current_wal_lsn();
-2026-08-16 10:51:32.047 GMT [30151] LOG:  statement: SELECT pg_stopevent_reset('before_abort_vxids_clear');
+2026-09-04 13:36:48.032 GMT [18874] LOG:  statement: UPDATE o_abort_snap SET v = v + 1 WHERE id = 2;
+2026-09-04 13:36:48.080 GMT [18876] LOG:  statement: CHECKPOINT;
+2026-09-04 13:36:48.086 GMT [18688] LOG:  checkpoint starting: immediate force wait
+2026-09-04 13:36:48.089 GMT [18688] LOG:  orioledb checkpoint 3 started
+2026-09-04 13:36:48.121 GMT [18688] LOG:  orioledb checkpoint 3 complete
+2026-09-04 13:36:48.122 GMT [18688] LOG:  checkpoint complete: wrote 12 buffers (0.1%), wrote 0 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.034 s, sync=0.001 s, total=0.036 s; sync files=7, longest=0.001 s, average=0.001 s; distance=668 kB, estimate=15531 kB; lsn=0/316EDB0, redo lsn=0/316ED40
+2026-09-04 13:36:48.150 GMT [18882] LOG:  statement: SELECT pg_stopevent_reset('before_abort_vxids_clear');
+2026-09-04 13:36:48.265 GMT [18691] LOG:  orioledb bgwriter 0 is shut down
+2026-09-04 13:36:48.465 GMT [18895] LOG:  registered custom resource manager "OrioleDB resource manager" with ID 129
+2026-09-04 13:36:48.501 GMT [18895] LOG:  starting PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by Homebrew clang version 22.1.8, 64-bit
+2026-09-04 13:36:48.503 GMT [18895] LOG:  listening on IPv4 address "127.0.0.1", port 20122
+2026-09-04 13:36:48.504 GMT [18895] LOG:  listening on Unix socket "/tmp/.s.PGSQL.20122"
+2026-09-04 13:36:48.521 GMT [18906] LOG:  Cleanup of old files at startup. Checkpoint 3
+2026-09-04 13:36:48.523 GMT [18907] LOG:  orioledb background writer 0 started
+2026-09-04 13:36:48.535 GMT [18906] LOG:  database system was interrupted; last known up at 2026-09-04 13:36:48 GMT
+2026-09-04 13:36:48.794 GMT [18906] LOG:  database system was not properly shut down; automatic recovery in progress
+2026-09-04 13:36:48.799 GMT [18906] LOG:  orioledb recovery started.
+2026-09-04 13:36:48.805 GMT [18917] LOG:  orioledb recovery worker 0 started.
+2026-09-04 13:36:48.805 GMT [18916] LOG:  orioledb recovery worker 1 started.
+2026-09-04 13:36:48.808 GMT [18918] LOG:  orioledb recovery worker 3 started.
+2026-09-04 13:36:48.810 GMT [18919] LOG:  orioledb recovery worker 2 started.
+2026-09-04 13:36:48.810 GMT [18906] LOG:  redo starts at 0/316ED40
+2026-09-04 13:36:48.810 GMT [18906] LOG:  invalid magic number 0000 in WAL segment 000000010000000000000003, LSN 0/3170000, offset 1507328
+2026-09-04 13:36:48.811 GMT [18917] LOG:  orioledb recovery worker 0 finished.
+2026-09-04 13:36:48.811 GMT [18919] LOG:  orioledb recovery worker 2 finished.
+2026-09-04 13:36:48.811 GMT [18919] LOG:  recovery on exit: 2
+2026-09-04 13:36:48.811 GMT [18917] LOG:  recovery on exit: 0
+2026-09-04 13:36:48.813 GMT [18920] LOG:  orioledb recovery worker 5 started.
+2026-09-04 13:36:48.814 GMT [18916] LOG:  orioledb recovery worker 1 finished.
+2026-09-04 13:36:48.814 GMT [18916] LOG:  recovery on exit: 1
+2026-09-04 13:36:48.814 GMT [18922] LOG:  orioledb recovery worker 4 started.
+2026-09-04 13:36:48.814 GMT [18922] LOG:  orioledb recovery worker 4 finished.
+2026-09-04 13:36:48.814 GMT [18922] LOG:  recovery on exit: 4
+2026-09-04 13:36:48.814 GMT [18920] LOG:  orioledb recovery worker 5 finished.
+2026-09-04 13:36:48.814 GMT [18920] LOG:  recovery on exit: 5
+2026-09-04 13:36:48.817 GMT [18918] LOG:  orioledb recovery worker 3 finished.
+2026-09-04 13:36:48.817 GMT [18918] LOG:  recovery on exit: 3
+2026-09-04 13:36:48.819 GMT [18906] LOG:  orioledb recovery finished.
+2026-09-04 13:36:48.819 GMT [18906] LOG:  redo done at 0/316EDB0 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.01 s
+2026-09-04 13:36:48.822 GMT [18904] LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-09-04 13:36:48.827 GMT [18904] LOG:  orioledb checkpoint 4 started
+2026-09-04 13:36:48.861 GMT [18904] LOG:  orioledb checkpoint 4 complete
+2026-09-04 13:36:48.862 GMT [18904] LOG:  checkpoint complete: wrote 0 buffers (0.0%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.038 s, sync=0.001 s, total=0.041 s; sync files=2, longest=0.001 s, average=0.001 s; distance=4 kB, estimate=4 kB; lsn=0/3170048, redo lsn=0/3170048
+2026-09-04 13:36:48.862 GMT [18906] LOG:  orioledb: emitting WAL_REC_ROLLBACK for in-flight oxid 54 aborted by recovery_finish
+2026-09-04 13:36:48.867 GMT [18895] LOG:  database system is ready to accept connections
+2026-09-04 13:36:48.967 GMT [18935] LOG:  statement: UPDATE o_abort_snap SET v = v + 1 WHERE id = 3;
+2026-09-04 13:36:48.986 GMT [18938] LOG:  statement: SELECT pg_current_wal_lsn();
+2026-09-04 13:36:50.707 GMT [19025] LOG:  statement: SELECT pg_stopevent_reset('before_abort_vxids_clear');
