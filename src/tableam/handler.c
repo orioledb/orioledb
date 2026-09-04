@@ -2058,6 +2058,7 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 	BlockSamplerData bs;
 	BlockNumber totalblocks;
 	ItemPointerData fake_iptr = {0};
+	bool		releasedUndoRetain;
 
 	/*
 	 * Sampling reads raw, latest tuples (stored below with
@@ -2087,7 +2088,9 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 	 * The system log stays retained either way: catalog access still goes
 	 * through the snapshot.
 	 */
-	if (AmAutoVacuumWorkerProcess() && XactIsoLevel == XACT_READ_COMMITTED)
+	releasedUndoRetain = (AmAutoVacuumWorkerProcess() &&
+						  XactIsoLevel == XACT_READ_COMMITTED);
+	if (releasedUndoRetain)
 	{
 		clear_my_snapshot_retain_location(UndoLogRegular);
 		clear_my_snapshot_retain_location(UndoLogRegularPageLevel);
@@ -2172,6 +2175,26 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 										   &scanEnd, NULL);
 	}
 	free_btree_seq_scan(scan);
+
+	/*
+	 * Take the retain locations back now that the long part is over.  Only
+	 * the sampling scan itself is safe without them -- it reads the live page
+	 * and never walks a chain -- while the rest of this transaction is not,
+	 * and a reader that arrives after us would otherwise find its undo
+	 * recycled:
+	 *
+	 * PANIC: undo_read(): undo record was cleaned concurrently with the read:
+	 * undoType=1 ... transactionUndoRetainLocation=<invalid>
+	 *
+	 * Re-registering here is at the current location, so it does not (and
+	 * need not) resurrect anything the scan gave up: what it protects is
+	 * everything read from this point on.
+	 */
+	if (releasedUndoRetain)
+	{
+		set_my_snapshot_retain_location(UndoLogRegular);
+		set_my_snapshot_retain_location(UndoLogRegularPageLevel);
+	}
 
 
 	/*
