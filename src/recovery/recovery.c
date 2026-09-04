@@ -3292,7 +3292,7 @@ worker_wait_shutdown(RecoveryWorkerState *worker)
 
 	while (true)
 	{
-		O_CHECK_FOR_INTERRUPTS();
+		o_worker_handle_interrupts();
 
 		status = GetBackgroundWorkerPid(worker->handle, &not_used);
 
@@ -4652,7 +4652,7 @@ delay_if_queued_for_idxbuild(void)
 		HASH_SEQ_STATUS hash_seq;
 		RecoveryIdxBuildQueueState *cur;
 
-		O_CHECK_FOR_INTERRUPTS();
+		o_worker_handle_interrupts();
 
 		/* Remove hash entries for completed indexes */
 		hash_seq_init(&hash_seq, idxbuild_oids_hash);
@@ -4689,7 +4689,7 @@ delay_rels_queued_for_idxbuild(ORelOids oids)
 	 */
 	while (true)
 	{
-		O_CHECK_FOR_INTERRUPTS();
+		o_worker_handle_interrupts();
 
 		hash_elem = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
 															   &oids,
@@ -5022,7 +5022,7 @@ workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 			BgwHandleStatus status;
 			pid_t		pid;
 
-			O_CHECK_FOR_INTERRUPTS();
+			o_worker_handle_interrupts();
 
 			pg_usleep(10);
 
