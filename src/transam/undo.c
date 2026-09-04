@@ -1668,6 +1668,14 @@ read_undo_range_if_exists(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
  * reserve_undo_size_extended, or set_my_reserved_location waiters) make
  * progress instead of stalling for the whole flush.
  */
+/*
+ * Upper bound on how much one eviction writes while holding undoWriteLock
+ * exclusively.  Without it the "write at least 5% of the ring" floor grows
+ * with undo_buffers and so does the stall it imposes on every backend that
+ * needs undo space.
+ */
+#define UNDO_EVICT_MAX_CHUNK ((UndoLocation) 16 * 1024 * 1024)
+
 #define UNDO_FLUSH_BATCH_PAGES 128
 static void
 flush_dirty_undo_range(UndoLogType undoType,
@@ -1827,6 +1835,40 @@ flush_dirty_undo_range(UndoLogType undoType,
 		}
 
 		LWLockRelease(&meta->undoWriteLock);
+
+		/*
+		 * Persisting the pages is not enough when the ring itself is running
+		 * out: the slots stay occupied because writtenLocation does not move,
+		 * so producers still block.  Once free space drops to what makes a
+		 * backend evict, turn this pass into a drain of what we have just
+		 * made durable.
+		 *
+		 * Hand the range to evict_undo_to_disk() rather than advancing
+		 * writtenLocation here.  Moving that frontier requires the
+		 * writeInProgressLocation handshake -- publish the target, let
+		 * in-place writers see it, wait out reserved locations -- and doing
+		 * it correctly is exactly what that function is.  It also rewrites
+		 * the pages we flushed through the o_buffers cache (their dirty bit
+		 * is clear now, so they take the write_undo_range_clean path), which
+		 * matters: the flush above deliberately bypasses that cache, and once
+		 * reads start answering from disk a stale cached page must not be
+		 * left behind.
+		 */
+		if (undo_free_space(meta, circularBufferSize) <
+			circularBufferSize / UNDO_FREE_FRACTION_BACKEND)
+		{
+			/*
+			 * Re-read the reserved frontier instead of reusing the one the
+			 * caller sampled: evictions since then may have pushed
+			 * writtenLocation past that older value, and evict_undo_to_disk()
+			 * clamps its target to what we pass, which would then land below
+			 * writtenLocation and trip its writeInProgressLocation assert.
+			 */
+			UndoLocation reservedNow = pg_atomic_read_u64(&meta->minProcReservedLocation);
+
+			evict_undo_to_disk(undoType, Min(pageLoc, reservedNow),
+							   reservedNow, true);
+		}
 	}
 }
 
@@ -1885,10 +1927,18 @@ evict_undo_to_disk(UndoLogType undoType,
 		return;
 	}
 
-	/* Try to write 5% of the whole undo size if possible */
+	/*
+	 * Write a decent chunk at a time rather than exactly what was asked for,
+	 * but do not let that minimum scale with the ring: at undo_buffers = 1GB
+	 * a flat 5% is 50MB written under the exclusive lock, and every backend
+	 * that needs undo space waits it out.  Cap it so the worst-case hold
+	 * stays bounded however large the buffer is configured.
+	 */
 	writtenLocation = pg_atomic_read_u64(&meta->writtenLocation);
 	retainUndoLocation = Max(retainUndoLocation, writtenLocation);
-	targetUndoLocation = Max(targetUndoLocation, writtenLocation + circularBufferSize / 20);
+	targetUndoLocation = Max(targetUndoLocation,
+							 writtenLocation + Min(circularBufferSize / 20,
+												   UNDO_EVICT_MAX_CHUNK));
 	targetUndoLocation = Min(targetUndoLocation, minProcReservedLocation);
 
 	Assert(targetUndoLocation >= pg_atomic_read_u64(&meta->writeInProgressLocation));
@@ -1981,21 +2031,22 @@ try_evict_undo_opportunistically(UndoLogType undoType)
 {
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
 	Size		circularBufferSize = o_undo_circular_sizes[(int) undoType];
-	UndoLocation writeInProgressLocation,
-				lastUsedLocation,
+	UndoLocation lastUsedLocation,
 				minProcReservedLocation,
 				targetLocation;
 
-	writeInProgressLocation = pg_atomic_read_u64(&meta->writeInProgressLocation);
-	lastUsedLocation = pg_atomic_read_u64(&meta->lastUsedLocation);
-
-	/* Still more than 5% of the circular buffer free: leave it alone. */
-	if (writeInProgressLocation + circularBufferSize >=
-		lastUsedLocation + circularBufferSize / 20)
+	/*
+	 * The bgwriter drains towards a tenth of the ring free; a backend only
+	 * steps in once even half of that is gone, so in a healthy system this
+	 * costs nothing and the background drain does the work.
+	 */
+	if (undo_free_space(meta, circularBufferSize) >=
+		circularBufferSize / UNDO_FREE_FRACTION_BACKEND)
 		return;
 
-	/* Same target as the bgwriter: keep 5% of the buffer ahead of us. */
-	targetLocation = lastUsedLocation - (19 * circularBufferSize) / 20;
+	lastUsedLocation = pg_atomic_read_u64(&meta->lastUsedLocation);
+	targetLocation = undo_evict_target(lastUsedLocation, circularBufferSize,
+									   UNDO_FREE_FRACTION_BACKEND);
 	minProcReservedLocation = pg_atomic_read_u64(&meta->minProcReservedLocation);
 
 	if (targetLocation < minProcReservedLocation)
@@ -2120,6 +2171,28 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		SpinLockRelease(&meta->minUndoLocationsMutex);
 #endif
 		return true;
+	}
+
+	/*
+	 * Try to make the room without queueing for the exclusive lock first.  If
+	 * somebody else is already writing, waiting for that write to land is
+	 * both cheaper and more likely to be enough than adding one more
+	 * exclusive acquisition behind it.
+	 */
+	evict_undo_to_disk(undoType, location + size - circularBufferSize,
+					   minProcReservedLocation, true);
+	if (location + size <=
+		pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize)
+		return true;
+
+	if (location + size <=
+		pg_atomic_read_u64(&meta->writeInProgressLocation) + circularBufferSize)
+	{
+		if (LWLockAcquireOrWait(&meta->undoWriteLock, LW_SHARED))
+			LWLockRelease(&meta->undoWriteLock);
+		if (location + size <=
+			pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize)
+			return true;
 	}
 
 	evict_undo_to_disk(undoType, location + size - circularBufferSize,
@@ -3569,7 +3642,18 @@ orioledb_snapshot_hook(Snapshot snapshot)
 		lastUsedLocation = pg_atomic_read_u64(&meta->lastUsedLocation);
 		lastUsedUndoLocationWhenUpdatedMinLocation = pg_atomic_read_u64(&meta->lastUsedUndoLocationWhenUpdatedMinLocation);
 		if (lastUsedLocation - lastUsedUndoLocationWhenUpdatedMinLocation > o_undo_circular_sizes[(int) undoType] / 10)
-			update_min_undo_locations(undoType, false, true);
+		{
+			/*
+			 * Every backend taking a snapshot arrives here at once, and each
+			 * one would then contend for minUndoLocationsMutex to compute the
+			 * same answer.  An odd changecount means somebody is already
+			 * doing the scan, so skip it -- this is only a hint, and the next
+			 * snapshot re-checks.
+			 */
+			pg_read_barrier();
+			if ((meta->minUndoLocationsChangeCount & 1) == 0)
+				update_min_undo_locations(undoType, false, true);
+		}
 	}
 
 

@@ -130,7 +130,6 @@ bgwriter_main(Datum main_arg)
 		{
 			OPagePoolType poolType;
 			UndoLocation lastUsedLocation;
-			UndoLocation writeInProgressLocation;
 			int			j;
 
 			if (ShutdownRequestPending)
@@ -186,13 +185,21 @@ bgwriter_main(Datum main_arg)
 			{
 				UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) j);
 
-				writeInProgressLocation = pg_atomic_read_u64(&undo_meta->writeInProgressLocation);
+				/*
+				 * Drain towards a tenth of the ring free, which is twice the
+				 * headroom a backend settles for.  Starting here means the
+				 * writing happens in the background rather than inside some
+				 * backend's reservation, where it would stall a transaction.
+				 */
 				lastUsedLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
-				if (writeInProgressLocation + undo_circular_buffer_size <
-					lastUsedLocation + undo_circular_buffer_size / 20)
+				if (undo_free_space(undo_meta, undo_circular_buffer_size) <
+					undo_circular_buffer_size / UNDO_FREE_FRACTION_BGWRITER)
 				{
 					UndoLocation minProcReservedLocation = pg_atomic_read_u64(&undo_meta->minProcReservedLocation);
-					UndoLocation targetLocation = lastUsedLocation - (19 * undo_circular_buffer_size) / 20;
+					UndoLocation targetLocation =
+						undo_evict_target(lastUsedLocation,
+										  undo_circular_buffer_size,
+										  UNDO_FREE_FRACTION_BGWRITER);
 
 					if (targetLocation < minProcReservedLocation)
 						evict_undo_to_disk((UndoLogType) j, targetLocation,

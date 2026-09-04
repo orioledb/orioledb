@@ -370,6 +370,48 @@ extern PendingTruncatesMeta *pending_truncates_meta;
 										AssertMacro((int) (undoType) >= 0 && (int) (undoType) < (int) UndoLogsCount), \
 										&oProcData[MYPROCNUMBER].undoStackLocations[oProcData[MYPROCNUMBER].autonomousNestingLevel][(int) (undoType)])
 
+/*
+ * How much of the circular buffer each actor tries to keep free.
+ *
+ * The bgwriter aims higher than backends on purpose.  It should start
+ * draining while there is still room, so that a backend -- which can only
+ * evict from inside reserve_undo_size_extended(), where the write sits on the
+ * critical path of a running transaction -- normally finds the space already
+ * made for it.  Backends only pitch in once the ring is genuinely tight.
+ */
+#define UNDO_FREE_FRACTION_BGWRITER 10	/* bgwriter keeps 1/10 free */
+#define UNDO_FREE_FRACTION_BACKEND	20	/* backends step in below 1/20 */
+
+/*
+ * Bytes of the circular buffer that undo may still be written into without
+ * waiting for a drain.
+ */
+static inline UndoLocation
+undo_free_space(UndoMeta *meta, Size circularBufferSize)
+{
+	UndoLocation writeInProgressLocation = pg_atomic_read_u64(&meta->writeInProgressLocation);
+	UndoLocation lastUsedLocation = pg_atomic_read_u64(&meta->lastUsedLocation);
+
+	if (writeInProgressLocation + circularBufferSize <= lastUsedLocation)
+		return 0;
+	return writeInProgressLocation + circularBufferSize - lastUsedLocation;
+}
+
+/*
+ * The drain frontier that would leave 1/fraction of the ring free, given the
+ * undo produced so far.
+ */
+static inline UndoLocation
+undo_evict_target(UndoLocation lastUsedLocation, Size circularBufferSize,
+				  int fraction)
+{
+	Size		keepFree = circularBufferSize / fraction;
+
+	if (lastUsedLocation + keepFree <= circularBufferSize)
+		return 0;
+	return lastUsedLocation + keepFree - circularBufferSize;
+}
+
 extern Size undo_shmem_needs(void);
 extern void undo_shmem_init(Pointer buf, bool found);
 extern UndoMeta *get_undo_meta_by_type(UndoLogType undoType);
