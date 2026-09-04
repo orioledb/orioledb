@@ -7,6 +7,7 @@ import testgres
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 
+from testgres.connection import DatabaseError
 from testgres.enums import NodeStatus
 
 
@@ -18,6 +19,35 @@ class OTablesTest(BaseTest):
 		    self.node.execute(
 		        'postgres',
 		        'SELECT count(*) FROM orioledb_table_oids();')[0][0])
+
+	def test_reject_unterminated_predicate(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_test (
+				key integer PRIMARY KEY,
+				value text
+			) USING orioledb;
+		""")
+
+		con = node.connect(autocommit=True)
+		try:
+			con.execute('SET orioledb.enable_stopevents = true;')
+			con.execute("SELECT pg_stopevent_set("
+			            "'corrupt_o_tables_predicate', 'true');")
+			with self.assertRaises(DatabaseError) as e:
+				con.execute("CREATE INDEX o_test_partial ON o_test (value) "
+				            "WHERE key > 10;")
+			self.assertIn('failed to deserialize OTable', str(e.exception))
+			self.assertEqual(con.execute('SELECT 1;')[0][0], 1)
+		finally:
+			node.execute("SELECT pg_stopevent_reset("
+			             "'corrupt_o_tables_predicate');")
+			con.close()
+
+		node.stop()
 
 	def test_o_tables_wal_commit(self):
 		node = self.node

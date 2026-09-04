@@ -2281,6 +2281,12 @@ serialize_o_table_index(OTableIndex *o_table_index, StringInfo str)
 	 * always be there to keep the stream aligned.
 	 */
 	o_serialize_string(o_table_index->predicate_str, str);
+#ifdef IS_DEV
+	/* Inject malformed persisted metadata for deserialization tests. */
+	if (o_table_index->predicate_str != NULL &&
+		STOPEVENT_CONDITION(STOPEVENT_CORRUPT_O_TABLES_PREDICATE, NULL))
+		str->data[str->len - 1] = 'x';
+#endif
 	o_serialize_node((Node *) o_table_index->expressions, str);
 	appendBinaryStringInfo(str, (Pointer) &o_table_index->oids.spcoid, sizeof(Oid));
 	if (o_table_index->type == oIndexExclusion)
