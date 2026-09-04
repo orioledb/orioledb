@@ -1275,6 +1275,51 @@ store_read_page_checkpoint_stats(uint32 checkpointNum)
 	elog(DEBUG1, "Remember read_page_checkpoin: min %u max %u", min_read_page_checkpoint, max_read_page_checkpoint);
 }
 
+/*
+ * Free the meta page of a relation's primary index, simulating what
+ * evict_btree does when it frees the root and meta pages.  Data pages
+ * remain alive so walk_page_check_locked passes, exercising the
+ * meta_change_count check in write_page.
+ */
+PG_FUNCTION_INFO_V1(orioledb_test_free_meta_page);
+
+Datum
+orioledb_test_free_meta_page(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	OTableDescr *descr;
+	BTreeDescr *td;
+	Relation	rel;
+	OInMemoryBlkno metaBlkno;
+
+	orioledb_check_shmem();
+
+	rel = relation_open(relid, AccessShareLock);
+	descr = relation_get_descr(rel);
+	td = &descr->indices[0]->desc;
+
+	o_btree_load_shmem(td);
+	metaBlkno = td->rootInfo.metaPageBlkno;
+	if (OInMemoryBlknoIsValid(metaBlkno))
+	{
+		CLEAN_DIRTY(td->ppool, metaBlkno);
+		ppool_free_page(td->ppool, metaBlkno, false);
+
+		/*
+		 * Wipe everything after the page header to simulate page reuse. The
+		 * header (incl. change count) must survive so that the
+		 * meta_change_count check in write_page sees the ppool_free_page
+		 * increment; the seq_buf fields that perform_page_io dereferences
+		 * become garbage.
+		 */
+		memset(O_GET_IN_MEMORY_PAGE(metaBlkno) + O_PAGE_HEADER_SIZE,
+			   0, ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE);
+	}
+
+	relation_close(rel, AccessShareLock);
+	PG_RETURN_VOID();
+}
+
 #endif
 
 /*
@@ -3248,6 +3293,8 @@ retry:
 	if (OMetaPageIsValid(desc))
 		meta_change_count = O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(
 															  desc->rootInfo.metaPageBlkno);
+
+	STOPEVENT(STOPEVENT_WALK_PAGE_BEFORE_LOCK, NULL);
 
 	if (!try_lock_page(blkno))
 		return OWalkPageSkipped;
