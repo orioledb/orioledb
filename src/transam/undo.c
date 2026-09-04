@@ -561,6 +561,32 @@ get_undo_type_name(UndoLogType undoType)
 }
 
 /*
+ * Parameters for the undo_write_* stop events: which undo log we are in.
+ */
+static Jsonb *
+undo_write_stopevent_params(UndoLogType undoType)
+{
+	JsonbParseState *state = NULL;
+	JsonbValue	key,
+				val,
+			   *res;
+	MemoryContext oldcxt = MemoryContextSwitchTo(stopevents_cxt);
+
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	key.type = jbvString;
+	key.val.string.len = strlen("undoType");
+	key.val.string.val = "undoType";
+	pushJsonbValue(&state, WJB_KEY, &key);
+	val.type = jbvNumeric;
+	val.val.numeric = DatumGetNumeric(DirectFunctionCall1(int8_numeric,
+														  Int64GetDatum((int64) undoType)));
+	pushJsonbValue(&state, WJB_VALUE, &val);
+	res = pushJsonbValue(&state, WJB_END_OBJECT, NULL);
+	MemoryContextSwitchTo(oldcxt);
+	return JsonbValueToJsonb(res);
+}
+
+/*
  * In case of undoEviction the function increments writeInProgressChangeCount,
  * but doesn't release minUndoLocationsMutex. Releasing this mutex should be
  * done by a caller.
@@ -652,6 +678,31 @@ update_min_undo_locations(UndoLogType undoType,
 							minRetainLocation);
 	minTransactionRetainLocation = Max(pg_atomic_read_u64(&meta->minProcTransactionRetainLocation),
 									   minTransactionRetainLocation);
+
+	/*
+	 * minProcReservedLocation is not monotonic the way the two above are, so
+	 * it must not be clamped against its own previous value: a reservation is
+	 * taken at the current frontier, which sits far below what this minimum
+	 * reads when nobody holds one, and hiding such a live reservation would
+	 * let eviction recycle the slot its owner is about to write into.
+	 *
+	 * Clamp it to the drain frontier instead.  undo_write_internal() computes
+	 * its reservation from the writeInProgressLocation it read a moment
+	 * earlier, publishes it, and only then re-checks that frontier and
+	 * retries if it has moved; a scan landing in that window would otherwise
+	 * publish a location the frontier has already passed.
+	 * evict_undo_to_disk() clamps its target to this value, so that would
+	 * drag writeInProgressLocation and then writtenLocation *down*, and a
+	 * backend that had already concluded from the higher frontier that its
+	 * undo was on disk trips the assert in reserve_undo_size_extended().
+	 *
+	 * A live reservation can never be below the frontier -- eviction may not
+	 * pass one -- so only the stale kind is dropped here, and its owner takes
+	 * the retry path anyway.
+	 */
+	minReservedLocation = Max(pg_atomic_read_u64(&meta->writeInProgressLocation),
+							  minReservedLocation);
+
 
 	pg_atomic_write_u64(&meta->minProcReservedLocation, minReservedLocation);
 	pg_atomic_write_u64(&meta->minProcRetainLocation, minRetainLocation);
@@ -3500,7 +3551,28 @@ undo_write_internal(UndoLogType undoType, UndoLocation location,
 		/* Reserve the location we're going to write into */
 		memoryUndoLocation = Max(location, writeInProgressLocation);
 		Assert(pg_atomic_read_u64(&sharedLocations->reservedUndoLocation) == InvalidUndoLocation);
+
+		/*
+		 * memoryUndoLocation was computed from the writeInProgressLocation
+		 * read just above, and nothing is published yet, so the frontier is
+		 * free to move on while a test holds us here -- which is what makes
+		 * the value we are about to publish stale.
+		 */
+		if (STOPEVENTS_ENABLED())
+			STOPEVENT(STOPEVENT_UNDO_WRITE_BEFORE_RESERVE,
+					  undo_write_stopevent_params(undoType));
+
 		pg_atomic_write_u64(&sharedLocations->reservedUndoLocation, memoryUndoLocation);
+
+		/*
+		 * The reservation is visible to update_min_undo_locations() from here
+		 * on, but this process has not re-checked the frontier yet.  A scan
+		 * landing in this window takes minProcReservedLocation from a
+		 * location the frontier may already have passed.
+		 */
+		if (STOPEVENTS_ENABLED())
+			STOPEVENT(STOPEVENT_UNDO_WRITE_AFTER_RESERVE,
+					  undo_write_stopevent_params(undoType));
 
 		pg_memory_barrier();
 

@@ -43,3 +43,5 @@ createdb_copy_fail
 cic_after_ambuild
 cic_before_flip
 merge_after_target_unlock
+undo_write_before_reserve
+undo_write_after_reserve
