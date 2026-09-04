@@ -19,6 +19,22 @@ class OTablesTest(BaseTest):
 		        'postgres',
 		        'SELECT count(*) FROM orioledb_table_oids();')[0][0])
 
+	def test_reject_unterminated_serialized_string(self):
+		node = self.node
+		node.start()
+		node.safe_psql('postgres', 'CREATE EXTENSION orioledb;')
+
+		self.assertEqual(
+		    node.execute(
+		        'postgres', """
+				SELECT orioledb_test_deserialize_string(
+						convert_to('terminated', 'UTF8') || decode('00', 'hex')),
+					   orioledb_test_deserialize_string(
+						convert_to('unterminated', 'UTF8'));
+			"""), [(True, False)])
+
+		node.stop()
+
 	def test_o_tables_wal_commit(self):
 		node = self.node
 		node.start()

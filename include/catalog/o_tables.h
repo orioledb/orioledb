@@ -162,6 +162,21 @@ typedef struct
 #define O_DESERIALIZE_RETRY_MIN_DURATION (1000L)
 #define O_DESERIALIZE_RETRY_MAX_DURATION (100000L)
 
+static inline long
+o_deserialize_retry_delay(int retry)
+{
+	long		delay = O_DESERIALIZE_RETRY_MIN_DURATION;
+
+	while (retry-- > 0 && delay < O_DESERIALIZE_RETRY_MAX_DURATION)
+	{
+		if (delay > O_DESERIALIZE_RETRY_MAX_DURATION / 2)
+			return O_DESERIALIZE_RETRY_MAX_DURATION;
+		delay *= 2;
+	}
+
+	return delay;
+}
+
 extern void o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 							   Relation index_rel);
 extern bool o_table_refresh_index_exprs(OTable *o_table, OIndexNumber ix_num,

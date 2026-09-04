@@ -794,25 +794,63 @@ bool
 o_deserialize_string_safe(Pointer *ptr, Pointer data, Size length, char **out)
 {
 	size_t		str_len;
+	Pointer		next = *ptr;
+	Size		used = (Size) (next - data);
 
-	if ((*ptr - data) + (int) sizeof(size_t) > length)
+	if (used > length || sizeof(size_t) > length - used)
 		return false;
-	memcpy(&str_len, *ptr, sizeof(size_t));
-	*ptr += sizeof(size_t);
+	memcpy(&str_len, next, sizeof(size_t));
+	next += sizeof(size_t);
 
 	if (str_len != 0)
 	{
-		if ((*ptr - data) + (Size) str_len > length)
+		used = (Size) (next - data);
+		if (used > length || str_len > length - used ||
+			((char *) next)[str_len - 1] != '\0')
 			return false;
 		*out = (char *) palloc(str_len);
-		memcpy(*out, *ptr, str_len);
-		*ptr += str_len;
+		memcpy(*out, next, str_len);
+		next += str_len;
 	}
 	else
 		*out = NULL;
 
+	*ptr = next;
 	return true;
 }
+
+#ifdef IS_DEV
+PG_FUNCTION_INFO_V1(orioledb_test_deserialize_string);
+
+/*
+ * Test-only wrapper for o_deserialize_string_safe().  The bytea contains the
+ * string payload; add its native length prefix but no implicit terminator.
+ */
+Datum
+orioledb_test_deserialize_string(PG_FUNCTION_ARGS)
+{
+	bytea	   *value = PG_GETARG_BYTEA_PP(0);
+	size_t		str_len = VARSIZE_ANY_EXHDR(value);
+	StringInfoData serialized;
+	Pointer		ptr;
+	char	   *out = NULL;
+	bool		valid;
+
+	initStringInfo(&serialized);
+	appendBinaryStringInfo(&serialized, (Pointer) &str_len, sizeof(str_len));
+	appendBinaryStringInfo(&serialized, VARDATA_ANY(value), str_len);
+	ptr = serialized.data;
+	valid = o_deserialize_string_safe(&ptr, serialized.data,
+									  serialized.len, &out);
+
+	if (out != NULL)
+		pfree(out);
+	pfree(serialized.data);
+	PG_FREE_IF_COPY(value, 0);
+
+	PG_RETURN_BOOL(valid);
+}
+#endif							/* IS_DEV */
 
 /*
  * Set while deserializing an OTable/OIndex whose persisted node trees were
@@ -1856,7 +1894,7 @@ o_indices_get_extended(ORelOids oids, OIndexType type,
 							oids.datoid, oids.reloid, oids.relnode,
 							type, retry + 1)));
 
-		pg_usleep(Min(O_DESERIALIZE_RETRY_MIN_DURATION << retry, O_DESERIALIZE_RETRY_MAX_DURATION));
+		pg_usleep(o_deserialize_retry_delay(retry));
 	}
 }
 
