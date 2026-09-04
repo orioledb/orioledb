@@ -794,23 +794,28 @@ bool
 o_deserialize_string_safe(Pointer *ptr, Pointer data, Size length, char **out)
 {
 	size_t		str_len;
+	Pointer		next = *ptr;
+	Size		used = (Size) (next - data);
 
-	if ((*ptr - data) + (int) sizeof(size_t) > length)
+	if (used > length || sizeof(size_t) > length - used)
 		return false;
-	memcpy(&str_len, *ptr, sizeof(size_t));
-	*ptr += sizeof(size_t);
+	memcpy(&str_len, next, sizeof(size_t));
+	next += sizeof(size_t);
 
 	if (str_len != 0)
 	{
-		if ((*ptr - data) + (Size) str_len > length)
+		used = (Size) (next - data);
+		if (used > length || str_len > length - used ||
+			((char *) next)[str_len - 1] != '\0')
 			return false;
 		*out = (char *) palloc(str_len);
-		memcpy(*out, *ptr, str_len);
-		*ptr += str_len;
+		memcpy(*out, next, str_len);
+		next += str_len;
 	}
 	else
 		*out = NULL;
 
+	*ptr = next;
 	return true;
 }
 
@@ -1843,7 +1848,7 @@ o_indices_get_extended(ORelOids oids, OIndexType type,
 							oids.datoid, oids.reloid, oids.relnode,
 							type, retry + 1)));
 
-		pg_usleep(Min(O_DESERIALIZE_RETRY_MIN_DURATION << retry, O_DESERIALIZE_RETRY_MAX_DURATION));
+		pg_usleep(o_deserialize_retry_delay(retry));
 	}
 }
 

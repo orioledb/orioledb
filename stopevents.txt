@@ -43,3 +43,4 @@ createdb_copy_fail
 cic_after_ambuild
 cic_before_flip
 merge_after_target_unlock
+corrupt_o_tables_predicate
