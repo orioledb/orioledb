@@ -3000,6 +3000,87 @@ class ReplicationTest(BaseTest):
 				except ProcessLookupError:
 					pass
 
+	def test_promotion_xid_horizon_switchover(self):
+		"""
+		Repeated promotions must not make a finish record from the new primary
+		carry an xmin below the standby's local globalXmin.
+		"""
+		master = self.node
+		master.start()
+		replica = None
+
+		def xid_meta(node):
+			return node.execute("SELECT nextxid, globalxmin "
+			                    "FROM orioledb_get_xid_meta();")[0]
+
+		def switchover(primary, standby, checkpoint_promoted):
+			standby.catchup()
+			standby.poll_query_until(
+			    "SELECT orioledb_recovery_synchronized();", expected=True)
+			before = xid_meta(standby)
+
+			# Stop without generating shutdown-checkpoint WAL on the old
+			# timeline, then promote the fully caught-up standby.
+			primary.stop(['-m', 'immediate'])
+			standby.promote()
+			standby.poll_query_until("SELECT NOT pg_is_in_recovery();",
+			                         expected=True)
+			after = xid_meta(standby)
+
+			self.assertEqual(before[0] + 1, after[0])
+			if checkpoint_promoted:
+				# Preserve this node's promotion advance in its control file.
+				# The other node is stopped before its automatic end-of-recovery
+				# checkpoint completes, reproducing the asymmetric horizons.
+				standby.safe_psql("CHECKPOINT;")
+
+			primary._assign_master(standby)
+			primary._create_recovery_conf(username=primary.os_ops.get_user())
+			primary.start()
+			primary.catchup()
+			primary.poll_query_until(
+			    "SELECT orioledb_recovery_synchronized();", expected=True)
+			return standby, primary
+
+		try:
+			master.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_promotion_xmin (
+					id integer PRIMARY KEY,
+					value integer NOT NULL
+				) USING orioledb;
+				INSERT INTO o_promotion_xmin VALUES (1, 0);
+				CHECKPOINT;
+			""")
+			replica = self.getReplica()
+			replica.start()
+			replica.catchup()
+
+			primary, standby = master, replica
+			for _ in range(4):
+				primary, standby = switchover(primary, standby, standby
+				                              is replica)
+
+			self.assertIs(primary, master)
+			self.assertLess(xid_meta(primary)[0], xid_meta(standby)[1])
+			primary.safe_psql(
+			    "UPDATE o_promotion_xmin SET value = value + 1 WHERE id = 1;")
+			standby.catchup()
+			standby.poll_query_until(
+			    "SELECT orioledb_recovery_synchronized();", expected=True)
+			self.assertEqual(
+			    1,
+			    standby.execute(
+			        "SELECT value FROM o_promotion_xmin WHERE id = 1;")[0][0])
+		finally:
+			for node in (master, replica):
+				if node is None:
+					continue
+				try:
+					node.stop(['-m', 'immediate'])
+				except Exception:
+					pass
+
 	def test_replication_partition_index(self):
 		with self.node as master:
 			self.node.append_conf("default_table_access_method = 'orioledb'")
