@@ -1885,10 +1885,13 @@ evict_undo_to_disk(UndoLogType undoType,
 		return;
 	}
 
-	/* Try to write 5% of the whole undo size if possible */
+	/* Try to write 5% of the whole undo size if possible, capped at 16 MB */
 	writtenLocation = pg_atomic_read_u64(&meta->writtenLocation);
 	retainUndoLocation = Max(retainUndoLocation, writtenLocation);
-	targetUndoLocation = Max(targetUndoLocation, writtenLocation + circularBufferSize / 20);
+#define UNDO_MAX_EVICT_BYTES	((UndoLocation) 16 * 1024 * 1024)
+	targetUndoLocation = Max(targetUndoLocation,
+							 writtenLocation + Min(circularBufferSize / 20,
+												   UNDO_MAX_EVICT_BYTES));
 	targetUndoLocation = Min(targetUndoLocation, minProcReservedLocation);
 
 	Assert(targetUndoLocation >= pg_atomic_read_u64(&meta->writeInProgressLocation));
@@ -1926,41 +1929,57 @@ evict_undo_to_disk(UndoLogType undoType,
 	 * clearing the bit could mask their updates.
 	 */
 	{
-		UndoLocation loc;
+		UndoLocation loc = retainUndoLocation;
 
-		for (loc = retainUndoLocation; loc < targetUndoLocation;)
+#define UNDO_EVICT_BATCH_PAGES 1024
+		while (loc < targetUndoLocation)
 		{
-			UndoLocation pageBase = loc - (loc % ORIOLEDB_BLCKSZ);
-			UndoLocation writeStart = loc;
-			UndoLocation writeEnd = Min(pageBase + ORIOLEDB_BLCKSZ,
-										targetUndoLocation);
-			uint32		page = UNDO_PAGE_INDEX(undoType, loc);
-			bool		isFull = (writeStart == pageBase &&
-								  writeEnd == pageBase + ORIOLEDB_BLCKSZ);
-			bool		dirty;
+			int			processed;
 
-			if (isFull)
-				dirty = test_clear_undo_page_dirty(undoType, page);
-			else
-				dirty = undo_page_dirty(undoType, page);
+			for (processed = 0;
+				 processed < UNDO_EVICT_BATCH_PAGES && loc < targetUndoLocation;
+				 processed++)
+			{
+				UndoLocation pageBase = loc - (loc % ORIOLEDB_BLCKSZ);
+				UndoLocation writeStart = loc;
+				UndoLocation writeEnd = Min(pageBase + ORIOLEDB_BLCKSZ,
+											targetUndoLocation);
+				uint32		page = UNDO_PAGE_INDEX(undoType, loc);
+				bool		isFull = (writeStart == pageBase &&
+									  writeEnd == pageBase + ORIOLEDB_BLCKSZ);
+				bool		dirty;
 
-			if (dirty)
-				write_undo_range(&undoBuffersDesc,
-								 circularBuffer + writeStart % circularBufferSize,
-								 undoType, writeStart, writeEnd);
-			else
-				write_undo_range_clean(&undoBuffersDesc,
-									   circularBuffer + writeStart % circularBufferSize,
-									   undoType, writeStart, writeEnd);
+				if (isFull)
+					dirty = test_clear_undo_page_dirty(undoType, page);
+				else
+					dirty = undo_page_dirty(undoType, page);
 
-			loc = writeEnd;
+				if (dirty)
+					write_undo_range(&undoBuffersDesc,
+									 circularBuffer + writeStart % circularBufferSize,
+									 undoType, writeStart, writeEnd);
+				else
+					write_undo_range_clean(&undoBuffersDesc,
+										   circularBuffer + writeStart % circularBufferSize,
+										   undoType, writeStart, writeEnd);
+
+				pg_atomic_write_u64(&meta->writtenLocation, writeEnd);
+				loc = writeEnd;
+			}
+
+			if (loc < targetUndoLocation)
+			{
+				UndoLocation curWritten;
+
+				LWLockRelease(&meta->undoWriteLock);
+				LWLockAcquire(&meta->undoWriteLock, LW_EXCLUSIVE);
+
+				curWritten = pg_atomic_read_u64(&meta->writtenLocation);
+				if (curWritten > loc)
+					loc = curWritten;
+			}
 		}
 	}
-
-	SpinLockAcquire(&meta->minUndoLocationsMutex);
-	Assert(targetUndoLocation >= pg_atomic_read_u64(&meta->writtenLocation));
-	pg_atomic_write_u64(&meta->writtenLocation, targetUndoLocation);
-	SpinLockRelease(&meta->minUndoLocationsMutex);
 
 	LWLockRelease(&meta->undoWriteLock);
 }
@@ -2074,6 +2093,25 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		SpinLockAcquire(&meta->minUndoLocationsMutex);
 		Assert(location + size <= pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize);
 		SpinLockRelease(&meta->minUndoLocationsMutex);
+		return true;
+	}
+
+	/*
+	 * Try non-blocking eviction first.  If another backend is already
+	 * evicting, wait for that write to finish and recheck before falling
+	 * through to a blocking eviction.
+	 */
+	evict_undo_to_disk(undoType, location + size - circularBufferSize,
+					   minProcReservedLocation, true);
+	if (location + size <=
+		pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize)
+		return true;
+
+	if (location + size <=
+		pg_atomic_read_u64(&meta->writeInProgressLocation) + circularBufferSize)
+	{
+		LWLockAcquire(&meta->undoWriteLock, LW_SHARED);
+		LWLockRelease(&meta->undoWriteLock);
 		return true;
 	}
 
@@ -3524,9 +3562,15 @@ orioledb_snapshot_hook(Snapshot snapshot)
 		lastUsedLocation = pg_atomic_read_u64(&meta->lastUsedLocation);
 		lastUsedUndoLocationWhenUpdatedMinLocation = pg_atomic_read_u64(&meta->lastUsedUndoLocationWhenUpdatedMinLocation);
 		if (lastUsedLocation - lastUsedUndoLocationWhenUpdatedMinLocation > o_undo_circular_sizes[(int) undoType] / 10)
-			update_min_undo_locations(undoType, false, true);
+		{
+			/*
+			 * Odd changecount means another backend is already scanning. Skip
+			 * in that case to avoid thundering herd on the spinlock.
+			 */
+			if ((meta->minUndoLocationsChangeCount & 1) == 0)
+				update_min_undo_locations(undoType, false, true);
+		}
 	}
-
 
 	snapshot->undoRegularRowLocationPhNode.undoLocation = set_my_snapshot_retain_location(UndoLogRegular);
 	snapshot->undoRegularPageLocationPhNode.undoLocation = set_my_snapshot_retain_location(UndoLogRegularPageLevel);
