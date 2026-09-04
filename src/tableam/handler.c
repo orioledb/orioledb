@@ -2079,6 +2079,11 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 	 * re-setting the location afterwards would not help, since the records
 	 * would already be gone.
 	 *
+	 * The page log goes too.  The sampling scan would otherwise rebuild a
+	 * historical page image through read_page_from_undo(), which is precisely
+	 * the record we are dropping our hold on; iterate_internal_page() skips
+	 * that walk for a sampling scan instead, and reads the live page.
+	 *
 	 * The system log stays retained either way: catalog access still goes
 	 * through the snapshot.
 	 */

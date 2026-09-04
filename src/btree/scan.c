@@ -2073,6 +2073,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 	while (get_next_downlink(scan, &downlink, &scan->keyRangeLow, &scan->keyRangeHigh))
 	{
 		bool		valid_downlink = true;
+		bool		readUndo;
 
 		/*
 		 * Check if this downlink's key range overlaps the scan's
@@ -2216,6 +2217,25 @@ iterate_internal_page(BTreeSeqScan *scan)
 					leafPartial = &scan->leafPartial;
 				}
 
+				/*
+				 * A sampling scan runs on COMMITSEQNO_INPROGRESS and must not
+				 * walk page-level undo.  imgReadCsn is a normal csn even then
+				 * -- it comes from the internal page image -- so without this
+				 * the leaf read would rebuild a historical image from the
+				 * page log.  ANALYZE deliberately drops its hold on that log
+				 * so a minutes-long sample does not pin the ring, and the
+				 * record it wanted is then gone:
+				 *
+				 * undo_read -> get_page_from_undo -> read_page_from_undo ->
+				 * o_btree_try_read_page -> iterate_internal_page
+				 *
+				 * Reading the live page instead may hand sampling a row or
+				 * two it would not have seen at its snapshot, which is of no
+				 * consequence to a sample.
+				 */
+				readUndo = !(scan->sampler != NULL &&
+							 !COMMITSEQNO_IS_NORMAL(scan->oSnapshot.csn));
+
 				result = o_btree_try_read_page(scan->desc,
 											   DOWNLINK_GET_IN_MEMORY_BLKNO(downlink),
 											   DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(downlink),
@@ -2224,7 +2244,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 											   NULL,
 											   BTreeKeyNone,
 											   leafPartial,
-											   true,
+											   readUndo,
 											   NULL);
 
 				if (result == ReadPageResultOK)
