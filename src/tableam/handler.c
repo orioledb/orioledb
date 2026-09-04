@@ -39,6 +39,7 @@
 #include "utils/rel.h"
 #include "utils/stopevent.h"
 
+
 #include "access/heapam.h"
 #include "access/heaptoast.h"
 #include "access/multixact.h"
@@ -74,6 +75,16 @@
 #include "utils/sampling.h"
 #include "utils/syscache.h"
 #include "funcapi.h"
+#include "postmaster/autovacuum.h"
+
+/*
+ * AmAutoVacuumWorkerProcess() only arrived in PG17; before that the same
+ * question is IsAutoVacuumWorkerProcess().  vacuum.c carries this compat of
+ * its own, but that definition is local to it.
+ */
+#if PG_VERSION_NUM < 170000
+#define AmAutoVacuumWorkerProcess() IsAutoVacuumWorkerProcess()
+#endif
 
 static Size orioledb_parallelscan_estimate(Relation rel);
 static Size orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan);
