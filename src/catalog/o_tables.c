@@ -1673,7 +1673,7 @@ o_tables_get_extended(ORelOids oids, OTableFetchContext ctx)
 							oids.datoid, oids.reloid, oids.relnode,
 							retry + 1)));
 
-		pg_usleep(Min(O_DESERIALIZE_RETRY_MIN_DURATION << retry, O_DESERIALIZE_RETRY_MAX_DURATION));
+		pg_usleep(o_deserialize_retry_delay(retry));
 	}
 }
 
