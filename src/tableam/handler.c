@@ -2048,6 +2048,35 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 	BlockNumber totalblocks;
 	ItemPointerData fake_iptr = {0};
 
+	/*
+	 * Sampling reads raw, latest tuples (stored below with
+	 * COMMITSEQNO_INPROGRESS) and never walks an undo chain, so the analyze
+	 * transaction's snapshot does not need the regular undo logs retained.
+	 *
+	 * Holding them does real damage: an autovacuum ANALYZE of a large table
+	 * runs for a minute or more, and for that whole time its snapshot pins
+	 * minProcRetainLocation.  The regular undo ring is far smaller than a
+	 * minute of undo production, so the eviction fast path can never discard
+	 * anything and every byte of undo is written to disk instead.
+	 *
+	 * Only for an autovacuum worker in READ COMMITTED, though.  Releasing the
+	 * retention is safe only when nothing else will read through this
+	 * snapshot afterwards, and that holds for autovacuum: the transaction is
+	 * its own, and past this scan it only writes pg_statistic.  A user's
+	 * ANALYZE can sit inside a REPEATABLE READ transaction, or alongside an
+	 * open cursor, whose later reads still need that snapshot's undo -- and
+	 * re-setting the location afterwards would not help, since the records
+	 * would already be gone.
+	 *
+	 * The system log stays retained either way: catalog access still goes
+	 * through the snapshot.
+	 */
+	if (AmAutoVacuumWorkerProcess() && XactIsoLevel == XACT_READ_COMMITTED)
+	{
+		clear_my_snapshot_retain_location(UndoLogRegular);
+		clear_my_snapshot_retain_location(UndoLogRegularPageLevel);
+	}
+
 	o_btree_load_shmem(&pk->desc);
 	totalblocks = TREE_NUM_LEAF_PAGES(&pk->desc);
 
