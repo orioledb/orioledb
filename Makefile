@@ -130,6 +130,7 @@ REGRESSCHECKS = btree_sys_check \
 				parallel_scan \
 				partial \
 				partition \
+				pgvector \
 				primary_key \
 				row_level_locks \
 				row_security \

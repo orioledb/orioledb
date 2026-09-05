@@ -1,0 +1,75 @@
+CREATE SCHEMA pgvector;
+SET SESSION search_path = 'pgvector';
+CREATE EXTENSION orioledb;
+-- pgvector is not part of the fork, so it is not installed everywhere; CI
+-- installs it in ci/post_build_prerequisites.sh.  Where it is missing the test
+-- skips its body and matches the pgvector_1 alternative output instead -- the
+-- error from CREATE EXTENSION cannot be used for that, as it names an absolute
+-- path.
+SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector')
+	AS have_pgvector \gset
+\if :have_pgvector
+CREATE EXTENSION vector;
+
+-- pgvector is built against stock PostgreSQL, so it leaves its insert callback
+-- on aminsert, which takes a plain ItemPointer, rather than on the
+-- aminsertextended entry point this fork added, which takes the tuple
+-- identifier as a Datum and so can carry an OrioleDB rowid.  Every access
+-- method shipped with the fork has been converted to aminsertextended, so
+-- pgvector is the only thing available to the tests that covers index bridging
+-- for the legacy signature.  See orioledb/orioledb#1118.
+
+CREATE TABLE o_vec (
+	id int NOT NULL,
+	v vector(3),
+	PRIMARY KEY (id)
+) USING orioledb;
+
+-- Rows already present reach the index through ambuild ...
+INSERT INTO o_vec SELECT id, ARRAY[id, id, id]::vector FROM generate_series(1, 10) id;
+CREATE INDEX o_vec_hnsw_idx ON o_vec USING hnsw (v vector_l2_ops);
+
+-- ... and these have to reach it through aminsert.
+INSERT INTO o_vec SELECT id, ARRAY[id, id, id]::vector FROM generate_series(11, 20) id;
+UPDATE o_vec SET v = '[100,100,100]' WHERE id = 5;
+DELETE FROM o_vec WHERE id = 6;
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT id FROM o_vec ORDER BY v <-> '[1,1,1]' LIMIT 5;
+SELECT id FROM o_vec ORDER BY v <-> '[1,1,1]' LIMIT 5;
+-- The index has to hold every live row, not just the ones the build saw.
+SELECT count(*) FROM (SELECT id FROM o_vec ORDER BY v <-> '[1,1,1]' LIMIT 100) s;
+SELECT id FROM o_vec ORDER BY v <-> '[100,100,100]' LIMIT 3;
+RESET enable_seqscan;
+
+SELECT count(*) FROM o_vec;
+
+-- Same for ivfflat, which resolves the tuple identifier on its own scan path.
+CREATE TABLE o_vec_ivf (
+	id int NOT NULL,
+	v vector(3),
+	PRIMARY KEY (id)
+) USING orioledb;
+INSERT INTO o_vec_ivf SELECT id, ARRAY[id, id, id]::vector FROM generate_series(1, 10) id;
+CREATE INDEX o_vec_ivf_idx ON o_vec_ivf USING ivfflat (v vector_l2_ops)
+	WITH (lists = 1);
+INSERT INTO o_vec_ivf SELECT id, ARRAY[id, id, id]::vector FROM generate_series(11, 20) id;
+
+SET enable_seqscan = off;
+SELECT id FROM o_vec_ivf ORDER BY v <-> '[20,20,20]' LIMIT 5;
+SELECT count(*) FROM (SELECT id FROM o_vec_ivf ORDER BY v <-> '[1,1,1]' LIMIT 100) s;
+RESET enable_seqscan;
+
+-- A rebuild over the whole table has to agree with what the inserts left.
+REINDEX INDEX o_vec_hnsw_idx;
+SET enable_seqscan = off;
+SELECT count(*) FROM (SELECT id FROM o_vec ORDER BY v <-> '[1,1,1]' LIMIT 100) s;
+RESET enable_seqscan;
+
+DROP TABLE o_vec;
+DROP TABLE o_vec_ivf;
+DROP EXTENSION vector;
+\endif
+DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA pgvector CASCADE;
+RESET search_path;
