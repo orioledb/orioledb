@@ -241,6 +241,7 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 				bridged->original_routine = (IndexAmRoutine *) DatumGetPointer(datum);
 				bridged->routine = *bridged->original_routine;
 				bridged->routine.ambuild = bridged_ambuild;
+				bridged->routine.aminsert = NULL;
 				bridged->routine.aminsertextended = bridged_aminsert;
 				bridged->routine.ambeginscan = bridged_ambeginscan;
 				bridged->routine.amcanreturn = NULL;
@@ -2352,8 +2353,14 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 
 	Assert(amroutine != NULL);
 
-	return amroutine->aminsertextended(rel, values, isnull, tupleid, heapRel,
-									   checkUnique, indexUnchanged, indexInfo);
+	if (amroutine->aminsertextended)
+		return amroutine->aminsertextended(rel, values, isnull, tupleid,
+										   heapRel, checkUnique,
+										   indexUnchanged, indexInfo);
+
+	return amroutine->aminsert(rel, values, isnull,
+							   DatumGetItemPointer(tupleid), heapRel,
+							   checkUnique, indexUnchanged, indexInfo);
 }
 
 static IndexScanDesc
