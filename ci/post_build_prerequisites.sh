@@ -23,12 +23,24 @@ if [ $GITHUB_JOB != "run-benchmark" ] && [ $GITHUB_JOB != "pgindent" ] && [ $GIT
     # insert callback on aminsert rather than on the aminsertextended entry
     # point this fork added.  Every access method shipped with the fork has been
     # converted, so pgvector is the only thing that covers index bridging for
-    # the legacy signature; the test/sql/pgvector.sql regression test is added
-    # to the suite only when this install has happened.
+    # the legacy signature; test/sql/pgvector.sql runs its body only when this
+    # install has happened, and matches its pgvector_1 expected output when it
+    # has not.
+    #
+    # Its default build is -march=native and dispatches to hand-written AVX-512
+    # kernels, neither of which valgrind can execute: the first INSERT of a
+    # vector value dies with SIGILL.  Build it for the baseline architecture
+    # there instead, which costs nothing but the speed of an access method we
+    # only test for correctness.
+    if [ "${CHECK_TYPE:-}" = "valgrind_1" ] || [ "${CHECK_TYPE:-}" = "valgrind_2" ]; then
+        pgvector_make_args="OPTFLAGS= PG_CPPFLAGS=-DDISABLE_DISPATCH"
+    else
+        pgvector_make_args=""
+    fi
     wget https://codeload.github.com/pgvector/pgvector/tar.gz/refs/tags/v0.8.1
     tar -zxf v0.8.1
     rm v0.8.1
-    (cd pgvector-0.8.1 && make && make install)
+    (cd pgvector-0.8.1 && make $pgvector_make_args && make install)
 
     wget https://codeload.github.com/eulerto/wal2json/tar.gz/refs/tags/wal2json_2_6
     tar -zxf wal2json_2_6
