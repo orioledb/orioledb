@@ -1575,15 +1575,24 @@ o_tables_evict(Oid datoid, List **evicted)
 void
 o_tables_truncate_all_unlogged()
 {
-	OTablesDropAllArg arg;
-	OXid		oxid;
-	OSnapshot	oSnapshot;
+	OTablesDropAllArg arg = {0};
 
-	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-
-	arg.oxid = oxid;
-	arg.csn = oSnapshot.csn;
-
+	/*
+	 * Assign no oxid here.  The callback truncates through
+	 * o_truncate_table(), which takes its own, and it never reads
+	 * arg.oxid/arg.csn -- so an oxid taken here is consumed by nothing.
+	 * Taking one anyway is actively harmful: this runs from the snapshot hook
+	 * on the first snapshot after recovery, which on a promote is concurrent
+	 * with the end-of-recovery checkpoint.  The checkpoint asks every backend
+	 * to flush its undo locations, so the very act of committing this
+	 * transaction files it in the checkpoint's xids file as in-flight, while
+	 * checkpoint_xmin -- read before the commit advanced runXmin -- is
+	 * published below it.  Since a cluster with no unlogged tables writes no
+	 * WAL under that oxid, nothing in the WAL stream can ever resolve it:
+	 * every later start resurrects it from the xids file, and the next
+	 * promote announces it to the peer with a WAL_REC_ROLLBACK whose xmin
+	 * sits below the peer's own globalXmin.
+	 */
 	o_tables_foreach(o_tables_truncate_unlogged_callback,
 					 &o_non_deleted_snapshot, &arg);
 }
