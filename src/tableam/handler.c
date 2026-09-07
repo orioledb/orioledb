@@ -1318,7 +1318,8 @@ orioledb_index_validate_scan(Relation heapRelation,
 	bool		bridged;
 
 	/*
-	 * Bridged index (any non-btree AM, or btree with orioledb_index = false):
+	 * Bridged non-unique index (any non-btree AM, or btree with
+	 * orioledb_index = false):
 	 * it's a stock-PG index keyed by bridge_ctid.  The phase-2 build was done
 	 * by the AM's own ambuild via bridged_ambuild / btbuild, and PG has
 	 * already set indisready=true between phase 2 and this call, so
@@ -1326,11 +1327,10 @@ orioledb_index_validate_scan(Relation heapRelation,
 	 * nothing native to do here -- no OIndex sys-tree row, no orioledb tree,
 	 * no spool.  PG will mark the index valid on return.
 	 *
-	 * Catch-up of inserts that happened *during* the phase-2 build (after its
-	 * snapshot but before indisready=true) is a follow-up: PG's heap-AM
-	 * validate_index would catch them by re-walking the heap here, and
-	 * orioledb-bridged would need an equivalent walk of the primary tree.
-	 * Single-writer CIC and bulk-load scenarios are unaffected.
+	 * PG's heap-AM validate_index would catch inserts made after the phase-2
+	 * snapshot by re-walking the heap here.  Orioledb-bridged does not yet
+	 * have an equivalent walk of the primary tree, so bridged UNIQUE CIC is
+	 * downgraded or rejected by the utility hook.
 	 */
 	bridged = indexRelation->rd_rel->relam != BTREE_AM_OID ||
 		(options && !options->orioledb_index);
@@ -1350,8 +1350,8 @@ orioledb_index_validate_scan(Relation heapRelation,
 	 * the spool of captured concurrent DML, flip OIndex.state to VALID, emit
 	 * WAL_REC_CIC_INDEX_VALID, drop the spool dir.
 	 *
-	 * UNIQUE is rejected at the ddl.c gate so we never need to perform the
-	 * duplicate-detection validation PG does for unique indexes.
+	 * Native UNIQUE indexes are checked during build and by the post-drain
+	 * unique-fields walk before their state is flipped to VALID.
 	 */
 	o_define_index_concurrent_finish(heapRelation, indexRelation);
 }

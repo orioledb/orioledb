@@ -18,9 +18,11 @@ Two paths coexist:
 - **Bridged** (any non-btree AM, or btree with
   `WITH(orioledb_index=false)`, or btree on a table whose `index_bridging`
   is enabled): the index is a stock PG index keyed by `bridge_ctid`;
-  ambuild lands in `bridged_ambuild` / `btbuild` and PG's CIC machinery
-  handles it natively, UNIQUE included.  No orioledb-specific BUILDING
-  state, no spool.  `orioledb_index_validate_scan` is a no-op for these.
+  ambuild lands in `bridged_ambuild` / `btbuild`.  Non-unique CIC uses PG's
+  machinery with no orioledb-specific BUILDING state or spool.  UNIQUE CIC
+  is downgraded to a plain build (or rejected in strict mode) because
+  `orioledb_index_validate_scan` does not yet catch up rows committed during
+  the bridged phase-2 build.
 
 The rest of this page describes the native btree path.
 
@@ -287,7 +289,9 @@ existing recovery-finish work.
   writers insert different PKs with same secondary value; the
   post-drain unique-fields walk catches the duplicate.
 - `test_cic_bridged_gin`: bridged GIN CIC through PG's machinery.
-- `test_cic_bridged_unique_btree`: bridged UNIQUE btree CIC.
+- `test_cic_bridged_unique_btree`: bridged UNIQUE CIC is safely downgraded.
+- `test_cic_bridged_unique_concurrent_insert`: a writer paused inside the
+  build cannot leave a row absent from the finished unique index.
 - `test_cic_concurrent_writes`: writer thread runs during the build;
   spool drain produces a complete index.
 - `test_cic_writer_spans_all_phases`: writer commits tiny transactions
@@ -300,6 +304,10 @@ existing recovery-finish work.
 
 ## Limitations
 
+- Bridged UNIQUE CIC is downgraded to a plain `CREATE UNIQUE INDEX` by
+  default, or rejected when `orioledb.strict_mode` is enabled.  A concurrent
+  implementation needs a bridged phase-3 primary-tree walk equivalent to
+  PostgreSQL's heap validation scan.
 - **DEFERRABLE INITIALLY DEFERRED UNIQUE** within a *single*
   transaction that creates and resolves duplicates inside the build
   window is currently not supported: the spool replays every event
