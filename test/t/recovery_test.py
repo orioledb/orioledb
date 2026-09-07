@@ -2767,6 +2767,69 @@ class RecoveryTest(BaseTest):
 		    node.execute("SELECT count(*) FROM o_single_user")[0][0], 1000)
 		node.stop()
 
+	def test_corrupt_xid_kind(self):
+		"""
+		A corrupted kind field in the checkpoint xid file must produce
+		a clean FATAL instead of indexing arrays out of bounds.
+		"""
+		import glob
+		import struct
+
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
+		    "orioledb.main_buffers = 8MB\n")
+		node.start()
+		node.safe_psql("CREATE EXTENSION orioledb;")
+		node.safe_psql("""
+			CREATE TABLE o_xid_corrupt (
+				id int PRIMARY KEY,
+				val text
+			) USING orioledb;
+			INSERT INTO o_xid_corrupt
+				SELECT g, repeat('x', 100) FROM generate_series(1, 100) g;
+		""")
+
+		# Hold a transaction in-progress so its undo is live at checkpoint.
+		conn = node.connect()
+		conn.begin()
+		conn.execute(
+		    "UPDATE o_xid_corrupt SET val = repeat('y', 100) WHERE id <= 50;")
+
+		# Checkpoint writes the in-progress xid to the .xid file.
+		node.safe_psql("CHECKPOINT;")
+		conn.close()
+		node.stop(['-m', 'immediate'])
+
+		# Find the .xid file and corrupt the kind field of the first record.
+		xid_dir = os.path.join(node.data_dir, 'orioledb_data')
+		xid_files = glob.glob(os.path.join(xid_dir, '*.xid'))
+		self.assertTrue(len(xid_files) > 0, "no .xid file found")
+
+		for xid_file in xid_files:
+			with open(xid_file, 'r+b') as f:
+				hdr = f.read(4)
+				count = struct.unpack('i', hdr)[0]
+				if count == 0:
+					continue
+				# kind is at offset 8 within XidFileRec, first record at offset 4
+				f.seek(4 + 8)
+				f.write(struct.pack('i', 0xFF))
+
+		# Recovery must FATAL on the corrupted kind.
+		try:
+			node.start()
+			started = True
+		except Exception:
+			started = False
+
+		if started:
+			node.stop(['-m', 'immediate'])
+
+		with open(os.path.join(node.logs_dir, 'postgresql.log')) as f:
+			log = f.read()
+		self.assertIn("corrupted checkpoint xid file: invalid kind", log)
+
 
 class RecoverySkModifyPendingReplicaTest(BaseTest):
 	"""
