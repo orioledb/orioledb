@@ -888,11 +888,11 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 
 	/*
 	 * The error report below prints valuesOld[], so the detoasted copies that
-	 * detoast_passed_values() made must outlive it.  Freeing them first turned
-	 * a failed secondary-index delete into a use-after-free: the text output
-	 * function read a clobbered varlena header and the backend segfaulted
-	 * instead of raising the error.  ereport(ERROR) never returns, so the
-	 * copies are released by the per-query context reset on that path.
+	 * detoast_passed_values() made must outlive it.  Freeing them first
+	 * turned a failed secondary-index delete into a use-after-free: the text
+	 * output function read a clobbered varlena header and the backend
+	 * segfaulted instead of raising the error.  ereport(ERROR) never returns,
+	 * so the copies are released by the per-query context reset on that path.
 	 */
 	if (!result.success)
 	{

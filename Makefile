@@ -233,6 +233,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/ddl_test.py \
 						test/t/eviction_full_memory_test.py \
 						test/t/include_indices_test.py \
+						test/t/partial_index_recovery_test.py \
 						test/t/indices_build_test.py \
 						test/t/logical_test.py \
 						test/t/logical_xid_leak_test.py \

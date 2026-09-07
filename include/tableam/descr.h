@@ -102,11 +102,11 @@ typedef struct
 	OHashFn    *hash_fn;
 
 	/*
-	 * True when this field carries one of the table's primary key columns.
-	 * A primary key column named in an INCLUDE list is stored once, in the
+	 * True when this field carries one of the table's primary key columns. A
+	 * primary key column named in an INCLUDE list is stored once, in the
 	 * INCLUDE position, but it still has to take part in key comparison and
-	 * hashing: without it two rows that agree on the key columns collide
-	 * (see OIgnoreColumn).
+	 * hashing: without it two rows that agree on the key columns collide (see
+	 * OIgnoreColumn).
 	 */
 	bool		primary;
 } OIndexField;

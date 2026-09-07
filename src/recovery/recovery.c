@@ -653,7 +653,16 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 			cmp = o_btree_cmp(&sk->desc,
 							  (Pointer) &oldSkKey, BTreeKeyBound,
 							  (Pointer) &newSkKey, BTreeKeyBound);
-			if (cmp != 0)
+
+			/*
+			 * An unchanged key still needs work on a partial index when the
+			 * row crosses the predicate through a non-key column: the
+			 * pre-image entry has to go, or the post-image entry has to
+			 * appear.  The predicate checks below then pick the right one.
+			 */
+			if (cmp != 0 ||
+				o_is_index_predicate_satisfied(sk, oldSlot, sk->econtext) !=
+				o_is_index_predicate_satisfied(sk, newSlot, sk->econtext))
 			{
 				needDelete = true;
 				needInsert = true;

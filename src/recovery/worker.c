@@ -1253,7 +1253,16 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 							  (Pointer) &new_key, BTreeKeyBound,
 							  (Pointer) &old_key, BTreeKeyBound);
 
-			if (cmp != 0)
+			/*
+			 * An unchanged key still needs work on a partial index when the
+			 * row crosses the predicate through a non-key column (e.g.
+			 * "deleted = true" under an index on another column WHERE NOT
+			 * deleted): the pre-image entry has to go, or the post-image
+			 * entry has to appear.  The predicate checks below pick which.
+			 */
+			if (cmp != 0 ||
+				o_is_index_predicate_satisfied(tree, old_slot, tree->econtext) !=
+				o_is_index_predicate_satisfied(tree, new_slot, tree->econtext))
 			{
 				OTuple		nullTup;
 				BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
