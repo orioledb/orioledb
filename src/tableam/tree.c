@@ -286,10 +286,17 @@ hash_combine_mix_field(OIndexDescr *idx, TupleDesc tupdesc,
 	bool		isnull;
 	uint32		element_hash;
 
+	/*
+	 * INCLUDE columns are not part of the key: the comparators skip them and
+	 * they carry no hash function, so hashing them would dereference NULL.
+	 */
+	if (OIgnoreColumn(idx, field_num))
+		return hash;
 	val = o_fastgetattr(tup, attnum, tupdesc, spec, &isnull);
 	if (isnull)
 		return hash;
-	if (idx->fields[field_num].hash_fn == &o_default_hash_fn)
+	if (idx->fields[field_num].hash_fn == NULL ||
+		idx->fields[field_num].hash_fn == &o_default_hash_fn)
 		return hash;
 	element_hash = o_call_hash_fn(idx->fields[field_num].hash_fn,
 								  idx->fields[field_num].collation,

@@ -100,6 +100,15 @@ typedef struct
 	OComparator *comparator;
 	OExclusionFn *exclusion_fn;
 	OHashFn    *hash_fn;
+
+	/*
+	 * True when this field carries one of the table's primary key columns.
+	 * A primary key column named in an INCLUDE list is stored once, in the
+	 * INCLUDE position, but it still has to take part in key comparison and
+	 * hashing: without it two rows that agree on the key columns collide
+	 * (see OIgnoreColumn).
+	 */
+	bool		primary;
 } OIndexField;
 
 typedef struct AttrNumberMap
@@ -265,7 +274,8 @@ OIndexKeyAttnumToTupleAttnum(BTreeKeyType keyType, OIndexDescr *idx, int attnum)
 #define OIgnoreColumn(descr, attnum) \
 	((descr->desc.type != oIndexToast && descr->desc.type != oIndexBridge) && \
 		(attnum >= descr->nKeyFields) && \
-	 (attnum < (descr->nKeyFields + descr->nIncludedFields)))
+	 (attnum < (descr->nKeyFields + descr->nIncludedFields)) && \
+	 !descr->fields[attnum].primary)
 
 struct OTableDescr
 {

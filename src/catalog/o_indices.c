@@ -1540,6 +1540,19 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 
 	descr->nKeyFields = oIndex->nKeyFields;
 	descr->nIncludedFields = oIndex->nIncludedFields;
+
+	/*
+	 * Flag the fields that carry primary key columns.  OIgnoreColumn() reads
+	 * the flag, so it has to be set before the opclass/comparator loop below.
+	 */
+	for (i = 0; i < oIndex->nPrimaryFields; i++)
+	{
+		AttrNumber	pk_attnum = oIndex->primaryFieldsAttnums[i] - 1;
+
+		if (pk_attnum >= 0 && pk_attnum < oIndex->nNonLeafFields)
+			descr->fields[pk_attnum].primary = true;
+	}
+
 	for (i = 0; i < oIndex->nLeafFields; i++)
 	{
 		OTableIndexField *iField = &oIndex->leafFields[i];
