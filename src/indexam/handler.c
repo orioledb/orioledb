@@ -886,13 +886,14 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 									  old_slot, oxid, oSnapshot.csn,
 									  checkUnique);
 
-	for (i = 0; i < index_descr->leafTupdesc->natts; i++)
-	{
-		if (vfree[i])
-			pfree(DatumGetPointer(valuesOld[i]));
-	}
-	pfree(vfree);
-
+	/*
+	 * The error report below prints valuesOld[], so the detoasted copies that
+	 * detoast_passed_values() made must outlive it.  Freeing them first turned
+	 * a failed secondary-index delete into a use-after-free: the text output
+	 * function read a clobbered varlena header and the backend segfaulted
+	 * instead of raising the error.  ereport(ERROR) never returns, so the
+	 * copies are released by the per-query context reset on that path.
+	 */
 	if (!result.success)
 	{
 		switch (result.action)
@@ -955,6 +956,13 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 				break;
 		}
 	}
+
+	for (i = 0; i < index_descr->leafTupdesc->natts; i++)
+	{
+		if (vfree[i])
+			pfree(DatumGetPointer(valuesOld[i]));
+	}
+	pfree(vfree);
 
 	if (old_tuple.data)
 		pfree(old_tuple.data);
@@ -1023,13 +1031,8 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
 	result = o_tbl_index_delete(index_descr, ix_num, slot, oxid, oSnapshot.csn);
-	for (i = 0; i < index_descr->nonLeafTupdesc->natts; i++)
-	{
-		if (vfree[i])
-			pfree(DatumGetPointer(values[i]));
-	}
-	pfree(vfree);
 
+	/* See orioledb_amupdate(): the error report prints values[]. */
 	if (!result.success)
 	{
 		switch (result.action)
@@ -1086,6 +1089,13 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 				break;
 		}
 	}
+
+	for (i = 0; i < index_descr->nonLeafTupdesc->natts; i++)
+	{
+		if (vfree[i])
+			pfree(DatumGetPointer(values[i]));
+	}
+	pfree(vfree);
 
 	if (tuple.data)
 		pfree(tuple.data);
