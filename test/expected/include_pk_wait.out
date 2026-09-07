@@ -1,0 +1,27 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_begin s1_insert_a s2_insert_b s2_update_b s1_commit s2_select
+step s1_begin: BEGIN;
+step s1_insert_a: INSERT INTO o_include_pk VALUES ('a', 'g-0', '2026-01-01 00:00:00+00', 1);
+step s2_insert_b: INSERT INTO o_include_pk VALUES ('b', 'g-0', '2026-01-01 00:00:00+00', 1);
+step s2_update_b: UPDATE o_include_pk SET ttl = 2 WHERE id = 'b';
+step s1_commit: COMMIT;
+step s2_select: SET enable_seqscan = off; SELECT id, ttl FROM o_include_pk WHERE grp = 'g-0' ORDER BY id;
+id|ttl
+--+---
+a |  1
+b |  2
+(2 rows)
+
+
+starting permutation: s1_begin s1_insert_a s2_insert_b s1_rollback s2_select
+step s1_begin: BEGIN;
+step s1_insert_a: INSERT INTO o_include_pk VALUES ('a', 'g-0', '2026-01-01 00:00:00+00', 1);
+step s2_insert_b: INSERT INTO o_include_pk VALUES ('b', 'g-0', '2026-01-01 00:00:00+00', 1);
+step s1_rollback: ROLLBACK;
+step s2_select: SET enable_seqscan = off; SELECT id, ttl FROM o_include_pk WHERE grp = 'g-0' ORDER BY id;
+id|ttl
+--+---
+b |  1
+(1 row)
+
