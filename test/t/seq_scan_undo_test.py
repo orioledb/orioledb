@@ -154,3 +154,45 @@ class SeqScanUndoTest(BaseTest):
 
 		reader.close()
 		node.stop(['-m', 'immediate'])
+
+	def test_corrupt_undo_tuple_size(self):
+		"""
+		Corrupted itemSize in a tuple-level undo record must raise
+		ERRCODE_DATA_CORRUPTED instead of overrunning the caller's buffer.
+		"""
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
+		    "orioledb.main_buffers = 8MB\n"
+		    "orioledb.debug_disable_pools_limit = true\n"
+		    "orioledb.debug_disable_bgwriter = true\n")
+		node.start()
+		node.safe_psql("CREATE EXTENSION orioledb;")
+		node.safe_psql("""
+			CREATE TABLE o_undo_corrupt_tuple (
+				id int PRIMARY KEY,
+				payload text
+			) USING orioledb;
+			INSERT INTO o_undo_corrupt_tuple
+				SELECT g, repeat('x', 200) FROM generate_series(1, 100) g;
+		""")
+
+		# Pin an old snapshot so tuple undo chains are preserved.
+		reader = node.connect()
+		reader.begin('REPEATABLE READ')
+		reader.execute("SELECT count(*) FROM o_undo_corrupt_tuple;")
+
+		# Update to create tuple-level undo, then corrupt the itemSize.
+		node.safe_psql("""
+			UPDATE o_undo_corrupt_tuple SET payload = repeat('y', 200);
+			SELECT orioledb_test_corrupt_row_undo(
+				'o_undo_corrupt_tuple'::regclass::oid);
+		""")
+
+		# The pinned reader must hit the corrupted undo and get a clean error.
+		with self.assertRaises(Exception) as cm:
+			reader.execute("SELECT * FROM o_undo_corrupt_tuple;")
+		self.assertIn("corrupted undo record", str(cm.exception))
+
+		reader.close()
+		node.stop(['-m', 'immediate'])
