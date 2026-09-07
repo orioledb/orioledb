@@ -66,6 +66,33 @@ INSERT INTO o_test_ioc3 VALUES (1, 5) ON CONFLICT DO NOTHING RETURNING *;
 SELECT * FROM o_test_ioc3;
 
 ---
+-- partial indexes
+---
+
+CREATE TABLE o_test_ioc_partial
+(
+	id text PRIMARY KEY,
+	val int
+) USING orioledb;
+CREATE INDEX o_test_ioc_partial_idx ON o_test_ioc_partial (id)
+	WHERE val IS NULL;
+
+INSERT INTO o_test_ioc_partial VALUES ('plain_bad', 1);
+INSERT INTO o_test_ioc_partial VALUES ('plain_good', NULL);
+INSERT INTO o_test_ioc_partial VALUES ('nothing_bad', 1)
+	ON CONFLICT (id) DO NOTHING;
+INSERT INTO o_test_ioc_partial VALUES ('nothing_good', NULL)
+	ON CONFLICT (id) DO NOTHING;
+INSERT INTO o_test_ioc_partial VALUES ('update_bad', 1)
+	ON CONFLICT (id) DO UPDATE SET val = EXCLUDED.val;
+INSERT INTO o_test_ioc_partial VALUES ('update_good', NULL)
+	ON CONFLICT (id) DO UPDATE SET val = EXCLUDED.val;
+
+SET enable_seqscan = off;
+SELECT id FROM o_test_ioc_partial WHERE val IS NULL ORDER BY id;
+RESET enable_seqscan;
+
+---
 -- conflict_target tests
 ---
 

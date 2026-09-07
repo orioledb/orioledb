@@ -1229,6 +1229,10 @@ o_tbl_insert_with_arbiter(Relation rel,
 				!list_member_oid(arbiterIndexes, descr->indices[i]->oids.reloid))
 				continue;
 
+			if (!o_is_index_predicate_satisfied(descr->indices[i], slot,
+												descr->indices[i]->econtext))
+				continue;
+
 			if ((descr->indices[i]->desc.type == oIndexExclusion ||
 				 descr->indices[i]->desc.type == oIndexUnique) &&
 				!descr->indices[i]->immediate)
@@ -1506,6 +1510,10 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 			if (arbiterIndexes == NIL ||
 				list_member_oid(arbiterIndexes, descr->indices[i]->oids.reloid))
+				continue;
+
+			if (!o_is_index_predicate_satisfied(descr->indices[i], slot,
+												descr->indices[i]->econtext))
 				continue;
 
 			ioc_arg.conflictIxNum = InvalidIndexNumber;
