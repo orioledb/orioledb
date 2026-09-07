@@ -1275,6 +1275,60 @@ store_read_page_checkpoint_stats(uint32 checkpointNum)
 	elog(DEBUG1, "Remember read_page_checkpoin: min %u max %u", min_read_page_checkpoint, max_read_page_checkpoint);
 }
 
+/*
+ * Simulate the effect of evict_btree on the meta page: free it via
+ * ppool_free_page (which increments its change count) and wipe the body
+ * to model page reuse.  Uses the checkpoint-namespace exclusive lock that
+ * the real eviction path (get_evict_btree_locks) acquires; the concurrent
+ * writer (bgwriter / page-pool clock) does NOT hold this lock, so no
+ * conflict -- exactly the gap that meta_change_count detection covers.
+ *
+ * We cannot call evict_btree directly because it requires all children
+ * to be evicted first (N_ONDISK == items_count), which would destroy the
+ * leaf page the concurrent writer is about to process.
+ */
+PG_FUNCTION_INFO_V1(orioledb_test_free_meta_page);
+
+Datum
+orioledb_test_free_meta_page(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	OTableDescr *descr;
+	BTreeDescr *td;
+	Relation	rel;
+	OInMemoryBlkno metaBlkno;
+
+	orioledb_check_shmem();
+
+	rel = relation_open(relid, AccessShareLock);
+	descr = relation_get_descr(rel);
+	td = &descr->indices[0]->desc;
+	o_btree_load_shmem(td);
+	metaBlkno = td->rootInfo.metaPageBlkno;
+	relation_close(rel, AccessShareLock);
+
+	if (OInMemoryBlknoIsValid(metaBlkno))
+	{
+		o_tables_rel_lock_extended(&td->oids, AccessExclusiveLock, true);
+
+		CLEAN_DIRTY(td->ppool, metaBlkno);
+		ppool_free_page(td->ppool, metaBlkno, false);
+
+		/*
+		 * Wipe everything after the page header to simulate page reuse.
+		 * The header (incl. change count) must survive so that the
+		 * meta_change_count check in write_page sees the ppool_free_page
+		 * increment; the seq_buf fields that perform_page_io dereferences
+		 * become garbage.
+		 */
+		memset(O_GET_IN_MEMORY_PAGE(metaBlkno) + O_PAGE_HEADER_SIZE,
+			   0, ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE);
+
+		o_tables_rel_unlock_extended(&td->oids, AccessExclusiveLock, true);
+	}
+	PG_RETURN_VOID();
+}
+
 #endif
 
 /*
@@ -3248,6 +3302,8 @@ retry:
 	if (OMetaPageIsValid(desc))
 		meta_change_count = O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(
 															  desc->rootInfo.metaPageBlkno);
+
+	STOPEVENT(STOPEVENT_WALK_PAGE_BEFORE_LOCK, NULL);
 
 	if (!try_lock_page(blkno))
 		return OWalkPageSkipped;

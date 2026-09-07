@@ -947,3 +947,90 @@ class EvictionTest(BaseTest):
 			        ('o_evicted', 'o_evicted_empty')))
 		finally:
 			con1.close()
+
+	def test_write_page_stale_seqbuf_after_concurrent_drop(self):
+		"""write_page must detect a freed meta page via change-count check.
+
+		walk_page resolves a BTreeDescr whose nextChkp[].shared points into
+		the meta page.  A concurrent evict_btree can free the meta page
+		while non-root pages are still alive.  The sweeping backend then
+		enters write_page with a stale desc.
+
+		The walk_page_before_lock stopevent parks the sweeping backend after
+		desc resolution but before the page lock.  While parked,
+		orioledb_test_free_meta_page frees only the meta page (simulating
+		evict_btree) leaving data pages alive so walk_page_check_locked
+		passes and write_page is reached.  The meta_change_count check in
+		write_page detects the stale pointer and bails out.
+
+		Without the fix, write_page proceeds to perform_page_io, accesses
+		desc->nextChkp[].shared in freed memory, and crashes.
+		"""
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.main_buffers = 8MB\n"
+		    "orioledb.bgwriter_num_workers = 0\n"
+		    "orioledb.enable_stopevents = true\n")
+		node.start()
+
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_wp (id int PRIMARY KEY, pad text)"
+		    " USING orioledb;\n"
+		    "INSERT INTO o_wp"
+		    " SELECT g, repeat('x', 400)"
+		    " FROM generate_series(1, 25000) g;")
+
+		node.safe_psql('postgres', "CHECKPOINT;")
+		node.safe_psql(
+		    'postgres', "UPDATE o_wp SET pad = repeat('y', 400)"
+		    " WHERE id = 1;")
+
+		ctrl = node.connect()
+		presser = node.connect()
+		presser_pid = presser.execute("SELECT pg_backend_pid();")[0][0]
+
+		ctrl.execute("SELECT pg_stopevent_set('walk_page_before_lock',"
+		             " '$pid == %d');" % presser_pid)
+
+		t = ThreadQueryExecutor(
+		    presser, "SELECT orioledb_write_pages('o_wp'::regclass::oid);")
+		t.start()
+
+		try:
+			wait_stopevent(node, presser_pid)
+
+			ctrl.execute("SELECT orioledb_test_free_meta_page("
+			             "'o_wp'::regclass::oid);")
+			ctrl.execute("SELECT pg_stopevent_reset('walk_page_before_lock');")
+		finally:
+			try:
+				ctrl.execute(
+				    "SELECT pg_stopevent_reset('walk_page_before_lock');")
+			except Exception:
+				pass
+			try:
+				t.join(timeout=30)
+			except Exception:
+				pass
+			try:
+				ctrl.close()
+			except Exception:
+				pass
+			try:
+				presser.close()
+			except Exception:
+				pass
+
+		with open(node.pg_log_file, errors='replace') as f:
+			log = f.read()
+		crashed = [
+		    line for line in log.splitlines()
+		    if 'TRAP' in line or 'terminated by signal' in line
+		]
+		self.assertEqual(
+		    crashed, [],
+		    "stale seq_buf pointer in write_page: %s" % (crashed[:3], ))
+
+		# The meta page body is wiped; skip the shutdown checkpoint.
+		node.stop(['-m', 'immediate'])
