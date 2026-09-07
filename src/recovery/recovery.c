@@ -3889,17 +3889,31 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 }
 
 static OIndexKey *
-o_indices_get_trees(Pointer tuple, ORelOids *tableOids)
+o_indices_get_trees(Pointer tuple, LocationIndex tuple_len,
+					ORelOids *tableOids)
 {
 	OIndexChunk chunk;
 	OIndexKey  *trees;
+
+	if (unlikely(tuple_len < offsetof(OIndexChunk, data)))
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("corrupted O_INDEXES WAL tuple: length %u smaller than header %u",
+						(unsigned) tuple_len,
+						(unsigned) offsetof(OIndexChunk, data))));
 
 	memcpy(&chunk, tuple, offsetof(OIndexChunk, data));
 
 	if (chunk.key.chunknum != 0)
 		return NULL;
 
-	Assert(chunk.dataLength >= sizeof(*tableOids));
+	if (unlikely(chunk.dataLength < sizeof(*tableOids) ||
+				 chunk.dataLength > tuple_len - offsetof(OIndexChunk, data)))
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("corrupted O_INDEXES WAL tuple: dataLength %u, tuple length %u",
+						(unsigned) chunk.dataLength, (unsigned) tuple_len)));
+
 	memcpy(tableOids, tuple + offsetof(OIndexChunk, data), sizeof(*tableOids));
 	trees = (OIndexKey *) MemoryContextAlloc(CurTransactionContext, sizeof(OIndexKey));
 
@@ -4093,7 +4107,8 @@ recovery_send_init(int worker_num)
  */
 static bool
 recovery_apply_systree_modify(int sys_tree_num, uint16 type, OTuple tuple,
-							  OXid oxid, XLogRecPtr xlogPtr, bool single)
+							  LocationIndex tuple_len, OXid oxid,
+							  XLogRecPtr xlogPtr, bool single)
 {
 	bool		success;
 
@@ -4110,13 +4125,13 @@ recovery_apply_systree_modify(int sys_tree_num, uint16 type, OTuple tuple,
 
 		if (type == RecoveryMsgTypeDelete)
 		{
-			trees = o_indices_get_trees(tuple.data, &tmp_oids);
+			trees = o_indices_get_trees(tuple.data, tuple_len, &tmp_oids);
 			if (trees)
 				add_undo_drop_relnode(tmp_oids, trees, 1);
 		}
 		else if (type == RecoveryMsgTypeInsert)
 		{
-			trees = o_indices_get_trees(tuple.data, &tmp_oids);
+			trees = o_indices_get_trees(tuple.data, tuple_len, &tmp_oids);
 			if (trees)
 			{
 				char	   *prefix;
@@ -5116,7 +5131,9 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 					 * deferred atomic-window apply is needed.
 					 */
 					recovery_apply_systree_modify(ctx->sys_tree_num, type,
-												  tuple1.tuple, rec->oxid,
+												  tuple1.tuple,
+												  rec->u.modify.len1,
+												  rec->oxid,
 												  xlogPtr, ctx->single);
 				}
 
