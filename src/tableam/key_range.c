@@ -33,7 +33,7 @@
 static bool o_key_range_is_unbounded(OBTreeKeyRange *range, int attnum);
 static void o_fill_key_bounds(Datum v, Oid type,
 							  OBTreeValueBound *low, OBTreeValueBound *high,
-							  OIndexField *field);
+							  OIndexField *field, Oid datoid);
 
 static OBTreeValueBound *
 o_fill_row_key_bound(OBTreeKeyBound *bound,
@@ -110,7 +110,7 @@ bool
 o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 						int numberOfKeys, BTArrayKeyInfo *arrayKeys,
 						int numPrefixExactKeys,
-						int resultNKeys, OIndexField *fields)
+						int resultNKeys, OIndexField *fields, Oid datoid)
 {
 	int			i;
 	bool		exact = true;
@@ -242,7 +242,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 					high.flags = O_VALUE_BOUND_UPPER | O_VALUE_BOUND_INCLUSIVE;
 					o_fill_key_bounds(key->sk_argument,
 									  OidIsValid(key->sk_subtype) ? key->sk_subtype : field->inputtype,
-									  &low, &high, field);
+									  &low, &high, field, datoid);
 					res->low.keys[attnum] = low;
 					res->high.keys[attnum] = high;
 					arrayKeys++;
@@ -270,7 +270,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 					low.flags = O_VALUE_BOUND_LOWER;	/* exclusive */
 					o_fill_key_bounds(key->sk_argument,
 									  OidIsValid(key->sk_subtype) ? key->sk_subtype : field->inputtype,
-									  &low, NULL, field);
+									  &low, NULL, field, datoid);
 					res->low.keys[attnum] = low;
 				}
 				else if (arrayKeys->low_compare)
@@ -282,7 +282,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 						 O_VALUE_BOUND_INCLUSIVE : 0);
 					o_fill_key_bounds(lk->sk_argument,
 									  OidIsValid(lk->sk_subtype) ? lk->sk_subtype : field->inputtype,
-									  &low, NULL, field);
+									  &low, NULL, field, datoid);
 					res->low.keys[attnum] = low;
 				}
 				else if (!arrayKeys->null_elem && field->nullfirst)
@@ -303,7 +303,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 					high.flags = O_VALUE_BOUND_UPPER;	/* exclusive */
 					o_fill_key_bounds(key->sk_argument,
 									  OidIsValid(key->sk_subtype) ? key->sk_subtype : field->inputtype,
-									  NULL, &high, field);
+									  NULL, &high, field, datoid);
 					res->high.keys[attnum] = high;
 				}
 				else if (arrayKeys->high_compare)
@@ -315,7 +315,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 						 O_VALUE_BOUND_INCLUSIVE : 0);
 					o_fill_key_bounds(hk->sk_argument,
 									  OidIsValid(hk->sk_subtype) ? hk->sk_subtype : field->inputtype,
-									  NULL, &high, field);
+									  NULL, &high, field, datoid);
 					res->high.keys[attnum] = high;
 				}
 				else if (!arrayKeys->null_elem && !field->nullfirst)
@@ -335,7 +335,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 									  key->sk_subtype,
 									  setLow ? &low : NULL,
 									  setHigh ? &high : NULL,
-									  field);
+									  field, datoid);
 				}
 				else
 				{
@@ -343,12 +343,12 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 									  key->sk_subtype,
 									  setLow ? &low : NULL,
 									  NULL,
-									  field);
+									  field, datoid);
 					o_fill_key_bounds(arrayKeys->elem_values[arrayKeys->num_elems - 1],
 									  key->sk_subtype,
 									  NULL,
 									  setHigh ? &high : NULL,
-									  field);
+									  field, datoid);
 				}
 				if (setLow)
 					res->low.keys[attnum] = low;
@@ -390,7 +390,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 
 				o_fill_key_bounds(subkey->sk_argument, subkey->sk_subtype,
 								  sublow, subhigh,
-								  subfield);
+								  subfield, datoid);
 				first_subkey = false;
 				if (!last_subkey)
 					subkey++;
@@ -406,12 +406,12 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 			o_fill_key_bounds(key->sk_argument, type,
 							  setLow ? &low : NULL,
 							  setHigh ? &high : NULL,
-							  field);
+							  field, datoid);
 			if (o_idx_cmp_value_bounds(&low, &res->low.keys[attnum],
-									   field, NULL) >= 0)
+									   field, datoid, NULL) >= 0)
 				res->low.keys[attnum] = low;
 			if (o_idx_cmp_value_bounds(&high, &res->high.keys[attnum],
-									   field, NULL) <= 0)
+									   field, datoid, NULL) <= 0)
 				res->high.keys[attnum] = high;
 		}
 	}
@@ -423,6 +423,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 		if (o_idx_cmp_value_bounds(&res->low.keys[i],
 								   &res->high.keys[i],
 								   &fields[i],
+								   datoid,
 								   &equals) >= 0)
 		{
 			res->empty = true;
@@ -438,7 +439,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 static void
 o_fill_key_bounds(Datum v, Oid type,
 				  OBTreeValueBound *low, OBTreeValueBound *high,
-				  OIndexField *field)
+				  OIndexField *field, Oid datoid)
 {
 	bool		coercible = false;
 	OComparator *comparator = NULL;
@@ -452,7 +453,8 @@ o_fill_key_bounds(Datum v, Oid type,
 	else
 		comparator = o_find_comparator(field->opfamily, type,
 									   field->inputtype,
-									   field->collation);
+									   field->collation,
+									   datoid);
 
 	if (low != NULL)
 	{

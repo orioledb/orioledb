@@ -58,10 +58,15 @@ typedef struct
 typedef struct OComparator OComparator;
 typedef struct OComparatorKey OComparatorKey;
 
+typedef struct OExclusionFnKey
+{
+	Oid			datoid;
+	Oid			operator;
+} OExclusionFnKey;
+
 typedef struct OExclusionFn
 {
-	Oid			operator;
-
+	OExclusionFnKey key;
 	FmgrInfo	finfo;
 } OExclusionFn;
 
@@ -367,7 +372,8 @@ extern void o_move_tree_meta(Oid datoid, Oid relnode, Oid old_tablespace,
 extern OComparator *o_find_comparator(Oid opfamily,
 									  Oid lefttype,
 									  Oid righttype,
-									  Oid collation);
+									  Oid collation,
+									  Oid datoid);
 extern int	o_call_comparator(OComparator *comparator, Datum left,
 							  Datum right);
 extern int	o_call_exclusion_fn(OExclusionFn *exclusion_fn, Datum left, Datum right, Oid collation);
@@ -388,7 +394,8 @@ extern void o_invalidate_undo_item_callback(UndoLogType undoType,
 											OXid oxid, OUndoCallbackStage stage,
 											bool changeCountsValid);
 
-extern void o_add_invalidate_comparator_undo_item(Oid opfamily, Oid lefttype, Oid righttype);
+extern void o_add_invalidate_comparator_undo_item(Oid datoid, Oid opfamily,
+												  Oid lefttype, Oid righttype);
 extern void o_invalidate_comparator_callback(UndoLogType undoType, UndoLocation location,
 											 UndoStackItem *baseItem,
 											 OXid oxid, OUndoCallbackStage stage,
