@@ -1,0 +1,276 @@
+-- A primary key column named in an INCLUDE list is stored once, in the
+-- INCLUDE position, but it must still take part in the index key: two rows
+-- that agree on the key columns are two distinct entries.
+CREATE SCHEMA include_pk;
+SET SESSION search_path = 'include_pk';
+CREATE EXTENSION orioledb;
+CREATE TABLE o_test_include_pk
+(
+	id text PRIMARY KEY,
+	grp text,
+	created_at timestamptz,
+	ttl bigint,
+	deleted bool NOT NULL DEFAULT false
+) USING orioledb;
+CREATE INDEX o_test_include_pk_ix ON o_test_include_pk (grp, created_at)
+	INCLUDE (id, ttl) WHERE NOT deleted AND ttl IS NOT NULL;
+INSERT INTO o_test_include_pk VALUES ('a', 'g-0', '2026-01-01 00:00:00+00', 3600);
+INSERT INTO o_test_include_pk VALUES ('b', 'g-0', '2026-01-01 00:00:00+00', 3600);
+INSERT INTO o_test_include_pk VALUES ('c', 'g-0', '2026-01-01 00:00:00+00', 3600)
+	ON CONFLICT (id) DO NOTHING;
+INSERT INTO o_test_include_pk VALUES ('d', 'g-1', '2026-01-01 00:00:00+00', NULL);
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT id FROM o_test_include_pk
+		WHERE NOT deleted AND ttl IS NOT NULL ORDER BY grp, created_at, id;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Incremental Sort
+   Sort Key: grp, created_at, id
+   Presorted Key: grp, created_at
+   ->  Custom Scan (o_scan) on o_test_include_pk
+         Forward index only scan of: o_test_include_pk_ix
+(5 rows)
+
+SELECT id, grp FROM o_test_include_pk
+	WHERE NOT deleted AND ttl IS NOT NULL ORDER BY grp, created_at, id;
+ id | grp 
+----+-----
+ a  | g-0
+ b  | g-0
+ c  | g-0
+(3 rows)
+
+RESET enable_seqscan;
+SELECT orioledb_tbl_structure('o_test_include_pk'::regclass, 'ne');
+                                   orioledb_tbl_structure                                    
+---------------------------------------------------------------------------------------------
+ Index o_test_include_pk_pkey contents                                                      +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                       +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                        +
+     Leftmost, Rightmost                                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                 +
+     Item 0: offset = 264, tuple = ('a', 'g-0', 'Wed Dec 31 16:00:00 2025 PST', '3600', 'f')+
+     Item 1: offset = 320, tuple = ('b', 'g-0', 'Wed Dec 31 16:00:00 2025 PST', '3600', 'f')+
+     Item 2: offset = 376, tuple = ('c', 'g-0', 'Wed Dec 31 16:00:00 2025 PST', '3600', 'f')+
+     Item 3: offset = 432, tuple = ('d', 'g-1', 'Wed Dec 31 16:00:00 2025 PST', null, 'f')  +
+                                                                                            +
+ Index o_test_include_pk_ix contents                                                        +
+ Page 0: level = 0, maxKeyLen = 40, nVacatedBytes = 0                                       +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty                        +
+     Leftmost, Rightmost                                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                 +
+     Item 0: offset = 264, tuple = ('g-0', 'Wed Dec 31 16:00:00 2025 PST', 'a', '3600')     +
+     Item 1: offset = 320, tuple = ('g-0', 'Wed Dec 31 16:00:00 2025 PST', 'b', '3600')     +
+     Item 2: offset = 376, tuple = ('g-0', 'Wed Dec 31 16:00:00 2025 PST', 'c', '3600')     +
+                                                                                            +
+ Index toast: not loaded                                                                    +
+ 
+(1 row)
+
+-- leaving the predicate must remove exactly this row's entry
+UPDATE o_test_include_pk SET deleted = true WHERE id = 'b';
+UPDATE o_test_include_pk SET deleted = true WHERE id = 'a';
+-- and coming back must add it again
+UPDATE o_test_include_pk SET deleted = false WHERE id = 'b';
+SET enable_seqscan = off;
+SELECT id, grp FROM o_test_include_pk
+	WHERE NOT deleted AND ttl IS NOT NULL ORDER BY grp, created_at, id;
+ id | grp 
+----+-----
+ b  | g-0
+ c  | g-0
+(2 rows)
+
+RESET enable_seqscan;
+DELETE FROM o_test_include_pk WHERE id = 'c';
+SET enable_seqscan = off;
+SELECT id, grp FROM o_test_include_pk
+	WHERE NOT deleted AND ttl IS NOT NULL ORDER BY grp, created_at, id;
+ id | grp 
+----+-----
+ b  | g-0
+(1 row)
+
+RESET enable_seqscan;
+SELECT orioledb_tbl_structure('o_test_include_pk'::regclass, 'ne');
+                                        orioledb_tbl_structure                                        
+------------------------------------------------------------------------------------------------------
+ Index o_test_include_pk_pkey contents                                                               +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 56                                               +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                 +
+     Leftmost, Rightmost                                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                          +
+     Item 0: offset = 264, tuple = ('a', 'g-0', 'Wed Dec 31 16:00:00 2025 PST', '3600', 't')         +
+     Item 1: offset = 320, tuple = ('b', 'g-0', 'Wed Dec 31 16:00:00 2025 PST', '3600', 'f')         +
+     Item 2: deleted, offset = 376, tuple = ('c', 'g-0', 'Wed Dec 31 16:00:00 2025 PST', '3600', 'f')+
+     Item 3: offset = 432, tuple = ('d', 'g-1', 'Wed Dec 31 16:00:00 2025 PST', null, 'f')           +
+                                                                                                     +
+ Index o_test_include_pk_ix contents                                                                 +
+ Page 0: level = 0, maxKeyLen = 40, nVacatedBytes = 112                                              +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty                                 +
+     Leftmost, Rightmost                                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                          +
+     Item 0: deleted, offset = 264, tuple = ('g-0', 'Wed Dec 31 16:00:00 2025 PST', 'a', '3600')     +
+     Item 1: offset = 320, tuple = ('g-0', 'Wed Dec 31 16:00:00 2025 PST', 'b', '3600')              +
+     Item 2: deleted, offset = 376, tuple = ('g-0', 'Wed Dec 31 16:00:00 2025 PST', 'c', '3600')     +
+                                                                                                     +
+ Index toast: not loaded                                                                             +
+ 
+(1 row)
+
+-- non-partial variant, and a UNIQUE index whose INCLUDE list names the key
+CREATE TABLE o_test_include_pk2
+(
+	id int PRIMARY KEY,
+	grp int,
+	payload text
+) USING orioledb;
+CREATE INDEX o_test_include_pk2_grp ON o_test_include_pk2 (grp) INCLUDE (id, payload);
+CREATE UNIQUE INDEX o_test_include_pk2_payload ON o_test_include_pk2 (payload) INCLUDE (id);
+INSERT INTO o_test_include_pk2 SELECT i, i % 3, 'p' || i FROM generate_series(1, 9) i;
+SET enable_seqscan = off;
+SELECT grp, id FROM o_test_include_pk2 WHERE grp = 1 ORDER BY id;
+ grp | id 
+-----+----
+   1 |  1
+   1 |  4
+   1 |  7
+(3 rows)
+
+SELECT id FROM o_test_include_pk2 WHERE payload = 'p5';
+ id 
+----
+  5
+(1 row)
+
+RESET enable_seqscan;
+UPDATE o_test_include_pk2 SET grp = 1 WHERE id = 6;
+DELETE FROM o_test_include_pk2 WHERE id = 4;
+SET enable_seqscan = off;
+SELECT grp, id FROM o_test_include_pk2 WHERE grp = 1 ORDER BY id;
+ grp | id 
+-----+----
+   1 |  1
+   1 |  6
+   1 |  7
+(3 rows)
+
+RESET enable_seqscan;
+SELECT orioledb_tbl_structure('o_test_include_pk2'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_test_include_pk2_pkey contents                             +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 40               +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('1', '1', 'p1')                 +
+     Item 1: offset = 320, tuple = ('2', '2', 'p2')                 +
+     Item 2: offset = 360, tuple = ('3', '0', 'p3')                 +
+     Item 3: deleted, offset = 400, tuple = ('4', '1', 'p4')        +
+     Item 4: offset = 440, tuple = ('5', '2', 'p5')                 +
+     Item 5: offset = 480, tuple = ('6', '1', 'p6')                 +
+     Item 6: offset = 520, tuple = ('7', '1', 'p7')                 +
+     Item 7: offset = 560, tuple = ('8', '2', 'p8')                 +
+     Item 8: offset = 600, tuple = ('9', '0', 'p9')                 +
+                                                                    +
+ Index o_test_include_pk2_grp contents                              +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 80              +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('0', '3', 'p3')                 +
+     Item 1: deleted, offset = 320, tuple = ('0', '6', 'p6')        +
+     Item 2: offset = 360, tuple = ('0', '9', 'p9')                 +
+     Item 3: offset = 400, tuple = ('1', '1', 'p1')                 +
+     Item 4: deleted, offset = 440, tuple = ('1', '4', 'p4')        +
+     Item 5: offset = 480, tuple = ('1', '6', 'p6')                 +
+     Item 6: offset = 520, tuple = ('1', '7', 'p7')                 +
+     Item 7: offset = 560, tuple = ('2', '2', 'p2')                 +
+     Item 8: offset = 600, tuple = ('2', '5', 'p5')                 +
+     Item 9: offset = 640, tuple = ('2', '8', 'p8')                 +
+                                                                    +
+ Index o_test_include_pk2_payload contents                          +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 32              +
+ state = free, datoid equal, relnode equal, ix_type = unique, dirty +
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('p1', '1')                      +
+     Item 1: offset = 312, tuple = ('p2', '2')                      +
+     Item 2: offset = 344, tuple = ('p3', '3')                      +
+     Item 3: deleted, offset = 376, tuple = ('p4', '4')             +
+     Item 4: offset = 408, tuple = ('p5', '5')                      +
+     Item 5: offset = 440, tuple = ('p6', '6')                      +
+     Item 6: offset = 472, tuple = ('p7', '7')                      +
+     Item 7: offset = 504, tuple = ('p8', '8')                      +
+     Item 8: offset = 536, tuple = ('p9', '9')                      +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+-- composite primary key with only one of its columns included
+CREATE TABLE o_test_include_pk3
+(
+	a int,
+	b int,
+	v int,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+CREATE INDEX o_test_include_pk3_v ON o_test_include_pk3 (v) INCLUDE (b);
+INSERT INTO o_test_include_pk3 VALUES (1, 1, 7), (1, 2, 7), (2, 1, 7), (2, 2, 8);
+SET enable_seqscan = off;
+SELECT a, b FROM o_test_include_pk3 WHERE v = 7 ORDER BY a, b;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 2
+ 2 | 1
+(3 rows)
+
+RESET enable_seqscan;
+DELETE FROM o_test_include_pk3 WHERE a = 1 AND b = 2;
+SET enable_seqscan = off;
+SELECT a, b FROM o_test_include_pk3 WHERE v = 7 ORDER BY a, b;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 1
+(2 rows)
+
+RESET enable_seqscan;
+SELECT orioledb_tbl_structure('o_test_include_pk3'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_test_include_pk3_pkey contents                             +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 32               +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = ('1', '1', '7')                  +
+     Item 1: deleted, offset = 296, tuple = ('1', '2', '7')         +
+     Item 2: offset = 328, tuple = ('2', '1', '7')                  +
+     Item 3: offset = 360, tuple = ('2', '2', '8')                  +
+                                                                    +
+ Index o_test_include_pk3_v contents                                +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 32              +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = ('7', '1', '1')                  +
+     Item 1: offset = 296, tuple = ('7', '1', '2')                  +
+     Item 2: deleted, offset = 328, tuple = ('7', '2', '1')         +
+     Item 3: offset = 360, tuple = ('8', '2', '2')                  +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table o_test_include_pk
+drop cascades to table o_test_include_pk2
+drop cascades to table o_test_include_pk3
+DROP SCHEMA include_pk CASCADE;
+RESET search_path;

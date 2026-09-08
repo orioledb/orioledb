@@ -118,6 +118,7 @@ REGRESSCHECKS = btree_sys_check \
 				generated \
 				getsomeattrs \
 				index_bridging \
+				include_pk \
 				indices \
 				indices_build \
 				inherits \
@@ -157,8 +158,9 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_print_backend_id \
 				  btree_scan \
 				  concurrent_update_delete \
-				  fkeys \
-				  included \
+				fkeys \
+				include_pk_wait \
+				included \
 				  insert_fails \
 				  ioc_deadlock \
 				  ioc_lost_update \
