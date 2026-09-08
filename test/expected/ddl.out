@@ -996,18 +996,18 @@ CREATE INDEX o_test_duplicate_key_fields_ix1
 	ON o_test_duplicate_key_fields (val_1, val_2, val_1) INCLUDE (val_1);
 INSERT INTO o_test_duplicate_key_fields SELECT v, v * 10 FROM generate_series(1, 5) v;
 SELECT orioledb_tbl_indices('o_test_duplicate_key_fields'::regclass);
-                 orioledb_tbl_indices                 
-------------------------------------------------------
- Index ctid_primary                                  +
-     Index type: primary, unique, ctid               +
-     Leaf tuple size: 3, non-leaf tuple size: 1      +
-     Non-leaf tuple fields: ctid                     +
-     Leaf tuple fields: ctid, val_2, val_1           +
- Index o_test_duplicate_key_fields_ix1               +
-     Index type: secondary                           +
-     Leaf tuple size: 4, non-leaf tuple size: 4      +
-     Non-leaf tuple fields: val_1, val_2, val_1, ctid+
-     Leaf tuple fields: val_1, val_2, val_1, ctid    +
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, val_2, val_1     +
+ Index o_test_duplicate_key_fields_ix1         +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val_1, val_2, ctid +
+     Leaf tuple fields: val_1, val_2, ctid     +
  
 (1 row)
 
@@ -1026,15 +1026,15 @@ SELECT orioledb_tbl_structure('o_test_duplicate_key_fields'::regclass, 'nue');
      Item 4: offset = 400, tuple = ('(0,5)', '5', '50')             +
                                                                     +
  Index o_test_duplicate_key_fields_ix1 contents                     +
- Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0               +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 272, tuple = ('10', '1', '10', '(0,1)')       +
-     Item 1: offset = 312, tuple = ('20', '2', '20', '(0,2)')       +
-     Item 2: offset = 352, tuple = ('30', '3', '30', '(0,3)')       +
-     Item 3: offset = 392, tuple = ('40', '4', '40', '(0,4)')       +
-     Item 4: offset = 432, tuple = ('50', '5', '50', '(0,5)')       +
+     Item 0: offset = 272, tuple = ('10', '1', '(0,1)')             +
+     Item 1: offset = 304, tuple = ('20', '2', '(0,2)')             +
+     Item 2: offset = 336, tuple = ('30', '3', '(0,3)')             +
+     Item 3: offset = 368, tuple = ('40', '4', '(0,4)')             +
+     Item 4: offset = 400, tuple = ('50', '5', '(0,5)')             +
                                                                     +
  Index toast: not loaded                                            +
  

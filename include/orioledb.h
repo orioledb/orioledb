@@ -99,7 +99,7 @@
  */
 #define ORIOLEDB_VERSION "OrioleDB beta 17"
 #define ORIOLEDB_BINARY_VERSION 10
-#define ORIOLEDB_SYS_TREE_VERSION	1	/* Version of system catalog */
+#define ORIOLEDB_SYS_TREE_VERSION	2	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION		1	/* Version of binary page format */
 #define ORIOLEDB_COMPRESS_VERSION	1	/* Version of page compression (only
 										 * for compressed pages) */

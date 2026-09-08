@@ -340,7 +340,8 @@ make_ctid_o_index(OTable *table, OIndexVersionMode ixVerMode)
 }
 
 static int
-find_existing_field(OIndex *index, int maxIndex, OTableIndexField *field)
+find_existing_field(OIndex *index, int maxIndex, OTableIndexField *field,
+					bool match_opclass)
 {
 	int			i;
 
@@ -348,7 +349,8 @@ find_existing_field(OIndex *index, int maxIndex, OTableIndexField *field)
 	{
 		if (field->attnum != EXPR_ATTNUM &&
 			field->attnum == index->leafFields[i].attnum &&
-			field->opclass == index->leafFields[i].opclass)
+			(!match_opclass ||
+			 field->opclass == index->leafFields[i].opclass))
 		{
 			return i;
 		}
@@ -435,7 +437,8 @@ make_primary_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	{
 		int			found_attnum;
 
-		found_attnum = find_existing_field(result, nadded, &tableIndex->fields[i]);
+		found_attnum = find_existing_field(result, nadded,
+										   &tableIndex->fields[i], true);
 		if (found_attnum >= 0)
 		{
 			List	   *duplicate;
@@ -463,41 +466,42 @@ make_primary_o_index(OTable *table, OIndexVersionMode ixVerMode)
 }
 
 static void
-add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nadded, bool fillPrimary)
+add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex,
+				 int field_from, int field_to, int *nadded,
+				 bool fillPrimary, bool fillIndexAm)
 {
 	int			i;
 	int			expr_field = 0;
-	int			init_nKeyFields = index->nKeyFields;
 
 	if (tableIndex)
 	{
-		int			nFields = fillPrimary ? tableIndex->nkeyfields : tableIndex->nfields;
+		for (i = 0; i < field_from; i++)
+		{
+			if (tableIndex->fields[i].attnum == EXPR_ATTNUM)
+				expr_field++;
+		}
 
-		for (i = 0; i < nFields; i++)
+		for (i = field_from; i < field_to; i++)
 		{
 			int			attnum = tableIndex->fields[i].attnum;
 			int			found_attnum;
 
-			found_attnum = find_existing_field(index, *nadded, &tableIndex->fields[i]);
+			found_attnum = find_existing_field(index, *nadded,
+											   &tableIndex->fields[i],
+											   i < tableIndex->nkeyfields || fillPrimary);
 			if (found_attnum >= 0)
 			{
 				if (fillPrimary)
 					index->primaryFieldsAttnums[index->nPrimaryFields++] = found_attnum + 1;
 				else
 				{
-					List	   *duplicate;
-
-					if (i < init_nKeyFields)
+					if (i < tableIndex->nkeyfields)
 						index->nKeyFields--;
 					else
 						index->nIncludedFields--;
-
-					Assert(CurrentMemoryContext == index->index_mctx);
-					/* (fieldnum, original fieldnum) */
-					/* cppcheck-suppress unknownEvaluationOrder */
-					duplicate = list_make2_int(*nadded, found_attnum);
-					index->duplicates = lappend(index->duplicates, duplicate);
 				}
+				if (fillIndexAm)
+					index->indexAmAttnums[index->nIndexAmFields++] = found_attnum + 1;
 
 				continue;
 			}
@@ -510,6 +514,8 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nad
 			index->leafFields[*nadded] = tableIndex->fields[i];
 			if (fillPrimary)
 				index->primaryFieldsAttnums[index->nPrimaryFields++] = *nadded + 1;
+			if (fillIndexAm)
+				index->indexAmAttnums[index->nIndexAmFields++] = *nadded + 1;
 			(*nadded)++;
 		}
 	}
@@ -587,12 +593,39 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex, OIndexVersionMode
 		result->exclops = palloc0(tableIndex->nkeyfields * sizeof(Oid));
 		memcpy(result->exclops, tableIndex->exclops, tableIndex->nkeyfields * sizeof(Oid));
 	}
-	add_index_fields(result, table, tableIndex, &nadded, false);
-	if (tableIndex->nfields == tableIndex->nkeyfields)
-		result->nKeyFields = nadded;
+	add_index_fields(result, table, tableIndex, 0, tableIndex->nkeyfields,
+					 &nadded, false, true);
 	Assert(nadded <= tableIndex->nfields);
-	add_index_fields(result, table, primary, &nadded, true);
+	add_index_fields(result, table, primary, 0,
+					 primary ? primary->nkeyfields : 0,
+					 &nadded, true, false);
+	add_index_fields(result, table, tableIndex, tableIndex->nkeyfields,
+					 tableIndex->nfields, &nadded, false, true);
 	Assert(nadded <= result->nLeafFields);
+
+	if (primary)
+	{
+		int			i;
+
+		for (i = 0; i < primary->nkeyfields; i++)
+		{
+			int			j;
+			bool		member = false;
+
+			for (j = 0; j < tableIndex->nfields; j++)
+			{
+				if (primary->fields[i].attnum == tableIndex->fields[j].attnum)
+				{
+					member = true;
+					break;
+				}
+			}
+			if (!member)
+				result->indexAmAttnums[result->nIndexAmFields++] =
+					result->primaryFieldsAttnums[i];
+		}
+	}
+	Assert(result->nIndexAmFields <= lengthof(result->indexAmAttnums));
 	MemoryContextSwitchTo(old_mcxt);
 	result->nLeafFields = nadded;
 	result->nNonLeafFields = nadded;
@@ -660,7 +693,9 @@ make_toast_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 
 	nadded = 0;
-	add_index_fields(result, table, primary, &nadded, true);
+	add_index_fields(result, table, primary, 0,
+					 primary ? primary->nkeyfields : 0,
+					 &nadded, true, false);
 	make_builtin_field(&result->leafTableFields[nadded], &result->leafFields[nadded],
 					   INT2OID, "attnum", FirstLowInvalidHeapAttributeNumber,
 					   INT2_BTREE_OPS_OID,
@@ -733,7 +768,9 @@ make_bridge_o_index(OTable *table, OIndexVersionMode ixVerMode)
 					   table->tid_hash_fn_oid);
 	nadded++;
 
-	add_index_fields(result, table, primary, &nadded, true);
+	add_index_fields(result, table, primary, 0,
+					 primary ? primary->nkeyfields : 0,
+					 &nadded, true, false);
 	Assert(nadded == result->nLeafFields);
 	result->nLeafFields = nadded;
 
@@ -1214,6 +1251,24 @@ cache_scan_tupdesc_and_slot(OIndexDescr *index_descr, OIndex *oIndex)
 	int			nduplicates = list_length(oIndex->duplicates);
 	int			cur_attr;
 
+	if (oIndex->nIndexAmFields > 0)
+	{
+		nfields = oIndex->nIndexAmFields;
+		index_descr->itupdesc = CreateTemplateTupleDesc(nfields);
+		for (i = 0; i < nfields; i++)
+		{
+			AttrNumber	attnum = oIndex->indexAmAttnums[i];
+
+			Assert(attnum > 0 && attnum <= oIndex->nLeafFields);
+			TupleDescCopyEntry(index_descr->itupdesc, i + 1,
+							   index_descr->leafTupdesc, attnum);
+		}
+		index_descr->index_slot =
+			MakeSingleTupleTableSlot(index_descr->leafTupdesc,
+									 &TTSOpsOrioleDB);
+		return;
+	}
+
 	/*
 	 * TODO: Check why this called multiple times for ctid_primary during
 	 * single CREATE INDEX
@@ -1540,6 +1595,10 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 
 	descr->nKeyFields = oIndex->nKeyFields;
 	descr->nIncludedFields = oIndex->nIncludedFields;
+	descr->nIndexAmFields = oIndex->nIndexAmFields;
+	memcpy(descr->indexAmAttnums, oIndex->indexAmAttnums,
+		   descr->nIndexAmFields * sizeof(descr->indexAmAttnums[0]));
+
 	for (i = 0; i < oIndex->nLeafFields; i++)
 	{
 		OTableIndexField *iField = &oIndex->leafFields[i];
@@ -1602,7 +1661,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 		AttrNumber	attnum = oIndex->primaryFieldsAttnums[i] - 1;
 		OTableIndexField *iField = &oIndex->leafFields[attnum];
 
-		temp_field.collation = TupleDescAttr(descr->leafTupdesc, i)->attcollation;
+		temp_field.collation = TupleDescAttr(descr->leafTupdesc,
+											 attnum)->attcollation;
 		if (OidIsValid(iField->collation))
 			temp_field.collation = iField->collation;
 

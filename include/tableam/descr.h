@@ -195,13 +195,14 @@ struct OIndexDescr
 	OIndexField *fields;
 
 	/*
-	 * Attnums for primary key values in the secondary index tuples. We may
-	 * assume that secondary index tuple just contain primary key values in
-	 * the tail.  But we would like to save the space if secondary index
-	 * shares some attributes with primary key.
+	 * Attnums for primary key values in secondary index tuples.  A value may
+	 * be in the key, INCLUDE range, or appended primary-key tail because a
+	 * column shared with the secondary index is stored only once.
 	 */
 	int			nPrimaryFields;
 	AttrNumber	primaryFieldsAttnums[INDEX_MAX_KEYS];
+	int			nIndexAmFields;
+	AttrNumber	indexAmAttnums[2 * INDEX_MAX_KEYS];
 
 	/* Compression rate used in this index */
 	OCompress	compress;
@@ -264,8 +265,8 @@ OIndexKeyAttnumToTupleAttnum(BTreeKeyType keyType, OIndexDescr *idx, int attnum)
 
 #define OIgnoreColumn(descr, attnum) \
 	((descr->desc.type != oIndexToast && descr->desc.type != oIndexBridge) && \
-		(attnum >= descr->nKeyFields) && \
-	 (attnum < (descr->nKeyFields + descr->nIncludedFields)))
+	 (attnum >= (descr->nFields - descr->nIncludedFields)) && \
+	 (attnum < descr->nFields))
 
 struct OTableDescr
 {

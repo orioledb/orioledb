@@ -907,9 +907,6 @@ fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *pkey)
 	else
 	{
 		int			i;
-		int			pk_from;
-
-		pk_from = idx->nFields - idx->nPrimaryFields;
 
 		pkey->nkeys = idx->nPrimaryFields;
 		for (i = 0; i < idx->nPrimaryFields; i++)
@@ -917,11 +914,11 @@ fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *pkey)
 			AttrNumber	attnum = idx->primaryFieldsAttnums[i];
 
 			pkey->keys[i].value = slot->tts_values[attnum - 1];
-			pkey->keys[i].type = TupleDescAttr(idx->leafTupdesc, pk_from + i)->atttypid;
+			pkey->keys[i].type = TupleDescAttr(idx->leafTupdesc, attnum - 1)->atttypid;
 			pkey->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
 			if (slot->tts_isnull[attnum - 1])
 				pkey->keys[i].flags |= O_VALUE_BOUND_NULL;
-			pkey->keys[i].comparator = idx->fields[pk_from + i].comparator;
+			pkey->keys[i].comparator = idx->pk_comparators[i];
 			pkey->keys[i].exclusion_fn = NULL;
 		}
 	}

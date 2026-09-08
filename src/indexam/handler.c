@@ -569,30 +569,20 @@ append_rowid_values(OIndexDescr *id,
 		tuple.formatFlags = add->flags;
 		*version = o_tuple_get_version(tuple);
 
-		if (id->nPrimaryFields <= id->nFields)
+		Assert(id->nPrimaryFields <= id->nFields);
+		for (int i = 0; i < id->nPrimaryFields; i++)
 		{
-			int			i;
-			int			pk_from;
+			AttrNumber	attnum = id->primaryFieldsAttnums[i] - 1;
 
-			pk_from = id->nFields - id->nPrimaryFields;
-
-			/* Amount of index fields checked in o_define_index_validate */
-			for (i = 0; i < id->nPrimaryFields; i++)
-			{
-				AttrNumber	attnum = id->primaryFieldsAttnums[i] - 1;
-
-				if (attnum >= pk_from)
-				{
-					values[attnum] = o_fastgetattr(tuple, i + 1, pk_tupdesc, pk_spec, &isnull[attnum]);
-				}
-			}
+			values[attnum] = o_fastgetattr(tuple, i + 1, pk_tupdesc,
+										   pk_spec, &isnull[attnum]);
 		}
 	}
 	else
 	{
 		ORowIdAddendumCtid *add;
 		ORowIdAddendumCtid addbuf;
-		AttrNumber	attnum = id->nFields - 1;
+		AttrNumber	attnum;
 
 		/* Decode through an aligned copy; see the non-ctid branch above. */
 		memcpy(&addbuf, p, sizeof(addbuf));
@@ -600,6 +590,8 @@ append_rowid_values(OIndexDescr *id,
 		*csn = add->csn;
 		*version = add->version;
 		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
+		Assert(id->nPrimaryFields == 1);
+		attnum = id->primaryFieldsAttnums[0] - 1;
 		values[attnum] = PointerGetDatum(p);
 		isnull[attnum] = false;
 	}
@@ -609,11 +601,8 @@ static void
 detoast_passed_values(OIndexDescr *index_descr, Datum *values, bool *isnull, bool *vfree)
 {
 	int			i;
-	int			pk_from;
 
-	pk_from = index_descr->nFields - index_descr->nPrimaryFields;
-
-	for (i = 0; i < pk_from; i++)
+	for (i = 0; i < index_descr->nFields; i++)
 	{
 		Form_pg_attribute att = TupleDescAttr(index_descr->nonLeafTupdesc, i);
 		Datum		tmp;
@@ -626,6 +615,27 @@ detoast_passed_values(OIndexDescr *index_descr, Datum *values, bool *isnull, boo
 			values[i] = tmp;
 			vfree[i] = true;
 		}
+	}
+}
+
+static void
+map_indexam_values(OIndexDescr *index_descr, int nvalues,
+				   Datum *input_values, bool *input_isnull,
+				   Datum *values, bool *isnull)
+{
+	int			i;
+
+	Assert(nvalues <= index_descr->nIndexAmFields);
+	memset(values, 0, sizeof(*values) * index_descr->nFields);
+	memset(isnull, true, sizeof(*isnull) * index_descr->nFields);
+
+	for (i = 0; i < nvalues; i++)
+	{
+		AttrNumber	attnum = index_descr->indexAmAttnums[i] - 1;
+
+		Assert(attnum >= 0 && attnum < index_descr->nFields);
+		values[attnum] = input_values[i];
+		isnull[attnum] = input_isnull[i];
 	}
 }
 
@@ -656,6 +666,8 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	uint32		version;
 	OTuple		tuple;
 	CommitSeqNo csn;
+	Datum		index_values[2 * INDEX_MAX_KEYS];
+	bool		index_isnull[2 * INDEX_MAX_KEYS];
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	if (options && !options->orioledb_index)
@@ -719,45 +731,16 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	}
 	Assert(ix_num < descr->nIndices);
 
-	if (index_descr->duplicates != NIL)
-	{
-		ListCell   *lc = NULL;
-		List	   *duplicate = NIL;
-		int			cur_attr;
-		int			i;
-
-		/* Remove duplicate column values to store in our index */
-
-		if (index_descr->duplicates != NIL)
-			lc = list_head(index_descr->duplicates);
-		if (lc != NULL)
-			duplicate = (List *) lfirst(lc);
-
-		cur_attr = 0;
-		for (i = 0; i < rel->rd_att->natts; i++)
-		{
-			if (duplicate != NIL && linitial_int(duplicate) == cur_attr)
-			{
-				lc = lnext(index_descr->duplicates, lc);
-				if (lc != NULL)
-					duplicate = (List *) lfirst(lc);
-				else
-					duplicate = NIL;
-			}
-			else
-			{
-				values[cur_attr] = values[i];
-				cur_attr++;
-			}
-		}
-	}
+	map_indexam_values(index_descr, rel->rd_att->natts,
+					   values, isnull, index_values, index_isnull);
 	append_rowid_values(index_descr,
 						GET_PRIMARY(descr)->nonLeafTupdesc,
 						&GET_PRIMARY(descr)->nonLeafSpec,
-						tupleid, values, isnull,
+						tupleid, index_values, index_isnull,
 						&csn, &version);
 
-	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull, NULL);
+	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
+						 version, index_values, index_isnull, NULL);
 	slot = index_descr->old_leaf_slot;
 	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, false, NULL);
 	callbackInfo.arg = slot;
@@ -810,6 +793,10 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	OTuple		old_tuple;
 	bool	   *vfree;
 	int			i;
+	Datum		index_values[2 * INDEX_MAX_KEYS];
+	bool		index_isnull[2 * INDEX_MAX_KEYS];
+	Datum		index_values_old[2 * INDEX_MAX_KEYS];
+	bool		index_isnull_old[2 * INDEX_MAX_KEYS];
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	if (options && !options->orioledb_index)
@@ -857,25 +844,33 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	}
 	Assert(ix_num < descr->nIndices);
 
+	map_indexam_values(index_descr, rel->rd_att->natts,
+					   valuesOld, isnullOld,
+					   index_values_old, index_isnull_old);
 	append_rowid_values(index_descr,
 						GET_PRIMARY(descr)->nonLeafTupdesc,
 						&GET_PRIMARY(descr)->nonLeafSpec,
-						oldTupleid, valuesOld, isnullOld,
+						oldTupleid, index_values_old, index_isnull_old,
 						&csn, &version);
 	vfree = palloc0(sizeof(bool) * index_descr->leafTupdesc->natts);
 	/* TODO: Probably there is a better way than detoasting here */
-	detoast_passed_values(index_descr, valuesOld, isnullOld, vfree);
+	detoast_passed_values(index_descr, index_values_old, index_isnull_old,
+						  vfree);
 	old_tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
-							 version, valuesOld, isnullOld, NULL);
+							 version, index_values_old, index_isnull_old,
+							 NULL);
 	old_slot = index_descr->old_leaf_slot;
 	tts_orioledb_store_non_leaf_tuple(old_slot, old_tuple, descr, csn, ix_num, false, NULL);
 
+	map_indexam_values(index_descr, rel->rd_att->natts,
+					   values, isnull, index_values, index_isnull);
 	append_rowid_values(index_descr,
 						GET_PRIMARY(descr)->nonLeafTupdesc,
 						&GET_PRIMARY(descr)->nonLeafSpec,
-						tupleid, values, isnull,
+						tupleid, index_values, index_isnull,
 						&csn, &version);
-	new_tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull, NULL);
+	new_tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
+							 version, index_values, index_isnull, NULL);
 	new_slot = index_descr->new_leaf_slot;
 	tts_orioledb_store_non_leaf_tuple(new_slot, new_tuple, descr, csn, ix_num, false, NULL);
 
@@ -889,7 +884,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	for (i = 0; i < index_descr->leafTupdesc->natts; i++)
 	{
 		if (vfree[i])
-			pfree(DatumGetPointer(valuesOld[i]));
+			pfree(DatumGetPointer(index_values_old[i]));
 	}
 	pfree(vfree);
 
@@ -909,7 +904,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 					{
 						if (i != 0)
 							appendStringInfo(str, ", ");
-						if (isnull[i])
+						if (index_isnull_old[i])
 							appendStringInfo(str, "null");
 						else
 						{
@@ -919,7 +914,8 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 
 							getTypeOutputInfo(TupleDescAttr(index_descr->leafTupdesc, i)->atttypid,
 											  &typoutput, &typisvarlena);
-							res = OidOutputFunctionCall(typoutput, valuesOld[i]);
+							res = OidOutputFunctionCall(typoutput,
+														index_values_old[i]);
 							appendStringInfo(str, "'%s'", res);
 						}
 					}
@@ -981,6 +977,8 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	OTuple		tuple;
 	bool	   *vfree;
 	int			i;
+	Datum		index_values[2 * INDEX_MAX_KEYS];
+	bool		index_isnull[2 * INDEX_MAX_KEYS];
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	if (options && !options->orioledb_index)
@@ -1009,15 +1007,17 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	Assert(ix_num < descr->nIndices);
 
 	slot = index_descr->old_leaf_slot;
+	map_indexam_values(index_descr, rel->rd_att->natts,
+					   values, isnull, index_values, index_isnull);
 	append_rowid_values(index_descr,
 						GET_PRIMARY(descr)->nonLeafTupdesc,
 						&GET_PRIMARY(descr)->nonLeafSpec,
-						tupleid, values, isnull,
+						tupleid, index_values, index_isnull,
 						&csn, &version);
 	vfree = palloc0(sizeof(bool) * index_descr->nonLeafTupdesc->natts);
-	detoast_passed_values(index_descr, values, isnull, vfree);
+	detoast_passed_values(index_descr, index_values, index_isnull, vfree);
 	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
-						 version, values, isnull, NULL);
+						 version, index_values, index_isnull, NULL);
 	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, false, NULL);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
@@ -1026,7 +1026,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	for (i = 0; i < index_descr->nonLeafTupdesc->natts; i++)
 	{
 		if (vfree[i])
-			pfree(DatumGetPointer(values[i]));
+			pfree(DatumGetPointer(index_values[i]));
 	}
 	pfree(vfree);
 
@@ -1046,7 +1046,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 					{
 						if (i != 0)
 							appendStringInfo(str, ", ");
-						if (isnull[i])
+						if (index_isnull[i])
 							appendStringInfo(str, "null");
 						else
 						{
@@ -1056,7 +1056,8 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 
 							getTypeOutputInfo(TupleDescAttr(index_descr->nonLeafTupdesc, i)->atttypid,
 											  &typoutput, &typisvarlena);
-							res = OidOutputFunctionCall(typoutput, values[i]);
+							res = OidOutputFunctionCall(typoutput,
+														index_values[i]);
 							appendStringInfo(str, "'%s'", res);
 						}
 					}
@@ -1939,6 +1940,10 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	bool	   *rowid_isnull = NULL;
 	Datum		temp_rowid_values[2 * INDEX_MAX_KEYS];
 	bool		temp_rowid_isnull[2 * INDEX_MAX_KEYS];
+	Datum		itup_values[2 * INDEX_MAX_KEYS];
+	bool		itup_isnull[2 * INDEX_MAX_KEYS];
+	Datum	   *output_values;
+	bool	   *output_isnull;
 
 	slot = index_descr->index_slot;
 	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum, true, hint);
@@ -1948,7 +1953,8 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	 * moving values from duplicate field places that will be filled during
 	 * index_form_tuple
 	 */
-	if (index_descr->duplicates != NIL)
+	if (index_descr->nIndexAmFields == 0 &&
+		index_descr->duplicates != NIL)
 	{
 		int			lc_id = 0;
 		ListCell   *lc = NULL;
@@ -2073,32 +2079,30 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		scan->xs_itup = NULL;
 	}
 
-	/*--
-	 * OrioleDB's internal itupdesc already matches the planner-side
-	 * indextlist layout in both column count and column order:
-	 *
-	 *   itupdesc = [non-duplicate secondary key cols
-	 *               | non-duplicate INCLUDE cols
-	 *               | duplicate cols (refilled from their source columns)
-	 *               | extra PK key cols not already in the secondary],
-	 *
-	 *   planner indextlist = rd_att (all declared cols, including dups)
-	 *                       + (when has_primary, PK key cols not in
-	 *                          rd_att.indexkeys, added by
-	 *                          set_plain_rel_pathlist_hook()).
-	 *
-	 * Their natts agree because the duplicate slots in itupdesc account
-	 * for exactly the same columns as the duplicates inside rd_att, and
-	 * because scan.c's hook only adds PK *key* cols (matching the
-	 * !primaryIsCtid path that populates the PK tail of itupdesc).  The
-	 * duplicate-slot rearrangement done by the block right above this
-	 * comment leaves slot->tts_values in itupdesc order, so we hand the
-	 * pair directly to index_form_tuple.
-	 */
+	if (index_descr->nIndexAmFields > 0)
+	{
+		int			i;
+
+		for (i = 0; i < index_descr->nIndexAmFields; i++)
+		{
+			AttrNumber	attnum = index_descr->indexAmAttnums[i] - 1;
+
+			itup_values[i] = slot->tts_values[attnum];
+			itup_isnull[i] = slot->tts_isnull[attnum];
+		}
+		output_values = itup_values;
+		output_isnull = itup_isnull;
+	}
+	else
+	{
+		output_values = slot->tts_values;
+		output_isnull = slot->tts_isnull;
+	}
+
 	scan->xs_itupdesc = index_descr->itupdesc;
 	scan->xs_itup = index_form_tuple(index_descr->itupdesc,
-									 slot->tts_values,
-									 slot->tts_isnull);
+									 output_values,
+									 output_isnull);
 
 	ItemPointerCopy(&slot->tts_tid, &scan->xs_itup->t_tid);
 

@@ -286,10 +286,14 @@ hash_combine_mix_field(OIndexDescr *idx, TupleDesc tupdesc,
 	bool		isnull;
 	uint32		element_hash;
 
+	/* Hash exactly the fields that participate in tuple comparison. */
+	if (OIgnoreColumn(idx, field_num))
+		return hash;
 	val = o_fastgetattr(tup, attnum, tupdesc, spec, &isnull);
 	if (isnull)
 		return hash;
-	if (idx->fields[field_num].hash_fn == &o_default_hash_fn)
+	if (idx->fields[field_num].hash_fn == NULL ||
+		idx->fields[field_num].hash_fn == &o_default_hash_fn)
 		return hash;
 	element_hash = o_call_hash_fn(idx->fields[field_num].hash_fn,
 								  idx->fields[field_num].collation,
@@ -546,13 +550,7 @@ o_fill_pindex_tuple_key_bound(BTreeDescr *desc,
 {
 	OIndexDescr *id = o_get_tree_def(desc);
 	int			i;
-	int			pk_from;
 	bool		isnull;
-
-	if (desc->type == oIndexBridge)
-		pk_from = 1;
-	else
-		pk_from = id->nFields - id->nPrimaryFields;
 
 	bound->nkeys = id->nPrimaryFields;
 	for (i = 0; i < id->nPrimaryFields; i++)
@@ -560,7 +558,7 @@ o_fill_pindex_tuple_key_bound(BTreeDescr *desc,
 		AttrNumber	attnum = id->primaryFieldsAttnums[i];
 
 		bound->keys[i].value = o_fastgetattr(tup, attnum, id->leafTupdesc, &id->leafSpec, &isnull);
-		bound->keys[i].type = TupleDescAttr(id->leafTupdesc, pk_from + i)->atttypid;
+		bound->keys[i].type = TupleDescAttr(id->leafTupdesc, attnum - 1)->atttypid;
 		bound->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;

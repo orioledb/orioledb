@@ -176,12 +176,24 @@ make_key_from_secondary_slot(TupleTableSlot *slot, OIndexDescr *idx, OTableDescr
 	{
 		int			pk_attnum = idx->primaryFieldsAttnums[i];
 		int			attindex = pk_attnum - 1;
+#ifdef USE_ASSERT_CHECKING
+		Form_pg_attribute att;
+#endif
+
+		if (idx->nIndexAmFields > 0 &&
+			slot->tts_tupleDescriptor != idx->leafTupdesc)
+		{
+			for (attindex = 0; attindex < idx->nIndexAmFields; attindex++)
+			{
+				if (idx->indexAmAttnums[attindex] == pk_attnum)
+					break;
+			}
+			Assert(attindex < idx->nIndexAmFields);
+		}
 
 #ifdef USE_ASSERT_CHECKING
 		/* PK attributes shouldn't be external or compressed */
-		Form_pg_attribute att;
-
-		att = TupleDescAttr(slot->tts_tupleDescriptor, pk_attnum - 1);
+		att = TupleDescAttr(slot->tts_tupleDescriptor, attindex);
 		if (!slot->tts_isnull[attindex] && att->attlen < 0)
 		{
 			Assert(!VARATT_IS_EXTERNAL(slot->tts_values[attindex]));
@@ -239,6 +251,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 									 * attributes. */
 	OIndexDescr *idx;
 	bool		index_order;
+	bool		mapped_index_order = false;
 	int			cur_tbl_attnum = 0;
 	bool	   *isfilled = NULL;
 
@@ -261,6 +274,9 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	if (oslot->ixnum == PrimaryIndexNumber)
 		index_order = index_order &&
 			slot->tts_tupleDescriptor->natts == idx->nFields;
+	else if (index_order && idx->nIndexAmFields > 0 &&
+			 slot->tts_tupleDescriptor != idx->leafTupdesc)
+		mapped_index_order = true;
 
 	/*
 	 * Ensure that if there are valid attributes, the slot is for the primary
@@ -313,6 +329,9 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	{
 		int			needed = Max(natts, __natts);
 
+		if (mapped_index_order)
+			needed = Max(needed, slot->tts_tupleDescriptor->natts);
+
 		if (oslot->isfilledLen < needed)
 		{
 			if (oslot->isfilled)
@@ -330,6 +349,8 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	{
 		Form_pg_attribute thisatt;
 		int			res_attnum = 0;
+		Datum		value = (Datum) 0;
+		bool		value_isnull = true;
 
 		/*
 		 * Determine the result attribute number based on the index type and
@@ -365,7 +386,10 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		}
 		else if (index_order)
 		{
-			if (GET_PRIMARY(descr)->primaryIsCtid && attnum == natts - 1)
+			if (mapped_index_order)
+				res_attnum = -3;
+			else if (GET_PRIMARY(descr)->primaryIsCtid &&
+					 attnum == idx->primaryFieldsAttnums[0] - 1)
 				res_attnum = -1;
 			else
 				res_attnum = attnum;
@@ -376,7 +400,25 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		}
 
 		/* Ensure the result attribute number is valid. */
-		Assert(res_attnum >= -2);
+		Assert(res_attnum >= -3);
+		if (res_attnum == -3)
+		{
+			int			index_attnum;
+
+			value = o_tuple_read_next_field(&oslot->state, &value_isnull);
+			for (index_attnum = 0;
+				 index_attnum < idx->nIndexAmFields;
+				 index_attnum++)
+			{
+				if (idx->indexAmAttnums[index_attnum] == attnum + 1)
+				{
+					values[index_attnum] = value;
+					isnull[index_attnum] = value_isnull;
+					isfilled[index_attnum] = true;
+				}
+			}
+			thisatt = TupleDescAttr(idx->leafTupdesc, attnum);
+		}
 		if (res_attnum >= 0)
 		{
 			if (oslot->ixnum == BridgeIndexNumber && attnum == 0)
@@ -397,6 +439,8 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			values[res_attnum] = o_tuple_read_next_field(&oslot->state,
 														 &isnull[res_attnum]);
 			isfilled[res_attnum] = true;
+			value = values[res_attnum];
+			value_isnull = isnull[res_attnum];
 
 			/* Determine the attribute metadata based on the index and order. */
 			if (oslot->ixnum == PrimaryIndexNumber && !index_order)
@@ -408,15 +452,20 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			 * Check for TOASTed attributes and adjust the number of
 			 * attributes if necessary.
 			 */
-			if (!isnull[res_attnum] && !thisatt->attbyval && thisatt->attlen < 0)
+		}
+		if (res_attnum >= 0 || res_attnum == -3)
+		{
+			if (!value_isnull && !thisatt->attbyval && thisatt->attlen < 0)
 			{
-				Pointer		p = DatumGetPointer(values[res_attnum]);
+				Pointer		p = DatumGetPointer(value);
 
 				Assert(p);
 				if (IS_TOAST_POINTER(p) && !VARATT_IS_EXTERNAL_ORIOLEDB(p))
 				{
 					hastoast = true;
-					natts = Max(natts, idx->maxTableAttnum - ctid_off);
+					if (!mapped_index_order)
+						natts = Max(natts,
+									idx->maxTableAttnum - ctid_off);
 				}
 			}
 		}
@@ -449,6 +498,8 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	if (hastoast)
 	{
 		OTuple		pkey;
+		int			toast_natts = mapped_index_order ?
+			slot->tts_tupleDescriptor->natts : natts;
 
 		/* Allocate memory for TOASTed attributes if not already done. */
 		if (!oslot->to_toast)
@@ -461,7 +512,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			pkey = make_key_from_secondary_slot(slot, idx, descr);
 
 		/* Iterate over attributes to process TOASTed values. */
-		for (attnum = 0; attnum < natts; attnum++)
+		for (attnum = 0; attnum < toast_natts; attnum++)
 		{
 			Form_pg_attribute thisatt;
 
@@ -492,9 +543,14 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			pfree(pkey.data);
 	}
 
-	/* Ensure the number of processed attributes matches the expected count. */
-	Assert(attnum == natts);
-
+	if (mapped_index_order)
+	{
+		for (attnum = slot->tts_nvalid;
+			 attnum < slot->tts_tupleDescriptor->natts; attnum++)
+			Assert(isfilled[attnum]);
+		slot->tts_nvalid = slot->tts_tupleDescriptor->natts;
+	}
+	else
 	{
 		int			first_unfilled = slot->tts_nvalid;
 
@@ -903,7 +959,20 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 			ItemPointer iptr;
 			bool		isnull;
 
-			if (oslot->leafTuple)
+			if (idx->nIndexAmFields > 0)
+			{
+				Datum		value;
+
+				value = o_fastgetattr(oslot->tuple,
+									  idx->primaryFieldsAttnums[0],
+									  oslot->leafTuple ? idx->leafTupdesc :
+									  idx->nonLeafTupdesc,
+									  oslot->leafTuple ? &idx->leafSpec :
+									  &idx->nonLeafSpec,
+									  &isnull);
+				iptr = (ItemPointer) DatumGetPointer(value);
+			}
+			else if (oslot->leafTuple)
 				iptr = o_tuple_get_last_iptr(idx->leafTupdesc, &idx->leafSpec,
 											 oslot->tuple, &isnull);
 			else

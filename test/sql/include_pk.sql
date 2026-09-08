@@ -1,6 +1,5 @@
 -- A primary key column named in an INCLUDE list is stored once, in the
--- INCLUDE position, but it must still take part in the index key: two rows
--- that agree on the key columns are two distinct entries.
+-- deduplicated PK segment, and remains available to index-only scans.
 CREATE SCHEMA include_pk;
 SET SESSION search_path = 'include_pk';
 CREATE EXTENSION orioledb;
@@ -86,6 +85,50 @@ SET enable_seqscan = off;
 SELECT a, b FROM o_test_include_pk3 WHERE v = 7 ORDER BY a, b;
 RESET enable_seqscan;
 SELECT orioledb_tbl_structure('o_test_include_pk3'::regclass, 'ne');
+
+-- composite PK delete correctness without any secondary index
+CREATE TABLE o_test_include_pk4
+(
+	a int,
+	b int,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_test_include_pk4 VALUES (1, 1), (1, 2), (2, 1), (2, 2);
+SELECT a, b FROM o_test_include_pk4 ORDER BY a, b;
+DELETE FROM o_test_include_pk4 WHERE a = 1 AND b = 2;
+SELECT a, b FROM o_test_include_pk4 ORDER BY a, b;
+
+-- PK fields can be interleaved with INCLUDE fields of different types.
+-- Exercise both secondary-to-primary lookup and ON CONFLICT row locking.
+CREATE TABLE o_test_include_pk5
+(
+	a text,
+	b int,
+	v int,
+	token text,
+	note text,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+CREATE INDEX o_test_include_pk5_v ON o_test_include_pk5 (v)
+	INCLUDE (b, note);
+CREATE UNIQUE INDEX o_test_include_pk5_token ON o_test_include_pk5 (token)
+	INCLUDE (b);
+INSERT INTO o_test_include_pk5 VALUES
+	('one', 1, 7, 'first', repeat('x', 10000)),
+	('two', 2, 7, 'second', repeat('y', 10000));
+SET enable_seqscan = off;
+SELECT a, b, token, length(note) FROM o_test_include_pk5
+	WHERE v = 7 ORDER BY a, b;
+RESET enable_seqscan;
+INSERT INTO o_test_include_pk5 VALUES
+	('unused', 9, 9, 'first', 'updated')
+	ON CONFLICT (token) DO UPDATE SET note = EXCLUDED.note
+	RETURNING a, b, token, note;
+DELETE FROM o_test_include_pk5 WHERE a = 'two' AND b = 2;
+SET enable_seqscan = off;
+SELECT a, b, token, length(note) FROM o_test_include_pk5
+	WHERE v = 7 ORDER BY a, b;
+RESET enable_seqscan;
 
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA include_pk CASCADE;
