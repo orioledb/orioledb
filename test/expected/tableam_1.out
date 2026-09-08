@@ -3161,7 +3161,7 @@ EXPLAIN (COSTS off) SELECT id, val FROM heap_table FULL JOIN o_tableam_join1 USI
          ->  Seq Scan on o_tableam_join1
 (5 rows)
 
-SELECT id, val FROM heap_table FULL JOIN o_tableam_join1 USING (id);
+SELECT id, val FROM heap_table FULL JOIN o_tableam_join1 USING (id) ORDER BY id;
  id  | val 
 -----+-----
    1 | 1!
