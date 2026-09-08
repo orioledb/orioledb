@@ -120,7 +120,7 @@ retain their previous access method.
 
 ### Collations
 
-OrioleDB tables support only ICU, C, and POSIX collations. So, make sure the cluster or database is set up with default collations that fall under those options, otherwise you have to write COLLATE for every "text" field of the table.
+OrioleDB tables support ICU, C, POSIX, and PostgreSQL 17 or later builtin collations. Make sure the cluster or database is set up with a default collation that uses one of those providers; otherwise, specify `COLLATE` for every `text` field of the table.
 
 ALTER COLLATION REFRESH VERSION is also disabled for collations that used for fields and indexes of orioledb tables.
 

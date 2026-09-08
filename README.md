@@ -163,7 +163,7 @@ shared_preload_libraries = 'orioledb.so'
 ```
 
 ## Collations
-OrioleDB tables support only ICU, C, and POSIX collations.
+OrioleDB tables support ICU, C, POSIX, and PostgreSQL 17 or later builtin collations.
 
 So that you don't have to write COLLATE for every "text" field of tables you have options:
 ### Create whole cluster with one of these collations:
@@ -173,6 +173,8 @@ initdb --locale=C -D..
 initdb --locale=POSIX -D..
 # OR
 initdb --locale-provider=icu --icu-locale=en -D...
+# OR
+initdb --locale-provider=builtin --builtin-locale=C.UTF-8 -D...
 ```
 
 ### Create new database with default collation from template0
@@ -182,8 +184,10 @@ createdb --locale=C --template template0 ...
 createdb --locale=POSIX --template template0 ...
 # OR
 createdb --locale-provider=icu --icu-locale=en --template template0 ...
+# OR
+createdb --locale-provider=builtin --builtin-locale=C.UTF-8 --template template0 ...
 ```
-Or using `CREATE DATABASE` with `LOCALE` or `ICU_LOCALE` parameters.
+Or use `CREATE DATABASE` with the `LOCALE`, `ICU_LOCALE`, or `BUILTIN_LOCALE` parameters.
 
 ## Setup
 
