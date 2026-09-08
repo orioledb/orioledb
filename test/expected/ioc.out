@@ -120,6 +120,17 @@ INSERT INTO o_test_ioc_partial VALUES ('update_bad', 1)
 	ON CONFLICT (id) DO UPDATE SET val = EXCLUDED.val;
 INSERT INTO o_test_ioc_partial VALUES ('update_good', NULL)
 	ON CONFLICT (id) DO UPDATE SET val = EXCLUDED.val;
+SELECT * FROM o_test_ioc_partial ORDER BY id, val;
+      id      | val 
+--------------+-----
+ nothing_bad  |   1
+ nothing_good |    
+ plain_bad    |   1
+ plain_good   |    
+ update_bad   |   1
+ update_good  |    
+(6 rows)
+
 SET enable_seqscan = off;
 SELECT id FROM o_test_ioc_partial WHERE val IS NULL ORDER BY id;
       id      
@@ -130,6 +141,38 @@ SELECT id FROM o_test_ioc_partial WHERE val IS NULL ORDER BY id;
 (3 rows)
 
 RESET enable_seqscan;
+-- partial unique index as arbiter
+CREATE TABLE o_test_ioc_partial2
+(
+	id text,
+	val int
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_ioc_partial2_idx ON o_test_ioc_partial2 (id)
+	WHERE val IS NULL;
+INSERT INTO o_test_ioc_partial2 VALUES ('a', NULL);
+-- conflicts on partial unique index arbiter
+INSERT INTO o_test_ioc_partial2 VALUES ('a', NULL)
+	ON CONFLICT (id) WHERE val IS NULL DO UPDATE SET val = 42;
+-- no conflict: predicate not satisfied for the new row
+INSERT INTO o_test_ioc_partial2 VALUES ('a', 1)
+	ON CONFLICT (id) WHERE val IS NULL DO NOTHING;
+-- no conflict: 'b' not in partial index yet
+INSERT INTO o_test_ioc_partial2 VALUES ('b', 1)
+	ON CONFLICT (id) WHERE val IS NULL DO NOTHING;
+INSERT INTO o_test_ioc_partial2 VALUES ('b', NULL)
+	ON CONFLICT (id) WHERE val IS NULL DO NOTHING;
+-- conflicts on 'b' in partial index
+INSERT INTO o_test_ioc_partial2 VALUES ('b', NULL)
+	ON CONFLICT (id) WHERE val IS NULL DO UPDATE SET val = 99;
+SELECT * FROM o_test_ioc_partial2 ORDER BY id, val;
+ id | val 
+----+-----
+ a  |   1
+ a  |  42
+ b  |   1
+ b  |  99
+(4 rows)
+
 ---
 -- conflict_target tests
 ---
@@ -440,11 +483,12 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 8 other objects
+NOTICE:  drop cascades to 9 other objects
 DETAIL:  drop cascades to table o_test_ioc1
 drop cascades to table o_test_ioc2
 drop cascades to table o_test_ioc3
 drop cascades to table o_test_ioc_partial
+drop cascades to table o_test_ioc_partial2
 drop cascades to table o_test_ioc4
 drop cascades to table o_test_ioc5
 drop cascades to table o_test_ioc6

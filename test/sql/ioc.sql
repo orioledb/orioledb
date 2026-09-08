@@ -88,9 +88,38 @@ INSERT INTO o_test_ioc_partial VALUES ('update_bad', 1)
 INSERT INTO o_test_ioc_partial VALUES ('update_good', NULL)
 	ON CONFLICT (id) DO UPDATE SET val = EXCLUDED.val;
 
+SELECT * FROM o_test_ioc_partial ORDER BY id, val;
+
 SET enable_seqscan = off;
 SELECT id FROM o_test_ioc_partial WHERE val IS NULL ORDER BY id;
 RESET enable_seqscan;
+
+-- partial unique index as arbiter
+CREATE TABLE o_test_ioc_partial2
+(
+	id text,
+	val int
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_ioc_partial2_idx ON o_test_ioc_partial2 (id)
+	WHERE val IS NULL;
+
+INSERT INTO o_test_ioc_partial2 VALUES ('a', NULL);
+-- conflicts on partial unique index arbiter
+INSERT INTO o_test_ioc_partial2 VALUES ('a', NULL)
+	ON CONFLICT (id) WHERE val IS NULL DO UPDATE SET val = 42;
+-- no conflict: predicate not satisfied for the new row
+INSERT INTO o_test_ioc_partial2 VALUES ('a', 1)
+	ON CONFLICT (id) WHERE val IS NULL DO NOTHING;
+-- no conflict: 'b' not in partial index yet
+INSERT INTO o_test_ioc_partial2 VALUES ('b', 1)
+	ON CONFLICT (id) WHERE val IS NULL DO NOTHING;
+INSERT INTO o_test_ioc_partial2 VALUES ('b', NULL)
+	ON CONFLICT (id) WHERE val IS NULL DO NOTHING;
+-- conflicts on 'b' in partial index
+INSERT INTO o_test_ioc_partial2 VALUES ('b', NULL)
+	ON CONFLICT (id) WHERE val IS NULL DO UPDATE SET val = 99;
+
+SELECT * FROM o_test_ioc_partial2 ORDER BY id, val;
 
 ---
 -- conflict_target tests
