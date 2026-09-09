@@ -90,7 +90,8 @@ class CollateTest(BaseTest):
 		self.assertEqual('Custom Scan', plan["Node Type"])
 		self.assertEqual('Index Only Scan', plan["Custom Scan Subtype"])
 		self.assertEqual('o_collate_builtin_migrated_idx', plan['Index Name'])
-		self.assertEqual([('z', )], node.execute("""
+		self.assertEqual([('z', )],
+		                 node.execute("""
 			SET LOCAL enable_seqscan = off;
 			SELECT migrated FROM o_collate_builtin
 				WHERE migrated = 'z' COLLATE builtin_c_utf8;
