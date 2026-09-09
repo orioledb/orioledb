@@ -390,7 +390,12 @@ build_fixed_tuple_from_tuple_view(const OTuple *view, const OffsetNumber len, OF
 	Assert(tuple);
 
 	tuple->tuple.formatFlags = view->formatFlags;
-	Assert(tuple->fixedData);
+	if (unlikely(MAXALIGN(len) > sizeof(tuple->fixedData)))
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("WAL tuple length %u exceeds fixed buffer size %u",
+						(unsigned) len,
+						(unsigned) sizeof(tuple->fixedData))));
 	memcpy(tuple->fixedData, view->data, len);
 	if (len != MAXALIGN(len))
 		memset(&tuple->fixedData[len], 0, MAXALIGN(len) - len);
