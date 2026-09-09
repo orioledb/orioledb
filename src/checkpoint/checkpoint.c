@@ -4117,6 +4117,11 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 	page = O_GET_IN_MEMORY_PAGE(blkno);
 	lock_page(blkno);
 	level = PAGE_GET_LEVEL(page);
+	if (level < 0 || level >= ORIOLEDB_MAX_DEPTH)
+		ereport(FATAL,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("invalid B-tree root page level %d in relfile (%u, %u)",
+						level, descr->oids.datoid, descr->oids.relnode)));
 	message.action = WalkDownwards;
 	message.content.downwards.blkno = blkno;
 	message.content.downwards.pageChangeCount = O_PAGE_GET_CHANGE_COUNT(page);

@@ -91,6 +91,9 @@ btree_try_merge_pages(BTreeDescr *desc,
 	bool		extent;
 	int			level = PAGE_GET_LEVEL(right);
 
+	if (level >= ORIOLEDB_MAX_DEPTH)
+		return false;
+
 	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(right)))
 	{
 		/* concurrent split in progress */
@@ -338,6 +341,13 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	/* Step 1: get all the information from the parent page */
 	level = PAGE_GET_LEVEL(target);
+
+	if (level >= ORIOLEDB_MAX_DEPTH)
+	{
+		unlock_page(blkno);
+		Assert(!have_locked_pages());
+		return false;
+	}
 
 	Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
 	Assert(desc->rootInfo.rootPageBlkno != blkno);
