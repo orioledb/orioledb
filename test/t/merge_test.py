@@ -88,6 +88,14 @@ class MergeTest(BaseTest):
 		ctrl.execute(
 		    "SELECT pg_stopevent_set('merge_after_target_unlock', 'true');")
 
+		# Under Valgrind the delete phase is slow enough for the clock sweep
+		# to evict every sparse o_mNN page before the stopevent is armed.
+		# Reload one leaf per tree so the presser can evict them.
+		with node.connect() as warmer:
+			for i in range(NTABLES):
+				warmer.execute("SELECT 1 FROM o_m%02d ORDER BY id LIMIT 1;" %
+				               i)
+
 		presser = node.connect()
 		running = {'go': True}
 
