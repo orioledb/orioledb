@@ -2288,10 +2288,14 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 
 	*tuphdr = item.tuphdr;
 	tuple->formatFlags = tuphdr->formatFlags;
-	tupleSize = item.header.itemSize - sizeof(BTreeModifyUndoStackItem);
+	tupleSize = validate_undo_item_size(item.header.itemSize);
 	if (sizeAvailable == 0)
 		tuple->data = palloc(tupleSize);
-	Assert(sizeAvailable == 0 || sizeAvailable >= tupleSize);
+	else if (unlikely(tupleSize > sizeAvailable))
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("corrupted undo record: tuple size %u exceeds available %u",
+						(unsigned) tupleSize, (unsigned) sizeAvailable)));
 	undo_read(undoType,
 			  undoLocation + BTreeLeafTuphdrSize,
 			  tupleSize,
@@ -2429,6 +2433,108 @@ orioledb_test_corrupt_page_undo(PG_FUNCTION_ARGS)
 
 	if (type_name)
 		PG_RETURN_TEXT_P(cstring_to_text(type_name));
+	PG_RETURN_NULL();
+}
+
+PG_FUNCTION_INFO_V1(orioledb_test_corrupt_row_undo);
+
+/*
+ * Walk the primary index btree, find the first leaf tuple with a valid
+ * tuple-level undoLocation, and corrupt the itemSize field in its
+ * BTreeModifyUndoStackItem header.  Returns "tuple" on success, NULL
+ * if no tuple-level undo record was found.
+ *
+ * Test-only; guarded by IS_DEV.
+ */
+Datum
+orioledb_test_corrupt_row_undo(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	Relation	rel;
+	OTableDescr *descr;
+	OIndexDescr *idx;
+	BTreeDescr *desc;
+	OInMemoryBlkno blkno;
+	UndoLogType undoType;
+	bool		found = false;
+
+	orioledb_check_shmem();
+
+	rel = relation_open(relid, AccessShareLock);
+	descr = relation_get_descr(rel);
+	if (!descr)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("relation oid %u is not orioledb", relid)));
+
+	idx = descr->indices[0];
+	desc = &idx->desc;
+	o_btree_load_shmem(desc);
+	undoType = desc->undoType;
+	blkno = desc->rootInfo.rootPageBlkno;
+
+	/* Walk from root to a leaf. */
+	lock_page(blkno);
+	while (true)
+	{
+		Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+
+		if (O_PAGE_IS(p, LEAF))
+		{
+			BTreePageItemLocator loc;
+
+			BTREE_PAGE_FOREACH_ITEMS(p, &loc)
+			{
+				BTreeLeafTuphdr *tuphdr = (BTreeLeafTuphdr *)
+					BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+
+				if (UndoLocationIsValid(tuphdr->undoLocation) &&
+					UNDO_REC_EXISTS(undoType, tuphdr->undoLocation))
+				{
+					BTreeModifyUndoStackItem item;
+					UndoLocation itemLoc;
+
+					itemLoc = tuphdr->undoLocation -
+						offsetof(BTreeModifyUndoStackItem, tuphdr);
+					undo_read(undoType, itemLoc,
+							  sizeof(item), (Pointer) &item);
+					item.header.itemSize = 0xFFFF;
+					undo_write(undoType, itemLoc,
+							   sizeof(item), (Pointer) &item);
+					found = true;
+					break;
+				}
+			}
+			unlock_page(blkno);
+			break;
+		}
+		else
+		{
+			BTreePageItemLocator loc;
+			BTreeNonLeafTuphdr *tuphdr;
+			OInMemoryBlkno child;
+
+			BTREE_PAGE_LOCATOR_FIRST(p, &loc);
+			tuphdr = (BTreeNonLeafTuphdr *)
+				BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+
+			if (!DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
+			{
+				unlock_page(blkno);
+				ereport(ERROR,
+						(errmsg("leftmost child is not in memory")));
+			}
+			child = DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink);
+			lock_page(child);
+			unlock_page(blkno);
+			blkno = child;
+		}
+	}
+
+	relation_close(rel, AccessShareLock);
+
+	if (found)
+		PG_RETURN_TEXT_P(cstring_to_text("tuple"));
 	PG_RETURN_NULL();
 }
 

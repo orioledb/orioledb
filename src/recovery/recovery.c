@@ -508,7 +508,7 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 	primary = GET_PRIMARY(descr);
 
 	/* The undo entry stores the pre-image tuple right after the header. */
-	oldTupleSize = item.header.itemSize - sizeof(BTreeModifyUndoStackItem);
+	oldTupleSize = validate_undo_item_size(item.header.itemSize);
 	if (oldTupleSize == 0)
 		return;
 	oldTuple.formatFlags = item.tuphdr.formatFlags;

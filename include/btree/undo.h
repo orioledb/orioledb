@@ -242,6 +242,27 @@ extern void btree_relnode_undo_callback(UndoLogType undoType,
 										UndoStackItem *baseItem, OXid oxid,
 										OUndoCallbackStage stage,
 										bool changeCountsValid);
+static inline LocationIndex
+validate_undo_item_size(LocationIndex itemSize)
+{
+	LocationIndex tupleSize;
+
+	if (unlikely(itemSize < sizeof(BTreeModifyUndoStackItem)))
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("corrupted undo record: item size %u smaller than header %u",
+						(unsigned) itemSize,
+						(unsigned) sizeof(BTreeModifyUndoStackItem))));
+	tupleSize = itemSize - sizeof(BTreeModifyUndoStackItem);
+	if (unlikely(tupleSize > O_BTREE_MAX_TUPLE_SIZE))
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("corrupted undo record: tuple size %u exceeds maximum %u",
+						(unsigned) tupleSize,
+						(unsigned) O_BTREE_MAX_TUPLE_SIZE)));
+	return tupleSize;
+}
+
 extern void get_prev_leaf_header_from_undo(UndoLogType undoType,
 										   BTreeLeafTuphdr *tuphdr,
 										   bool inPage);
