@@ -1744,6 +1744,23 @@ read_disk_leaf_into_img(BTreeSeqScan *scan, uint64 downlinkLoc, CommitSeqNo csn)
 
 	read_result = read_page_from_disk(scan->desc, scan->leafImg, downlinkLoc,
 									  &extent);
+
+	/*
+	 * On a failed read scan->leafImg holds no valid page, so inspect its
+	 * header (and walk its undo chain) only after a successful read.
+	 */
+	if (read_result != OReadPageResultOk)
+	{
+		if (read_result == OReadPageResultChecksumFailed ||
+			read_result == OReadPageResultCorrupted)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_CORRUPTED),
+					 errmsg("invalid leaf page with file offset " UINT64_FORMAT " read from disk",
+							DOWNLINK_GET_DISK_OFF(downlinkLoc))));
+		else
+			elog(ERROR, "can not read leaf page from disk");
+	}
+
 	header = (BTreePageHeader *) scan->leafImg;
 
 	/*
@@ -1759,17 +1776,6 @@ read_disk_leaf_into_img(BTreeSeqScan *scan, uint64 downlinkLoc, CommitSeqNo csn)
 
 	STOPEVENT(STOPEVENT_SCAN_DISK_PAGE,
 			  btree_page_stopevent_params(scan->desc, scan->leafImg));
-
-	if (read_result != OReadPageResultOk)
-	{
-		if (read_result == OReadPageResultChecksumFailed)
-			ereport(ERROR,
-					(errcode(ERRCODE_DATA_CORRUPTED),
-					 errmsg("invalid leaf page with file offset " UINT64_FORMAT " read from disk",
-							DOWNLINK_GET_DISK_OFF(downlinkLoc))));
-		else
-			elog(ERROR, "can not read leaf page from disk");
-	}
 }
 
 /*

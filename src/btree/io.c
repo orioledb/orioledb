@@ -1397,8 +1397,21 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 
 	/* for the checksum computation we need aligned buffer */
 	Assert(((uintptr_t) img % sizeof(uint32)) == 0);
-	Assert(FileExtentOffIsValid(offset));
-	Assert(FileExtentLenIsValid(len));
+
+	/*
+	 * The extent offset and length come from a parent downlink and are
+	 * attacker-controlled metadata.  Validate them before computing
+	 * read_size: a length above ORIOLEDB_BLCKSZ / ORIOLEDB_COMP_BLCKSZ would
+	 * make the compressed read below fetch len * ORIOLEDB_COMP_BLCKSZ bytes
+	 * into the 8 KB stack buffer OrioleDBChecksummablePage, smashing the
+	 * stack, and a zero length would read nothing and then decompress
+	 * uninitialized data.  A non-compressed index must always use a
+	 * single-block extent.  Raise a corruption error instead of asserting.
+	 */
+	if (!FileExtentOffIsValid(offset) || len == 0 ||
+		len > (ORIOLEDB_BLCKSZ / ORIOLEDB_COMP_BLCKSZ) ||
+		(!OCompressIsValid(desc->compress) && len != 1))
+		return OReadPageResultCorrupted;
 
 	extent->off = offset;
 	extent->len = len;
@@ -1460,6 +1473,18 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 
 			needs_compress_version_convert = check_orioledb_compress_version(ondisk_page_header);
 			Assert(!needs_compress_version_convert);
+
+			/*
+			 * compress_page_size is read from the on-disk header.  Bound it
+			 * against the bytes actually fetched before handing it to
+			 * o_decompress_page(): otherwise a crafted header could make
+			 * decompression read past the fetched extent.
+			 */
+			if (ondisk_page_header.compress_page_size == 0 ||
+				(off_t) ondisk_page_header.compress_page_size >
+				read_size - (off_t) O_PAGE_HEADER_SIZE)
+				return OReadPageResultCorrupted;
+
 			o_decompress_page(buf + O_PAGE_HEADER_SIZE, ondisk_page_header.compress_page_size, img);
 			elog(DEBUG1, "Read disk page: checkpoint %u size %d", ondisk_page_header.checkpointNum, ondisk_page_header.compress_page_size);
 
@@ -1744,7 +1769,8 @@ load_page(OBTreeFindPageContext *context)
 		if (orioledb_s3_mode)
 			chkpNum = S3_GET_CHKP_NUM(page_desc->fileExtent.off);
 
-		if (read_result == OReadPageResultChecksumFailed)
+		if (read_result == OReadPageResultChecksumFailed ||
+			read_result == OReadPageResultCorrupted)
 			ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
 							errmsg("invalid page with file offset " UINT64_FORMAT " in %s",
 								   DOWNLINK_GET_DISK_OFF(downlink),
@@ -3953,3 +3979,252 @@ try_to_punch_holes(BTreeDescr *desc)
 		chkp_num++;
 	}
 }
+
+#ifdef IS_DEV
+
+#include "btree/page_state.h"
+
+PG_FUNCTION_INFO_V1(orioledb_test_corrupt_downlink_len);
+
+/*
+ * Walk the primary index btree of the given relation down to its leftmost
+ * level-1 (leaf parent) page, find the first on-disk leaf downlink and
+ * overwrite the extent length stored in that downlink with new_len (masked
+ * to the 15 bits a downlink can hold).  This lets regression tests feed
+ * read_page_from_disk() a crafted extent length without touching on-disk
+ * bytes.  Returns the downlink's file offset, or NULL when the tree is too
+ * shallow to have an internal page or no on-disk leaf downlink was found
+ * (e.g. leaves were not evicted).
+ *
+ * Test-only; guarded by IS_DEV.
+ */
+Datum
+orioledb_test_corrupt_downlink_len(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	int			new_len = PG_GETARG_INT32(1);
+	Relation	rel;
+	OTableDescr *descr;
+	OIndexDescr *idx;
+	BTreeDescr *desc;
+	OInMemoryBlkno blkno;
+	uint64		result_offset = InvalidFileExtentOff;
+
+	orioledb_check_shmem();
+
+	rel = relation_open(relid, AccessShareLock);
+	descr = relation_get_descr(rel);
+	if (!descr)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("relation oid %u is not orioledb", relid)));
+
+	idx = descr->indices[0];
+	desc = &idx->desc;
+	o_btree_load_shmem(desc);
+	blkno = desc->rootInfo.rootPageBlkno;
+
+	lock_page(blkno);
+	while (true)
+	{
+		Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+
+		if (O_PAGE_IS(p, LEAF))
+		{
+			/* Tree too shallow: root is a leaf, no internal downlink. */
+			unlock_page(blkno);
+			break;
+		}
+		else if (PAGE_GET_LEVEL(p) == 1)
+		{
+			BTreePageItemLocator loc;
+
+			BTREE_PAGE_FOREACH_ITEMS(p, &loc)
+			{
+				BTreeNonLeafTuphdr *tuphdr = (BTreeNonLeafTuphdr *)
+					BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+
+				if (DOWNLINK_IS_ON_DISK(tuphdr->downlink))
+				{
+					FileExtent	fext;
+
+					fext.off = DOWNLINK_GET_DISK_OFF(tuphdr->downlink);
+					fext.len = (uint16) (new_len & 0x7FFF);
+					result_offset = fext.off;
+					tuphdr->downlink = MAKE_ON_DISK_DOWNLINK(fext);
+					break;
+				}
+			}
+			unlock_page(blkno);
+			break;
+		}
+		else
+		{
+			/* Descend to the leftmost child. */
+			BTreePageItemLocator loc;
+			BTreeNonLeafTuphdr *tuphdr;
+			OInMemoryBlkno child;
+
+			BTREE_PAGE_LOCATOR_FIRST(p, &loc);
+			tuphdr = (BTreeNonLeafTuphdr *)
+				BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+
+			if (!DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
+			{
+				unlock_page(blkno);
+				ereport(ERROR,
+						(errmsg("leftmost child is not in memory")));
+			}
+			child = DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink);
+			lock_page(child);
+			unlock_page(blkno);
+			blkno = child;
+		}
+	}
+
+	relation_close(rel, AccessShareLock);
+
+	if (FileExtentOffIsValid(result_offset))
+		PG_RETURN_INT64((int64) result_offset);
+	PG_RETURN_NULL();
+}
+
+PG_FUNCTION_INFO_V1(orioledb_test_corrupt_compressed_page_size);
+
+/*
+ * Walk the primary index btree of the given relation to its leftmost
+ * level-1 page, find the first on-disk downlink whose extent length shows
+ * the leaf is actually compressed (len < ORIOLEDB_BLCKSZ / ORIOLEDB_COMP_BLCKSZ),
+ * read that page back from disk, overwrite its on-disk compress_page_size
+ * header field with the maximum uint16 value and recompute a matching
+ * checksum so the always-on checksum check passes on the next read.  This
+ * drives execution to the compress_page_size bound in read_page_from_disk().
+ * Returns the downlink's file offset, or NULL when no suitable compressed
+ * on-disk leaf was found.
+ *
+ * Test-only; guarded by IS_DEV.
+ */
+Datum
+orioledb_test_corrupt_compressed_page_size(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	Relation	rel;
+	OTableDescr *descr;
+	OIndexDescr *idx;
+	BTreeDescr *desc;
+	OInMemoryBlkno blkno;
+	FileExtent	extent;
+	bool		found = false;
+	uint64		result_offset = InvalidFileExtentOff;
+
+	Assert(!orioledb_s3_mode && !use_device && !use_mmap);
+
+	orioledb_check_shmem();
+
+	rel = relation_open(relid, AccessShareLock);
+	descr = relation_get_descr(rel);
+	if (!descr)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("relation oid %u is not orioledb", relid)));
+
+	idx = descr->indices[0];
+	desc = &idx->desc;
+	o_btree_load_shmem(desc);
+	blkno = desc->rootInfo.rootPageBlkno;
+
+	lock_page(blkno);
+	while (true)
+	{
+		Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+
+		if (O_PAGE_IS(p, LEAF))
+		{
+			unlock_page(blkno);
+			break;
+		}
+		else if (PAGE_GET_LEVEL(p) == 1)
+		{
+			BTreePageItemLocator loc;
+
+			BTREE_PAGE_FOREACH_ITEMS(p, &loc)
+			{
+				BTreeNonLeafTuphdr *tuphdr = (BTreeNonLeafTuphdr *)
+					BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+
+				if (DOWNLINK_IS_ON_DISK(tuphdr->downlink) &&
+					DOWNLINK_GET_DISK_LEN(tuphdr->downlink) <
+					(ORIOLEDB_BLCKSZ / ORIOLEDB_COMP_BLCKSZ))
+				{
+					extent.off = DOWNLINK_GET_DISK_OFF(tuphdr->downlink);
+					extent.len = DOWNLINK_GET_DISK_LEN(tuphdr->downlink);
+					found = true;
+					break;
+				}
+			}
+			unlock_page(blkno);
+			break;
+		}
+		else
+		{
+			BTreePageItemLocator loc;
+			BTreeNonLeafTuphdr *tuphdr;
+			OInMemoryBlkno child;
+
+			BTREE_PAGE_LOCATOR_FIRST(p, &loc);
+			tuphdr = (BTreeNonLeafTuphdr *)
+				BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+
+			if (!DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
+			{
+				unlock_page(blkno);
+				ereport(ERROR,
+						(errmsg("leftmost child is not in memory")));
+			}
+			child = DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink);
+			lock_page(child);
+			unlock_page(blkno);
+			blkno = child;
+		}
+	}
+
+	relation_close(rel, AccessShareLock);
+
+	if (!found)
+		PG_RETURN_NULL();
+
+	result_offset = extent.off;
+
+	{
+		off_t		byte_offset = (off_t) extent.off * (off_t) ORIOLEDB_COMP_BLCKSZ;
+		off_t		read_size = (off_t) extent.len * (off_t) ORIOLEDB_COMP_BLCKSZ;
+		char	   *buf;
+		OrioleDBOndiskPageHeader *hdr;
+
+		buf = (char *) palloc(read_size);
+		if (btree_smgr_read(desc, buf, 0, read_size, byte_offset) != read_size)
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("could not read page to corrupt it")));
+
+		hdr = (OrioleDBOndiskPageHeader *) buf;
+		hdr->compress_page_size = UINT16_MAX;
+		hdr->checkSum = 0;
+		hdr->checkSum = (uint16) ((oriole_checksum_block(
+														 (const OrioleDBChecksummablePage *) buf,
+														 oriole_checksum_block_len((uint32) read_size)) % 65535) + 1);
+
+		if (btree_smgr_write(desc, buf, 0, read_size, byte_offset) != read_size)
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("could not write corrupted page")));
+
+		pfree(buf);
+	}
+
+	if (FileExtentOffIsValid(result_offset))
+		PG_RETURN_INT64((int64) result_offset);
+	PG_RETURN_NULL();
+}
+
+#endif							/* IS_DEV */

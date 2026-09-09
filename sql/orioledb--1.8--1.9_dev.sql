@@ -18,6 +18,16 @@ RETURNS text
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
+CREATE FUNCTION orioledb_test_corrupt_downlink_len(relid oid, new_len int4)
+RETURNS int8
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_test_corrupt_compressed_page_size(relid oid)
+RETURNS int8
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
 CREATE FUNCTION orioledb_check_pending_truncates()
 RETURNS VOID
 AS 'MODULE_PATHNAME'
