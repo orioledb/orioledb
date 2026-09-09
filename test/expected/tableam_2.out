@@ -1266,11 +1266,11 @@ SELECT smart_explain($$
 	EXPLAIN (COSTS off) SELECT (value || 'WOW') FROM o_test_expression
 		WHERE UPPER(value) BETWEEN '6' AND '9';
 $$);
-                              smart_explain                              
--------------------------------------------------------------------------
+                             smart_explain                              
+------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_expression
-   Filter: ((upper(value) >= '6'::text) AND (upper(value) <= '9'::text))
-   Forward index only scan of: o_test_expression_ix5
+   Forward index scan of: o_test_expression_ix6
+   Conds: ((upper(value) >= '6'::text) AND (upper(value) <= '9'::text))
 (3 rows)
 
 SELECT (value || 'WOW') FROM o_test_expression
@@ -3058,10 +3058,10 @@ EXPLAIN (COSTS off) SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (i
                     QUERY PLAN                     
 ---------------------------------------------------
  Hash Join
-   Hash Cond: (heap_table.id = o_tableam_join1.id)
-   ->  Seq Scan on heap_table
+   Hash Cond: (o_tableam_join1.id = heap_table.id)
+   ->  Seq Scan on o_tableam_join1
    ->  Hash
-         ->  Seq Scan on o_tableam_join1
+         ->  Seq Scan on heap_table
 (5 rows)
 
 SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (id);
@@ -3087,13 +3087,14 @@ SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (id);
 SET enable_hashjoin = off;
 SET enable_mergejoin = off;
 EXPLAIN (COSTS off) SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (id);
-                        QUERY PLAN                         
------------------------------------------------------------
+                     QUERY PLAN                      
+-----------------------------------------------------
  Nested Loop
-   ->  Seq Scan on o_tableam_join1
-   ->  Index Only Scan using heap_table_pkey on heap_table
-         Index Cond: (id = o_tableam_join1.id)
-(4 rows)
+   ->  Seq Scan on heap_table
+   ->  Custom Scan (o_scan) on o_tableam_join1
+         Forward index scan of: o_tableam_join1_pkey
+         Conds: (id = heap_table.id)
+(5 rows)
 
 SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (id);
  id | val 
@@ -3123,10 +3124,9 @@ EXPLAIN (COSTS off) SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (i
  Merge Join
    Merge Cond: (heap_table.id = o_tableam_join1.id)
    ->  Index Only Scan using heap_table_pkey on heap_table
-   ->  Sort
-         Sort Key: o_tableam_join1.id
-         ->  Seq Scan on o_tableam_join1
-(6 rows)
+   ->  Custom Scan (o_scan) on o_tableam_join1
+         Forward index scan of: o_tableam_join1_pkey
+(5 rows)
 
 SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (id);
  id | val 
@@ -3155,10 +3155,10 @@ EXPLAIN (COSTS off) SELECT id, val FROM heap_table FULL JOIN o_tableam_join1 USI
                     QUERY PLAN                     
 ---------------------------------------------------
  Hash Full Join
-   Hash Cond: (heap_table.id = o_tableam_join1.id)
-   ->  Seq Scan on heap_table
+   Hash Cond: (o_tableam_join1.id = heap_table.id)
+   ->  Seq Scan on o_tableam_join1
    ->  Hash
-         ->  Seq Scan on o_tableam_join1
+         ->  Seq Scan on heap_table
 (5 rows)
 
 SELECT id, val FROM heap_table FULL JOIN o_tableam_join1 USING (id) ORDER BY id;
@@ -3268,13 +3268,13 @@ SELECT id, val FROM heap_table FULL JOIN o_tableam_join1 USING (id) ORDER BY id;
 
 EXPLAIN (COSTS off) SELECT * FROM heap_table
 			     JOIN o_tableam_join1 ON o_tableam_join1.id = ANY (heap_table.ids);
-                         QUERY PLAN                         
-------------------------------------------------------------
+                     QUERY PLAN                      
+-----------------------------------------------------
  Nested Loop
-   Join Filter: (o_tableam_join1.id = ANY (heap_table.ids))
    ->  Seq Scan on heap_table
-   ->  Materialize
-         ->  Seq Scan on o_tableam_join1
+   ->  Custom Scan (o_scan) on o_tableam_join1
+         Forward index scan of: o_tableam_join1_pkey
+         Conds: (id = ANY (heap_table.ids))
 (5 rows)
 
 SELECT * FROM heap_table JOIN o_tableam_join1 ON o_tableam_join1.id = ANY (heap_table.ids);
@@ -3429,12 +3429,11 @@ EXPLAIN (COSTS off) SELECT * FROM heap_table
                          QUERY PLAN                         
 ------------------------------------------------------------
  Nested Loop
-   Join Filter: (o_tableam_join1.id = ANY (heap_table.ids))
    ->  Seq Scan on heap_table
-   ->  Materialize
-         ->  Seq Scan on o_tableam_join1
-               Filter: (id < 20)
-(6 rows)
+   ->  Custom Scan (o_scan) on o_tableam_join1
+         Forward index scan of: o_tableam_join1_pkey
+         Conds: ((id = ANY (heap_table.ids)) AND (id < 20))
+(5 rows)
 
 SELECT * FROM heap_table
 	 JOIN o_tableam_join1 ON o_tableam_join1.id = ANY (heap_table.ids)
@@ -4192,10 +4191,11 @@ FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
    Conflict Arbiter Indexes: o_tableam_explain_x_pkey
    Tuples Inserted: x
    Conflicting Tuples: x
+   Buffers: shared hit=x
    ->  Result  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
  Planning Time: x ms
  Execution Time: x ms
-(8 rows)
+(9 rows)
 
 SELECT * FROM o_tableam_explain_2;
  id | val | val2 | val3 
@@ -4235,15 +4235,12 @@ FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE) WITH src AS (
    ->  Hash Join  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
          Hash Cond: ((srcxid + x) = dstxid)
          ->  CTE Scan on src  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-               Storage: Memory  Maximum Storage: xkB
          ->  Hash  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
                Buckets: x  Batches: x  Memory Usage: xkB
                ->  Seq Scan on o_tableam_explain_x dst  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
- Planning:
-   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(17 rows)
+(14 rows)
 
 SELECT * FROM o_tableam_explain_1;
  id | val | val2 
