@@ -1077,9 +1077,14 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 
 		/* HACK: prevent sys cache pages from loading during o_btree_modify */
 		for (attnum = 0; attnum < keyBound.nkeys; attnum++)
-			keyBound.keys[attnum].flags &= ~O_VALUE_BOUND_COERCIBLE;
-		(void) o_btree_cmp(&id->desc, &cur_tuple, BTreeKeyLeafTuple,
-						   (Pointer) &keyBound, BTreeKeyBound);
+		{
+			OBTreeValueBound *bound = &keyBound.keys[attnum];
+
+			if (!OIgnoreColumn(id, attnum) &&
+				!(bound->flags & O_VALUE_BOUND_NULL))
+				(void) o_call_comparator(bound->comparator, bound->value,
+										 bound->value);
+		}
 		(void) o_btree_modify(&id->desc, BTreeOperationInsert,
 							  cur_tuple, BTreeKeyLeafTuple,
 							  (Pointer) &keyBound, BTreeKeyBound,
