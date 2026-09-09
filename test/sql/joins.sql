@@ -28,6 +28,7 @@ FROM
 	generate_series(1, 4) as b,
 	generate_series(1, 4) as c;
 
+SET enable_seqscan = off;
 SET enable_hashjoin = off;
 SET enable_mergejoin = off;
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
@@ -132,6 +133,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
 RESET enable_nestloop;
 RESET enable_hashjoin;
+RESET enable_seqscan;
 
 DROP TABLE o_joins2;
 DROP TABLE o_joins1;
