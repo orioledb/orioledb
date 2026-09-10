@@ -19,6 +19,13 @@
 #include "workers/interrupt.h"
 
 #include "postmaster/interrupt.h"
+#include "postmaster/startup.h"
+
+#if PG_VERSION_NUM >= 180000
+#define O_STARTUP_PROC_INTERRUPTS() ProcessStartupProcInterrupts()
+#else
+#define O_STARTUP_PROC_INTERRUPTS() HandleStartupProcInterrupts()
+#endif
 
 static void o_worker_shutdown(int elevel);
 
@@ -37,10 +44,21 @@ o_worker_shutdown(int elevel)
 void
 o_worker_handle_interrupts(void)
 {
-	/*
-	 * In case of a pending shutdown request we just raise an ERROR message
-	 * currently.
-	 */
-	if (ShutdownRequestPending)
-		o_worker_shutdown(ERROR);
+	if (AmStartupProcess())
+	{
+		O_STARTUP_PROC_INTERRUPTS();
+	}
+	else if (MyBackendType == B_BG_WORKER)
+	{
+		/*
+		 * In case of a pending shutdown request we just raise an ERROR
+		 * message currently.
+		 */
+		if (ShutdownRequestPending)
+			o_worker_shutdown(ERROR);
+	}
+	else
+	{
+		CHECK_FOR_INTERRUPTS();
+	}
 }
