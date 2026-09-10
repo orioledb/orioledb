@@ -803,6 +803,17 @@ s3_schedule_downlink_load(BTreeDescr *desc, uint64 downlink)
 	chkpNum = S3_GET_CHKP_NUM(offset);
 	offset &= S3_OFFSET_MASK;
 
+	/*
+	 * Apply the same extent bound as read_page_from_disk(): a crafted
+	 * downlink length would otherwise make the read_size loop below schedule
+	 * bogus parts from an attacker-controlled size.  Skip the prefetch; the
+	 * actual read rejects the corrupt page cleanly.
+	 */
+	if (len == 0 ||
+		len > (ORIOLEDB_BLCKSZ / ORIOLEDB_COMP_BLCKSZ) ||
+		(!OCompressIsValid(desc->compress) && len != 1))
+		return result;
+
 	if (!OCompressIsValid(desc->compress))
 	{
 		byte_offset = (off_t) offset * (off_t) ORIOLEDB_BLCKSZ;

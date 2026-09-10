@@ -6121,7 +6121,8 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 		if (read_result != OReadPageResultOk)
 		{
 			unlock_page(desc->rootInfo.rootPageBlkno);
-			if (read_result == OReadPageResultChecksumFailed)
+			if (read_result == OReadPageResultChecksumFailed ||
+				read_result == OReadPageResultCorrupted)
 				ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
 								errmsg("invalid rootPageBlkno page in %s: %m",
 									   btree_smgr_filename(desc,
