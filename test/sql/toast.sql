@@ -596,6 +596,24 @@ SELECT query_to_text_filtered($$ SELECT data from pg_logical_slot_get_changes('r
 SELECT * FROM pg_drop_replication_slot('regression_slot');
 DROP TABLE o_logical;
 
+-- REPLICA IDENTITY FULL: the old tuple of an UPDATE/DELETE must carry the
+-- actual old value of a TOASTed attribute, not an unchanged-toast-datum
+-- placeholder -- the old tuple is the only record of what the value was.
+CREATE TABLE o_logical(id integer PRIMARY KEY, v1 text) using orioledb WITH (compress = -1, toast_compress = -1, primary_compress = -1);
+ALTER TABLE o_logical REPLICA IDENTITY FULL;
+SELECT slot_name FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);
+
+INSERT INTO o_logical VALUES (1, generate_string(1, 2500));
+INSERT INTO o_logical VALUES (2, generate_string(2, 2500));
+
+UPDATE o_logical SET v1 = generate_string(3, 2500) WHERE id = 1;
+DELETE FROM o_logical WHERE id = 2;
+
+SELECT query_to_text_filtered($$ SELECT data from pg_logical_slot_get_changes('regression_slot', NULL, NULL); $$);
+
+SELECT pg_drop_replication_slot('regression_slot');
+DROP TABLE o_logical;
+
 CREATE TABLE IF NOT EXISTS o_test_toast_update_delete (
 	id integer PRIMARY KEY,
 	v1 text,

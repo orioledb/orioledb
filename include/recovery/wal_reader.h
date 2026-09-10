@@ -121,6 +121,13 @@ typedef struct WalRecord
 			Oid			dst_datoid;
 		}			dbcreate_copy;
 
+		struct
+		{
+			uint16		attnum;
+			uint16		length;
+			Pointer		data;
+		}			toast_chunk;
+
 	}			u;
 
 } WalRecord;

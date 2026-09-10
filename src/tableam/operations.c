@@ -1878,6 +1878,14 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 
 	if (mres.success && mres.oldTuple != NULL)
 	{
+		/*
+		 * Logical decoding needs the old value of a TOASTed attribute only
+		 * for REPLICA IDENTITY FULL, and the old tuple in WAL carries just a
+		 * placeholder, so have the TOAST chunks logged as they are removed.
+		 */
+		bool		logOldChunks = (rel->rd_rel->relreplident == REPLICA_IDENTITY_FULL) &&
+			XLogLogicalInfoActive();
+
 		oldSlot = mres.oldTuple;
 
 		if (mres.action == BTreeOperationUpdate)
@@ -1887,7 +1895,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 
 			mres.failedIxNum = TOASTIndexNumber;
 			mres.success = tts_orioledb_update_toast_values(oldSlot, slot, descr,
-															oxid, csn);
+															oxid, csn, logOldChunks);
 
 			if (mres.success &&
 				primary->desc.storageType == BTreeStoragePersistence)
@@ -1914,7 +1922,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			if (mres.success)
 			{
 				/* remove old value from TOAST table */
-				mres.success = tts_orioledb_remove_toast_values(oldSlot, descr, oxid, csn);
+				mres.success = tts_orioledb_remove_toast_values(oldSlot, descr, oxid, csn, logOldChunks);
 			}
 
 			if (mres.success &&
@@ -1983,13 +1991,22 @@ o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 			OTuple		primary_tuple;
 			OTableSlot *oslot = (OTableSlot *) result.oldTuple;
 
+			/*
+			 * Logical decoding needs the old value of a TOASTed attribute
+			 * only for REPLICA IDENTITY FULL, and the old tuple in WAL
+			 * carries just a placeholder, so have the TOAST chunks logged as
+			 * they are removed.
+			 */
+			bool		logOldChunks = (rel->rd_rel->relreplident == REPLICA_IDENTITY_FULL) &&
+				XLogLogicalInfoActive();
+
 			csn = arg->csn;
 
 			if (descr->bridge)
 				delete_old_bridge_index_ctid(descr, rel, &oslot->bridge_ctid, csn);
 
 			/* if tuple has been deleted from index trees, remove TOAST values */
-			if (!tts_orioledb_remove_toast_values(result.oldTuple, descr, oxid, csn))
+			if (!tts_orioledb_remove_toast_values(result.oldTuple, descr, oxid, csn, logOldChunks))
 			{
 				result.success = false;
 				result.failedIxNum = TOASTIndexNumber;

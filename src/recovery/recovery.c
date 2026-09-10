@@ -4902,6 +4902,16 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			/* Unused yet */
 			break;
 
+		case WAL_REC_TOAST_CHUNK:
+
+			/*
+			 * The chunk is logged only so logical decoding can rebuild the old
+			 * value of a TOASTed attribute; the chunk itself is still present
+			 * in the TOAST tree at this point and is removed by the
+			 * WAL_REC_DELETE that follows.
+			 */
+			break;
+
 		case WAL_REC_O_TABLES_META_LOCK:
 			Assert(!cur_recovery_xid_state->o_tables_meta_locked);
 

@@ -37,6 +37,14 @@
  *   outcomes in troubles for logical decoder with visibility of heap
  *   modifications in Oriole's sub-part due to incorrect state of the
  *   MVCC-historical snapshot.
+ *
+ * WAL_REC_TOAST_CHUNK:
+ *   A chunk of a TOASTed value that is about to be removed, logged only for
+ *   REPLICA IDENTITY FULL tables so that logical decoding can reconstruct the
+ *   old value of that attribute.  Unlike heap, which flattens the old tuple
+ *   before WAL-logging it, OrioleDB stores a compact placeholder in the tuple,
+ *   so the value itself has to reach the decoder separately.  Replay ignores
+ *   these records: they carry no BTree operation.
  */
 
 #define ORIOLE_WAL_RECORDS(X) \
@@ -63,7 +71,8 @@
 	X(WAL_REC_DATABASE_TEMPLATE_CHECKPOINT, 21, "DATABASE_TEMPLATE_CHECKPOINT", wal_parse_rec_dbcreate_copy) \
 	X(WAL_REC_CIC_WRITERS_DIRECT,   22, "CIC_WRITERS_DIRECT", wal_parse_rec_cic_phase) \
 	X(WAL_REC_CIC_DRAIN_BARRIER,    23, "CIC_DRAIN_BARRIER",  wal_parse_rec_cic_phase) \
-	X(WAL_REC_CIC_INDEX_VALID,      24, "CIC_INDEX_VALID",    wal_parse_rec_cic_phase)
+	X(WAL_REC_CIC_INDEX_VALID,      24, "CIC_INDEX_VALID",    wal_parse_rec_cic_phase) \
+	X(WAL_REC_TOAST_CHUNK,          25, "TOAST_CHUNK",        wal_parse_rec_toast_chunk)
 
 /*
  * Of the CIC records above only CIC_INDEX_VALID is emitted; the other two

@@ -1745,7 +1745,8 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
 	result = generic_toast_delete_optional_wal(&oIndicesToastAPI,
 											   (Pointer) &key, oxid, csn,
-											   sys_tree, table->persistence != RELPERSISTENCE_TEMP);
+											   sys_tree, table->persistence != RELPERSISTENCE_TEMP,
+											   false, 0);
 	return result;
 }
 
@@ -1948,7 +1949,7 @@ o_indices_move(OTable *table, OIndexNumber ixNum, Oid old_tablespace,
 	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
 	(void) generic_toast_delete_optional_wal(&oIndicesToastAPI,
 											 (Pointer) &oldKey, oxid, csn,
-											 sys_tree, wal);
+											 sys_tree, wal, false, 0);
 	result = generic_toast_insert_optional_wal(&oIndicesToastAPI,
 											   (Pointer) &newKey, data, len,
 											   oxid, csn, sys_tree, wal);

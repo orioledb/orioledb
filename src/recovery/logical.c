@@ -144,12 +144,101 @@ get_reorder_buffer_txn(ReorderBuffer *rb, TransactionId xid)
 }
 
 /*
+ * Old values of TOASTed attributes, reassembled from the
+ * WAL_REC_TOAST_CHUNK records that precede the row-level record they
+ * belong to.
+ *
+ * A large value spans several WAL containers, hence this state can't live in
+ * DecodeWalDescCtx.  It is reset once the row-level record that consumes it
+ * has been decoded.
+ */
+typedef struct
+{
+	uint16		attnum;			/* leaf attribute number, as logged */
+	StringInfoData data;
+} ToastOldValue;
+
+static MemoryContext toastOldValuesCxt = NULL;
+static List *toastOldValues = NIL;
+
+static void
+toast_old_values_reset(void)
+{
+	if (toastOldValuesCxt != NULL)
+		MemoryContextReset(toastOldValuesCxt);
+	toastOldValues = NIL;
+}
+
+static void
+toast_old_value_add_chunk(uint16 attnum, Pointer data, uint16 length)
+{
+	MemoryContext oldcontext;
+	ToastOldValue *value = NULL;
+	ListCell   *lc;
+
+	if (toastOldValuesCxt == NULL)
+		toastOldValuesCxt = AllocSetContextCreate(TopMemoryContext,
+												  "orioledb old TOAST values",
+												  ALLOCSET_DEFAULT_SIZES);
+
+	oldcontext = MemoryContextSwitchTo(toastOldValuesCxt);
+
+	foreach(lc, toastOldValues)
+	{
+		ToastOldValue *cur = (ToastOldValue *) lfirst(lc);
+
+		if (cur->attnum == attnum)
+		{
+			value = cur;
+			break;
+		}
+	}
+
+	if (value == NULL)
+	{
+		value = (ToastOldValue *) palloc0(sizeof(ToastOldValue));
+		value->attnum = attnum;
+		initStringInfo(&value->data);
+		toastOldValues = lappend(toastOldValues, value);
+	}
+
+	/* Chunks are logged in ascending order, as the delete iterator walks them */
+	appendBinaryStringInfo(&value->data, data, length);
+
+	MemoryContextSwitchTo(oldcontext);
+}
+
+static struct varlena *
+toast_old_value_find(uint16 attnum)
+{
+	ListCell   *lc;
+
+	if (toastOldValues == NIL)
+		return NULL;
+
+	foreach(lc, toastOldValues)
+	{
+		ToastOldValue *cur = (ToastOldValue *) lfirst(lc);
+
+		if (cur->attnum == attnum)
+			return (struct varlena *) cur->data.data;
+	}
+
+	return NULL;
+}
+
+/*
  * Convert tuples from the main relation from OrioleDB to heap format with
  * conversion of TOAST pointers to PG format.
+ *
+ * For an old tuple the real value of a TOASTed attribute is substituted when
+ * it was logged (see toast_old_value_add_chunk()); a new tuple keeps the
+ * pointer, which core resolves from the TOAST chunks of this transaction, or
+ * reports as unchanged-toast-datum just as heap does.
  */
 static HeapTuple
 o_convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
-						 OTuple tuple)
+						 OTuple tuple, bool isOldTuple)
 {
 	int			natts = descr->tupdesc->natts;
 	Datum	   *old_values = palloc0(natts * sizeof(Datum));
@@ -201,6 +290,35 @@ o_convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 		elog(DEBUG4, "reloid: Old toast value: %u toast_attn: %u compression %u, raw_size, %u, toasted_size %u",
 			 descr->oids.reloid, toast_attn + 1, otv.compression,
 			 otv.raw_size, otv.toasted_size);
+
+		if (isOldTuple)
+		{
+			struct varlena *old_value;
+
+			/*
+			 * Keyed by the attnum the chunks were logged under, which is the
+			 * TOAST tree's key column: 1-based and relative to the leaf tuple,
+			 * i.e. descr->toastable[i] + 1.  That is the same value
+			 * tts_orioledb_remove_toast_values() passes as toast_attn + 1 +
+			 * ctid_off; spelling it without ctid_off keeps it independent of
+			 * how each side happens to compute that offset.  Note toast_attn
+			 * here is something else -- a 0-based index into the arrays above.
+			 */
+			old_value = toast_old_value_find(descr->toastable[i] + 1);
+			if (old_value != NULL)
+			{
+				/*
+				 * The value as it was stored: still compressed if it was
+				 * compressed, which is exactly what a heap tuple holds for a
+				 * de-externalized attribute (compare toast_flatten_tuple()).
+				 */
+				Assert(VARSIZE_ANY(old_value) == otv.toasted_size);
+				elog(DEBUG4, "old TOAST value substituted for attr %u, size %u",
+					 toast_attn + 1, otv.toasted_size);
+				new_values[toast_attn] = PointerGetDatum(old_value);
+				continue;
+			}
+		}
 
 		ve.va_rawsize = otv.raw_size + VARHDRSZ;
 		ve.va_extinfo = (otv.toasted_size - VARHDRSZ) | (otv.compression << VARLENA_EXTSIZE_BITS);
@@ -257,7 +375,10 @@ set_snapshot(LogicalDecodingContext *ctx,
  * function only returns reodrer buffer tuple without any side effects.
  */
 static REORDER_BUFFER_TUPLE_TYPE
-o_convert_non_toast_tuple(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexDescr *indexDescr, OTuple tuple, bool force_store_to_slot, TupleTableSlot *store_slot, HeapTuple *heaptuple, bool leafTuple)
+o_convert_non_toast_tuple(ReorderBuffer *reorderbuf, OTableDescr *descr,
+						  OIndexDescr *indexDescr, OTuple tuple,
+						  bool force_store_to_slot, TupleTableSlot *store_slot,
+						  HeapTuple *heaptuple, bool leafTuple, bool isOldTuple)
 {
 	REORDER_BUFFER_TUPLE_TYPE result;
 
@@ -271,7 +392,8 @@ o_convert_non_toast_tuple(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexD
 			 */
 			elog(DEBUG4, "Convert LEAF NON-TOAST toastable");
 
-			*heaptuple = o_convert_toast_pointers(descr, indexDescr, tuple);
+			*heaptuple = o_convert_toast_pointers(descr, indexDescr, tuple,
+												  isOldTuple);
 			if (force_store_to_slot)
 			{
 				/*
@@ -429,7 +551,7 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, WalRecordType rec_type,
 
 			elog(DEBUG4, "WAL_REC_INSERT NON-TOAST");
 			/* Store full new tuple into reorderbuffer */
-			change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, false, descr->newTuple, &newheaptuple, true);
+			change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, false, descr->newTuple, &newheaptuple, true, false);
 			change->data.tp.clear_toast_afterwards = true;
 		}
 	}
@@ -443,7 +565,7 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, WalRecordType rec_type,
 
 		change->action = REORDER_BUFFER_CHANGE_UPDATE;
 		change->data.tp.clear_toast_afterwards = true;
-		change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, (relreplident != REPLICA_IDENTITY_FULL), descr->newTuple, &newheaptuple, true);
+		change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, (relreplident != REPLICA_IDENTITY_FULL), descr->newTuple, &newheaptuple, true, false);
 
 		if (relreplident == REPLICA_IDENTITY_FULL)
 		{
@@ -453,7 +575,7 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, WalRecordType rec_type,
 
 			/* Store full old tuple into reorderbuffer */
 			Assert(!O_TUPLE_IS_NULL(tuple2));
-			change->data.tp.oldtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple2, false, descr->oldTuple, &oldheaptuple, true);
+			change->data.tp.oldtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple2, false, descr->oldTuple, &oldheaptuple, true, true);
 		}
 		else
 		{
@@ -493,7 +615,7 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, WalRecordType rec_type,
 			elog(DEBUG4, "WAL_REC_DELETE NON-TOAST");
 
 			change->data.tp.clear_toast_afterwards = true;
-			change->data.tp.oldtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, false, descr->oldTuple, &oldheaptuple, (relreplident == REPLICA_IDENTITY_FULL));
+			change->data.tp.oldtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, false, descr->oldTuple, &oldheaptuple, (relreplident == REPLICA_IDENTITY_FULL), true);
 		}
 	}
 	else if (rec_type == WAL_REC_REINSERT)
@@ -510,9 +632,9 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, WalRecordType rec_type,
 		elog(DEBUG4, "WAL_REC_REINSERT");
 
 		/* Store old tuple or key into reorderbuffer */
-		change->data.tp.oldtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple2, false, descr->oldTuple, &oldheaptuple, (relreplident == REPLICA_IDENTITY_FULL));
+		change->data.tp.oldtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple2, false, descr->oldTuple, &oldheaptuple, (relreplident == REPLICA_IDENTITY_FULL), true);
 		/* Store full new tuple into reorderbuffer */
-		change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, false, descr->newTuple, &newheaptuple, true);
+		change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, false, descr->newTuple, &newheaptuple, true, false);
 	}
 	else
 	{
@@ -741,6 +863,13 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 
 				elog(DEBUG4, "RECEIVE record type %d (%s) oxid " UINT64_FORMAT " logicalXId %u heapXid %u",
 					 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
+
+				/*
+				 * Old TOAST values are consumed by the row-level record that
+				 * follows them, so nothing should be left here; drop anything
+				 * that is, rather than letting it reach another transaction.
+				 */
+				toast_old_values_reset();
 
 				if (!TransactionIdIsValid(rec->logicalXid))
 				{
@@ -1091,6 +1220,23 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				break;
 			}
 
+		case WAL_REC_TOAST_CHUNK:
+
+			/*
+			 * A chunk of the old value of a TOASTed attribute, logged as it
+			 * was removed.  Collect it; o_convert_toast_pointers() consumes it
+			 * when the row-level record that follows builds its old tuple.
+			 */
+			if (r->container.version >= ORIOLEDB_TOAST_CHUNK_WAL_VERSION &&
+				!ctx->decodeCtx->fast_forward)
+			{
+				Assert(ctx->ix_type == oIndexToast);
+				toast_old_value_add_chunk(rec->u.toast_chunk.attnum,
+										  rec->u.toast_chunk.data,
+										  rec->u.toast_chunk.length);
+			}
+			break;
+
 		case WAL_REC_RELREPLIDENT:
 		case WAL_REC_O_TABLES_META_LOCK:
 		case WAL_REC_REPLAY_FEEDBACK:
@@ -1218,6 +1364,13 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 				ReorderBufferTXN *txn = NULL;
 
+				/*
+				 * Old TOAST values collected so far belong to this row and
+				 * must not outlive it, however this record ends up being
+				 * handled -- see modify_done below.
+				 */
+				bool		isRowRecord = (ctx->ix_type != oIndexToast);
+
 				build_fixed_tuples(rec, &tuple1, &tuple2);
 
 				elog(DEBUG4,
@@ -1236,7 +1389,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 						 "IGNORED record type %d (%s) invalid logicalXid for oxid " UINT64_FORMAT,
 						 rec->type, recname, rec->oxid);
 					/* Skip */
-					break;
+					goto modify_done;
 				}
 
 				ReorderBufferProcessXid(ctx->decodeCtx->reorder, rec->logicalXid, xlogPtr);
@@ -1250,12 +1403,12 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 						 rec->type, recname, rec->oxid,
 						 r->container.origin_info.id);
 					/* Skip */
-					break;
+					goto modify_done;
 				}
 
 				if (SnapBuildCurrentState(ctx->decodeCtx->snapshot_builder) < SNAPBUILD_FULL_SNAPSHOT)
 					/* Skip */
-					break;
+					goto modify_done;
 
 				(void) set_snapshot(ctx->decodeCtx, rec->logicalXid, xlogPtr);
 
@@ -1264,7 +1417,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 
 				/* Skip actual record processing in fast_forward mode */
 				if (ctx->decodeCtx->fast_forward)
-					break;
+					goto modify_done;
 
 				if ((ctx->ix_type == oIndexInvalid || ctx->ix_type == oIndexToast) &&
 					rec->oids.datoid == ctx->decodeCtx->slot->data.database)
@@ -1314,6 +1467,15 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 					/* Do nothing */
 					elog(DEBUG4, "Logical decoding modify ix_type, %u", ctx->ix_type);
 				}
+
+		modify_done:
+
+				/*
+				 * A row-level record consumes the old TOAST values logged
+				 * right before it.
+				 */
+				if (isRowRecord)
+					toast_old_values_reset();
 
 				break;
 			}
