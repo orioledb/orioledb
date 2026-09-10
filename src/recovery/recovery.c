@@ -4791,7 +4791,12 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				commit = (rec->type == WAL_REC_COMMIT);
 
 				Assert(rec->oxid != InvalidOXid);
-				Assert(cur_recovery_xid_state != NULL);
+
+				if (cur_recovery_xid_state == NULL)
+				{
+					elog(LOG, "WAL record %s lacks XID state", wal_type_name(rec->type));
+					return WALPARSE_BAD_TYPE;
+				}
 
 				/*
 				 * A transaction that rides on a heap xid is settled by
@@ -4850,6 +4855,12 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			}
 
 		case WAL_REC_JOINT_COMMIT:
+			if (cur_recovery_xid_state == NULL)
+			{
+				elog(LOG, "WAL record %s lacks XID state", wal_type_name(rec->type));
+				return WALPARSE_BAD_TYPE;
+			}
+
 			cur_recovery_xid_state->xid = rec->u.joint_commit.xid;
 			elog(DEBUG1, "OrioleDB recovery committed transaction (xid, oxid)="
 				 "(%u, " UINT64_FORMAT "). Next WAL record starts at LSN %X/%X",
@@ -4867,6 +4878,11 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			break;
 
 		case WAL_REC_REPLAY_FEEDBACK:
+			if (cur_recovery_xid_state == NULL)
+			{
+				elog(LOG, "WAL record %s lacks XID state", wal_type_name(rec->type));
+				return WALPARSE_BAD_TYPE;
+			}
 			cur_recovery_xid_state->needs_feedback = true;
 			break;
 
@@ -4877,7 +4893,15 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				rec->relreplident = REPLICA_IDENTITY_DEFAULT;
 
 				if (IS_SYS_TREE_OIDS(rec->oids))
+				{
+					if (rec->oids.relnode < 1 || rec->oids.relnode > SYS_TREES_NUM)
+					{
+						elog(LOG, "WAL record %s has out-of-range sys tree number %u",
+							 wal_type_name(rec->type), rec->oids.relnode);
+						return WALPARSE_BAD_TYPE;
+					}
 					ctx->sys_tree_num = rec->oids.relnode;
+				}
 				else
 					ctx->sys_tree_num = -1;
 
@@ -4933,6 +4957,11 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			break;
 
 		case WAL_REC_O_TABLES_META_LOCK:
+			if (cur_recovery_xid_state == NULL)
+			{
+				elog(LOG, "WAL record %s lacks XID state", wal_type_name(rec->type));
+				return WALPARSE_BAD_TYPE;
+			}
 			Assert(!cur_recovery_xid_state->o_tables_meta_locked);
 
 			/*
@@ -5030,6 +5059,11 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			}
 
 		case WAL_REC_SAVEPOINT:
+			if (cur_recovery_xid_state == NULL)
+			{
+				elog(LOG, "WAL record %s lacks XID state", wal_type_name(rec->type));
+				return WALPARSE_BAD_TYPE;
+			}
 			recovery_savepoint(rec->u.savepoint.parentSubid, -1);
 			if (!ctx->single)
 				workers_send_savepoint(rec->u.savepoint.parentSubid);
@@ -5038,6 +5072,12 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_ROLLBACK_TO_SAVEPOINT:
 			{
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
+
+				if (cur_recovery_xid_state == NULL)
+				{
+					elog(LOG, "WAL record %s lacks XID state", wal_type_name(rec->type));
+					return WALPARSE_BAD_TYPE;
+				}
 
 				if (!ctx->single)
 				{
