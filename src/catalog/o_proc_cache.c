@@ -2094,6 +2094,86 @@ o_proc_cache_delete_if_stale(Oid datoid, Oid procoid)
 }
 
 /*
+ * o_proc_cache_verify_native_metadata
+ *
+ * The proc cache is backed by an on-disk system tree whose contents can be
+ * forged independently of the authoritative pg_proc catalog.  Before the
+ * cached prolanguage, source symbol and library path are used to load native
+ * code (C-language and internal-language functions), re-read the real pg_proc
+ * row and require the fields to match; on mismatch, refuse to load and fail
+ * closed instead of executing an attacker-selected native symbol.
+ *
+ * fmgr_symbol() reproduces exactly the (probin, prosrc) pair that
+ * o_proc_cache_fill_entry stored -- including the "fmgr_security_definer"
+ * substitution for SECURITY DEFINER / SET / hook-needing functions -- so a
+ * legitimate cache entry always compares equal and legitimate C functions keep
+ * working.
+ *
+ * Verification runs only when the regular catalog is the authoritative source
+ * of metadata, i.e. when OrioleDB's syscache hook is not installed.  In the
+ * catalog-free background paths (recovery, checkpointer) the hook is the only
+ * available source and the proc cache was populated from WAL validated on the
+ * primary, so the cached metadata is trusted there as before; this also keeps
+ * the hook from recursing back into the proc cache during the lookup.
+ */
+static void
+o_proc_cache_verify_native_metadata(Oid procoid, OProc *o_proc)
+{
+	HeapTuple	proctup;
+	Form_pg_proc procform;
+	char	   *auth_probin = NULL;
+	char	   *auth_prosrc = NULL;
+	Oid			auth_prolang;
+	bool		mismatch = false;
+
+	/* Only when the real catalog is reachable and authoritative. */
+	if (o_is_syscache_hooks_set())
+		return;
+
+	proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(procoid));
+	if (!HeapTupleIsValid(proctup))
+		elog(ERROR, "cache lookup failed for function %u", procoid);
+	procform = (Form_pg_proc) GETSTRUCT(proctup);
+	auth_prolang = procform->prolang;
+
+	/*
+	 * fmgr_symbol() does its own pg_proc lookup; since the hook is not set
+	 * here, that reaches the real catalog rather than the (possibly forged)
+	 * cached tuple.
+	 */
+	fmgr_symbol(procoid, &auth_probin, &auth_prosrc);
+
+	if (o_proc->prolang != auth_prolang)
+		mismatch = true;
+	else if ((o_proc->prosrc == NULL) != (auth_prosrc == NULL) ||
+			 (o_proc->prosrc != NULL &&
+			  strcmp(o_proc->prosrc, auth_prosrc) != 0))
+		mismatch = true;
+	else if ((o_proc->probin == NULL) != (auth_probin == NULL) ||
+			 (o_proc->probin != NULL &&
+			  strcmp(o_proc->probin, auth_probin) != 0))
+		mismatch = true;
+
+	if (auth_probin != NULL)
+		pfree(auth_probin);
+	if (auth_prosrc != NULL)
+		pfree(auth_prosrc);
+	ReleaseSysCache(proctup);
+
+	if (mismatch)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("OrioleDB procedure cache metadata for function %u "
+						"does not match the system catalog",
+						procoid),
+				 errdetail("The cached function language, source symbol or "
+						   "library path differed from pg_proc."),
+				 errhint("The OrioleDB system tree may be corrupt; rebuild "
+						 "the affected index or run "
+						 "orioledb_upgrade_refresh().")));
+}
+
+/*
  * o_proc_cache_fill_finfo
  *
  * Fill FmgrInfo for procoid in the provided database context.
@@ -2131,6 +2211,7 @@ o_proc_cache_fill_finfo(FmgrInfo *finfo, Oid procoid, Oid datoid)
 	}
 	else if (o_proc->prolang == INTERNALlanguageId)
 	{
+		o_proc_cache_verify_native_metadata(procoid, o_proc);
 		fbp = fmgr_lookupByName(o_proc->prosrc);
 		if (fbp == NULL)
 			ereport(ERROR,
@@ -2143,6 +2224,7 @@ o_proc_cache_fill_finfo(FmgrInfo *finfo, Oid procoid, Oid datoid)
 	}
 	else if (o_proc->prolang == ClanguageId)
 	{
+		o_proc_cache_verify_native_metadata(procoid, o_proc);
 		finfo->fn_stats = TRACK_FUNC_PL;
 		finfo->fn_addr = load_external_function(o_proc->probin,
 												o_proc->prosrc,
@@ -2237,3 +2319,61 @@ o_proc_cache_search_htup(TupleDesc tupdesc, Oid procoid)
 	}
 	return result;
 }
+
+#ifdef IS_DEV
+PG_FUNCTION_INFO_V1(orioledb_test_corrupt_proc_cache);
+
+/*
+ * Test-only (IS_DEV): forge the in-memory proc-cache entry for procoid so its
+ * prolanguage / source symbol / library path differ from the authoritative
+ * pg_proc row, exercising o_proc_cache_fill_finfo's native-code verification
+ * guard.  A legitimate entry is populated from the catalog first, then this
+ * backend's fast-cache copy is overwritten in place.  The on-disk system tree
+ * is left untouched, so the effect is scoped to the current session.
+ */
+Datum
+orioledb_test_corrupt_proc_cache(PG_FUNCTION_ARGS)
+{
+	Oid			procoid = PG_GETARG_OID(0);
+	char	   *probin = PG_ARGISNULL(1) ? NULL :
+		text_to_cstring(PG_GETARG_TEXT_PP(1));
+	char	   *prosrc = PG_ARGISNULL(2) ? NULL :
+		text_to_cstring(PG_GETARG_TEXT_PP(2));
+	Oid			prolang = PG_GETARG_OID(3);
+	OProc	   *o_proc;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	List	   *processed = NIL;
+	MemoryContext oldcxt;
+
+	orioledb_check_shmem();
+
+	/* Populate a legitimate entry from the catalog first. */
+	o_collect_function_by_oid(procoid, InvalidOid, &processed);
+	list_free_deep(processed);
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_proc = o_proc_cache_search(datoid, procoid, cur_lsn,
+								 proc_cache->nkeys);
+	if (o_proc == NULL)
+		elog(ERROR, "proc cache entry for function %u not found", procoid);
+
+	/*
+	 * Overwrite the in-memory copy of this backend's fast-cache entry.  The
+	 * on-disk system tree is left untouched, so the effect is scoped to the
+	 * current session and the caller must drive the subsequent descriptor
+	 * fill from the same connection.
+	 */
+	oldcxt = MemoryContextSwitchTo(o_proc->cxt);
+	if (o_proc->prosrc != NULL)
+		pfree(o_proc->prosrc);
+	if (o_proc->probin != NULL)
+		pfree(o_proc->probin);
+	o_proc->prolang = prolang;
+	o_proc->prosrc = (prosrc != NULL) ? pstrdup(prosrc) : NULL;
+	o_proc->probin = (probin != NULL) ? pstrdup(probin) : NULL;
+	MemoryContextSwitchTo(oldcxt);
+
+	PG_RETURN_TEXT_P(cstring_to_text("ok"));
+}
+#endif							/* IS_DEV */

@@ -58,6 +58,7 @@ sql/orioledb--1.5--1.6.sql
 sql/orioledb--1.6--1.7.sql
 sql/orioledb--1.7--1.8.sql
 sql/orioledb--1.8--1.9.sql
+sql/orioledb--1.9--1.10.sql
 
 # Exclude the PostGIS Docker build directory
 /docker-postgis

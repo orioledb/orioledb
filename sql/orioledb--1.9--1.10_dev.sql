@@ -7,3 +7,11 @@ CREATE FUNCTION orioledb_test_corrupt_row_undo(relid oid)
 RETURNS text
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_test_corrupt_proc_cache(procoid oid,
+												 probin text,
+												 prosrc text,
+												 prolang oid)
+RETURNS text
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
