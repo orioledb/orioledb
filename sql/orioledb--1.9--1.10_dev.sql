@@ -7,3 +7,8 @@ CREATE FUNCTION orioledb_test_corrupt_row_undo(relid oid)
 RETURNS text
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_test_free_meta_page(relid oid)
+RETURNS VOID
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
