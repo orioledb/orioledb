@@ -1038,6 +1038,23 @@ DROP TABLE o_sm_upsert;
 DROP FUNCTION generate_string(integer, integer);
 RESET max_parallel_workers_per_gather;
 
+-- Toast chunk underflow: composite PK with large text column leaves no room
+-- for toast chunk data.  Use STORAGE EXTERNAL to prevent compression.
+CREATE TABLE o_toast_large_pk (
+	a int NOT NULL,
+	b text NOT NULL,
+	payload text,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+ALTER TABLE o_toast_large_pk ALTER COLUMN payload SET STORAGE EXTERNAL;
+
+INSERT INTO o_toast_large_pk VALUES (1, 'small', repeat('x', 5000));
+-- PK text column large enough that toast chunks can't fit
+INSERT INTO o_toast_large_pk VALUES (2, repeat('y', 2600), repeat('x', 5000));
+-- UPDATE that enlarges the PK text column
+UPDATE o_toast_large_pk SET b = repeat('z', 2600) WHERE a = 1;
+DROP TABLE o_toast_large_pk;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA toast CASCADE;
