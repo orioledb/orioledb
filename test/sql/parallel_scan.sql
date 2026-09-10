@@ -863,6 +863,40 @@ SELECT * FROM
 RESET enable_material;
 COMMIT;
 
+-- Parallel ordered scan on primary index with non-leading PK columns.
+-- PK (c, a) on table (a, b, c): leaf tuples store columns in table order,
+-- nonLeafKeys in index key order.  The ordered-scan assertion must compare
+-- both sides as BTreeKeyLeafTuple, not mix leaf vs nonLeaf formats.
+BEGIN;
+CREATE TABLE o_test_nonlead_pk (
+	a int NOT NULL,
+	b int NOT NULL,
+	c int NOT NULL,
+	PRIMARY KEY (c, a)
+) USING orioledb;
+INSERT INTO o_test_nonlead_pk
+	SELECT i * 1000, i * 10, i FROM generate_series(1, 50000) i;
+ANALYZE o_test_nonlead_pk;
+
+SET LOCAL max_parallel_workers_per_gather = 3;
+SET LOCAL min_parallel_table_scan_size = 1;
+SET LOCAL min_parallel_index_scan_size = 1;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_nonlead_pk
+		WHERE sqrt(a::float8) >= 0
+		ORDER BY c, a
+		LIMIT 10;
+SELECT * FROM o_test_nonlead_pk
+	WHERE sqrt(a::float8) >= 0
+	ORDER BY c, a
+	LIMIT 10;
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA parallel_scan CASCADE;
 RESET search_path;

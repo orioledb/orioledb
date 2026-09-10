@@ -244,7 +244,7 @@ struct BTreeSeqScan
 	 * mode.
 	 */
 	bool		haveOrderedPrev;
-	OFixedKey	orderedPrevKey;
+	OFixedTuple orderedPrevTuple;
 #endif
 
 	/*
@@ -3171,8 +3171,8 @@ btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
 				if (scan->haveOrderedPrev)
 				{
 					int			cmp = o_btree_cmp(scan->desc,
-												  &scan->orderedPrevKey.tuple,
-												  BTreeKeyNonLeafKey,
+												  &scan->orderedPrevTuple.tuple,
+												  BTreeKeyLeafTuple,
 												  &tuple, BTreeKeyLeafTuple);
 
 					/* forward: prev <= cur; backward: prev >= cur */
@@ -3181,7 +3181,7 @@ btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
 					else
 						Assert(cmp <= 0);
 				}
-				copy_fixed_key(scan->desc, &scan->orderedPrevKey, tuple);
+				copy_fixed_tuple(scan->desc, &scan->orderedPrevTuple, tuple);
 				scan->haveOrderedPrev = true;
 			}
 #endif
