@@ -1694,8 +1694,63 @@ SELECT * FROM
 
 RESET enable_material;
 COMMIT;
+-- Parallel ordered scan on primary index with non-leading PK columns.
+-- PK (c, a) on table (a, b, c): leaf tuples store columns in table order,
+-- nonLeafKeys in index key order.  The ordered-scan assertion must compare
+-- both sides as BTreeKeyLeafTuple, not mix leaf vs nonLeaf formats.
+BEGIN;
+CREATE TABLE o_test_nonlead_pk (
+	a int NOT NULL,
+	b int NOT NULL,
+	c int NOT NULL,
+	PRIMARY KEY (c, a)
+) USING orioledb;
+INSERT INTO o_test_nonlead_pk
+	SELECT i * 1000, i * 10, i FROM generate_series(1, 50000) i;
+ANALYZE o_test_nonlead_pk;
+SET LOCAL max_parallel_workers_per_gather = 3;
+SET LOCAL min_parallel_table_scan_size = 1;
+SET LOCAL min_parallel_index_scan_size = 1;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_nonlead_pk
+		WHERE sqrt(a::float8) >= 0
+		ORDER BY c, a
+		LIMIT 10;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Limit
+   ->  Gather Merge
+         Workers Planned: 3
+         ->  Parallel Custom Scan (o_scan) on o_test_nonlead_pk
+               Filter: (sqrt((a)::double precision) >= '0'::double precision)
+               Forward index scan of: o_test_nonlead_pk_pkey
+(6 rows)
+
+SELECT * FROM o_test_nonlead_pk
+	WHERE sqrt(a::float8) >= 0
+	ORDER BY c, a
+	LIMIT 10;
+   a   |  b  | c  
+-------+-----+----
+  1000 |  10 |  1
+  2000 |  20 |  2
+  3000 |  30 |  3
+  4000 |  40 |  4
+  5000 |  50 |  5
+  6000 |  60 |  6
+  7000 |  70 |  7
+  8000 |  80 |  8
+  9000 |  90 |  9
+ 10000 | 100 | 10
+(10 rows)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 22 other objects
+NOTICE:  drop cascades to 23 other objects
 DETAIL:  drop cascades to table seq_scan_test
 drop cascades to table o_test_o_scan_register
 drop cascades to table o_test_1
@@ -1718,6 +1773,7 @@ drop cascades to table o_test_ordered_scan
 drop cascades to table o_test_parallel_bitmap
 drop cascades to table o_test_parallel_bitmap_fixed
 drop cascades to table o_test_parallel_bitmap_bridged
+drop cascades to table o_test_nonlead_pk
 DROP SCHEMA parallel_scan CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)
