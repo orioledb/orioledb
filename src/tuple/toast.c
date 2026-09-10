@@ -286,7 +286,21 @@ tableGetMaxChunkSize(void *key, void *arg)
 	minTupleSize = o_new_tuple_size(toast->leafTupdesc, &toast->leafSpec,
 									NULL, NULL, 1, values, isnull, NULL);
 
-	return MAXALIGN_DOWN(O_BTREE_MAX_TUPLE_SIZE * 3 - MAXALIGN(minTupleSize)) / 3 - minTupleSize - sizeof(LocationIndex);
+	{
+		uint32		total = O_BTREE_MAX_TUPLE_SIZE * 3;
+		uint32		aligned = MAXALIGN(minTupleSize);
+		uint32		available;
+
+		if (aligned >= total)
+			return 0;
+
+		available = MAXALIGN_DOWN(total - aligned) / 3;
+
+		if (available <= minTupleSize + sizeof(LocationIndex))
+			return 0;
+
+		return available - minTupleSize - sizeof(LocationIndex);
+	}
 }
 
 static void
@@ -446,6 +460,9 @@ generic_toast_insert_optional_wal(ToastAPI *api, void *key, Pointer data,
 
 	Assert(data_size > 0);
 
+	if (max_length == 0)
+		return false;
+
 	while (data_size > 0)
 	{
 		OTuple		tup;
@@ -522,6 +539,9 @@ generic_toast_sort_add(ToastAPI *api, void *key,
 
 	Assert(data_size > 0);
 
+	if (max_length == 0)
+		return;
+
 	while (data_size > 0)
 	{
 		OTuple		tup;
@@ -596,6 +616,9 @@ generic_toast_update_optional_wal(ToastAPI *api, void *key, Pointer data,
 	};
 
 	Assert(data_size > 0);
+
+	if (max_length == 0)
+		return false;
 
 	while (data_size > 0)
 	{
@@ -961,6 +984,11 @@ o_toast_insert(OTableDescr *descr, OTuple pk, uint16 attn,
 
 	Assert(descr->toast->desc.type == oIndexToast);
 
+	if (tableGetMaxChunkSize(&tkey, &arg) == 0)
+		o_btree_check_size_of_tuple(O_BTREE_MAX_TUPLE_SIZE + 1,
+									NameStr(GET_PRIMARY(descr)->name),
+									false);
+
 	result = generic_toast_insert(&tableToastAPI, &tkey, data,
 								  data_size, oxid, csn, &arg);
 
@@ -980,6 +1008,11 @@ o_toast_sort_add(OTableDescr *descr, OTuple pk, uint16 attn,
 	tkey.chunknum = 0;
 
 	Assert(descr->toast->desc.type == oIndexToast);
+
+	if (tableGetMaxChunkSize(&tkey, &arg) == 0)
+		o_btree_check_size_of_tuple(O_BTREE_MAX_TUPLE_SIZE + 1,
+									NameStr(GET_PRIMARY(descr)->name),
+									false);
 
 	generic_toast_sort_add(&tableToastAPI, (Pointer) &tkey, data,
 						   data_size, sortstate, &arg);
