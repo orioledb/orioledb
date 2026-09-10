@@ -4668,8 +4668,8 @@ delay_if_queued_for_idxbuild(void)
 
 		/*
 		 * We wait on a condition variable that will wake us as soon as the
-		 * pause ends, but we use a timeout so we can check for
-		 * interrupts periodically too.
+		 * pause ends, but we use a timeout so we can check for interrupts
+		 * periodically too.
 		 */
 		ConditionVariableTimedSleep(recovery_index_cv, 1000,
 									WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
