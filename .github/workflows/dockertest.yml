@@ -54,6 +54,7 @@ jobs:
           build-args: |
             ALPINE_VERSION=${{ matrix.distr == 'alpine' && matrix.distr-version || '' }}
             UBUNTU_VERSION=${{ matrix.distr == 'ubuntu' && matrix.distr-version || '' }}
+            UBUNTU_APT_FALLBACK=${{ matrix.distr == 'ubuntu' && 'azure.archive.ubuntu.com' || '' }}
             PG_MAJOR=${{ matrix.postgres }}
             BUILD_CC_COMPILER=${{ matrix.compiler }}
             DOCKER_PG_LLVM_DEPS=llvm-dev clang

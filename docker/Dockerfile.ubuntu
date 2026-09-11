@@ -8,6 +8,7 @@ ARG UBUNTU_VERSION=noble
 FROM ubuntu:${UBUNTU_VERSION}
 
 ARG UBUNTU_VERSION
+ARG UBUNTU_APT_FALLBACK
 
 # Set PG_MAJOR = [ 17 16 ]
 ARG PG_MAJOR=17
@@ -39,7 +40,25 @@ RUN set -eux; \
 	chown -R postgres:postgres /var/lib/postgresql
 
 RUN set -eux; \
-	apt-get update; \
+	apt_update() { \
+		apt-get \
+			-o APT::Update::Error-Mode=any \
+			-o Acquire::http::Timeout=30 \
+			-o Acquire::https::Timeout=30 \
+			update; \
+	}; \
+	if ! apt_update; then \
+		test -n "${UBUNTU_APT_FALLBACK:-}"; \
+		echo "Ubuntu mirrors unavailable, retrying with $UBUNTU_APT_FALLBACK"; \
+		for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \
+			[ -f "$source_file" ] || continue; \
+			sed -Ei \
+				-e "s|://([a-z0-9-]+\.)?archive\.ubuntu\.com|://${UBUNTU_APT_FALLBACK}|g" \
+				-e "s|://security\.ubuntu\.com|://${UBUNTU_APT_FALLBACK}|g" \
+				"$source_file"; \
+		done; \
+		apt_update; \
+	fi; \
 	DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y; \
 	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
 		ca-certificates \

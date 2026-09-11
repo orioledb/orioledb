@@ -24,9 +24,54 @@ while sudo fuser /var/lib/dpkg/lock >/dev/null 2>&1; do
 	sleep 3
 done
 
-sudo apt-get update -qq
+apt_update()
+{
+	sudo apt-get \
+		-o APT::Update::Error-Mode=any \
+		-o Acquire::http::Timeout=30 \
+		-o Acquire::https::Timeout=30 \
+		update -qq
+}
 
-sudo apt-get -y install -qq wget ca-certificates
+use_azure_mirror()
+{
+	echo "Ubuntu mirrors unavailable, retrying with azure.archive.ubuntu.com"
+	for source_file in /etc/apt/sources.list \
+		/etc/apt/sources.list.d/*.list \
+		/etc/apt/sources.list.d/*.sources; do
+		[ -f "$source_file" ] || continue
+		sudo sed -Ei \
+			-e 's|://([a-z0-9-]+\.)?archive\.ubuntu\.com|://azure.archive.ubuntu.com|g' \
+			-e 's|://security\.ubuntu\.com|://azure.archive.ubuntu.com|g' \
+			"$source_file"
+	done
+	apt_update
+}
+
+apt_install()
+{
+	if sudo apt-get \
+		-o Dpkg::Options::="--force-confdef" \
+		-o Dpkg::Options::="--force-confold" \
+		-o Acquire::http::Timeout=30 \
+		-o Acquire::https::Timeout=30 \
+		-y install -qq "$@"; then
+		return
+	fi
+	use_azure_mirror
+	sudo apt-get \
+		-o Dpkg::Options::="--force-confdef" \
+		-o Dpkg::Options::="--force-confold" \
+		-o Acquire::http::Timeout=30 \
+		-o Acquire::https::Timeout=30 \
+		-y install -qq "$@"
+}
+
+if ! apt_update; then
+	use_azure_mirror
+fi
+
+apt_install wget ca-certificates
 
 apt_packages="build-essential flex bison pkg-config libreadline-dev make gdb libipc-run-perl libicu-dev python3-full python3-pip python3-setuptools python3-testresources libzstd1 libzstd-dev libcurl4-openssl-dev libssl-dev lcov"
 
@@ -47,7 +92,7 @@ if [ $CHECK_TYPE = "dm_log_writes" ]; then
 fi
 
 # install required packages
-sudo apt-get -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y install -qq $apt_packages
+apt_install $apt_packages
 
 if [ $CHECK_TYPE = "dm_log_writes" ]; then
 	# dm-log-writes is built into the CI runner kernels; abort early if a
