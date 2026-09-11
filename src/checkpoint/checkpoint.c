@@ -2577,13 +2577,21 @@ sort_checkpoint_map_file(BTreeDescr *descr, int cur_chkp_index)
 		free_blocks_size = sizeof(uint32) * header.numFreeBlocks;
 	}
 
+	if (free_blocks_size > FileSize(file) - sizeof(header))
+		ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+						errmsg("Corrupt checkpoint map file %s: "
+							   "numFreeBlocks %lu exceeds file size",
+							   filename,
+							   (unsigned long) header.numFreeBlocks)));
+
 	free_blocks = palloc(free_blocks_size);
 	if (free_blocks_size > 0)
 	{
-		read_size = OFileRead(file, (Pointer) free_blocks, free_blocks_size,
+		read_size = OFileRead(file, (Pointer) free_blocks,
+							  (int) free_blocks_size,
 							  sizeof(header), WAIT_EVENT_DATA_FILE_READ);
 
-		if (read_size != free_blocks_size)
+		if (read_size != (int) free_blocks_size)
 		{
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("Could not read data from checkpoint map file %s: %m",
