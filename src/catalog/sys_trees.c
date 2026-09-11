@@ -477,6 +477,8 @@ sys_trees_shmem_init(Pointer ptr, bool found)
 BTreeDescr *
 get_sys_tree(int tree_num)
 {
+	if (tree_num < 1 || tree_num > SYS_TREES_NUM)
+		elog(ERROR, "invalid system tree number: %d", tree_num);
 	Assert(tree_num >= 1 && tree_num <= SYS_TREES_NUM);
 	sys_tree_init_if_needed(tree_num - 1);
 
@@ -486,6 +488,8 @@ get_sys_tree(int tree_num)
 BTreeDescr *
 get_sys_tree_no_init(int tree_num)
 {
+	if (tree_num < 1 || tree_num > SYS_TREES_NUM)
+		elog(ERROR, "invalid system tree number: %d", tree_num);
 	Assert(tree_num >= 1 && tree_num <= SYS_TREES_NUM);
 
 	if (!sysTreesDescrs[tree_num - 1].initialized)
@@ -671,24 +675,32 @@ orioledb_sys_tree_rows(PG_FUNCTION_ARGS)
 bool
 sys_tree_supports_transactions(int tree_num)
 {
+	if (tree_num < 1 || tree_num > SYS_TREES_NUM)
+		elog(ERROR, "invalid system tree number: %d", tree_num);
 	return sysTreesMeta[tree_num - 1].undoLogType != UndoLogNone;
 }
 
 BTreeStorageType
 sys_tree_get_storage_type(int tree_num)
 {
+	if (tree_num < 1 || tree_num > SYS_TREES_NUM)
+		elog(ERROR, "invalid system tree number: %d", tree_num);
 	return sysTreesMeta[tree_num - 1].storageType;
 }
 
 void
 sys_tree_set_extra(int tree_num, Pointer extra)
 {
+	if (tree_num < 1 || tree_num > SYS_TREES_NUM)
+		elog(ERROR, "invalid system tree number: %d", tree_num);
 	sysTreesMeta[tree_num - 1].extra = extra;
 }
 
 Pointer
 sys_tree_get_extra(int tree_num)
 {
+	if (tree_num < 1 || tree_num > SYS_TREES_NUM)
+		elog(ERROR, "invalid system tree number: %d", tree_num);
 	return sysTreesMeta[tree_num - 1].extra;
 }
 

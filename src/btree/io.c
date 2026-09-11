@@ -3034,6 +3034,14 @@ walk_page_prelock_check(OInMemoryBlkno blkno, bool evict,
 	 */
 	if (IS_SYS_TREE_OIDS(*oids))
 	{
+		/*
+		 * Defensively reject an out-of-range system-tree number before it
+		 * indexes fixed arrays.  Under normal operation the page descriptor
+		 * oids are stamped from a valid BTreeDescr, but a corrupted shared
+		 * memory state could carry a forged value.
+		 */
+		if (oids->relnode < 1 || oids->relnode > SYS_TREES_NUM)
+			return NULL;
 		if (sys_tree_get_storage_type(oids->relnode) != BTreeStorageInMemory)
 			desc = get_sys_tree(oids->relnode);
 		else

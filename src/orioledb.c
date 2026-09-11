@@ -368,6 +368,112 @@ wal_desc_on_record(WalReaderState *r, WalRecord *rec)
 	}
 	return WALPARSE_OK;
 }
+
+/*
+ * Minimal on_record callback for the WAL parse test helper: accept every
+ * delivered record without touching its fields.
+ */
+static WalParseResult
+test_wal_on_record(WalReaderState *r, WalRecord *rec)
+{
+	return WALPARSE_OK;
+}
+
+PG_FUNCTION_INFO_V1(orioledb_test_wal_parse_relation);
+
+/*
+ * Test-only (IS_DEV): feed a hand-built WAL container holding a single
+ * WAL_REC_RELATION record to wal_parse_container() and return the parse
+ * result as text.  This exercises the relnode bounds check in
+ * wal_parse_rec_relation() without needing a running recovery stream.
+ *
+ * A forged container is assembled with version = ORIOLEDB_WAL_VERSION,
+ * no flags, and one RELATION record whose (datoid, relnode) come from
+ * the caller.  When datoid == SYS_TREES_DATOID and relnode is outside
+ * 1..SYS_TREES_NUM, the parser must reject it with WALPARSE_BAD_TYPE
+ * instead of accepting an out-of-range system-tree number that would
+ * index fixed arrays out of bounds.
+ */
+Datum
+orioledb_test_wal_parse_relation(PG_FUNCTION_ARGS)
+{
+	Oid			datoid = PG_GETARG_OID(0);
+	Oid			relnode = PG_GETARG_OID(1);
+	StringInfoData buf;
+	WalReaderState r;
+	WalParseResult st;
+	const char *result_name;
+
+	uint16		version = ORIOLEDB_WAL_VERSION;
+	uint8		flags = 0;
+	uint8		rec_type = WAL_REC_RELATION;
+	uint8		tree_type = 0;
+	Oid			reloid = relnode;
+	OXid		xmin = 0;
+	CommitSeqNo csn = COMMITSEQNO_FROZEN;
+	CommandId	cid = 0;
+	uint32		rel_version = 0;
+	uint32		base_version = 0;
+	Oid			spcoid = 0;
+
+	initStringInfo(&buf);
+
+	/* Container header: version + flags */
+	appendBinaryStringInfo(&buf, (char *) &version, sizeof(version));
+	appendBinaryStringInfo(&buf, (char *) &flags, sizeof(flags));
+
+	/* Record tag */
+	appendBinaryStringInfo(&buf, (char *) &rec_type, sizeof(rec_type));
+
+	/*
+	 * WAL_REC_RELATION payload (layout since ORIOLEDB_WAL_VERSION >= 17).
+	 * WR_PARSE() copies raw bytes via memcpy, so field order must match
+	 * wal_parse_rec_relation() exactly.
+	 */
+	appendBinaryStringInfo(&buf, (char *) &tree_type, sizeof(tree_type));
+	appendBinaryStringInfo(&buf, (char *) &datoid, sizeof(datoid));
+	appendBinaryStringInfo(&buf, (char *) &reloid, sizeof(reloid));
+	appendBinaryStringInfo(&buf, (char *) &relnode, sizeof(relnode));
+	appendBinaryStringInfo(&buf, (char *) &xmin, sizeof(xmin));
+	appendBinaryStringInfo(&buf, (char *) &csn, sizeof(csn));
+	appendBinaryStringInfo(&buf, (char *) &cid, sizeof(cid));
+	appendBinaryStringInfo(&buf, (char *) &rel_version, sizeof(rel_version));
+	appendBinaryStringInfo(&buf, (char *) &base_version, sizeof(base_version));
+	/* spcoid (since ORIOLEDB_REL_TABLESPACE_WAL_VERSION) */
+	appendBinaryStringInfo(&buf, (char *) &spcoid, sizeof(spcoid));
+
+	memset(&r, 0, sizeof(r));
+	r.start = (Pointer) buf.data;
+	r.end = (Pointer) (buf.data + buf.len);
+	r.ptr = (Pointer) buf.data;
+	r.on_record = test_wal_on_record;
+
+	st = wal_parse_container(&r, false);
+
+	switch (st)
+	{
+		case WALPARSE_OK:
+			result_name = "ok";
+			break;
+		case WALPARSE_STOP:
+			result_name = "stop";
+			break;
+		case WALPARSE_EOF:
+			result_name = "eof";
+			break;
+		case WALPARSE_BAD_TYPE:
+			result_name = "bad_type";
+			break;
+		case WALPARSE_BAD_VERSION:
+			result_name = "bad_version";
+			break;
+		default:
+			result_name = "unknown";
+			break;
+	}
+
+	PG_RETURN_TEXT_P(cstring_to_text(result_name));
+}
 #endif
 
 static void

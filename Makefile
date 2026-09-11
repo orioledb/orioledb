@@ -221,6 +221,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/page_fit_items_test.py \
 						test/t/page_level_guard_test.py \
 						test/t/proc_cache_guard_test.py \
+						test/t/sys_tree_guard_test.py \
 						test/t/move_database_test.py \
 						test/t/database_template_test.py
 TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
