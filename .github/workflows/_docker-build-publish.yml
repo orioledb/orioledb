@@ -37,24 +37,28 @@ jobs:
         postgres: [16, 17, 18]
         distr: [alpine, ubuntu]
 
-        # Define runner and distr_version depending on cpu and distr
+        # Define runner and distr_version and distr_digest depending on cpu and distr
         include:
           - cpu: amd64
             distr: alpine
             runner: ubuntu-24.04
             distr_version: 3.21
+            distr_digest: sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           - cpu: amd64
             distr: ubuntu
             runner: ubuntu-24.04
             distr_version: noble
+            distr_digest: sha256:224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254
           - cpu: arm64
             distr: alpine
             runner: ubuntu-24.04-arm
             distr_version: 3.21
+            distr_digest: sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           - cpu: arm64
             distr: ubuntu
             runner: ubuntu-24.04-arm
             distr_version: noble
+            distr_digest: sha256:224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254
 
     runs-on: ${{ matrix.runner }}
 
@@ -94,8 +98,8 @@ jobs:
           platforms: linux/${{ matrix.cpu }}
           build-args: |
             PG_MAJOR=${{ matrix.postgres }}
-            ALPINE_VERSION=${{ matrix.distr == 'alpine' && matrix.distr_version || '' }}
-            UBUNTU_VERSION=${{ matrix.distr == 'ubuntu' && matrix.distr_version || '' }}
+            ALPINE_VERSION=${{ matrix.distr == 'alpine' && format('{0}@{1}', matrix.distr_version, matrix.distr_digest) || '' }}
+            UBUNTU_VERSION=${{ matrix.distr == 'ubuntu' && format('{0}@{1}', matrix.distr_version, matrix.distr_digest) || '' }}
           outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push=true,push-by-digest=true,name-canonical=true
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false # (как было)
