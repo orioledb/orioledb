@@ -28,7 +28,7 @@
  * ORIOLEDB_COMPRESS_VERSION (see big comment on versioning
  * in include/orioledb.h)
  */
-#define ORIOLEDB_WAL_VERSION (19)
+#define ORIOLEDB_WAL_VERSION (20)
 
 /*
  * Value has been fixed at the moment of introducing WAL versioning.
@@ -68,6 +68,16 @@
  * record replay needed to see.
  */
 #define ORIOLEDB_SUBXACT_JOINT_COMMIT_WAL_VERSION (19)
+
+/*
+ * WAL version that introduced WAL_REC_TOAST_CHUNK: the chunks of a TOASTed
+ * value being removed are logged for REPLICA IDENTITY FULL tables so logical
+ * decoding can reconstruct the old value of that attribute.  Replay ignores
+ * these records.
+ *
+ * We should never change this value.
+ */
+#define ORIOLEDB_TOAST_CHUNK_WAL_VERSION (20)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
@@ -215,6 +225,21 @@ typedef struct
 	uint8		iptr[sizeof(ItemPointerData)];
 } WALRecBridgeErase;
 
+/*
+ * One chunk of a TOASTed value that is being removed, logged so that logical
+ * decoding can reconstruct the old value of the attribute.
+ *
+ * Chunks are page-bounded (see tableGetMaxChunkSize()), so a uint16 length is
+ * enough and each record fits into LOCAL_WAL_BUFFER_SIZE.
+ */
+typedef struct
+{
+	uint8		recType;
+	uint8		attnum[sizeof(uint16)];
+	uint8		length[sizeof(uint16)];
+	/* data[length] */
+} WALRecToastChunk;
+
 typedef struct
 {
 	uint8		xactTime[sizeof(TimestampTz)];
@@ -251,6 +276,9 @@ typedef struct
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length, char relreplident, uint32 version, uint32 base_version);
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr, uint32 version, uint32 base_version);
+extern void add_toast_chunk_wal_record(BTreeDescr *desc, uint16 attnum,
+									   Pointer data, uint16 length,
+									   uint32 version, uint32 base_version);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
 extern void add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId logicalXid_sub);

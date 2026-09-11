@@ -88,11 +88,13 @@ extern void tts_orioledb_toast_sort_add(TupleTableSlot *slot,
 										Tuplesortstate *sortstate);
 extern bool tts_orioledb_remove_toast_values(TupleTableSlot *slot,
 											 OTableDescr *descr,
-											 OXid oxid, CommitSeqNo csn);
+											 OXid oxid, CommitSeqNo csn,
+											 bool logOldChunks);
 extern bool tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 											 TupleTableSlot *newSlot,
 											 OTableDescr *descr,
-											 OXid oxid, CommitSeqNo csn);
+											 OXid oxid, CommitSeqNo csn,
+											 bool logOldChunks);
 extern bool tts_orioledb_modified(TupleTableSlot *oldSlot,
 								  TupleTableSlot *newSlot,
 								  Bitmapset *attrs);

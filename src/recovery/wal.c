@@ -180,6 +180,56 @@ add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr, uint32 version, 
 }
 
 /*
+ * Logs one chunk of a TOASTed value being removed, so that logical decoding
+ * can reconstruct the old value of the attribute.  Replay skips these records.
+ *
+ * `desc` is the TOAST tree, so the record lands in the relation context the
+ * surrounding chunk deletes already use.
+ */
+void
+add_toast_chunk_wal_record(BTreeDescr *desc, uint16 attnum,
+						   Pointer data, uint16 length,
+						   uint32 version, uint32 base_version)
+{
+	int			required_length;
+	ORelOids	oids = desc->oids;
+	OIndexType	type = desc->type;
+	WALRecToastChunk *rec;
+
+	/* Do not write WAL during recovery */
+	if (OXidIsValid(recovery_oxid))
+		return;
+
+	Assert(!is_recovery_process());
+	Assert(type == oIndexToast);
+	Assert(length > 0);
+
+	required_length = sizeof(WALRecToastChunk) + length;
+
+	if (!ORelOidsIsEqual(local_wal.oids, oids) || type != local_wal.ix_type)
+		required_length += sizeof(WALRecRelation);
+
+	flush_local_wal_if_needed(required_length);
+	Assert(local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	add_xid_wal_record_if_needed();
+
+	if (!ORelOidsIsEqual(local_wal.oids, oids) || type != local_wal.ix_type)
+		add_rel_wal_record(oids, type, version, base_version);
+
+	Assert(local_wal.buffer_offset + sizeof(*rec) + length + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	rec = (WALRecToastChunk *) (&local_wal.buffer[local_wal.buffer_offset]);
+	rec->recType = WAL_REC_TOAST_CHUNK;
+	memcpy(rec->attnum, &attnum, sizeof(rec->attnum));
+	memcpy(rec->length, &length, sizeof(rec->length));
+	local_wal.buffer_offset += sizeof(*rec);
+
+	memcpy(&local_wal.buffer[local_wal.buffer_offset], data, length);
+	local_wal.buffer_offset += length;
+}
+
+/*
  * Adds the record to the local_wal.buffer.
  */
 static inline void
