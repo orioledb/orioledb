@@ -29,8 +29,9 @@ class ConcurrentIndexTest(BaseTest):
 	Bridged indexes (any non-btree AM, or btree with
 	WITH(orioledb_index=false), or btree on a table with
 	index_bridging enabled) are stock-PG indexes keyed by
-	bridge_ctid; CIC for those flows through PG's standard
-	machinery, no orioledb-specific BUILDING/spool plumbing.
+	bridge_ctid.  Non-unique CIC flows through PG's standard
+	machinery.  UNIQUE CIC is downgraded to a plain build because
+	OrioleDB does not yet provide the bridged phase-3 catch-up scan.
 	"""
 
 	def test_cic_basic(self):
@@ -228,10 +229,8 @@ class ConcurrentIndexTest(BaseTest):
 
 	def test_cic_bridged_unique_btree(self):
 		"""
-		CIC on a UNIQUE btree index over a bridged orioledb table
-		(WITH index_bridging) should also flow through PG's stock
-		CIC machinery — UNIQUE is fine when the underlying index
-		is a stock PG btree on bridge_ctid.
+		UNIQUE CIC on a bridged orioledb table is downgraded to a
+		plain build, which still enforces uniqueness.
 		"""
 		node = self.node
 		node.start()
@@ -246,13 +245,132 @@ class ConcurrentIndexTest(BaseTest):
 				INSERT INTO o_cic_b_uniq
 				SELECT g, 'v' || g FROM generate_series(1, 200) g;
 			""")
-			node.safe_psql(
+			_, _, err = node.psql(
 			    "CREATE UNIQUE INDEX CONCURRENTLY o_cic_b_uniq_val_uidx "
 			    "ON o_cic_b_uniq (val);")
+			self.assertIn(b"using a plain CREATE UNIQUE INDEX instead", err)
 			# Uniqueness enforced post-build.
 			with self.assertRaises(Exception):
 				node.safe_psql("INSERT INTO o_cic_b_uniq VALUES (201, 'v1');")
 		finally:
+			try:
+				node.stop()
+			except Exception:
+				pass
+
+	def test_cic_bridged_unique_concurrent_insert(self):
+		"""
+		A row committed after the bridged UNIQUE build takes its snapshot
+		must not be omitted from the finished index.  Pause expression
+		evaluation during the build so the writer lands in that window.
+		"""
+		node = self.node
+		node.start()
+		ctrl = None
+		cic_conn = None
+		writer_conn = None
+		cic = None
+		writer = None
+		try:
+			node.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE FUNCTION o_cic_pause(value text) RETURNS text
+				LANGUAGE plpgsql IMMUTABLE AS $$
+				BEGIN
+					IF value = 'v1' THEN
+						PERFORM pg_advisory_xact_lock(292);
+					END IF;
+					RETURN value;
+				END;
+				$$;
+				CREATE TABLE o_cic_b_race (
+					id int NOT NULL PRIMARY KEY,
+					val text NOT NULL
+				) USING orioledb;
+				INSERT INTO o_cic_b_race
+				SELECT g, 'v' || g FROM generate_series(1, 200) g;
+			""")
+
+			ctrl = node.connect()
+			ctrl.begin()
+			ctrl.execute("SELECT pg_advisory_xact_lock(292)")
+
+			cic_conn = node.connect(autocommit=True)
+			cic_pid = cic_conn.execute("SELECT pg_backend_pid()")[0][0]
+			cic = ThreadQueryExecutor(
+			    cic_conn,
+			    "CREATE UNIQUE INDEX CONCURRENTLY o_cic_b_race_val_uidx "
+			    "ON o_cic_b_race (o_cic_pause(val)) "
+			    "WITH (orioledb_index = off);")
+			cic.start()
+
+			deadline = time.time() + 10
+			while time.time() < deadline:
+				waiting = node.execute(
+				    "SELECT wait_event = 'advisory' FROM pg_stat_activity "
+				    "WHERE pid = %d" % cic_pid)
+				if waiting and waiting[0][0]:
+					break
+				time.sleep(0.1)
+			else:
+				self.fail("bridged index build did not reach advisory lock")
+
+			writer_conn = node.connect(autocommit=True)
+			writer_pid = writer_conn.execute("SELECT pg_backend_pid()")[0][0]
+			writer = ThreadQueryExecutor(
+			    writer_conn, "INSERT INTO o_cic_b_race "
+			    "SELECT g, 'late' || g FROM generate_series(201, 210) g;")
+			writer.start()
+
+			# CIC permits the insert immediately; the safe plain build blocks it
+			# on its table lock.  Wait for either outcome before resuming build.
+			deadline = time.time() + 10
+			while time.time() < deadline:
+				settled = node.execute(
+				    "SELECT EXISTS (SELECT 1 FROM o_cic_b_race "
+				    "WHERE id = 210) OR EXISTS (SELECT 1 "
+				    "FROM pg_stat_activity WHERE pid = %d "
+				    "AND wait_event_type = 'Lock')" % writer_pid)[0][0]
+				if settled:
+					break
+				time.sleep(0.1)
+			else:
+				self.fail("concurrent insert neither committed nor blocked")
+
+			ctrl.commit()
+			cic.join()
+			writer.join()
+
+			expected = [(i, ) for i in range(201, 211)]
+			heap_rows = node.execute(
+			    "SELECT id FROM o_cic_b_race "
+			    "WHERE id BETWEEN 201 AND 210 ORDER BY id")
+			self.assertEqual(heap_rows, expected)
+			with node.connect() as c:
+				c.execute("SET enable_seqscan = off")
+				index_rows = c.execute(
+				    "SELECT id FROM o_cic_b_race "
+				    "WHERE o_cic_pause(val) >= 'late' "
+				    "AND o_cic_pause(val) < 'latf' ORDER BY id")
+			self.assertEqual(index_rows, expected)
+			with self.assertRaises(Exception):
+				node.safe_psql(
+				    "INSERT INTO o_cic_b_race VALUES (211, 'late201');")
+		finally:
+			if ctrl is not None:
+				try:
+					ctrl.rollback()
+				except Exception:
+					pass
+			for thread in (cic, writer):
+				if thread is not None:
+					try:
+						thread.join(10)
+					except Exception:
+						pass
+			for conn in (cic_conn, writer_conn, ctrl):
+				if conn is not None:
+					conn.close()
 			try:
 				node.stop()
 			except Exception:

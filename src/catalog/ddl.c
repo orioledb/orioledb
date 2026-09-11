@@ -935,8 +935,8 @@ ReindexPartitions(Oid relid, bool concurrently)
  * full orioledb-native build) or on the *bridged* path (the index is a
  * stock PG index keyed by bridge_ctid, built by btbuild / each AM's own
  * ambuild)?  The BUILDING/spool plumbing only applies to native
- * indexes; bridged indexes are handled by PG's standard CIC machinery
- * (and that includes UNIQUE).
+ * indexes.  Bridged indexes do not have the phase-3 catch-up scan needed
+ * for UNIQUE CIC, so those builds are rejected or downgraded below.
  *
  * Mirrors the resolution that orioledb_indexam_routine_hook +
  * orioledb_ambuild's `options->orioledb_index` branch perform later,
@@ -1698,12 +1698,23 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				 * - *Bridged* (any non-btree AM, or btree with
 				 * WITH(orioledb_index=false), or btree on a table whose
 				 * index_bridging is enabled): the index is a stock-PG index
-				 * keyed by bridge_ctid; ambuild lands in bridged_ambuild /
-				 * btbuild and PG's CIC machinery handles it natively, UNIQUE
-				 * included.  Don't second-guess any of it -- just let it
-				 * through.
+				 * keyed by bridge_ctid.  Non-unique CIC can use that path, but
+				 * UNIQUE must be downgraded until validate_scan can catch rows
+				 * committed during the phase-2 build.
 				 */
-				(void) o_cic_is_native_index(rel, stmt);
+				if (stmt->unique && !o_cic_is_native_index(rel, stmt))
+				{
+					if (orioledb_strict_mode)
+					{
+						table_close(rel, lockmode);
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("CREATE UNIQUE INDEX CONCURRENTLY is not supported for bridged indexes on orioledb tables")));
+					}
+					stmt->concurrent = false;
+					ereport(WARNING,
+							(errmsg("CREATE UNIQUE INDEX CONCURRENTLY is not supported for bridged indexes on orioledb tables, using a plain CREATE UNIQUE INDEX instead")));
+				}
 			}
 			table_close(rel, lockmode);
 		}
