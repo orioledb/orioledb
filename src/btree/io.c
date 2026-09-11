@@ -596,13 +596,21 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 
 	if (use_mmap)
 	{
-		Assert(offset + amount <= device_length);
+		if (unlikely(offset + amount > device_length))
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_CORRUPTED),
+					 errmsg("device write offset %lld + %d exceeds device length %lld",
+							(long long) offset, amount, (long long) device_length)));
 		memcpy(mmap_data + offset, buffer, amount);
 		return amount;
 	}
 	else if (use_device)
 	{
-		Assert(offset + amount <= device_length);
+		if (unlikely(offset + amount > device_length))
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_CORRUPTED),
+					 errmsg("device write offset %lld + %d exceeds device length %lld",
+							(long long) offset, amount, (long long) device_length)));
 		pgstat_report_wait_start(WAIT_EVENT_DATA_FILE_WRITE);
 		result = pg_pwrite(device_fd, buffer, amount, offset);
 		pgstat_report_wait_end();
@@ -688,13 +696,21 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 
 	if (use_mmap)
 	{
-		Assert(offset + amount <= device_length);
+		if (unlikely(offset + amount > device_length))
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_CORRUPTED),
+					 errmsg("device read offset %lld + %d exceeds device length %lld",
+							(long long) offset, amount, (long long) device_length)));
 		memcpy(buffer, mmap_data + offset, amount);
 		return amount;
 	}
 	else if (use_device)
 	{
-		Assert(offset + amount <= device_length);
+		if (unlikely(offset + amount > device_length))
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_CORRUPTED),
+					 errmsg("device read offset %lld + %d exceeds device length %lld",
+							(long long) offset, amount, (long long) device_length)));
 		pgstat_report_wait_start(WAIT_EVENT_DATA_FILE_READ);
 		result = pg_pread(device_fd, buffer, amount, offset);
 		pgstat_report_wait_end();
@@ -763,7 +779,11 @@ btree_smgr_writeback(BTreeDescr *desc, uint32 chkpNum,
 {
 	if (use_mmap)
 	{
-		Assert(offset + amount <= device_length);
+		if (unlikely(offset + amount > device_length))
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_CORRUPTED),
+					 errmsg("device writeback offset %lld + %d exceeds device length %lld",
+							(long long) offset, amount, (long long) device_length)));
 		msync(mmap_data + offset, amount, MS_ASYNC);
 		return;
 	}
@@ -1073,7 +1093,6 @@ get_free_disk_offset(BTreeDescr *desc)
 
 	if (gotBlock)
 	{
-
 		if (use_device)
 		{
 			FileExtent	extent;
@@ -1091,6 +1110,17 @@ get_free_disk_offset(BTreeDescr *desc)
 				result = offset;
 			else
 				result = InvalidFileExtentOff;
+		}
+
+		/* Reject free-map offsets beyond the data file bounds */
+		if (FileExtentOffIsValid(result) &&
+			result >= pg_atomic_read_u64(&metaPage->datafileLength[0]))
+		{
+			elog(WARNING, "free-map offset " UINT64_FORMAT " beyond "
+				 "data file length " UINT64_FORMAT,
+				 result,
+				 pg_atomic_read_u64(&metaPage->datafileLength[0]));
+			result = InvalidFileExtentOff;
 		}
 	}
 	else
