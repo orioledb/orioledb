@@ -1,0 +1,28 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_setup s2_set_stopevent s1_iterate s2_bloat s2_reset
+step s1_setup: SET orioledb.enable_stopevents = true;
+step s2_set_stopevent: 
+	SELECT pg_stopevent_set('raw_iterate_chunk_crossing', 'true');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_iterate: 
+	SELECT array_length(orioledb_test_raw_iterate_refind('o_raw_refind'::regclass), 1); <waiting ...>
+step s2_bloat: 
+	UPDATE o_raw_refind SET pad = repeat('z', 500) WHERE id <= 30;
+step s2_reset: 
+	SELECT pg_stopevent_reset('raw_iterate_chunk_crossing');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_iterate: <... completed>
+array_length
+------------
+         200
+(1 row)
+
