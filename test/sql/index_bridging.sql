@@ -1341,6 +1341,27 @@ SELECT count(*), sum(a * 1000 + b) FROM o_bridge_pk2
 	WHERE tags @> ARRAY[3] OR (a, b) IN ((0, 5), (7, 10), (20, 40), (39, 49));
 DROP TABLE o_bridge_pk2;
 
+-- Updates must maintain bridged expression indexes and enforce uniqueness.
+CREATE TABLE o_bridge_expr (
+	id int PRIMARY KEY,
+	value text,
+	payload text
+) USING orioledb;
+CREATE UNIQUE INDEX o_bridge_expr_lower_idx ON o_bridge_expr (lower(value))
+	WITH (orioledb_index=off);
+INSERT INTO o_bridge_expr VALUES (1, 'Alpha', 'one'), (2, 'Beta', 'two');
+
+SELECT count(*) FROM btree_index_content('o_bridge_expr_lower_idx');
+UPDATE o_bridge_expr SET payload = 'changed' WHERE id = 1;
+SELECT count(*) FROM btree_index_content('o_bridge_expr_lower_idx');
+
+UPDATE o_bridge_expr SET value = 'Gamma' WHERE id = 1;
+SET enable_seqscan = off;
+SELECT id, value FROM o_bridge_expr WHERE lower(value) = 'gamma';
+UPDATE o_bridge_expr SET value = 'GAMMA' WHERE id = 2;
+SELECT id, value FROM o_bridge_expr ORDER BY id;
+RESET enable_seqscan;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;

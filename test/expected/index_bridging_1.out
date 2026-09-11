@@ -5293,9 +5293,54 @@ SELECT count(*), sum(a * 1000 + b) FROM o_bridge_pk2
 (1 row)
 
 DROP TABLE o_bridge_pk2;
+-- Updates must maintain bridged expression indexes and enforce uniqueness.
+CREATE TABLE o_bridge_expr (
+	id int PRIMARY KEY,
+	value text,
+	payload text
+) USING orioledb;
+CREATE UNIQUE INDEX o_bridge_expr_lower_idx ON o_bridge_expr (lower(value))
+	WITH (orioledb_index=off);
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_expr'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+INSERT INTO o_bridge_expr VALUES (1, 'Alpha', 'one'), (2, 'Beta', 'two');
+SELECT count(*) FROM btree_index_content('o_bridge_expr_lower_idx');
+ count 
+-------
+     2
+(1 row)
+
+UPDATE o_bridge_expr SET payload = 'changed' WHERE id = 1;
+SELECT count(*) FROM btree_index_content('o_bridge_expr_lower_idx');
+ count 
+-------
+     2
+(1 row)
+
+UPDATE o_bridge_expr SET value = 'Gamma' WHERE id = 1;
+SET enable_seqscan = off;
+SELECT id, value FROM o_bridge_expr WHERE lower(value) = 'gamma';
+ id | value 
+----+-------
+  1 | Gamma
+(1 row)
+
+UPDATE o_bridge_expr SET value = 'GAMMA' WHERE id = 2;
+ERROR:  duplicate key value violates unique constraint "o_bridge_expr_lower_idx"
+DETAIL:  Key (lower(value))=(gamma) already exists.
+SELECT id, value FROM o_bridge_expr ORDER BY id;
+ id | value 
+----+-------
+  1 | Gamma
+  2 | Beta
+(2 rows)
+
+RESET enable_seqscan;
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 39 other objects
+NOTICE:  drop cascades to 40 other objects
 DETAIL:  drop cascades to table o_test_ix_ams
 drop cascades to table o_test_bridging_with_regular_no_pkey
 drop cascades to table o_test_bridging_with_regular_pkey
@@ -5335,6 +5380,7 @@ drop cascades to table o_bridge_sec_gin
 drop cascades to table o_bridge_sec_btree
 drop cascades to table o_bridge_ioc
 drop cascades to table o_bridge_mixed
+drop cascades to table o_bridge_expr
 DROP SCHEMA index_bridging CASCADE;
 NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to function btree_index_content(name)

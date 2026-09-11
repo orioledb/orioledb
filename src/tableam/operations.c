@@ -44,6 +44,7 @@
 #include "catalog/storage.h"
 #include "commands/vacuum.h"
 #include "nodes/execnodes.h"
+#include "optimizer/optimizer.h"
 #include "parser/parsetree.h"
 #include "pgstat.h"
 #if PG_VERSION_NUM >= 180000
@@ -1726,6 +1727,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		ListCell   *indexId;
 		int			attnum;
 		TupleTableSlot *newSlot;
+		/* Match pull_varattnos()'s offset attribute-number representation. */
 		Bitmapset  *changed_attrs = NULL;
 
 		/*
@@ -1760,7 +1762,8 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 				 !datumIsEqual(oldSlot->tts_values[attnum], newSlot->tts_values[attnum],
 							   attr->attbyval, attr->attlen)))
 			{
-				changed_attrs = bms_add_member(changed_attrs, attnum);
+				changed_attrs = bms_add_member(changed_attrs,
+											   attnum + 1 - FirstLowInvalidHeapAttributeNumber);
 			}
 		}
 
@@ -1775,7 +1778,8 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			{
 				 /* Assuming that tts_isnull big enough */ ;
 				oldSlot->tts_isnull[attnum] = true;
-				changed_attrs = bms_add_member(changed_attrs, attnum);
+				changed_attrs = bms_add_member(changed_attrs,
+											   attnum + 1 - FirstLowInvalidHeapAttributeNumber);
 			}
 		}
 
@@ -1793,48 +1797,29 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			}
 			if (interesting)
 			{
+				Bitmapset  *index_attrs = NULL;
+
 				for (attnum = 0; attnum < index_rel->rd_index->indnatts; attnum++)
 				{
 					AttrNumber	tbl_attnum = index_rel->rd_index->indkey.values[attnum];
 
-					if (index_rel->rd_indpred != NIL)
-					{
-						ExprState  *predicate;
-						EState	   *estate;
-						ExprContext *econtext;
-
-						estate = CreateExecutorState();
-						predicate = ExecPrepareQual(index_rel->rd_indpred, estate);
-
-						econtext = GetPerTupleExprContext(estate);
-						econtext->ecxt_scantuple = newSlot;
-
-						/*
-						 * Skip this index-update if the predicate isn't
-						 * satisfied
-						 */
-						if (!ExecQual(predicate, econtext))
-						{
-							FreeExecutorState(estate);
-							continue;
-						}
-						FreeExecutorState(estate);
-					}
-
 					if (AttributeNumberIsValid(tbl_attnum))
-					{
-						if (bms_is_member(tbl_attnum - 1, changed_attrs))
-							touched_indices = true;
-					}
-					else
-					{
-						Assert(false);	/* Expression indices not implemented
-										 * yet. */
-					}
-
-					if (touched_indices)
-						break;
+						index_attrs = bms_add_member(index_attrs,
+													 tbl_attnum - FirstLowInvalidHeapAttributeNumber);
 				}
+
+				pull_varattnos((Node *) index_rel->rd_indexprs, 1,
+							   &index_attrs);
+				pull_varattnos((Node *) index_rel->rd_indpred, 1,
+							   &index_attrs);
+
+				if ((!bms_is_empty(changed_attrs) &&
+					 bms_is_member(0 - FirstLowInvalidHeapAttributeNumber,
+								   index_attrs)) ||
+					bms_overlap(changed_attrs, index_attrs))
+					touched_indices = true;
+
+				bms_free(index_attrs);
 			}
 			index_close(index_rel, AccessExclusiveLock);
 		}
