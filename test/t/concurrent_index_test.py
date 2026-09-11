@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import glob
 import os
 import time
 import unittest
@@ -59,6 +60,40 @@ class ConcurrentIndexTest(BaseTest):
 			self.assertEqual(cnt, 1)
 			cnt = node.execute("SELECT count(*) FROM o_cic_basic;")[0][0]
 			self.assertEqual(cnt, 1000)
+		finally:
+			try:
+				node.stop()
+			except Exception:
+				pass
+
+	def test_cic_no_leftover_spool_dir(self):
+		"""
+		Once a CIC build finishes normally, the cic_<...> spool
+		directory made for it must be gone. Otherwise, running CIC
+		over and over would keep leaving empty directories behind and
+		slowly use up disk space.
+		"""
+		node = self.node
+		node.start()
+		try:
+			node.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_cic_no_leftover (
+					id int NOT NULL,
+					val text NOT NULL,
+					PRIMARY KEY (id)
+				) USING orioledb;
+				INSERT INTO o_cic_no_leftover
+				SELECT g, 'v' || g FROM generate_series(1, 100) g;
+			""")
+			node.safe_psql("CREATE INDEX CONCURRENTLY o_cic_no_leftover_val_idx "
+			               "ON o_cic_no_leftover (val);")
+
+			data_dir = os.path.join(node.data_dir, "orioledb_data")
+			leftover = glob.glob(os.path.join(data_dir, "cic_*"))
+			self.assertEqual(leftover, [],
+			                 "CIC left a spool directory behind after "
+			                 "a successful build: %s" % leftover)
 		finally:
 			try:
 				node.stop()
