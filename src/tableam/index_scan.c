@@ -610,7 +610,8 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 												(so->numArrayKeys > 0) ? so->arrayKeys : NULL,
 												ostate->numPrefixExactKeys,
 												indexDescr->nonLeafTupdesc->natts,
-												indexDescr->fields);
+												indexDescr->fields,
+												indexDescr->oids.datoid);
 	else
 		o_key_data_update_array_key_range(&ostate->curKeyRange,
 										  so->keyData,
@@ -916,7 +917,8 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 														(so->numArrayKeys > 0) ? so->arrayKeys : NULL,
 														ostate->numPrefixExactKeys,
 														indexDescr->nonLeafTupdesc->natts,
-														indexDescr->fields);
+														indexDescr->fields,
+														indexDescr->oids.datoid);
 
 				if (!ostate->exact && !ostate->curKeyRange.empty)
 				{
@@ -1281,7 +1283,8 @@ o_exec_parallel_idx_scan_load_keyrange(OScanState *ostate,
 											(so->numArrayKeys > 0) ? so->arrayKeys : NULL,
 											0,
 											indexDescr->nonLeafTupdesc->natts,
-											indexDescr->fields);
+											indexDescr->fields,
+											indexDescr->oids.datoid);
 	MemoryContextSwitchTo(oldcontext);
 }
 

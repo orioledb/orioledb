@@ -11,6 +11,63 @@ class RecoveryOpclassTest(BaseTest):
 		super().setUp()
 		self.node.append_conf('orioledb.recovery_pool_size = 1')
 
+	def test_cross_database_comparator_cache(self):
+		with self.node as node:
+			node.append_conf('checkpoint_timeout = 1d')
+			node.start()
+			node.safe_psql("CREATE DATABASE cmp_source;")
+			node.safe_psql(
+			    'cmp_source', """
+				CREATE FUNCTION cross_db_cmp(a int, b int) RETURNS int AS $$
+					SELECT btint4cmp(a, b);
+				$$ LANGUAGE SQL IMMUTABLE;
+
+				CREATE OPERATOR <^ (
+					LEFTARG = int4,
+					RIGHTARG = int4,
+					PROCEDURE = int4lt
+				);
+
+				CREATE OPERATOR CLASS cross_db_ops FOR TYPE int
+					USING btree
+					AS OPERATOR 1 <^, OPERATOR 3 =,
+					FUNCTION 1 cross_db_cmp(int, int);
+			""")
+			node.safe_psql("CREATE DATABASE cmp_target TEMPLATE cmp_source;")
+			node.safe_psql(
+			    'cmp_target', """
+				CREATE OR REPLACE FUNCTION cross_db_cmp(a int, b int)
+					RETURNS int AS $$
+					SELECT btint4cmp(b, a);
+				$$ LANGUAGE SQL IMMUTABLE;
+			""")
+			index_ddl = """
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_test (val int) USING orioledb;
+				CREATE INDEX o_test_idx ON o_test (val cross_db_ops);
+			"""
+			node.safe_psql('cmp_source', index_ddl)
+			node.safe_psql('cmp_target', index_ddl)
+			node.safe_psql("CHECKPOINT;")
+
+			node.safe_psql('cmp_source',
+			               "INSERT INTO o_test SELECT generate_series(1, 5);")
+			node.safe_psql('cmp_target',
+			               "INSERT INTO o_test SELECT generate_series(1, 5);")
+			node.stop(['-m', 'immediate'])
+			node.start()
+
+			query = """
+				SET enable_seqscan = off;
+				SELECT val FROM o_test ORDER BY val USING OPERATOR(<^);
+			"""
+			self.assertEqual(node.execute('cmp_source', query), [(1, ), (2, ),
+			                                                     (3, ), (4, ),
+			                                                     (5, )])
+			self.assertEqual(node.execute('cmp_target', query), [(5, ), (4, ),
+			                                                     (3, ), (2, ),
+			                                                     (1, )])
+
 	def test_simple_sql_cmp_function(self):
 		with self.node as node:
 			node.start()
