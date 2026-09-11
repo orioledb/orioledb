@@ -1078,7 +1078,7 @@ o_define_index_concurrent_finish(Relation heap, Relation index)
 	 * root, missing our drained/covering rows.
 	 */
 
-	cic_spool_drop_dir(tableOids, oxid);
+	cic_spool_drop_dir(tableOids, idx->builderOxid);
 
 	o_invalidate_oids(idx_oids);
 
