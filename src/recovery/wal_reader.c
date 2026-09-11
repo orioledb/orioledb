@@ -141,6 +141,18 @@ wal_parse_rec_relation(WalReaderState *r, WalRecord *rec)
 	WR_PARSE(r, &rec->oids.reloid);
 	WR_PARSE(r, &rec->oids.relnode);
 
+	/*
+	 * When the datoid marks this as a system-tree relation, relnode is
+	 * interpreted as a system-tree number and used to index fixed arrays
+	 * (sysTreesMeta, sysTreesDescrs).  A forged or truncated WAL container
+	 * could carry an out-of-range value; reject it here before any consumer
+	 * dereferences the array, returning WALPARSE_BAD_TYPE as for any other
+	 * unparseable record.
+	 */
+	if (rec->oids.datoid == SYS_TREES_DATOID &&
+		(rec->oids.relnode < 1 || rec->oids.relnode > SYS_TREES_NUM))
+		return WALPARSE_BAD_TYPE;
+
 	if (r->container.version >= 17)
 	{
 		OXid		xmin;

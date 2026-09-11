@@ -15,3 +15,9 @@ CREATE FUNCTION orioledb_test_corrupt_proc_cache(procoid oid,
 RETURNS text
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_test_wal_parse_relation(datoid oid,
+												 relnode oid)
+RETURNS text
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
