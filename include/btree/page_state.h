@@ -71,7 +71,11 @@ extern OLockPageWithTupleResult lock_page_with_tuple(BTreeDescr *desc,
 													 OTupleXactInfo xactInfo,
 													 OTuple tuple,
 													 BTreeOperationType action,
-													 RowLockMode lockMode);
+													 RowLockMode lockMode,
+													 CommitSeqNo opCsn,
+													 BTreeKeyType keyType);
+extern int	get_waiters_with_ops(BTreeDescr *desc, OInMemoryBlkno blkno,
+								 int result[BTREE_PAGE_MAX_SPLIT_ITEMS]);
 extern void relock_page(OInMemoryBlkno blkno);
 extern bool try_lock_page(OInMemoryBlkno blkno);
 extern bool try_lock_page_and_check(OInMemoryBlkno blkno, uint16 level,

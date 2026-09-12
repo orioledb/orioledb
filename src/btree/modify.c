@@ -1129,6 +1129,163 @@ o_btree_modify_lock(BTreeModifyInternalContext *context)
 	return OBTreeModifyResultLocked;
 }
 
+/*
+ * Apply one waiting process's row lock to the page we hold locked.
+ *
+ * Returns true when the waiter has been serviced -- its state then records
+ * what happened -- and false when we decline, leaving the waiter to wake up
+ * and do the work itself.  Declining is always safe and is what we do for
+ * anything this path may not resolve; above all a row conflict, because
+ * resolving one means blocking, and blocking here would hold the page for
+ * everybody else on it.
+ */
+static bool
+apply_waiter_lock(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
+{
+	OPageWaiterShmemState *lockerState = &lockerStates[pgprocno];
+	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+	BTreePageItemLocator loc;
+	BTreeLeafTuphdr *tuphdr;
+	BTreeLeafTuphdr conflictTupHdr;
+	BTreeModifyLockStatus lockStatus;
+	UndoLocation conflictUndoLocation;
+	UndoLocation undoLocation;
+	OTuple		curTuple;
+	OTuple		key;
+	OXid		oxid;
+	bool		redundantRowLocks = false;
+
+	/* A row lock is recorded in undo; without it we cannot take one. */
+	if (desc->undoType == UndoLogNone)
+		return false;
+
+	key.formatFlags = lockerState->tupleFlags;
+	key.data = &lockerState->tupleData.fixedData[BTreeLeafTuphdrSize];
+	oxid = XACT_INFO_GET_OXID(((BTreeLeafTuphdr *) lockerState->tupleData.fixedData)->xactInfo);
+
+	if (!OXidIsValid(oxid))
+		return false;
+
+	/*
+	 * The key may belong on a page to our right: the waiter queued during a
+	 * descent that our own split or insert has since made stale.
+	 */
+	if (!O_PAGE_IS(p, RIGHTMOST))
+	{
+		OTuple		hikey;
+
+		BTREE_PAGE_GET_HIKEY(hikey, p);
+		if (o_btree_cmp(desc, &key, lockerState->keyType,
+						&hikey, BTreeKeyNonLeafKey) >= 0)
+			return false;
+	}
+
+	(void) btree_page_search(desc, p, (Pointer) &key, lockerState->keyType,
+							 NULL, &loc);
+	(void) page_locator_find_real_item(p, NULL, &loc);
+
+	if (!BTREE_PAGE_LOCATOR_IS_VALID(p, &loc))
+	{
+		lockerState->opResult = OPageWaiterOpNotFound;
+		return true;
+	}
+
+	BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, p, &loc);
+
+	if (o_btree_cmp(desc, &key, lockerState->keyType,
+					&curTuple, BTreeKeyLeafTuple) != 0 ||
+		tuphdr->deleted != BTreeLeafTupleNonDeleted)
+	{
+		lockerState->opResult = OPageWaiterOpNotFound;
+		return true;
+	}
+
+	/*
+	 * Anything the waiter would have had to wait for stays the waiter's own
+	 * business.  The waiter has no savepoint -- the entry conditions only let
+	 * it get here as the first modification of its transaction -- so there is
+	 * none to pass.
+	 */
+	if (row_lock_conflicts(tuphdr, &conflictTupHdr, desc->undoType,
+						   &conflictUndoLocation, lockerState->lockMode,
+						   oxid, lockerState->opCsn, blkno,
+						   InvalidUndoLocation, &redundantRowLocks,
+						   &lockStatus))
+		return false;
+
+	if (redundantRowLocks)
+		return false;
+
+	/* The waiter already holds this lock or a stronger one. */
+	if (lockStatus == BTreeModifySameOrStrongerLock)
+	{
+		lockerState->opResult = OPageWaiterOpLocked;
+		return true;
+	}
+
+	steal_reserved_undo_size(desc->undoType, lockerState->reservedUndoSize);
+	undoLocation = make_waiter_modify_undo_record(desc, curTuple, true,
+												  BTreeOperationLock, blkno,
+												  O_PAGE_GET_CHANGE_COUNT(p),
+												  tuphdr, pgprocno,
+												  lockerState);
+
+	START_CRIT_SECTION();
+	page_block_reads(blkno);
+
+	tuphdr->chainHasLocks = tuphdr->chainHasLocks ||
+		XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo);
+	tuphdr->undoLocation = undoLocation;
+	tuphdr->xactInfo = OXID_GET_XACT_INFO(oxid, lockerState->lockMode, true);
+	tuphdr->deleted = BTreeLeafTupleNonDeleted;
+
+	MARK_DIRTY(desc, blkno);
+	END_CRIT_SECTION();
+
+	lockerState->opResult = OPageWaiterOpLocked;
+	return true;
+}
+
+/*
+ * Do the work of the processes queued on this page, for the operations we are
+ * able to finish for them.  Called by the holder once its own modification is
+ * done and the page is still locked.
+ */
+void
+btree_apply_waiter_ops(BTreeDescr *desc, OInMemoryBlkno blkno)
+{
+	int			procnums[BTREE_PAGE_MAX_SPLIT_ITEMS];
+	int			count,
+				i;
+
+	if (O_PAGE_IS_LOCAL(blkno) || desc->undoType == UndoLogNone)
+		return;
+
+	count = get_waiters_with_ops(desc, blkno, procnums);
+
+	for (i = 0; i < count; i++)
+	{
+		OPageWaiterShmemState *lockerState = &lockerStates[procnums[i]];
+		bool		serviced = false;
+
+		switch (lockerState->action)
+		{
+			case BTreeOperationLock:
+				serviced = apply_waiter_lock(desc, blkno, procnums[i]);
+				break;
+			default:
+				/* Not handled yet: the waiter does it itself. */
+				break;
+		}
+
+		if (serviced)
+		{
+			pg_write_barrier();
+			lockerState->serviced = true;
+		}
+	}
+}
+
 static Jsonb *
 prepare_modify_start_params(BTreeDescr *desc)
 {
@@ -1205,6 +1362,8 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		pageFindContext.insertTuple = tuple;
 		pageFindContext.waiterAction = BTreeOperationInsert;
 		pageFindContext.waiterLockMode = lockMode;
+		pageFindContext.waiterOpCsn = opCsn;
+		pageFindContext.waiterKeyType = BTreeKeyLeafTuple;
 		if (OXidIsValid(opOxid))
 			pageFindContext.insertXactInfo = OXID_GET_XACT_INFO(opOxid, lockMode, false);
 		else

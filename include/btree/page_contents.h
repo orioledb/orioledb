@@ -476,6 +476,16 @@ typedef struct
 	BTreeOperationType action;
 	RowLockMode lockMode;
 
+	/*
+	 * Transaction on whose behalf the holder acts.  The oxid is recoverable
+	 * from the serialized tuple header, but row_lock_conflicts() also needs
+	 * the snapshot, and it has no other way here.
+	 */
+	CommitSeqNo opCsn;
+
+	/* How to read the payload: leaf tuple or bare key. */
+	BTreeKeyType keyType;
+
 	/* Set by the holder once it has finished the waiter's operation. */
 	bool		serviced;
 	OPageWaiterOpResult opResult;
