@@ -192,8 +192,8 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 								   PageImg *img, OTupleXactInfo xactInfo,
 								   OTuple tuple, BTreeOperationType action,
 								   RowLockMode lockMode, CommitSeqNo opCsn,
-								   BTreeKeyType keyType, uint64 *prevState,
-								   bool *keySerialized)
+								   BTreeKeyType keyType, int delegatedCallbackId,
+								   uint64 *prevState, bool *keySerialized)
 {
 	OPagePool  *ppool = (OPagePool *) get_ppool_by_blkno(*blkno);
 	Page		p = O_GET_IN_MEMORY_PAGE(*blkno);
@@ -295,6 +295,7 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 			lockerState->lockMode = lockMode;
 			lockerState->opCsn = opCsn;
 			lockerState->keyType = keyType;
+			lockerState->delegatedCallbackId = delegatedCallbackId;
 			lockerState->opResult = OPageWaiterOpNotApplied;
 			lockerState->undoLocation = InvalidUndoLocation;
 			lockerState->pageChangeCount = *pageChangeCount;
@@ -547,7 +548,8 @@ lock_page_with_tuple(BTreeDescr *desc,
 					 OInMemoryBlkno *blkno, uint32 *pageChangeCount,
 					 OTupleXactInfo xactInfo, OTuple tuple,
 					 BTreeOperationType action, RowLockMode lockMode,
-					 CommitSeqNo opCsn, BTreeKeyType keyType)
+					 CommitSeqNo opCsn, BTreeKeyType keyType,
+					 int delegatedCallbackId, OPageWaiterOpResult *opResult)
 {
 	uint64		prevState;
 	int			extraWaits = 0;
@@ -572,6 +574,7 @@ lock_page_with_tuple(BTreeDescr *desc,
 														&img, xactInfo,
 														tuple, action, lockMode,
 														opCsn, keyType,
+														delegatedCallbackId,
 														&prevState,
 														&keySerialized);
 
@@ -636,7 +639,8 @@ lock_page_with_tuple(BTreeDescr *desc,
 												 lockerState->undoLocation);
 			}
 
-			return OLockPageWithTupleResultInserted;
+			*opResult = lockerState->opResult;
+			return OLockPageWithTupleResultServiced;
 		}
 	}
 

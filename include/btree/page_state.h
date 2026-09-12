@@ -15,6 +15,22 @@
 #define __BTREE_PAGE_STATE_H__
 
 #include "btree.h"
+
+/*
+ * Outcome the lock holder recorded for a waiter's operation.  Only meaningful
+ * once OPageWaiterShmemState.serviced is set -- that flag is what tells the
+ * waiter the holder did the work on its behalf.
+ */
+typedef enum
+{
+	OPageWaiterOpNotApplied = 0,
+	OPageWaiterOpInserted,
+	OPageWaiterOpUpdated,
+	OPageWaiterOpDeleted,
+	OPageWaiterOpLocked,
+	OPageWaiterOpNotFound
+} OPageWaiterOpResult;
+
 #include "page_contents.h"
 
 /* Flags stored in OrioleDBPageHeader.state */
@@ -48,7 +64,7 @@ typedef enum
 {
 	OLockPageWithTupleResultLocked,
 	OLockPageWithTupleResultRefindNeeded,
-	OLockPageWithTupleResultInserted
+	OLockPageWithTupleResultServiced
 } OLockPageWithTupleResult;
 
 /*
@@ -73,7 +89,9 @@ extern OLockPageWithTupleResult lock_page_with_tuple(BTreeDescr *desc,
 													 BTreeOperationType action,
 													 RowLockMode lockMode,
 													 CommitSeqNo opCsn,
-													 BTreeKeyType keyType);
+													 BTreeKeyType keyType,
+													 int delegatedCallbackId,
+													 OPageWaiterOpResult *opResult);
 extern int	get_waiters_with_ops(BTreeDescr *desc, OInMemoryBlkno blkno,
 								 int result[BTREE_PAGE_MAX_SPLIT_ITEMS]);
 extern void relock_page(OInMemoryBlkno blkno);

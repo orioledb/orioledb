@@ -96,6 +96,8 @@ init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 	context->waiterLockMode = RowLockKeyShare;
 	context->waiterOpCsn = COMMITSEQNO_INPROGRESS;
 	context->waiterKeyType = BTreeKeyLeafTuple;
+	context->waiterDelegatedCallbackId = 0;
+	context->waiterOpResult = OPageWaiterOpNotApplied;
 	O_TUPLE_SET_NULL(context->lokey.tuple);
 }
 
@@ -645,7 +647,9 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 											  context->waiterAction,
 											  context->waiterLockMode,
 											  context->waiterOpCsn,
-											  context->waiterKeyType);
+											  context->waiterKeyType,
+											  context->waiterDelegatedCallbackId,
+											  &context->waiterOpResult);
 
 				if (result == OLockPageWithTupleResultLocked)
 				{
@@ -654,9 +658,9 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 					intCxt.haveLock = true;
 					needLock = false;
 				}
-				else if (result == OLockPageWithTupleResultInserted)
+				else if (result == OLockPageWithTupleResultServiced)
 				{
-					return OFindPageResultInserted;
+					return OFindPageResultServiced;
 				}
 				else
 				{
@@ -875,7 +879,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			else if (result == OBTreeFastPathFindRetry)
 			{
 				if (intCxt.inserted)
-					return OFindPageResultInserted;
+					return OFindPageResultServiced;
 				continue;
 			}
 			p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
@@ -1242,9 +1246,11 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 											  context->waiterAction,
 											  context->waiterLockMode,
 											  context->waiterOpCsn,
-											  context->waiterKeyType);
+											  context->waiterKeyType,
+											  context->waiterDelegatedCallbackId,
+											  &context->waiterOpResult);
 
-				if (result == OLockPageWithTupleResultInserted)
+				if (result == OLockPageWithTupleResultServiced)
 				{
 					intCxt->haveLock = false;
 					intCxt->inserted = true;
@@ -1383,10 +1389,12 @@ retry:
 										  context->waiterAction,
 										  context->waiterLockMode,
 										  context->waiterOpCsn,
-										  context->waiterKeyType);
+										  context->waiterKeyType,
+										  context->waiterDelegatedCallbackId,
+										  &context->waiterOpResult);
 
-			if (result == OLockPageWithTupleResultInserted)
-				return OFindPageResultInserted;
+			if (result == OLockPageWithTupleResultServiced)
+				return OFindPageResultServiced;
 			else if (result == OLockPageWithTupleResultRefindNeeded)
 				return find_page(context, key, keyType, level);
 			Assert(result == OLockPageWithTupleResultLocked);
@@ -1487,7 +1495,7 @@ retry:
 			if (intCxt.tryLockFailed)
 				return OFindPageResultFailure;
 			if (intCxt.inserted)
-				return OFindPageResultInserted;
+				return OFindPageResultServiced;
 			Assert(!intCxt.haveLock);
 			return find_page(context, key, keyType, level);
 		}

@@ -1391,6 +1391,62 @@ reserve_undo_for_modification(UndoLogType undoType)
 }
 
 /*
+ * Registry of the callbacks a page holder is allowed to run for somebody
+ * else.  Callers cannot hand the holder a function pointer through shared
+ * memory -- there is no guarantee it means the same thing in another backend
+ * -- so they register once and pass the small integer instead.  Id 0 is "no
+ * delegated callbacks", which is what a zeroed BTreeModifyCallbackInfo says.
+ */
+#define MAX_DELEGATED_CALLBACKS		8
+
+static struct
+{
+	BTreeDelegatedModifyCallback modifyCallback;
+	BTreeDelegatedPostUndoCallback postUndoCallback;
+	BTreeDelegatedApplyResultCallback applyResultCallback;
+}			delegatedCallbacks[MAX_DELEGATED_CALLBACKS];
+
+static int	numDelegatedCallbacks = 1;	/* slot 0 stays empty */
+
+int
+btree_register_delegated_callbacks(BTreeDelegatedModifyCallback modifyCallback,
+								   BTreeDelegatedPostUndoCallback postUndoCallback,
+								   BTreeDelegatedApplyResultCallback applyResultCallback)
+{
+	int			id = numDelegatedCallbacks++;
+
+	if (id >= MAX_DELEGATED_CALLBACKS)
+		elog(ERROR, "too many delegated B-tree modify callbacks");
+
+	delegatedCallbacks[id].modifyCallback = modifyCallback;
+	delegatedCallbacks[id].postUndoCallback = postUndoCallback;
+	delegatedCallbacks[id].applyResultCallback = applyResultCallback;
+
+	return id;
+}
+
+BTreeDelegatedApplyResultCallback
+btree_get_delegated_apply_result_callback(int id)
+{
+	Assert(id > 0 && id < numDelegatedCallbacks);
+	return delegatedCallbacks[id].applyResultCallback;
+}
+
+BTreeDelegatedModifyCallback
+btree_get_delegated_modify_callback(int id)
+{
+	Assert(id > 0 && id < numDelegatedCallbacks);
+	return delegatedCallbacks[id].modifyCallback;
+}
+
+BTreeDelegatedPostUndoCallback
+btree_get_delegated_post_undo_callback(int id)
+{
+	Assert(id > 0 && id < numDelegatedCallbacks);
+	return delegatedCallbacks[id].postUndoCallback;
+}
+
+/*
  * Can the process holding the leaf page finish this operation for us?
  *
  * The holder works with nothing but the page and what we leave in shared
@@ -1421,9 +1477,17 @@ modify_can_be_delegated(BTreeDescr *desc, BTreeOperationType action,
 	if (is_recovery_process())
 		return false;
 
-	if (callbackInfo &&
+	/*
+	 * Callbacks are ours to run -- unless the caller has also registered a
+	 * delegated form of them, which is exactly the statement that the holder
+	 * may run them for us.
+	 */
+	if (callbackInfo && callbackInfo->delegatedCallbackId == 0 &&
 		(callbackInfo->modifyCallback || callbackInfo->modifyDeletedCallback ||
 		 callbackInfo->waitCallback || callbackInfo->postUndoRecorded))
+		return false;
+
+	if (callbackInfo && callbackInfo->waitCallback)
 		return false;
 
 	if (keyType != BTreeKeyLeafTuple && keyType != BTreeKeyNonLeafKey)
@@ -1512,6 +1576,8 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		pageFindContext.waiterOpCsn = opCsn;
 		pageFindContext.waiterKeyType = (action == BTreeOperationUpdate) ?
 			BTreeKeyLeafTuple : keyType;
+		pageFindContext.waiterDelegatedCallbackId =
+			callbackInfo ? callbackInfo->delegatedCallbackId : 0;
 		pageFindContext.insertXactInfo =
 			OXID_GET_XACT_INFO(opOxid, lockMode,
 							   action == BTreeOperationLock);
@@ -1522,10 +1588,9 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	else
 		findResult = find_page(&pageFindContext, key, keyType, 0);
 
-	if (findResult == OFindPageResultInserted)
+	if (findResult == OFindPageResultServiced)
 	{
-		Assert(action == BTreeOperationInsert);
-		Assert(tupleType == BTreeKeyLeafTuple);
+		OPageWaiterShmemState *myState = &lockerStates[MYPROCNUMBER];
 
 		if (desc->undoType != UndoLogNone)
 		{
@@ -1535,7 +1600,35 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		}
 		ppool_release_reserved(desc->ppool, PPOOL_RESERVE_INSERT);
 		Assert(!have_locked_pages());
-		return OBTreeModifyResultInserted;
+
+		/*
+		 * The holder could not touch our memory, so the half of the callback
+		 * that belongs here runs now, on what it left us.
+		 */
+		if (callbackInfo && callbackInfo->delegatedCallbackId != 0)
+		{
+			BTreeDelegatedApplyResultCallback applyResult;
+
+			applyResult = btree_get_delegated_apply_result_callback(callbackInfo->delegatedCallbackId);
+			if (applyResult)
+				applyResult(desc, &myState->delegatedResult, callbackInfo->arg);
+		}
+
+		switch (pageFindContext.waiterOpResult)
+		{
+			case OPageWaiterOpInserted:
+				return OBTreeModifyResultInserted;
+			case OPageWaiterOpUpdated:
+				return OBTreeModifyResultUpdated;
+			case OPageWaiterOpDeleted:
+				return OBTreeModifyResultDeleted;
+			case OPageWaiterOpLocked:
+				return OBTreeModifyResultLocked;
+			case OPageWaiterOpNotFound:
+				return OBTreeModifyResultNotFound;
+			default:
+				elog(ERROR, "page holder reported no outcome for a serviced operation");
+		}
 	}
 	Assert(findResult == OFindPageResultSuccess);
 
