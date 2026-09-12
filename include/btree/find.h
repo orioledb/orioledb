@@ -69,6 +69,8 @@ typedef struct
 	 */
 	BTreeOperationType waiterAction;
 	RowLockMode waiterLockMode;
+	CommitSeqNo waiterOpCsn;
+	BTreeKeyType waiterKeyType;
 
 	/*
 	 * When BTREE_PAGE_FIND_LOKEY_SIBLING is not set, then lokey contains

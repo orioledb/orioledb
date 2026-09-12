@@ -203,7 +203,8 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 								   uint32 *pageChangeCount, uint32 pgprocnum,
 								   PageImg *img, OTupleXactInfo xactInfo,
 								   OTuple tuple, BTreeOperationType action,
-								   RowLockMode lockMode, uint64 *prevState,
+								   RowLockMode lockMode, CommitSeqNo opCsn,
+								   BTreeKeyType keyType, uint64 *prevState,
 								   bool *keySerialized)
 {
 	OPagePool  *ppool = (OPagePool *) get_ppool_by_blkno(*blkno);
@@ -288,7 +289,9 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 				memcpy(lockerState->tupleData.fixedData,
 					   &tuphdr,
 					   BTreeLeafTuphdrSize);
-				tuplen = o_btree_len(desc, tuple, OTupleLength);
+				tuplen = o_btree_len(desc, tuple,
+									 keyType == BTreeKeyLeafTuple ? OTupleLength
+									 : OKeyLength);
 				memcpy(&lockerState->tupleData.fixedData[BTreeLeafTuphdrSize],
 					   tuple.data,
 					   tuplen);
@@ -302,6 +305,8 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 			lockerState->status = OPageWaitInsert;
 			lockerState->action = action;
 			lockerState->lockMode = lockMode;
+			lockerState->opCsn = opCsn;
+			lockerState->keyType = keyType;
 			lockerState->opResult = OPageWaiterOpNotApplied;
 			lockerState->undoLocation = InvalidUndoLocation;
 			lockerState->pageChangeCount = *pageChangeCount;
@@ -553,7 +558,8 @@ OLockPageWithTupleResult
 lock_page_with_tuple(BTreeDescr *desc,
 					 OInMemoryBlkno *blkno, uint32 *pageChangeCount,
 					 OTupleXactInfo xactInfo, OTuple tuple,
-					 BTreeOperationType action, RowLockMode lockMode)
+					 BTreeOperationType action, RowLockMode lockMode,
+					 CommitSeqNo opCsn, BTreeKeyType keyType)
 {
 	uint64		prevState;
 	int			extraWaits = 0;
@@ -577,6 +583,7 @@ lock_page_with_tuple(BTreeDescr *desc,
 														MYPROCNUMBER,
 														&img, xactInfo,
 														tuple, action, lockMode,
+														opCsn, keyType,
 														&prevState,
 														&keySerialized);
 
@@ -895,6 +902,7 @@ get_waiters_with_tuples(BTreeDescr *desc,
 		OPageWaiterShmemState *lockerState = &lockerStates[pgprocnum];
 
 		if (lockerState->status == OPageWaitInsert &&
+			lockerState->action == BTreeOperationInsert &&
 			lockerState->pageChangeCount == O_PAGE_HEADER(p)->pageChangeCount &&
 			ORelOidsIsEqual(desc->oids, lockerState->reloids))
 		{
@@ -904,6 +912,44 @@ get_waiters_with_tuples(BTreeDescr *desc,
 				Assert(count == BTREE_PAGE_MAX_SPLIT_ITEMS);
 				break;
 			}
+		}
+
+		pgprocnum = lockerState->next;
+	}
+
+	return count;
+}
+
+/*
+ * Collect the processes queued on this page that are waiting for an operation
+ * other than an insert, so the holder can apply them on their behalf.
+ */
+int
+get_waiters_with_ops(BTreeDescr *desc, OInMemoryBlkno blkno,
+					 int result[BTREE_PAGE_MAX_SPLIT_ITEMS])
+{
+	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+	uint32		pgprocnum;
+	int			count = 0;
+
+	/* Local pages do not need locking */
+	if (O_PAGE_IS_LOCAL(blkno))
+		return 0;
+
+	pgprocnum = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state)) & PAGE_STATE_LIST_TAIL_MASK;
+
+	while (pgprocnum != PAGE_STATE_INVALID_PROCNO)
+	{
+		OPageWaiterShmemState *lockerState = &lockerStates[pgprocnum];
+
+		if (lockerState->status == OPageWaitInsert &&
+			lockerState->action != BTreeOperationInsert &&
+			lockerState->pageChangeCount == O_PAGE_HEADER(p)->pageChangeCount &&
+			ORelOidsIsEqual(desc->oids, lockerState->reloids))
+		{
+			result[count++] = pgprocnum;
+			if (count >= BTREE_PAGE_MAX_SPLIT_ITEMS)
+				break;
 		}
 
 		pgprocnum = lockerState->next;
