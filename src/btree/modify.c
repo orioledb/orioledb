@@ -1203,6 +1203,8 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	if (action == BTreeOperationInsert && tupleType == BTreeKeyLeafTuple)
 	{
 		pageFindContext.insertTuple = tuple;
+		pageFindContext.waiterAction = BTreeOperationInsert;
+		pageFindContext.waiterLockMode = lockMode;
 		if (OXidIsValid(opOxid))
 			pageFindContext.insertXactInfo = OXID_GET_XACT_INFO(opOxid, lockMode, false);
 		else

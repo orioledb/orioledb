@@ -1301,7 +1301,8 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 											lockerState);
 					tuphdr.undoLocation = InvalidUndoLocation | lockerState->undoLocation;
 				}
-				lockerState->inserted = true;
+				lockerState->serviced = true;
+				lockerState->opResult = OPageWaiterOpInserted;
 			}
 
 			btree_leaf_write_new_item(desc, p, &loc, &tuphdr, tuple, tuplen);

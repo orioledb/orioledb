@@ -69,7 +69,9 @@ extern OLockPageWithTupleResult lock_page_with_tuple(BTreeDescr *desc,
 													 OInMemoryBlkno *blkno,
 													 uint32 *pageChangeCount,
 													 OTupleXactInfo xactInfo,
-													 OTuple tuple);
+													 OTuple tuple,
+													 BTreeOperationType action,
+													 RowLockMode lockMode);
 extern void relock_page(OInMemoryBlkno blkno);
 extern bool try_lock_page(OInMemoryBlkno blkno);
 extern bool try_lock_page_and_check(OInMemoryBlkno blkno, uint16 level,

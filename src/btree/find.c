@@ -92,6 +92,8 @@ init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 	context->img = NULL;
 	context->parentImg = NULL;
 	O_TUPLE_SET_NULL(context->insertTuple);
+	context->waiterAction = BTreeOperationInsert;
+	context->waiterLockMode = RowLockKeyShare;
 	O_TUPLE_SET_NULL(context->lokey.tuple);
 }
 
@@ -637,7 +639,9 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 											  &intCxt.blkno,
 											  &intCxt.pageChangeCount,
 											  context->insertXactInfo,
-											  context->insertTuple);
+											  context->insertTuple,
+											  context->waiterAction,
+											  context->waiterLockMode);
 
 				if (result == OLockPageWithTupleResultLocked)
 				{
@@ -1230,7 +1234,9 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 											  &intCxt->blkno,
 											  &intCxt->pageChangeCount,
 											  context->insertXactInfo,
-											  context->insertTuple);
+											  context->insertTuple,
+											  context->waiterAction,
+											  context->waiterLockMode);
 
 				if (result == OLockPageWithTupleResultInserted)
 				{
@@ -1367,7 +1373,9 @@ retry:
 										  &intCxt.blkno,
 										  &intCxt.pageChangeCount,
 										  context->insertXactInfo,
-										  context->insertTuple);
+										  context->insertTuple,
+										  context->waiterAction,
+										  context->waiterLockMode);
 
 			if (result == OLockPageWithTupleResultInserted)
 				return OFindPageResultInserted;

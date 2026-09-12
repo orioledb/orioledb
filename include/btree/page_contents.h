@@ -431,9 +431,25 @@ typedef enum
 } OPageWaiterStatus;
 
 /*
- * Shared-memory state for a process waiting to insert a tuple into a page
- * (or lock it).  When the lock holder performs a group insert optimization,
- * it creates undo records on behalf of the waiter using this state.
+ * Outcome the lock holder recorded for a waiter's operation.  Only meaningful
+ * once OPageWaiterShmemState.serviced is set -- that flag is what tells the
+ * waiter the holder did the work on its behalf.
+ */
+typedef enum
+{
+	OPageWaiterOpNotApplied = 0,
+	OPageWaiterOpInserted,
+	OPageWaiterOpUpdated,
+	OPageWaiterOpDeleted,
+	OPageWaiterOpLocked,
+	OPageWaiterOpNotFound
+} OPageWaiterOpResult;
+
+/*
+ * Shared-memory state for a process waiting to modify a tuple on a page (or
+ * lock it).  When the lock holder performs the group modification
+ * optimization, it applies the waiter's operation and creates undo records on
+ * behalf of the waiter using this state.
  *
  * This should be in page_state.h but depends on O_BTREE_MAX_KEY_SIZE.
  */
@@ -451,7 +467,18 @@ typedef struct
 	 */
 	int			autonomousNestingLevel;
 	uint8		tupleFlags;
-	bool		inserted;
+
+	/*
+	 * What the waiter asks the holder to do, and -- for BTreeOperationLock --
+	 * in which mode.  The payload in tupleData is the new leaf tuple for
+	 * insert/update and the key for delete/lock.
+	 */
+	BTreeOperationType action;
+	RowLockMode lockMode;
+
+	/* Set by the holder once it has finished the waiter's operation. */
+	bool		serviced;
+	OPageWaiterOpResult opResult;
 	Size		reservedUndoSize;
 	UndoLocation undoLocation;
 	uint32		next;
