@@ -58,6 +58,7 @@ static int	numberOfMyLockedPages = 0;
 static int	numberOfMyInProgressSplitPages = 0;
 
 OPageWaiterShmemState *lockerStates = NULL;
+OPageWaiterPayload *lockerPayloads = NULL;
 
 #ifdef CHECK_PAGE_STATS
 static void o_check_btree_page_statistics(BTreeDescr *desc, Pointer p);
@@ -70,7 +71,8 @@ static void o_check_page_struct(BTreeDescr *desc, Page p);
 Size
 page_state_shmem_needs(void)
 {
-	return CACHELINEALIGN(sizeof(OPageWaiterShmemState) * max_procs);
+	return CACHELINEALIGN(sizeof(OPageWaiterShmemState) * max_procs) +
+		CACHELINEALIGN(sizeof(OPageWaiterPayload) * max_procs);
 }
 
 void
@@ -79,6 +81,8 @@ page_state_shmem_init(Pointer buf, bool found)
 	Pointer		ptr = buf;
 
 	lockerStates = (OPageWaiterShmemState *) ptr;
+	ptr += CACHELINEALIGN(sizeof(OPageWaiterShmemState) * max_procs);
+	lockerPayloads = (OPageWaiterPayload *) ptr;
 }
 
 static int
@@ -274,17 +278,17 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 				else
 					lockerState->reservedUndoSize = 0;
 				lockerState->tupleFlags = tuple.formatFlags;
-				memcpy(lockerState->tupleData.fixedData,
+				memcpy(lockerPayloads[pgprocnum].tupleData.fixedData,
 					   &tuphdr,
 					   BTreeLeafTuphdrSize);
 				tuplen = o_btree_len(desc, tuple,
 									 keyType == BTreeKeyLeafTuple ? OTupleLength
 									 : OKeyLength);
-				memcpy(&lockerState->tupleData.fixedData[BTreeLeafTuphdrSize],
+				memcpy(&lockerPayloads[pgprocnum].tupleData.fixedData[BTreeLeafTuphdrSize],
 					   tuple.data,
 					   tuplen);
 				if (tuplen != MAXALIGN(tuplen))
-					memset(&lockerState->tupleData.fixedData[BTreeLeafTuphdrSize + tuplen],
+					memset(&lockerPayloads[pgprocnum].tupleData.fixedData[BTreeLeafTuphdrSize + tuplen],
 						   0, MAXALIGN(tuplen) - tuplen);
 				*keySerialized = true;
 			}

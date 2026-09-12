@@ -477,7 +477,6 @@ typedef struct
 	 * leaves what we have to record for ourselves afterwards.
 	 */
 	int			delegatedCallbackId;
-	BTreeDelegatedModifyResult delegatedResult;
 
 	/*
 	 * The row as the holder found it, handed back because the caller of an
@@ -494,6 +493,20 @@ typedef struct
 	Size		reservedUndoSize;
 	UndoLocation undoLocation;
 	uint32		next;
+} OPageWaiterShmemState;
+
+/*
+ * The bulky part of a waiter's state, kept out of the list node above.
+ *
+ * A holder looking for work has to walk the page's waiter list, and that walk
+ * is a chain of dependent loads: every byte in the node is a byte of stride
+ * between one load and the next.  With the payload inline the node ran to
+ * several kilobytes and the walk cost more than the work it was looking for.
+ * Indexed by the same procnum, so there is no pointer to follow.
+ */
+typedef struct
+{
+	BTreeDelegatedModifyResult delegatedResult;
 	union
 	{
 		char		fixedData[BTreeLeafTuphdrSize + O_BTREE_MAX_KEY_SIZE];
@@ -504,8 +517,9 @@ typedef struct
 		char		fixedData[O_BTREE_MAX_TUPLE_SIZE];
 		Datum		datum;		/* keep here for alignment */
 	}			oldTupleData;
-} OPageWaiterShmemState;
+} OPageWaiterPayload;
 
 extern OPageWaiterShmemState *lockerStates;
+extern OPageWaiterPayload *lockerPayloads;
 
 #endif							/* __BTREE_PAGE_CONTENTS_H__ */

@@ -17,6 +17,7 @@
 
 #include "btree/find.h"
 #include "btree/insert.h"
+#include "btree/modify.h"
 #include "btree/split.h"
 #include "btree/page_contents.h"
 #include "btree/page_chunks.h"
@@ -449,14 +450,15 @@ get_tuple_waiter_infos(BTreeDescr *desc,
 	for (i = 0; i < tupleWaitersCount; i++)
 	{
 		OPageWaiterShmemState *lockerState = &lockerStates[tupleWaiterProcnums[i]];
+		OPageWaiterPayload *payload = &lockerPayloads[tupleWaiterProcnums[i]];
 		TupleWaiterInfo *tupleWaiterInfo = &tupleWaiterInfos[i];
 		OTuple		tuple;
 
 		tuple.formatFlags = lockerState->tupleFlags;
-		tuple.data = &lockerState->tupleData.fixedData[BTreeLeafTuphdrSize];
+		tuple.data = &payload->tupleData.fixedData[BTreeLeafTuphdrSize];
 
 		tupleWaiterInfo->item.flags = lockerState->tupleFlags;
-		tupleWaiterInfo->item.data = lockerState->tupleData.fixedData;
+		tupleWaiterInfo->item.data = payload->tupleData.fixedData;
 		tupleWaiterInfo->item.size = BTreeLeafTuphdrSize +
 			MAXALIGN(o_btree_len(desc,
 								 tuple,

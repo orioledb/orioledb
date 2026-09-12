@@ -528,7 +528,7 @@ make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno,
 	OTuple		key;
 
 	tuple.formatFlags = lockerState->tupleFlags;
-	tuple.data = &lockerState->tupleData.fixedData[BTreeLeafTuphdrSize];
+	tuple.data = &lockerPayloads[pgprocno].tupleData.fixedData[BTreeLeafTuphdrSize];
 
 	tuplelen = o_btree_len(desc, tuple, OTupleKeyLength);
 

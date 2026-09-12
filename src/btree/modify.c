@@ -1176,8 +1176,8 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 		return false;
 
 	key.formatFlags = lockerState->tupleFlags;
-	key.data = &lockerState->tupleData.fixedData[BTreeLeafTuphdrSize];
-	waiterTuphdr = (BTreeLeafTuphdr *) lockerState->tupleData.fixedData;
+	key.data = &lockerPayloads[pgprocno].tupleData.fixedData[BTreeLeafTuphdrSize];
+	waiterTuphdr = (BTreeLeafTuphdr *) lockerPayloads[pgprocno].tupleData.fixedData;
 	oxid = XACT_INFO_GET_OXID(waiterTuphdr->xactInfo);
 
 	if (!OXidIsValid(oxid))
@@ -1229,16 +1229,16 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 
 		delegated = btree_get_delegated_modify_callback(lockerState->delegatedCallbackId);
 		newTup.formatFlags = lockerState->tupleFlags;
-		newTup.data = &lockerState->tupleData.fixedData[BTreeLeafTuphdrSize];
+		newTup.data = &lockerPayloads[pgprocno].tupleData.fixedData[BTreeLeafTuphdrSize];
 
-		memset(&lockerState->delegatedResult, 0,
-			   sizeof(lockerState->delegatedResult));
+		memset(&lockerPayloads[pgprocno].delegatedResult, 0,
+			   sizeof(lockerPayloads[pgprocno].delegatedResult));
 
 		if (delegated &&
 			delegated(desc, curTuple, &newTup, oxid, lockerState->opCsn,
 					  tuphdr->xactInfo, tuphdr->undoLocation,
 					  &lockerState->lockMode,
-					  &lockerState->delegatedResult) != OBTreeCallbackActionUpdate)
+					  &lockerPayloads[pgprocno].delegatedResult) != OBTreeCallbackActionUpdate)
 			return false;
 	}
 
@@ -1274,7 +1274,7 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	if (lockerState->action == BTreeOperationUpdate)
 	{
 		newTuple.formatFlags = lockerState->tupleFlags;
-		newTuple.data = &lockerState->tupleData.fixedData[BTreeLeafTuphdrSize];
+		newTuple.data = &lockerPayloads[pgprocno].tupleData.fixedData[BTreeLeafTuphdrSize];
 		newTuplen = o_btree_len(desc, newTuple, OTupleLength);
 		newItemSize = MAXALIGN(newTuplen) + BTreeLeafTuphdrSize;
 
@@ -1304,7 +1304,7 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 		 * values and this is the last moment anybody can read them.
 		 */
 		Assert(oldTuplen <= O_BTREE_MAX_TUPLE_SIZE);
-		memcpy(lockerState->oldTupleData.fixedData, curTuple.data, oldTuplen);
+		memcpy(lockerPayloads[pgprocno].oldTupleData.fixedData, curTuple.data, oldTuplen);
 		lockerState->oldTupleFlags = curTuple.formatFlags;
 		lockerState->oldTupleLen = oldTuplen;
 
@@ -1654,13 +1654,15 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		{
 			BTreeDelegatedApplyResultCallback applyResult;
 
-			myState->delegatedResult.oldTuple.formatFlags = myState->oldTupleFlags;
-			myState->delegatedResult.oldTuple.data = myState->oldTupleLen > 0 ?
-				myState->oldTupleData.fixedData : NULL;
+			OPageWaiterPayload *myPayload = &lockerPayloads[MYPROCNUMBER];
+
+			myPayload->delegatedResult.oldTuple.formatFlags = myState->oldTupleFlags;
+			myPayload->delegatedResult.oldTuple.data = myState->oldTupleLen > 0 ?
+				myPayload->oldTupleData.fixedData : NULL;
 
 			applyResult = btree_get_delegated_apply_result_callback(callbackInfo->delegatedCallbackId);
 			if (applyResult)
-				applyResult(desc, &myState->delegatedResult, callbackInfo->arg);
+				applyResult(desc, &myPayload->delegatedResult, callbackInfo->arg);
 		}
 
 		switch (pageFindContext.waiterOpResult)
