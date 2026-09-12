@@ -202,7 +202,8 @@ static LockPageResult
 lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 								   uint32 *pageChangeCount, uint32 pgprocnum,
 								   PageImg *img, OTupleXactInfo xactInfo,
-								   OTuple tuple, uint64 *prevState,
+								   OTuple tuple, BTreeOperationType action,
+								   RowLockMode lockMode, uint64 *prevState,
 								   bool *keySerialized)
 {
 	OPagePool  *ppool = (OPagePool *) get_ppool_by_blkno(*blkno);
@@ -299,10 +300,13 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 
 			Assert((state & PAGE_STATE_LIST_TAIL_MASK) != pgprocnum);
 			lockerState->status = OPageWaitInsert;
+			lockerState->action = action;
+			lockerState->lockMode = lockMode;
+			lockerState->opResult = OPageWaiterOpNotApplied;
 			lockerState->undoLocation = InvalidUndoLocation;
 			lockerState->pageChangeCount = *pageChangeCount;
 			lockerState->autonomousNestingLevel = GET_CUR_PROCDATA()->autonomousNestingLevel;
-			Assert(!lockerState->inserted);
+			Assert(!lockerState->serviced);
 			lockerState->next = (state & PAGE_STATE_LIST_TAIL_MASK);
 			newState = state & (~PAGE_STATE_LIST_TAIL_MASK);
 			newState |= pgprocnum;
@@ -548,7 +552,8 @@ try_lock_page_and_check(OInMemoryBlkno blkno, uint16 level,
 OLockPageWithTupleResult
 lock_page_with_tuple(BTreeDescr *desc,
 					 OInMemoryBlkno *blkno, uint32 *pageChangeCount,
-					 OTupleXactInfo xactInfo, OTuple tuple)
+					 OTupleXactInfo xactInfo, OTuple tuple,
+					 BTreeOperationType action, RowLockMode lockMode)
 {
 	uint64		prevState;
 	int			extraWaits = 0;
@@ -571,7 +576,8 @@ lock_page_with_tuple(BTreeDescr *desc,
 														pageChangeCount,
 														MYPROCNUMBER,
 														&img, xactInfo,
-														tuple, &prevState,
+														tuple, action, lockMode,
+														&prevState,
 														&keySerialized);
 
 		if (lockResult == LockPageResultLocked)
@@ -601,12 +607,12 @@ lock_page_with_tuple(BTreeDescr *desc,
 		while (extraWaits-- > 0)
 			PGSemaphoreUnlock(MyProc->sem);
 
-		if (lockerState->inserted)
+		if (lockerState->serviced)
 		{
 			UndoLogType undoType = desc->undoType;
 
 			Assert(keySerialized);
-			lockerState->inserted = false;
+			lockerState->serviced = false;
 			if (undoType != UndoLogNone)
 			{
 				giveup_reserved_undo_size(undoType);
@@ -915,7 +921,10 @@ mark_waiter_tuples_inserted(int procnums[BTREE_PAGE_MAX_SPLIT_ITEMS],
 	Assert(count > 0);
 
 	for (i = 0; i < count; i++)
-		lockerStates[procnums[i]].inserted = true;
+	{
+		lockerStates[procnums[i]].serviced = true;
+		lockerStates[procnums[i]].opResult = OPageWaiterOpInserted;
+	}
 
 }
 
@@ -1059,7 +1068,7 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 			OPageWaiterShmemState *lock = &lockerStates[cur];
 
 			bool		shouldWake =
-				lock->inserted ||
+				lock->serviced ||
 				lock->status == OPageWaitNonExclusive ||
 				(split && lock->status == OPageWaitInsert);
 

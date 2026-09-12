@@ -63,6 +63,14 @@ typedef struct
 	OTuple		insertTuple;
 
 	/*
+	 * Operation the descent should hand to the lock holder when it finds the
+	 * target page locked, and -- for BTreeOperationLock -- in which mode.
+	 * Only consulted when insertTuple is set.
+	 */
+	BTreeOperationType waiterAction;
+	RowLockMode waiterLockMode;
+
+	/*
 	 * When BTREE_PAGE_FIND_LOKEY_SIBLING is not set, then lokey contains
 	 * hikey of left sibling of parent.  Otherwise, contain hikey of left
 	 * sibling.
