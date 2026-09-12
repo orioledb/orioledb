@@ -1130,7 +1130,7 @@ o_btree_modify_lock(BTreeModifyInternalContext *context)
 }
 
 /*
- * Apply one waiting process's row lock to the page we hold locked.
+ * Apply one waiting process's operation to the page we hold locked.
  *
  * Returns true when the waiter has been serviced -- its state then records
  * what happened -- and false when we decline, leaving the waiter to wake up
@@ -1140,7 +1140,7 @@ o_btree_modify_lock(BTreeModifyInternalContext *context)
  * everybody else on it.
  */
 static bool
-apply_waiter_lock(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
+apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 {
 	OPageWaiterShmemState *lockerState = &lockerStates[pgprocno];
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
@@ -1153,15 +1153,21 @@ apply_waiter_lock(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	OTuple		curTuple;
 	OTuple		key;
 	OXid		oxid;
+	BTreeLeafTuphdr *waiterTuphdr;
 	bool		redundantRowLocks = false;
 
-	/* A row lock is recorded in undo; without it we cannot take one. */
+	/* Every operation here is recorded in undo; without it we cannot act. */
 	if (desc->undoType == UndoLogNone)
+		return false;
+
+	if (lockerState->action != BTreeOperationLock &&
+		lockerState->action != BTreeOperationDelete)
 		return false;
 
 	key.formatFlags = lockerState->tupleFlags;
 	key.data = &lockerState->tupleData.fixedData[BTreeLeafTuphdrSize];
-	oxid = XACT_INFO_GET_OXID(((BTreeLeafTuphdr *) lockerState->tupleData.fixedData)->xactInfo);
+	waiterTuphdr = (BTreeLeafTuphdr *) lockerState->tupleData.fixedData;
+	oxid = XACT_INFO_GET_OXID(waiterTuphdr->xactInfo);
 
 	if (!OXidIsValid(oxid))
 		return false;
@@ -1216,8 +1222,9 @@ apply_waiter_lock(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	if (redundantRowLocks)
 		return false;
 
-	/* The waiter already holds this lock or a stronger one. */
-	if (lockStatus == BTreeModifySameOrStrongerLock)
+	/* Taking a lock we already hold, or a weaker one, is nothing to do. */
+	if (lockerState->action == BTreeOperationLock &&
+		lockStatus == BTreeModifySameOrStrongerLock)
 	{
 		lockerState->opResult = OPageWaiterOpLocked;
 		return true;
@@ -1225,7 +1232,7 @@ apply_waiter_lock(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 
 	steal_reserved_undo_size(desc->undoType, lockerState->reservedUndoSize);
 	undoLocation = make_waiter_modify_undo_record(desc, curTuple, true,
-												  BTreeOperationLock, blkno,
+												  lockerState->action, blkno,
 												  O_PAGE_GET_CHANGE_COUNT(p),
 												  tuphdr, pgprocno,
 												  lockerState);
@@ -1236,13 +1243,32 @@ apply_waiter_lock(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	tuphdr->chainHasLocks = tuphdr->chainHasLocks ||
 		XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo);
 	tuphdr->undoLocation = undoLocation;
-	tuphdr->xactInfo = OXID_GET_XACT_INFO(oxid, lockerState->lockMode, true);
-	tuphdr->deleted = BTreeLeafTupleNonDeleted;
+
+	if (lockerState->action == BTreeOperationLock)
+	{
+		tuphdr->xactInfo = OXID_GET_XACT_INFO(oxid, lockerState->lockMode,
+											  true);
+		tuphdr->deleted = BTreeLeafTupleNonDeleted;
+		lockerState->opResult = OPageWaiterOpLocked;
+	}
+	else
+	{
+		tuphdr->xactInfo = waiterTuphdr->xactInfo;
+		tuphdr->deleted = waiterTuphdr->deleted == BTreeLeafTupleNonDeleted ?
+			BTreeLeafTupleDeleted : waiterTuphdr->deleted;
+
+		/* Bridge index deleted tuples are not treated as vacated */
+		if (desc->type != oIndexBridge)
+			PAGE_ADD_N_VACATED(p, BTreeLeafTuphdrSize +
+							   MAXALIGN(o_btree_len(desc, curTuple,
+													OTupleLength)));
+
+		lockerState->opResult = OPageWaiterOpDeleted;
+	}
 
 	MARK_DIRTY(desc, blkno);
 	END_CRIT_SECTION();
 
-	lockerState->opResult = OPageWaiterOpLocked;
 	return true;
 }
 
@@ -1268,15 +1294,7 @@ btree_apply_waiter_ops(BTreeDescr *desc, OInMemoryBlkno blkno)
 		OPageWaiterShmemState *lockerState = &lockerStates[procnums[i]];
 		bool		serviced = false;
 
-		switch (lockerState->action)
-		{
-			case BTreeOperationLock:
-				serviced = apply_waiter_lock(desc, blkno, procnums[i]);
-				break;
-			default:
-				/* Not handled yet: the waiter does it itself. */
-				break;
-		}
+		serviced = apply_waiter_op(desc, blkno, procnums[i]);
 
 		if (serviced)
 		{
