@@ -1153,6 +1153,9 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	OTuple		curTuple;
 	OTuple		key;
 	OXid		oxid;
+	OTuple		newTuple;
+	LocationIndex newTuplen = 0;
+	LocationIndex newItemSize = 0;
 	BTreeLeafTuphdr *waiterTuphdr;
 	bool		redundantRowLocks = false;
 
@@ -1161,7 +1164,8 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 		return false;
 
 	if (lockerState->action != BTreeOperationLock &&
-		lockerState->action != BTreeOperationDelete)
+		lockerState->action != BTreeOperationDelete &&
+		lockerState->action != BTreeOperationUpdate)
 		return false;
 
 	key.formatFlags = lockerState->tupleFlags;
@@ -1230,6 +1234,24 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 		return true;
 	}
 
+	/*
+	 * Decide an update fits before recording any undo: growing the item past
+	 * the free space would mean splitting the page for the waiter, which this
+	 * path does not do.
+	 */
+	if (lockerState->action == BTreeOperationUpdate)
+	{
+		newTuple.formatFlags = lockerState->tupleFlags;
+		newTuple.data = &lockerState->tupleData.fixedData[BTreeLeafTuphdrSize];
+		newTuplen = o_btree_len(desc, newTuple, OTupleLength);
+		newItemSize = MAXALIGN(newTuplen) + BTreeLeafTuphdrSize;
+
+		if (newItemSize > BTREE_PAGE_GET_ITEM_SIZE(p, &loc) &&
+			newItemSize - BTREE_PAGE_GET_ITEM_SIZE(p, &loc) >
+			BTREE_PAGE_FREE_SPACE(p))
+			return false;
+	}
+
 	steal_reserved_undo_size(desc->undoType, lockerState->reservedUndoSize);
 	undoLocation = make_waiter_modify_undo_record(desc, curTuple, true,
 												  lockerState->action, blkno,
@@ -1239,6 +1261,30 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 
 	START_CRIT_SECTION();
 	page_block_reads(blkno);
+
+	if (lockerState->action == BTreeOperationUpdate)
+	{
+		BTreeLeafTuphdr newTuphdr = *waiterTuphdr;
+
+		newTuphdr.undoLocation = undoLocation;
+		newTuphdr.chainHasLocks = tuphdr->chainHasLocks ||
+			XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo);
+
+		if (!btree_leaf_replace_item_no_split(desc, p, &loc, &newTuphdr,
+											  newTuple, newTuplen))
+		{
+			/* Checked above; the page cannot have changed under our lock. */
+			Assert(false);
+			END_CRIT_SECTION();
+			return false;
+		}
+
+		MARK_DIRTY(desc, blkno);
+		END_CRIT_SECTION();
+
+		lockerState->opResult = OPageWaiterOpUpdated;
+		return true;
+	}
 
 	tuphdr->chainHasLocks = tuphdr->chainHasLocks ||
 		XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo);

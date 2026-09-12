@@ -1043,6 +1043,71 @@ btree_leaf_probe_insert_slot(BTreeDescr *desc, Page p, bool rightmost,
 }
 
 /*
+ * Replace the leaf item at *loc in place, for the group modification
+ * optimization.  Returns false without having touched the page when the new
+ * tuple does not fit where the old one sits, so the caller can decline the
+ * waiter instead of splitting the page on its behalf.
+ *
+ * Caller has positioned loc, made the undo record and entered the critical
+ * section; it follows with MARK_DIRTY.  The body mirrors the replace branch
+ * of o_btree_insert_item_no_waiters(), including leaving a shrunk item at its
+ * old size so that rolling the change back cannot need a split.
+ */
+bool
+btree_leaf_replace_item_no_split(BTreeDescr *desc, Page p,
+								 BTreePageItemLocator *loc,
+								 const BTreeLeafTuphdr *tuphdr,
+								 OTuple tuple, LocationIndex tuplen)
+{
+	BTreePageHeader *header = (BTreePageHeader *) p;
+	LocationIndex newItemSize = MAXALIGN(tuplen) + BTreeLeafTuphdrSize;
+	LocationIndex prevItemSize = BTREE_PAGE_GET_ITEM_SIZE(p, loc);
+	BTreeLeafTuphdr prev;
+	Pointer		ptr;
+
+	Assert(O_PAGE_IS(p, LEAF));
+
+	if (newItemSize > prevItemSize &&
+		newItemSize - prevItemSize > BTREE_PAGE_FREE_SPACE(p))
+		return false;
+
+	prev = *((BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, loc));
+
+	if (!prev.deleted)
+	{
+		OTuple		oldTuple;
+
+		BTREE_PAGE_READ_TUPLE(oldTuple, p, loc);
+		PAGE_ADD_N_VACATED(p, BTreeLeafTuphdrSize +
+						   MAXALIGN(o_btree_len(desc, oldTuple, OTupleLength)));
+	}
+
+	if (newItemSize > prevItemSize)
+	{
+		page_locator_resize_item(p, loc, newItemSize);
+		PAGE_SUB_N_VACATED(p, prevItemSize);
+		header->prevInsertOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, loc);
+	}
+	else
+	{
+		PAGE_SUB_N_VACATED(p, BTreeLeafTuphdrSize + MAXALIGN(tuplen));
+		header->prevInsertOffset = MaxOffsetNumber;
+	}
+
+	ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, loc);
+	memcpy(ptr, tuphdr, BTreeLeafTuphdrSize);
+	memcpy(ptr + BTreeLeafTuphdrSize, tuple.data, tuplen);
+	BTREE_PAGE_SET_ITEM_FLAGS(p, loc, tuple.formatFlags);
+
+	if (!(tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
+		header->chunkDesc[loc->chunkOffset].chunkKeysFixed = 0;
+
+	page_split_chunk_if_needed(desc, p, loc);
+
+	return true;
+}
+
+/*
  * Write one new leaf item at *loc.  Shared page-write body for
  * o_btree_insert_item_with_waiters() and o_btree_multi_insert_item().
  * Caller has positioned loc, made any undo record, decided that the
