@@ -22,6 +22,11 @@ extern void o_btree_split_fix_and_unlock(BTreeDescr *descr,
 										 OInMemoryBlkno left_blkno);
 extern void o_btree_split_fix_for_right_page_and_unlock(BTreeDescr *desc,
 														OInMemoryBlkno rightBlkno);
+extern bool btree_leaf_replace_item_no_split(BTreeDescr *desc, Page p,
+											 BTreePageItemLocator *loc,
+											 const BTreeLeafTuphdr *tuphdr,
+											 OTuple tuple,
+											 LocationIndex tuplen);
 extern void o_btree_insert_tuple_to_leaf(OBTreeFindPageContext *context,
 										 OTuple tuple, LocationIndex tuplen,
 										 BTreeLeafTuphdr *leaf_header,
