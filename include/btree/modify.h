@@ -82,6 +82,13 @@ typedef struct BTreeDelegatedModifyResult
 	OTupleXactInfo xactInfo;	/* of the row as we found it */
 	UndoLocation undoLocation;	/* its undo location */
 	bool		deleted;		/* was it a deleted row? */
+
+	/*
+	 * The row as the holder found it.  Set only for the waiter's half, and
+	 * only for an update; it points into the waiter's own shared state, which
+	 * nobody else touches once it has been woken.
+	 */
+	OTuple		oldTuple;
 } BTreeDelegatedModifyResult;
 
 /*
@@ -101,7 +108,7 @@ typedef struct BTreeDelegatedModifyResult
  */
 typedef OBTreeModifyCallbackAction (*BTreeDelegatedModifyCallback)
 			(BTreeDescr *desc, OTuple curTuple, OTuple *newTuple, OXid oxid,
-			 OTupleXactInfo xactInfo, UndoLocation location,
+			 CommitSeqNo csn, OTupleXactInfo xactInfo, UndoLocation location,
 			 RowLockMode *lockMode, BTreeDelegatedModifyResult *result);
 
 /*
