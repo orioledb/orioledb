@@ -479,6 +479,15 @@ typedef struct
 	int			delegatedCallbackId;
 	BTreeDelegatedModifyResult delegatedResult;
 
+	/*
+	 * The row as the holder found it, handed back because the caller of an
+	 * update needs the old values -- for its secondary indexes, RETURNING and
+	 * triggers -- and cannot read them once the row has been replaced. Valid
+	 * only when opResult says the holder updated something.
+	 */
+	uint8		oldTupleFlags;
+	LocationIndex oldTupleLen;
+
 	/* Set by the holder once it has finished the waiter's operation. */
 	bool		serviced;
 	OPageWaiterOpResult opResult;
@@ -490,6 +499,11 @@ typedef struct
 		char		fixedData[BTreeLeafTuphdrSize + O_BTREE_MAX_KEY_SIZE];
 		Datum		datum;		/* keep here for alignment */
 	}			tupleData;
+	union
+	{
+		char		fixedData[O_BTREE_MAX_TUPLE_SIZE];
+		Datum		datum;		/* keep here for alignment */
+	}			oldTupleData;
 } OPageWaiterShmemState;
 
 extern OPageWaiterShmemState *lockerStates;

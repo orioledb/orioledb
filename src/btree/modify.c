@@ -1272,6 +1272,16 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	if (lockerState->action == BTreeOperationUpdate)
 	{
 		BTreeLeafTuphdr newTuphdr = *waiterTuphdr;
+		LocationIndex oldTuplen = o_btree_len(desc, curTuple, OTupleLength);
+
+		/*
+		 * Hand the row back before overwriting it: the waiter needs the old
+		 * values and this is the last moment anybody can read them.
+		 */
+		Assert(oldTuplen <= O_BTREE_MAX_TUPLE_SIZE);
+		memcpy(lockerState->oldTupleData.fixedData, curTuple.data, oldTuplen);
+		lockerState->oldTupleFlags = curTuple.formatFlags;
+		lockerState->oldTupleLen = oldTuplen;
 
 		newTuphdr.undoLocation = undoLocation;
 		newTuphdr.chainHasLocks = tuphdr->chainHasLocks ||
