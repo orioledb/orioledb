@@ -91,6 +91,7 @@ typedef struct
 	bool		selfModified;
 } OLockCallbackArg;
 
+extern void o_register_delegated_callbacks(void);
 extern TupleTableSlot *o_tbl_insert(OTableDescr *descr, Relation relation,
 									TupleTableSlot *slot, OXid oxid,
 									CommitSeqNo csn);

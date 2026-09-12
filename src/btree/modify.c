@@ -1218,6 +1218,31 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	}
 
 	/*
+	 * The half of the caller's callback that belongs on the page runs here.
+	 * It may amend the new tuple and refuse outright; it also settles the
+	 * lock mode, so it has to run before the conflict question is asked.
+	 */
+	if (lockerState->delegatedCallbackId != 0)
+	{
+		BTreeDelegatedModifyCallback delegated;
+		OTuple		newTup;
+
+		delegated = btree_get_delegated_modify_callback(lockerState->delegatedCallbackId);
+		newTup.formatFlags = lockerState->tupleFlags;
+		newTup.data = &lockerState->tupleData.fixedData[BTreeLeafTuphdrSize];
+
+		memset(&lockerState->delegatedResult, 0,
+			   sizeof(lockerState->delegatedResult));
+
+		if (delegated &&
+			delegated(desc, curTuple, &newTup, oxid, lockerState->opCsn,
+					  tuphdr->xactInfo, tuphdr->undoLocation,
+					  &lockerState->lockMode,
+					  &lockerState->delegatedResult) != OBTreeCallbackActionUpdate)
+			return false;
+	}
+
+	/*
 	 * Anything the waiter would have had to wait for stays the waiter's own
 	 * business.  The waiter has no savepoint -- the entry conditions only let
 	 * it get here as the first modification of its transaction -- so there is
@@ -1298,6 +1323,15 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 
 		MARK_DIRTY(desc, blkno);
 		END_CRIT_SECTION();
+
+		if (lockerState->delegatedCallbackId != 0)
+		{
+			BTreeDelegatedPostUndoCallback postUndo;
+
+			postUndo = btree_get_delegated_post_undo_callback(lockerState->delegatedCallbackId);
+			if (postUndo)
+				postUndo(desc, undoLocation, pgprocno);
+		}
 
 		lockerState->opResult = OPageWaiterOpUpdated;
 		return true;
@@ -1500,7 +1534,8 @@ modify_can_be_delegated(BTreeDescr *desc, BTreeOperationType action,
 	if (callbackInfo && callbackInfo->waitCallback)
 		return false;
 
-	if (keyType != BTreeKeyLeafTuple && keyType != BTreeKeyNonLeafKey)
+	if (action != BTreeOperationUpdate &&
+		keyType != BTreeKeyLeafTuple && keyType != BTreeKeyNonLeafKey)
 		return false;
 
 	if (action == BTreeOperationUpdate &&
@@ -1618,6 +1653,10 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		if (callbackInfo && callbackInfo->delegatedCallbackId != 0)
 		{
 			BTreeDelegatedApplyResultCallback applyResult;
+
+			myState->delegatedResult.oldTuple.formatFlags = myState->oldTupleFlags;
+			myState->delegatedResult.oldTuple.data = myState->oldTupleLen > 0 ?
+				myState->oldTupleData.fixedData : NULL;
 
 			applyResult = btree_get_delegated_apply_result_callback(callbackInfo->delegatedCallbackId);
 			if (applyResult)

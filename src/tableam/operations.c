@@ -59,6 +59,10 @@ static void set_pending_sk_marker_from_slot(UndoLocation pkUndoLoc, void *arg);
 static void set_pending_sk_marker_from_modify_arg(UndoLocation pkUndoLoc,
 												  void *arg);
 static int	o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2);
+static TupleTableSlot *update_arg_get_slot(OModifyCallbackArg *arg);
+static void copy_tuple_to_slot(OTuple tup, TupleTableSlot *slot,
+							   OTableDescr *descr, CommitSeqNo csn,
+							   OIndexNumber ix_num, BTreeLocationHint *hint);
 
 /*
  * Set ODBProcData.pendingSkUndoLoc to mark the PK-applied/SK-pending
@@ -81,6 +85,103 @@ static void
 set_pending_sk_marker_from_slot(UndoLocation pkUndoLoc, void *arg)
 {
 	set_pending_sk_marker(((OTableSlot *) arg)->descr, pkUndoLoc);
+}
+
+/*
+ * The delegated half of o_update_callback(), run by whoever holds the leaf
+ * page rather than by the backend the update belongs to.
+ *
+ * Only the work that needs the page happens here: reading the row we are
+ * about to replace and completing the new tuple from it.  Everything the
+ * caller has to record for itself is left in *result and applied by
+ * o_update_delegated_apply().
+ */
+static OBTreeModifyCallbackAction
+o_update_delegated_modify(BTreeDescr *desc, OTuple curTuple, OTuple *newTuple,
+						  OXid oxid, CommitSeqNo csn, OTupleXactInfo xactInfo,
+						  UndoLocation location, RowLockMode *lockMode,
+						  BTreeDelegatedModifyResult *result)
+{
+	OIndexDescr *id = (OIndexDescr *) desc->arg;
+
+	if (desc->type != oIndexPrimary)
+		return OBTreeCallbackActionDoNothing;
+
+	/*
+	 * A row this transaction wrote itself needs command-id bookkeeping that
+	 * only its own backend can do.
+	 */
+	if (XACT_INFO_OXID_EQ(xactInfo, oxid))
+		return OBTreeCallbackActionDoNothing;
+
+	/*
+	 * A row committed after the caller's snapshot is the caller's problem:
+	 * deciding what to do about it is its business, and under a serializable
+	 * snapshot the decision is to raise an error, which we must not do from
+	 * here holding somebody else's page.
+	 */
+	if (XACT_INFO_IS_FINISHED(xactInfo) && XACT_INFO_MAP_CSN(xactInfo) >= csn)
+		return OBTreeCallbackActionDoNothing;
+
+	/* The new tuple's version follows the row's, so only now is it complete. */
+	o_tuple_set_version(&id->leafSpec, newTuple,
+						o_tuple_get_version(curTuple) + 1);
+
+	/*
+	 * Choosing between the two update lock modes means comparing the key
+	 * attributes of old and new through the caller's slots, which we cannot
+	 * reach.  Take the stronger one: always correct, only stricter.
+	 */
+	*lockMode = RowLockUpdate;
+
+	result->xactInfo = xactInfo;
+	result->undoLocation = location;
+	result->deleted = false;
+
+	return OBTreeCallbackActionUpdate;
+}
+
+/*
+ * Delegated form of the post-undo hook.  We only offer delegation for tables
+ * whose secondary indexes cannot be out of step with the primary, which is
+ * what makes this nothing to do.
+ */
+static void
+o_update_delegated_post_undo(BTreeDescr *desc, UndoLocation undoLoc,
+							 int pgprocno)
+{
+}
+
+/*
+ * The caller's half, run once it wakes, over what the holder left behind.
+ */
+static void
+o_update_delegated_apply(BTreeDescr *desc, BTreeDelegatedModifyResult *result,
+						 void *arg)
+{
+	OModifyCallbackArg *o_arg = (OModifyCallbackArg *) arg;
+
+	o_arg->modified = false;
+	o_arg->selfModified = false;
+	o_arg->tup_undo_location = result->undoLocation;
+
+	if (!O_TUPLE_IS_NULL(result->oldTuple))
+		copy_tuple_to_slot(result->oldTuple, update_arg_get_slot(o_arg),
+						   o_arg->descr, o_arg->csn, PrimaryIndexNumber, NULL);
+
+	((OTableSlot *) o_arg->newSlot)->version =
+		o_tuple_get_version(((OTableSlot *) o_arg->newSlot)->tuple);
+}
+
+int			o_update_delegated_id = 0;
+
+void
+o_register_delegated_callbacks(void)
+{
+	o_update_delegated_id =
+		btree_register_delegated_callbacks(o_update_delegated_modify,
+										   o_update_delegated_post_undo,
+										   o_update_delegated_apply);
 }
 
 static void
@@ -2179,7 +2280,15 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 		.modifyCallback = o_update_callback,
 		.needsUndoForSelfCreated = false,
 		.arg = arg,
-		.postUndoRecorded = set_pending_sk_marker_from_modify_arg
+		.postUndoRecorded = set_pending_sk_marker_from_modify_arg,
+
+		/*
+		 * Offer the update for delegation only where the holder's half is the
+		 * whole of what the page needs: with a secondary index there is also
+		 * the PK/SK marker and the index maintenance itself, neither of which
+		 * it can do for us.
+		 */
+		.delegatedCallbackId = (descr->nIndices < 2) ? o_update_delegated_id : 0
 	};
 
 	memset(&result, 0, sizeof(result));
@@ -2415,7 +2524,15 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
 		.modifyCallback = o_delete_callback,
 		.needsUndoForSelfCreated = false,
 		.arg = arg,
-		.postUndoRecorded = set_pending_sk_marker_from_modify_arg
+		.postUndoRecorded = set_pending_sk_marker_from_modify_arg,
+
+		/*
+		 * Offer the update for delegation only where the holder's half is the
+		 * whole of what the page needs: with a secondary index there is also
+		 * the PK/SK marker and the index maintenance itself, neither of which
+		 * it can do for us.
+		 */
+		.delegatedCallbackId = (descr->nIndices < 2) ? o_update_delegated_id : 0
 	};
 
 	memset(&result, 0, sizeof(result));
