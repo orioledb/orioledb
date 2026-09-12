@@ -358,13 +358,21 @@ undo_record_key_stopevent_params(BTreeOperationType action,
 }
 
 /*
- * Make undo record associated with give tuple and operation.
+ * Make undo record associated with given tuple and operation.
+ *
+ * pgprocno < 0 means the record belongs to us.  Otherwise it is built for a
+ * waiting process during the group modification optimization: the record is
+ * still allocated from our undo space, but linked into that process's undo
+ * stack at the nesting level it captured when it queued.  The waiter is
+ * blocked on its semaphore in lock_page_with_tuple() for the whole call, so
+ * its shared state is stable.
  */
-UndoLocation
-make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
-				 BTreeOperationType action, OInMemoryBlkno blkno,
-				 uint32 pageChangeCount,
-				 BTreeLeafTuphdr *curTupHdr)
+static UndoLocation
+make_undo_record_internal(BTreeDescr *desc, OTuple tuple, bool is_tuple,
+						  BTreeOperationType action, OInMemoryBlkno blkno,
+						  uint32 pageChangeCount,
+						  BTreeLeafTuphdr *curTupHdr,
+						  int pgprocno, int autonomousNestingLevel)
 {
 	LocationIndex tuplelen;
 	BTreeModifyUndoStackItem *item;
@@ -425,15 +433,70 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 		item->tuphdr.chainHasLocks = curTupHdr->chainHasLocks;
 	}
 
-	add_new_undo_stack_item(desc->undoType, undoLocation);
+	if (pgprocno < 0)
+		add_new_undo_stack_item(desc->undoType, undoLocation);
+	else
+		add_new_undo_stack_item_to_process(desc->undoType, undoLocation,
+										   pgprocno, autonomousNestingLevel);
 
 	undoLocation += offsetof(BTreeModifyUndoStackItem, tuphdr);
 
-	commandId = o_get_current_command();
-	if (desc->undoType == UndoLogRegular &&
-		commandId != InvalidCommandId &&
-		!is_recovery_process())
-		update_command_undo_location(commandId, undoLocation);
+	/*
+	 * Skip the per-command undo location when working for somebody else:
+	 * o_get_current_command() would report *our* command, and the waiter's
+	 * command-level rollback must not be pointed at a record of ours.  The
+	 * waiter only reaches this path as the first modification of its
+	 * transaction, so it has no earlier command to roll back to anyway.
+	 */
+	if (pgprocno < 0)
+	{
+		commandId = o_get_current_command();
+		if (desc->undoType == UndoLogRegular &&
+			commandId != InvalidCommandId &&
+			!is_recovery_process())
+			update_command_undo_location(commandId, undoLocation);
+	}
+
+	return undoLocation;
+}
+
+/*
+ * Make undo record for an operation performed by this process.
+ */
+UndoLocation
+make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
+				 BTreeOperationType action, OInMemoryBlkno blkno,
+				 uint32 pageChangeCount,
+				 BTreeLeafTuphdr *curTupHdr)
+{
+	return make_undo_record_internal(desc, tuple, is_tuple, action, blkno,
+									 pageChangeCount, curTupHdr, -1, 0);
+}
+
+/*
+ * Make undo record for a lock/update/delete the lock holder is applying on
+ * behalf of a waiting process.  Returns the value to store in the page
+ * tuple's header, exactly as make_undo_record() does for our own operations,
+ * and records it in the waiter's state so the waiter can pick up its retain
+ * location after it is woken.
+ */
+UndoLocation
+make_waiter_modify_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
+							   BTreeOperationType action, OInMemoryBlkno blkno,
+							   uint32 pageChangeCount,
+							   BTreeLeafTuphdr *curTupHdr, int pgprocno,
+							   OPageWaiterShmemState *lockerState)
+{
+	UndoLocation undoLocation;
+
+	Assert(pgprocno >= 0);
+	Assert(action != BTreeOperationInsert);
+
+	undoLocation = make_undo_record_internal(desc, tuple, is_tuple, action,
+											 blkno, pageChangeCount, curTupHdr,
+											 pgprocno,
+											 lockerState->autonomousNestingLevel);
+	lockerState->undoLocation = undoLocation;
 
 	return undoLocation;
 }

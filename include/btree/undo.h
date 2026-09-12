@@ -194,6 +194,14 @@ extern UndoLocation make_undo_record(BTreeDescr *desc, OTuple tuple,
 									 OInMemoryBlkno blkno,
 									 uint32 pageChangeCount,
 									 BTreeLeafTuphdr *curTupHdr);
+extern UndoLocation make_waiter_modify_undo_record(BTreeDescr *desc,
+												   OTuple tuple, bool is_tuple,
+												   BTreeOperationType action,
+												   OInMemoryBlkno blkno,
+												   uint32 pageChangeCount,
+												   BTreeLeafTuphdr *curTupHdr,
+												   int pgprocno,
+												   OPageWaiterShmemState *lockerState);
 extern void make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno,
 									int pgprocno,
 									OPageWaiterShmemState *lockerState);
