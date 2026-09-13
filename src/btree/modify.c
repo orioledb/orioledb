@@ -1765,9 +1765,30 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 
 		if (desc->undoType != UndoLogNone)
 		{
-			release_undo_size(desc->undoType);
+			/*
+			 * Give the reservation up rather than release it.  The holder
+			 * took it over to write our undo record, so releasing would
+			 * subtract what we no longer have, and the accounting it
+			 * corrupts is what everyone flushing undo spins on.
+			 */
+			giveup_reserved_undo_size(desc->undoType);
 			if (GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType) != desc->undoType)
 				release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+
+			/*
+			 * The record the holder wrote is ours: retain it, and register it
+			 * as this command's, which is bookkeeping only our own backend
+			 * can do.
+			 */
+			if (UndoLocationIsValid(myState->undoLocation))
+			{
+				if (!UndoLocationIsValid(curRetainUndoLocations[desc->undoType]))
+					curRetainUndoLocations[desc->undoType] = myState->undoLocation;
+
+				if (desc->undoType == UndoLogRegular && !IsParallelWorker())
+					update_command_undo_location(o_get_current_command(),
+												 myState->undoLocation);
+			}
 		}
 		ppool_release_reserved(desc->ppool, PPOOL_RESERVE_INSERT);
 		Assert(!have_locked_pages());
