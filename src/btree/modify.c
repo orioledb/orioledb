@@ -1161,11 +1161,13 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	OTuple		key;
 	OXid		oxid;
 	OTuple		newTuple;
-	Pointer		newTupData = NULL;
+	OTuple		delegatedTuple;
 	LocationIndex newTuplen = 0;
 	LocationIndex newItemSize = 0;
 	BTreeLeafTuphdr *waiterTuphdr;
 	bool		redundantRowLocks = false;
+
+	O_TUPLE_SET_NULL(delegatedTuple);
 
 	/* Every operation here is recorded in undo; without it we cannot act. */
 	if (desc->undoType == UndoLogNone)
@@ -1226,7 +1228,6 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	if (lockerState->delegatedCallbackId != 0)
 	{
 		BTreeDelegatedModifyCallback delegated;
-		OTuple		newTup;
 
 		delegated = btree_get_delegated_modify_callback(lockerState->delegatedCallbackId);
 
@@ -1237,20 +1238,19 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 		 * every operation.  Measured at 5.7x of throughput on a 64-core
 		 * machine; the copy costs nothing by comparison.
 		 */
-		newTupData = palloc(O_BTREE_MAX_TUPLE_SIZE);
-		memcpy(newTupData,
+		delegatedTuple.formatFlags = lockerState->tupleFlags;
+		delegatedTuple.data = palloc(O_BTREE_MAX_TUPLE_SIZE);
+		memcpy(delegatedTuple.data,
 			   &lockerPayloads[pgprocno].tupleData.fixedData[BTreeLeafTuphdrSize],
 			   o_btree_len(desc, (OTuple) {.formatFlags = lockerState->tupleFlags,
 										   .data = &lockerPayloads[pgprocno].tupleData.fixedData[BTreeLeafTuphdrSize]},
 						   OTupleLength));
-		newTup.formatFlags = lockerState->tupleFlags;
-		newTup.data = newTupData;
 
 		memset(&lockerPayloads[pgprocno].delegatedResult, 0,
 			   sizeof(lockerPayloads[pgprocno].delegatedResult));
 
 		if (delegated &&
-			delegated(desc, curTuple, &newTup, oxid, lockerState->opCsn,
+			delegated(desc, curTuple, &delegatedTuple, oxid, lockerState->opCsn,
 					  tuphdr->xactInfo, tuphdr->undoLocation,
 					  &lockerState->lockMode,
 					  &lockerPayloads[pgprocno].delegatedResult) != OBTreeCallbackActionUpdate)
@@ -1288,9 +1288,20 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	 */
 	if (lockerState->action == BTreeOperationUpdate)
 	{
-		newTuple.formatFlags = lockerState->tupleFlags;
-		newTuple.data = newTupData ? newTupData :
-			&lockerPayloads[pgprocno].tupleData.fixedData[BTreeLeafTuphdrSize];
+		/*
+		 * Take the callback's tuple whole.  It completes the new row from the
+		 * one it replaces -- stamping the row version among other things --
+		 * and that can change the tuple's format as well as its bytes, so
+		 * reinstating the flags published before the call would leave the
+		 * page describing this tuple in a layout it no longer has.
+		 */
+		if (!O_TUPLE_IS_NULL(delegatedTuple))
+			newTuple = delegatedTuple;
+		else
+		{
+			newTuple.formatFlags = lockerState->tupleFlags;
+			newTuple.data = &lockerPayloads[pgprocno].tupleData.fixedData[BTreeLeafTuphdrSize];
+		}
 		newTuplen = o_btree_len(desc, newTuple, OTupleLength);
 		newItemSize = MAXALIGN(newTuplen) + BTreeLeafTuphdrSize;
 
