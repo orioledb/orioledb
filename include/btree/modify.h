@@ -136,7 +136,7 @@ extern BTreeDelegatedPostUndoCallback btree_get_delegated_post_undo_callback(int
 extern BTreeDelegatedApplyResultCallback btree_get_delegated_apply_result_callback(int id);
 
 extern BTreeModifyCallbackInfo nullCallbackInfo;
-extern void btree_apply_waiter_ops(BTreeDescr *desc, OInMemoryBlkno blkno);
+extern void btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno);
 
 extern bool o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple);
 extern bool o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,

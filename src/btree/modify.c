@@ -448,7 +448,7 @@ unlock_release(BTreeModifyInternalContext *context, bool unlock)
 		 * Our own work on this page is done and we are about to let it go, so
 		 * this is the moment to do the queued processes' work for them.
 		 */
-		btree_apply_waiter_ops(desc, blkno);
+		btree_do_queued_work(desc, blkno);
 		unlock_page(blkno);
 	}
 	if (context->undoIsReserved)
@@ -1374,9 +1374,15 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
  * able to finish for them.  Called by the holder once its own modification is
  * done and the page is still locked.
  */
+/*
+ * Test the hint, and if the queue holds work for us, collect it and do what
+ * we can of it.  The page state must be one we already hold: an extra read of
+ * the page's state word is the most expensive thing this code could do.
+ */
 void
-btree_apply_waiter_ops(BTreeDescr *desc, OInMemoryBlkno blkno)
+btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 {
+	uint64		state;
 	int			procnums[BTREE_PAGE_MAX_SPLIT_ITEMS];
 	int			count,
 				i;
@@ -1384,16 +1390,22 @@ btree_apply_waiter_ops(BTreeDescr *desc, OInMemoryBlkno blkno)
 	if (O_PAGE_IS_LOCAL(blkno) || desc->undoType == UndoLogNone)
 		return;
 
-	count = get_waiters_with_ops(desc, blkno, procnums);
+	state = page_locked_state(blkno);
+
+	if (!(state & PAGE_STATE_HAS_OP_WAITER_FLAG))
+		return;
+
+	count = get_page_waiters(desc, blkno, state, procnums);
 
 	for (i = 0; i < count; i++)
 	{
 		OPageWaiterShmemState *lockerState = &lockerStates[procnums[i]];
-		bool		serviced = false;
 
-		serviced = apply_waiter_op(desc, blkno, procnums[i]);
+		/* Inserts are merged into the page by the insert path itself. */
+		if (lockerState->action == BTreeOperationInsert)
+			continue;
 
-		if (serviced)
+		if (apply_waiter_op(desc, blkno, procnums[i]))
 		{
 			pg_write_barrier();
 			lockerState->serviced = true;

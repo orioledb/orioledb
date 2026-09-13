@@ -1580,9 +1580,18 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 		MARK_DIRTY(desc, blkno);
 
 		o_btree_insert_mark_split_finished_if_needed(insert_item);
-		unlock_page(blkno);
 
 		END_CRIT_SECTION();
+
+		/*
+		 * page_block_reads() above refreshed our cached page state as a side
+		 * effect of a write it had to make anyway, so the hint tested here
+		 * knows about waiters that arrived while we held the page.
+		 */
+		if (O_PAGE_IS(p, LEAF))
+			btree_do_queued_work(desc, blkno);
+
+		unlock_page(blkno);
 
 		return true;
 	}
@@ -1773,7 +1782,26 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 				STOPEVENT(STOPEVENT_BEFORE_GET_WAITERS_WITH_TUPLES, params);
 			}
 
-			tupleWaitersCount = get_waiters_with_tuples(desc, blkno, tupleWaiterProcnums);
+			{
+				uint64		state;
+
+				tupleWaitersCount = 0;
+
+				/* A local page is never queued on, and never listed as ours. */
+				state = O_PAGE_IS_LOCAL(blkno) ? 0 : page_locked_state(blkno);
+
+				if (state & PAGE_STATE_HAS_OP_WAITER_FLAG)
+				{
+					int			procnums[BTREE_PAGE_MAX_SPLIT_ITEMS];
+					int			count,
+								i;
+
+					count = get_page_waiters(desc, blkno, state, procnums);
+					for (i = 0; i < count; i++)
+						if (lockerStates[procnums[i]].action == BTreeOperationInsert)
+							tupleWaiterProcnums[tupleWaitersCount++] = procnums[i];
+				}
+			}
 		}
 		else
 			tupleWaitersCount = 0;

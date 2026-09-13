@@ -107,6 +107,8 @@ my_locked_page_add(OInMemoryBlkno blkno, uint64 state)
 	myLockedPages[numberOfMyLockedPages++].state = state;
 }
 
+static uint64 my_locked_page_get_state(OInMemoryBlkno blkno);
+
 static uint64
 my_locked_page_del(OInMemoryBlkno blkno)
 {
@@ -118,6 +120,12 @@ my_locked_page_del(OInMemoryBlkno blkno)
 	myLockedPages[i] = myLockedPages[--numberOfMyLockedPages];
 
 	return state;
+}
+
+uint64
+page_locked_state(OInMemoryBlkno blkno)
+{
+	return my_locked_page_get_state(blkno);
 }
 
 static uint64
@@ -308,6 +316,9 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 			lockerState->next = (state & PAGE_STATE_LIST_TAIL_MASK);
 			newState = state & (~PAGE_STATE_LIST_TAIL_MASK);
 			newState |= pgprocnum;
+
+			/* Tell the holder there is work here worth looking for. */
+			newState |= PAGE_STATE_HAS_OP_WAITER_FLAG;
 		}
 
 		if (!ucmUpdateTried)
@@ -878,68 +889,29 @@ page_block_reads(OInMemoryBlkno blkno)
 	myLockedPages[i].state = state | PAGE_STATE_NO_READ_FLAG;
 }
 
-int
-get_waiters_with_tuples(BTreeDescr *desc,
-						OInMemoryBlkno blkno,
-						int result[BTREE_PAGE_MAX_SPLIT_ITEMS])
-{
-	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
-	uint32		pgprocnum;
-	int			count = 0;
-
-	/* Local pages do not need locking */
-	if (O_PAGE_IS_LOCAL(blkno))
-		return 0;
-
-	pgprocnum = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state)) & PAGE_STATE_LIST_TAIL_MASK;
-
-	while (pgprocnum != PAGE_STATE_INVALID_PROCNO)
-	{
-		OPageWaiterShmemState *lockerState = &lockerStates[pgprocnum];
-
-		if (lockerState->status == OPageWaitInsert &&
-			lockerState->action == BTreeOperationInsert &&
-			lockerState->pageChangeCount == O_PAGE_HEADER(p)->pageChangeCount &&
-			ORelOidsIsEqual(desc->oids, lockerState->reloids))
-		{
-			result[count++] = pgprocnum;
-			if (count >= BTREE_PAGE_MAX_SPLIT_ITEMS)
-			{
-				Assert(count == BTREE_PAGE_MAX_SPLIT_ITEMS);
-				break;
-			}
-		}
-
-		pgprocnum = lockerState->next;
-	}
-
-	return count;
-}
-
 /*
- * Collect the processes queued on this page that are waiting for an operation
- * other than an insert, so the holder can apply them on their behalf.
+ * Collect the processes queued on this page, whatever they are waiting to do.
+ *
+ * `state` must be one the caller already holds.
  */
 int
-get_waiters_with_ops(BTreeDescr *desc, OInMemoryBlkno blkno,
-					 int result[BTREE_PAGE_MAX_SPLIT_ITEMS])
+get_page_waiters(BTreeDescr *desc, OInMemoryBlkno blkno, uint64 state,
+				 int result[BTREE_PAGE_MAX_SPLIT_ITEMS])
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	uint32		pgprocnum;
 	int			count = 0;
 
-	/* Local pages do not need locking */
 	if (O_PAGE_IS_LOCAL(blkno))
 		return 0;
 
-	pgprocnum = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state)) & PAGE_STATE_LIST_TAIL_MASK;
+	pgprocnum = state & PAGE_STATE_LIST_TAIL_MASK;
 
 	while (pgprocnum != PAGE_STATE_INVALID_PROCNO)
 	{
 		OPageWaiterShmemState *lockerState = &lockerStates[pgprocnum];
 
 		if (lockerState->status == OPageWaitInsert &&
-			lockerState->action != BTreeOperationInsert &&
 			lockerState->pageChangeCount == O_PAGE_HEADER(p)->pageChangeCount &&
 			ORelOidsIsEqual(desc->oids, lockerState->reloids))
 		{
@@ -1203,6 +1175,13 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 		}
 
 		newState |= newTail;
+
+		/*
+		 * Nobody is queued any more, so nobody is waiting for us to do their
+		 * work either.  Clearing rides on a CAS we are making anyway.
+		 */
+		if (newTail == PAGE_STATE_INVALID_PROCNO)
+			newState &= ~PAGE_STATE_HAS_OP_WAITER_FLAG;
 
 		if (pg_atomic_compare_exchange_u64(&hdr->state, &state, newState))
 			break;				/* Success!  Exit retry loop */

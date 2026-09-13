@@ -42,6 +42,17 @@ typedef enum
 #define PAGE_STATE_CHANGE_USAGE_COUNT_MASK UINT64CONST(0x00F0000000000000)
 #define PAGE_STATE_CHANGE_USAGE_COUNT_ONE UINT64CONST(0x0010000000000000)
 #define PAGE_STATE_CHANGE_USAGE_COUNT_SHIFT (52)
+/*
+ * Set while the page's waiter list may hold a process that published an
+ * operation for the holder to finish, rather than merely waiting for the
+ * lock.  Deliberately a hint: the holder has to decide whether the queue is
+ * worth walking from a page state it already has, because an extra read of
+ * this word costs more than everything the walk could find.  A stale set
+ * costs one fruitless walk, a stale clear one missed chance to combine.
+ *
+ * Bits 52-55 belong to the usage count, so this lives above them.
+ */
+#define PAGE_STATE_HAS_OP_WAITER_FLAG UINT64CONST(0x0100000000000000)
 #define PAGE_STATE_LIST_TAIL_MASK UINT64CONST(0x000000000003FFFF)
 
 #define PAGE_STATE_INVALID_PROCNO PAGE_STATE_LIST_TAIL_MASK
@@ -75,9 +86,10 @@ typedef enum
 extern Size page_state_shmem_needs(void);
 extern void page_state_shmem_init(Pointer buf, bool found);
 extern bool have_locked_pages(void);
-extern int	get_waiters_with_tuples(BTreeDescr *desc,
-									OInMemoryBlkno blkno,
-									int result[BTREE_PAGE_MAX_SPLIT_ITEMS]);
+extern int	get_page_waiters(BTreeDescr *desc, OInMemoryBlkno blkno,
+							 uint64 state,
+							 int result[BTREE_PAGE_MAX_SPLIT_ITEMS]);
+extern uint64 page_locked_state(OInMemoryBlkno blkno);
 extern void mark_waiter_tuples_inserted(int procnums[BTREE_PAGE_MAX_SPLIT_ITEMS],
 										int count);
 extern void lock_page(OInMemoryBlkno blkno);
