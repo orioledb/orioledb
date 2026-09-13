@@ -58,6 +58,8 @@
 static void set_pending_sk_marker_from_slot(UndoLocation pkUndoLoc, void *arg);
 static void set_pending_sk_marker_from_modify_arg(UndoLocation pkUndoLoc,
 												  void *arg);
+static void set_pending_sk_marker_from_ioc_arg(UndoLocation pkUndoLoc,
+											   void *arg);
 static int	o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2);
 
 /*
@@ -87,6 +89,13 @@ static void
 set_pending_sk_marker_from_modify_arg(UndoLocation pkUndoLoc, void *arg)
 {
 	set_pending_sk_marker(((OModifyCallbackArg *) arg)->descr, pkUndoLoc);
+}
+
+static void
+set_pending_sk_marker_from_ioc_arg(UndoLocation pkUndoLoc, void *arg)
+{
+	set_pending_sk_marker(((InsertOnConflictCallbackArg *) arg)->desc,
+						  pkUndoLoc);
 }
 
 void
@@ -1243,9 +1252,31 @@ o_tbl_insert_with_arbiter(Relation rel,
 											descr->indices[i]->name.data)));
 
 			ioc_arg.conflictIxNum = i;
+
+			/*
+			 * Mark the PK-applied/SK-pending window only for the primary
+			 * index: the non-arbiter secondary indexes are written in the
+			 * second loop below, and a checkpoint landing in between must see
+			 * this row's undo location so crash recovery can repair the SK
+			 * side.  The same callbackInfo is reused for secondary arbiters,
+			 * so do not enable it globally.
+			 */
+			callbackInfo.postUndoRecorded = (i == PrimaryIndexNumber)
+				? set_pending_sk_marker_from_ioc_arg : NULL;
+
 			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
 										oxid, csn, &callbackInfo,
 										descr->indices[i]->desc.type == oIndexExclusion ? UNIQUE_CHECK_NO : UNIQUE_CHECK_YES);
+
+			/*
+			 * Marker (if any) was installed under page lock by the
+			 * postUndoRecorded hook; fire the stopevent outside the page lock
+			 * so deterministic tests can interleave a CHECKPOINT in the
+			 * window before the non-arbiter secondary-index inserts.
+			 */
+			if (i == PrimaryIndexNumber)
+				fire_sk_modify_pending_stopevent(descr);
+
 			if (result != OBTreeModifyResultInserted)
 			{
 				success = false;
