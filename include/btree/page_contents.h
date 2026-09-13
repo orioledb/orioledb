@@ -531,6 +531,15 @@ typedef struct
 
 	/* Set by the holder once it has finished the waiter's operation. */
 	bool		serviced;
+
+	/*
+	 * Set with it when the work is done but not yet committed.  Such a waiter
+	 * must not be woken by the unlock: it would tell its client the update
+	 * succeeded while the record that says so is still in nobody's WAL.  The
+	 * holder takes it off the page's queue and wakes it once the transaction
+	 * the work went into is durable.
+	 */
+	bool		deferWake;
 	OPageWaiterOpResult opResult;
 	Size		reservedUndoSize;
 	UndoLocation undoLocation;
