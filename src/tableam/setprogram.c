@@ -110,31 +110,146 @@ supported_add_op(Oid opfuncid, int *leftWidth, int *rightWidth, bool *subtract)
 }
 
 /*
- * Compile one target list entry into an assignment, or report that it is
- * beyond us.
+ * A constant operand, whether it was written as a literal or bound as a
+ * parameter.  A prepared statement is the normal shape for the workloads
+ * worth combining, and by the time ExecutorStart runs its parameters are
+ * bound, so the two are the same thing to us.
  */
 static bool
-compile_set_op(Expr *expr, AttrNumber attnum, OSetOp *op)
+resolve_constant(Node *expr, ParamListInfo params,
+				 Datum *value, bool *isnull, Oid *type)
 {
-	op->attnum = attnum;
-
 	if (IsA(expr, Const))
 	{
 		Const	   *con = (Const *) expr;
 
-		/*
-		 * Only by-value constants travel: the program is copied into shared
-		 * memory verbatim, so a Datum that is really a pointer would mean
-		 * nothing in the process that applies it.
-		 */
-		if (!con->constbyval)
+		*value = con->constvalue;
+		*isnull = con->constisnull;
+		*type = con->consttype;
+		return true;
+	}
+
+	if (IsA(expr, Param))
+	{
+		Param	   *param = (Param *) expr;
+		ParamExternData *prm;
+
+		if (param->paramkind != PARAM_EXTERN || params == NULL ||
+			param->paramid <= 0 || param->paramid > params->numParams)
 			return false;
 
+		/*
+		 * Only parameters already sitting in the list.  A paramFetch hook
+		 * could run arbitrary code, and this has to stay a plain read.
+		 */
+		if (params->paramFetch != NULL)
+			return false;
+
+		prm = &params->params[param->paramid - 1];
+		if (!OidIsValid(prm->ptype))
+			return false;
+
+		*value = prm->value;
+		*isnull = prm->isnull;
+		*type = prm->ptype;
+		return true;
+	}
+
+	return false;
+}
+
+/*
+ * Put a constant into the op, copying it into the program's own store when it
+ * is held by reference.  Returns false if it does not fit or is of a kind we
+ * cannot copy.
+ */
+static bool
+store_constant(OSetProgram *program, OSetOp *op,
+			   Datum value, bool isnull, Oid type)
+{
+	int16		typlen;
+	bool		typbyval;
+	Size		size;
+	Pointer		src;
+	int			offset;
+
+	op->isnull = isnull;
+	if (isnull)
+	{
+		op->byval = true;
+		op->value = (Datum) 0;
+		return true;
+	}
+
+	get_typlenbyval(type, &typlen, &typbyval);
+
+	if (typbyval)
+	{
+		op->byval = true;
+		op->value = value;
+		return true;
+	}
+
+	if (typlen == -1)
+	{
+		struct varlena *vl;
+
+		/*
+		 * Detoast now, in the process that can: what goes into the store has
+		 * to be readable by whoever applies it, with no catalog and no I/O.
+		 * Keep the four-byte header rather than the packed one, so that every
+		 * reader downstream sees an ordinary varlena.
+		 */
+		vl = pg_detoast_datum((struct varlena *) DatumGetPointer(value));
+		src = (Pointer) vl;
+		size = VARSIZE(vl);
+	}
+	else if (typlen > 0)
+	{
+		src = DatumGetPointer(value);
+		size = (Size) typlen;
+	}
+	else
+		return false;			/* cstring and friends: not worth the care */
+
+	offset = MAXALIGN(program->constUsed);
+	if (offset + size > O_SET_PROGRAM_CONST_SPACE)
+		return false;
+
+	memcpy(&program->consts[offset], src, size);
+	program->constUsed = offset + size;
+
+	op->byval = false;
+	op->valueOffset = offset;
+	op->valueLen = size;
+	return true;
+}
+
+/*
+ * Compile one target list entry into an assignment, or report that it is
+ * beyond us.
+ */
+static bool
+compile_set_op(OSetProgram *program, ParamListInfo params,
+			   Expr *expr, AttrNumber attnum, OSetOp *op)
+{
+	Datum		value;
+	bool		isnull;
+	Oid			type;
+
+	/*
+	 * Start from zeroes.  The program is copied whole into shared memory, and
+	 * a field this op does not use should not carry whatever the last
+	 * statement left there.
+	 */
+	memset(op, 0, sizeof(*op));
+	op->attnum = attnum;
+
+	if (resolve_constant((Node *) expr, params, &value, &isnull, &type))
+	{
 		op->kind = OSetOpConst;
 		op->opfuncid = InvalidOid;
-		op->value = con->constvalue;
-		op->isnull = con->constisnull;
-		return true;
+		return store_constant(program, op, value, isnull, type);
 	}
 
 	if (IsA(expr, OpExpr))
@@ -143,7 +258,6 @@ compile_set_op(Expr *expr, AttrNumber attnum, OSetOp *op)
 		Node	   *left,
 				   *right;
 		Var		   *var;
-		Const	   *con;
 		int			leftWidth,
 					rightWidth;
 		bool		subtract;
@@ -162,11 +276,12 @@ compile_set_op(Expr *expr, AttrNumber attnum, OSetOp *op)
 		 * addition the reversed form is rare enough not to be worth a second
 		 * shape to get wrong.
 		 */
-		if (!IsA(left, Var) || !IsA(right, Const))
+		if (!IsA(left, Var))
+			return false;
+		if (!resolve_constant(right, params, &value, &isnull, &type))
 			return false;
 
 		var = (Var *) left;
-		con = (Const *) right;
 
 		/*
 		 * The column must read itself.  Referring to another column would
@@ -183,12 +298,14 @@ compile_set_op(Expr *expr, AttrNumber attnum, OSetOp *op)
 		if (varattno != attnum)
 			return false;
 
-		if (!con->constbyval || con->constisnull)
+		/* The amount to add is arithmetic, so it is always by value. */
+		if (isnull)
 			return false;
 
 		op->kind = OSetOpAddConst;
 		op->opfuncid = opexpr->opfuncid;
-		op->value = con->constvalue;
+		op->byval = true;
+		op->value = value;
 		op->isnull = false;
 		return true;
 	}
@@ -215,6 +332,8 @@ compile_current_program(QueryDesc *queryDesc)
 	RangeTblEntry *rte;
 	Index		rti;
 	int			nops = 0;
+
+	currentProgram.constUsed = 0;
 
 	if (queryDesc->operation != CMD_UPDATE)
 		return;
@@ -252,7 +371,8 @@ compile_current_program(QueryDesc *queryDesc)
 		if (tle->resjunk)
 			return;				/* the lists would be out of step */
 
-		if (!compile_set_op(tle->expr, attnum, &currentProgram.ops[nops]))
+		if (!compile_set_op(&currentProgram, queryDesc->params, tle->expr,
+							attnum, &currentProgram.ops[nops]))
 			return;
 		nops++;
 	}
@@ -354,14 +474,14 @@ add_const(Oid opfuncid, Datum cur, Datum add, Datum *result)
 }
 
 bool
-o_set_program_apply(const OSetProgram *program,
+o_set_program_apply(OSetProgram *program,
 					Datum *values, bool *isnull, int natts)
 {
 	int			i;
 
 	for (i = 0; i < program->nops; i++)
 	{
-		const OSetOp *op = &program->ops[i];
+		OSetOp	   *op = &program->ops[i];
 		int			idx = op->attnum - 1;
 
 		if (idx < 0 || idx >= natts)
@@ -370,8 +490,13 @@ o_set_program_apply(const OSetProgram *program,
 		switch (op->kind)
 		{
 			case OSetOpConst:
-				values[idx] = op->value;
 				isnull[idx] = op->isnull;
+				if (op->isnull)
+					values[idx] = (Datum) 0;
+				else if (op->byval)
+					values[idx] = op->value;
+				else
+					values[idx] = PointerGetDatum(&program->consts[op->valueOffset]);
 				break;
 
 			case OSetOpAddConst:

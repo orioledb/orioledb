@@ -45,20 +45,33 @@ typedef struct
 	AttrNumber	attnum;			/* 1-based attribute of the relation */
 	OSetOpKind	kind;
 	Oid			opfuncid;		/* the addition, for OSetOpAddConst */
-	Datum		value;			/* by value only: this crosses shared memory */
 	bool		isnull;
+
+	/*
+	 * A Datum is only meaningful in the process that made it, so anything
+	 * held by reference travels as bytes in the program's own store and is
+	 * pointed at again when it is applied.
+	 */
+	bool		byval;
+	Datum		value;			/* byval */
+	int			valueOffset;	/* otherwise, into OSetProgram.consts */
+	int			valueLen;
 } OSetOp;
 
 /*
- * Eight covers the shapes worth combining and keeps the whole program inside
- * a waiter's shared state without a length prefix to get wrong.
+ * Sixteen assignments and two kilobytes of constants cover a row of ten
+ * hundred-byte fields, which is what the workloads that update whole rows
+ * look like, and keep the program a plain value that can be copied whole.
  */
-#define O_SET_PROGRAM_MAX_OPS	8
+#define O_SET_PROGRAM_MAX_OPS		16
+#define O_SET_PROGRAM_CONST_SPACE	2048
 
 typedef struct
 {
 	int			nops;			/* 0 means "nothing here" */
+	int			constUsed;
 	OSetOp		ops[O_SET_PROGRAM_MAX_OPS];
+	char		consts[O_SET_PROGRAM_CONST_SPACE];
 } OSetProgram;
 
 /*
@@ -75,7 +88,7 @@ extern void o_setprogram_init(void);
  * cannot be carried out on these inputs, which the caller must treat as "do
  * it the ordinary way" rather than as an error.
  */
-extern bool o_set_program_apply(const OSetProgram *program,
+extern bool o_set_program_apply(OSetProgram *program,
 								Datum *values, bool *isnull, int natts);
 
 #endif							/* __TABLEAM_SETPROGRAM_H__ */
