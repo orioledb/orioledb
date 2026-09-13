@@ -1372,6 +1372,15 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 			return false;
 	}
 
+	/*
+	 * Decline unless what the waiter reserved already covers the record we
+	 * would write.  Asking for more is not an option here: reserving undo is
+	 * not allowed while holding a page, as reserve_undo_size() asserts, and
+	 * there is no way to hand a reservation back once taken.
+	 */
+	if (lockerState->reservedUndoSize < O_UPDATE_MAX_UNDO_SIZE)
+		return false;
+
 	steal_reserved_undo_size(desc->undoType, lockerState->reservedUndoSize);
 	undoLocation = make_waiter_modify_undo_record(desc, curTuple, true,
 												  lockerState->action, blkno,
@@ -1498,6 +1507,16 @@ btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 			pg_write_barrier();
 			lockerState->serviced = true;
 		}
+
+		/*
+		 * One per page hold.  Making an undo record publishes a reserved undo
+		 * location, and anybody flushing or evicting undo spins until every
+		 * backend's has moved on; doing that repeatedly while holding a page
+		 * others are queued on is how a stuck spinlock happens.  Whoever is
+		 * left is picked up by the next holder, which is where they would
+		 * have been anyway.
+		 */
+		break;
 	}
 }
 
