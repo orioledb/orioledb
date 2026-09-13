@@ -137,6 +137,94 @@ my_locked_page_get_state(OInMemoryBlkno blkno)
 	return myLockedPages[i].state;
 }
 
+/*
+ * What this backend wants advertised if it has to queue on a page.  Set
+ * around a descent by the modify path; lets the plain lock path publish an
+ * operation without taking the insert path's pre-queue work.
+ */
+static struct
+{
+	bool		valid;
+	BTreeDescr *desc;
+	BTreeOperationType action;
+	RowLockMode lockMode;
+	CommitSeqNo opCsn;
+	BTreeKeyType keyType;
+	int			delegatedCallbackId;
+	OTupleXactInfo xactInfo;
+	OTuple		tuple;
+}			myWaiterOp = {0};
+
+void
+set_my_waiter_op(BTreeDescr *desc, BTreeOperationType action,
+				 RowLockMode lockMode, CommitSeqNo opCsn,
+				 BTreeKeyType keyType, int delegatedCallbackId,
+				 OTupleXactInfo xactInfo, OTuple tuple)
+{
+	myWaiterOp.valid = true;
+	myWaiterOp.desc = desc;
+	myWaiterOp.action = action;
+	myWaiterOp.lockMode = lockMode;
+	myWaiterOp.opCsn = opCsn;
+	myWaiterOp.keyType = keyType;
+	myWaiterOp.delegatedCallbackId = delegatedCallbackId;
+	myWaiterOp.xactInfo = xactInfo;
+	myWaiterOp.tuple = tuple;
+}
+
+void
+clear_my_waiter_op(void)
+{
+	myWaiterOp.valid = false;
+}
+
+/*
+ * Serialize the pending operation into our waiter state.  Returns true when
+ * something was published, so the caller can advertise it in the page state.
+ */
+static bool
+publish_my_waiter_op(OPageWaiterShmemState *lockerState, uint32 pgprocnum,
+					 uint32 pageChangeCount)
+{
+	BTreeDescr *desc = myWaiterOp.desc;
+	BTreeLeafTuphdr tuphdr;
+	int			tuplen;
+
+	if (!myWaiterOp.valid)
+		return false;
+
+	tuphdr.deleted = false;
+	tuphdr.undoLocation = InvalidUndoLocation;
+	tuphdr.formatFlags = 0;
+	tuphdr.chainHasLocks = false;
+	tuphdr.xactInfo = myWaiterOp.xactInfo;
+
+	lockerState->reloids = desc->oids;
+	lockerState->reservedUndoSize = desc->undoType != UndoLogNone ?
+		get_reserved_undo_size(desc->undoType) : 0;
+	lockerState->tupleFlags = myWaiterOp.tuple.formatFlags;
+	memcpy(lockerPayloads[pgprocnum].tupleData.fixedData, &tuphdr,
+		   BTreeLeafTuphdrSize);
+	tuplen = o_btree_len(desc, myWaiterOp.tuple,
+						 myWaiterOp.keyType == BTreeKeyLeafTuple ?
+						 OTupleLength : OKeyLength);
+	memcpy(&lockerPayloads[pgprocnum].tupleData.fixedData[BTreeLeafTuphdrSize],
+		   myWaiterOp.tuple.data, tuplen);
+
+	lockerState->status = OPageWaitInsert;
+	lockerState->action = myWaiterOp.action;
+	lockerState->lockMode = myWaiterOp.lockMode;
+	lockerState->opCsn = myWaiterOp.opCsn;
+	lockerState->keyType = myWaiterOp.keyType;
+	lockerState->delegatedCallbackId = myWaiterOp.delegatedCallbackId;
+	lockerState->opResult = OPageWaiterOpNotApplied;
+	lockerState->undoLocation = InvalidUndoLocation;
+	lockerState->pageChangeCount = pageChangeCount;
+	lockerState->autonomousNestingLevel = GET_CUR_PROCDATA()->autonomousNestingLevel;
+
+	return true;
+}
+
 static uint64
 lock_page_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum)
 {
@@ -166,6 +254,10 @@ lock_page_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum)
 			lockerState->next = (state & PAGE_STATE_LIST_TAIL_MASK);
 			newState = state & (~PAGE_STATE_LIST_TAIL_MASK);
 			newState |= pgprocnum;
+
+			if (publish_my_waiter_op(lockerState, pgprocnum,
+									 O_PAGE_GET_CHANGE_COUNT(p)))
+				newState |= PAGE_STATE_HAS_OP_WAITER_FLAG;
 		}
 
 		if (!ucmUpdateTried)

@@ -1581,6 +1581,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	int			pageReserveKind;
 	Jsonb	   *params = NULL;
 	OFindPageResult findResult;
+	bool		waiterOpSet = false;
 
 	if (STOPEVENTS_ENABLED())
 		params = prepare_modify_start_params(desc);
@@ -1625,25 +1626,31 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		 * Describe the operation to whoever holds the leaf, so it can finish
 		 * it for us instead of just handing the page over.  What travels is
 		 * the new tuple for an update and the key for a delete or a lock.
+		 *
+		 * Advertised through the plain lock path rather than by setting
+		 * insertTuple: that would also move us onto the insert path's way of
+		 * waiting, which reads the page before queueing so it can tell
+		 * whether the key is even on it.  An insert has to ask that; we
+		 * already know.
 		 */
-		pageFindContext.insertTuple = (action == BTreeOperationUpdate) ?
-			tuple : *((OTuple *) key);
-		pageFindContext.waiterAction = action;
-		pageFindContext.waiterLockMode = lockMode;
-		pageFindContext.waiterOpCsn = opCsn;
-		pageFindContext.waiterKeyType = (action == BTreeOperationUpdate) ?
-			BTreeKeyLeafTuple : keyType;
-		pageFindContext.waiterDelegatedCallbackId =
-			callbackInfo ? callbackInfo->delegatedCallbackId : 0;
-		pageFindContext.insertXactInfo =
-			OXID_GET_XACT_INFO(opOxid, lockMode,
-							   action == BTreeOperationLock);
+		waiterOpSet = true;
+		set_my_waiter_op(desc, action, lockMode, opCsn,
+						 (action == BTreeOperationUpdate) ?
+						 BTreeKeyLeafTuple : keyType,
+						 callbackInfo ? callbackInfo->delegatedCallbackId : 0,
+						 OXID_GET_XACT_INFO(opOxid, lockMode,
+											action == BTreeOperationLock),
+						 (action == BTreeOperationUpdate) ?
+						 tuple : *((OTuple *) key));
 	}
 
 	if (hint && OInMemoryBlknoIsValid(hint->blkno))
 		findResult = refind_page(&pageFindContext, key, keyType, 0, hint->blkno, hint->pageChangeCount);
 	else
 		findResult = find_page(&pageFindContext, key, keyType, 0);
+
+	if (waiterOpSet)
+		clear_my_waiter_op();
 
 	if (findResult == OFindPageResultServiced)
 	{
