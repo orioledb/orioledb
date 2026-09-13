@@ -27,10 +27,13 @@
 #include "recovery/wal.h"
 #include "transam/undo.h"
 #include "transam/oxid.h"
+#include "tableam/descr.h"
+#include "tuple/format.h"
 #include "utils/page_pool.h"
 #include "utils/stopevent.h"
 
 #include "miscadmin.h"
+#include "utils/memutils.h"
 
 #define IsRelationTree(desc) (ORelOidsIsValid(desc->oids) && !IS_SYS_TREE_OIDS(desc->oids))
 
@@ -1218,6 +1221,100 @@ o_btree_modify_lock(BTreeModifyInternalContext *context)
  * resolving one means blocking, and blocking here would hold the page for
  * everybody else on it.
  */
+static MemoryContext delegated_rebuild_cxt = NULL;
+
+/*
+ * Rebuild a waiting backend's new row from the row as we found it, by
+ * applying the assignment it left us.
+ *
+ * This is what makes contention for one row worth combining: the tuple the
+ * waiter computed was computed from the row it read, which under contention
+ * is not the row that is there now, whereas the assignment still means the
+ * same thing.  It is the same rebuild EvalPlanQual() would have done in the
+ * waiter, against the same row.
+ *
+ * Returns a null tuple if the row cannot be rebuilt here, which is never
+ * wrong -- the waiter then does its own update in the ordinary way.
+ */
+static OTuple
+rebuild_waiter_tuple(BTreeDescr *desc, OTuple curTuple, int pgprocno,
+					 LocationIndex *newTuplen)
+{
+	OIndexDescr *id = (OIndexDescr *) desc->arg;
+	OSetProgram *program = &lockerPayloads[pgprocno].program;
+	OTupleReaderState reader;
+	TupleDesc	tupdesc;
+	Datum	   *values;
+	bool	   *isnull;
+	OTuple		result;
+	int			natts,
+				i;
+	MemoryContext oldcxt;
+
+	O_TUPLE_SET_NULL(result);
+
+	if (desc->type != oIndexPrimary || program->nops == 0)
+		return result;
+
+	tupdesc = id->leafTupdesc;
+	natts = tupdesc->natts;
+
+	if (delegated_rebuild_cxt == NULL)
+		delegated_rebuild_cxt =
+			AllocSetContextCreate(TopMemoryContext,
+								  "orioledb delegated update rebuild",
+								  ALLOCSET_SMALL_SIZES);
+	else
+	{
+		/*
+		 * Everything the last rebuild allocated has long since been copied
+		 * into the page and into the waiter's own state.  Reset rather than
+		 * free piecemeal, which also cleans up after a rebuild that raised.
+		 */
+		MemoryContextReset(delegated_rebuild_cxt);
+	}
+
+	oldcxt = MemoryContextSwitchTo(delegated_rebuild_cxt);
+
+	values = (Datum *) palloc(natts * sizeof(Datum));
+	isnull = (bool *) palloc(natts * sizeof(bool));
+
+	/*
+	 * Everything from here can raise: reading a field of a malformed tuple,
+	 * and forming one that will not fit.  We are holding a page, so an error
+	 * getting out would leave it locked behind us -- catch it, put the error
+	 * away, and report that we could not do it.
+	 */
+	PG_TRY();
+	{
+		o_tuple_init_reader(&reader, curTuple, tupdesc, &id->leafSpec);
+		for (i = 0; i < natts; i++)
+			values[i] = o_tuple_read_next_field(&reader, &isnull[i]);
+
+		if (o_set_program_apply(program, values, isnull, natts))
+		{
+			result = o_form_tuple(tupdesc, &id->leafSpec,
+								  o_tuple_get_version(curTuple) + 1,
+								  values, isnull, NULL);
+			*newTuplen = o_btree_len(desc, result, OTupleLength);
+
+			/* No room to grow the item is a decline, not a failure. */
+			if (*newTuplen > O_BTREE_MAX_TUPLE_SIZE)
+				O_TUPLE_SET_NULL(result);
+		}
+	}
+	PG_CATCH();
+	{
+		FlushErrorState();
+		O_TUPLE_SET_NULL(result);
+	}
+	PG_END_TRY();
+
+	MemoryContextSwitchTo(oldcxt);
+
+	return result;
+}
+
 static bool
 apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 {
@@ -1234,12 +1331,14 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	OXid		oxid;
 	OTuple		newTuple;
 	OTuple		delegatedTuple;
+	OTuple		rebuiltTuple;
 	LocationIndex newTuplen = 0;
 	LocationIndex newItemSize = 0;
 	BTreeLeafTuphdr *waiterTuphdr;
 	bool		redundantRowLocks = false;
 
 	O_TUPLE_SET_NULL(delegatedTuple);
+	O_TUPLE_SET_NULL(rebuiltTuple);
 
 	/* Every operation here is recorded in undo; without it we cannot act. */
 	if (desc->undoType == UndoLogNone)
@@ -1297,7 +1396,30 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	 * It may amend the new tuple and refuse outright; it also settles the
 	 * lock mode, so it has to run before the conflict question is asked.
 	 */
-	if (lockerState->delegatedCallbackId != 0)
+	if (lockerState->action == BTreeOperationUpdate &&
+		lockerPayloads[pgprocno].program.nops > 0)
+	{
+		/*
+		 * We were given the assignment rather than a tuple, so the row having
+		 * moved on is no reason to decline: rebuild from what is there.  The
+		 * lock has to be the stronger of the two update modes, since working
+		 * out whether the key attributes changed would mean comparing through
+		 * the waiter's slots, which are not ours to read.
+		 */
+		/*
+		 * A row this same transaction wrote needs command-id bookkeeping only
+		 * its own backend can do.
+		 */
+		if (XACT_INFO_OXID_EQ(tuphdr->xactInfo, oxid))
+			return false;
+
+		rebuiltTuple = rebuild_waiter_tuple(desc, curTuple, pgprocno,
+											&newTuplen);
+		if (O_TUPLE_IS_NULL(rebuiltTuple))
+			return false;
+		lockerState->lockMode = RowLockUpdate;
+	}
+	else if (lockerState->delegatedCallbackId != 0)
 	{
 		BTreeDelegatedModifyCallback delegated;
 
@@ -1367,14 +1489,17 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 		 * reinstating the flags published before the call would leave the
 		 * page describing this tuple in a layout it no longer has.
 		 */
-		if (!O_TUPLE_IS_NULL(delegatedTuple))
+		if (!O_TUPLE_IS_NULL(rebuiltTuple))
+			newTuple = rebuiltTuple;
+		else if (!O_TUPLE_IS_NULL(delegatedTuple))
 			newTuple = delegatedTuple;
 		else
 		{
 			newTuple.formatFlags = lockerState->tupleFlags;
 			newTuple.data = &lockerPayloads[pgprocno].tupleData.fixedData[BTreeLeafTuphdrSize];
 		}
-		newTuplen = o_btree_len(desc, newTuple, OTupleLength);
+		if (O_TUPLE_IS_NULL(rebuiltTuple))
+			newTuplen = o_btree_len(desc, newTuple, OTupleLength);
 		newItemSize = MAXALIGN(newTuplen) + BTreeLeafTuphdrSize;
 
 		if (newItemSize > BTREE_PAGE_GET_ITEM_SIZE(p, &loc) &&
@@ -1415,6 +1540,21 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 		memcpy(lockerPayloads[pgprocno].oldTupleData.fixedData, curTuple.data, oldTuplen);
 		lockerState->oldTupleFlags = curTuple.formatFlags;
 		lockerState->oldTupleLen = oldTuplen;
+
+		/*
+		 * When we worked the row out ourselves the waiter has never seen it,
+		 * so give it that too: its own slot still holds what it computed from
+		 * a row that is no longer there.
+		 */
+		if (!O_TUPLE_IS_NULL(rebuiltTuple))
+		{
+			memcpy(&lockerPayloads[pgprocno].tupleData.fixedData[BTreeLeafTuphdrSize],
+				   newTuple.data, newTuplen);
+			lockerState->tupleFlags = newTuple.formatFlags;
+			lockerPayloads[pgprocno].delegatedResult.newTupleLen = newTuplen;
+		}
+		else
+			lockerPayloads[pgprocno].delegatedResult.newTupleLen = 0;
 
 		newTuphdr.undoLocation = undoLocation;
 		newTuphdr.chainHasLocks = tuphdr->chainHasLocks ||
@@ -1768,6 +1908,14 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		findResult = refind_page(&pageFindContext, key, keyType, 0, hint->blkno, hint->pageChangeCount);
 	else
 		findResult = find_page(&pageFindContext, key, keyType, 0);
+
+	/*
+	 * Only that first descent may come back finished.  Past it we are in the
+	 * middle of our own modification and re-descend to resolve a conflict;
+	 * the callers of those descents expect a locked page, not an answer, so
+	 * stop advertising the work.
+	 */
+	O_TUPLE_SET_NULL(pageFindContext.insertTuple);
 
 	if (findResult == OFindPageResultServiced)
 	{

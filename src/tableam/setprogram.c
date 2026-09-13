@@ -16,8 +16,10 @@
 
 #include "tableam/setprogram.h"
 
+#include "access/xact.h"
 #include "common/int.h"
 #include "executor/executor.h"
+#include "nodes/execnodes.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
 #include "parser/parsetree.h"
@@ -337,6 +339,14 @@ compile_current_program(QueryDesc *queryDesc)
 
 	if (queryDesc->operation != CMD_UPDATE)
 		return;
+
+	/*
+	 * A snapshot that spans the transaction means a row committed after it
+	 * has to raise, not be recomputed against.  Rebuilding from the row as
+	 * found is read-committed behaviour and nothing else.
+	 */
+	if (IsolationUsesXactSnapshot())
+		return;
 	if (!IsA(stmt->planTree, ModifyTable))
 		return;
 
@@ -379,6 +389,21 @@ compile_current_program(QueryDesc *queryDesc)
 
 	if (nops == 0)
 		return;
+
+	/*
+	 * Anything that reads the row we produce has to see the row that was
+	 * really stored, and the process that stores it cannot run triggers or
+	 * projections on our behalf.  Leave those statements alone.
+	 */
+	if (queryDesc->estate != NULL && queryDesc->estate->es_result_relations != NULL)
+	{
+		ResultRelInfo *rri = queryDesc->estate->es_result_relations[0];
+
+		if (rri == NULL || rri->ri_TrigDesc != NULL ||
+			rri->ri_projectReturning != NULL ||
+			rri->ri_WithCheckOptions != NIL)
+			return;
+	}
 
 	rti = linitial_int(node->resultRelations);
 	rte = list_nth_node(RangeTblEntry, stmt->rtable, rti - 1);
