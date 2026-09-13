@@ -1375,21 +1375,22 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 							 NULL, &loc);
 	(void) page_locator_find_real_item(p, NULL, &loc);
 
+	/*
+	 * Not finding the row is not an answer we should give.  We are looking at
+	 * one page, from the outside of the waiter's descent, and "it is not
+	 * here" can mean the key moved rather than that it is gone -- reported as
+	 * an outcome it would turn into an update that silently did nothing.
+	 * Decline, and let the waiter find out for itself.
+	 */
 	if (!BTREE_PAGE_LOCATOR_IS_VALID(p, &loc))
-	{
-		lockerState->opResult = OPageWaiterOpNotFound;
-		return true;
-	}
+		return false;
 
 	BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, p, &loc);
 
 	if (o_btree_cmp(desc, &key, lockerState->keyType,
 					&curTuple, BTreeKeyLeafTuple) != 0 ||
 		tuphdr->deleted != BTreeLeafTupleNonDeleted)
-	{
-		lockerState->opResult = OPageWaiterOpNotFound;
-		return true;
-	}
+		return false;
 
 	/*
 	 * The half of the caller's callback that belongs on the page runs here.
