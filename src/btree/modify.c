@@ -1616,7 +1616,6 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	int			pageReserveKind;
 	Jsonb	   *params = NULL;
 	OFindPageResult findResult;
-	bool		waiterOpSet = false;
 
 	if (STOPEVENTS_ENABLED())
 		params = prepare_modify_start_params(desc);
@@ -1662,21 +1661,24 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		 * it for us instead of just handing the page over.  What travels is
 		 * the new tuple for an update and the key for a delete or a lock.
 		 *
-		 * Advertised through the plain lock path rather than by setting
-		 * insertTuple: that would also move us onto the insert path's way of
-		 * waiting, which reads the page before queueing so it can tell
-		 * whether the key is even on it.  An insert has to ask that; we
-		 * already know.
+		 * This is the same channel an insert uses, and it has to be: waiting
+		 * on the plain page lock instead would leave nobody to notice that
+		 * the work came back done.  Only lock_page_with_tuple() reads the
+		 * serviced flag, and a waiter that misses it goes on to repeat an
+		 * operation another process has already recorded in its undo.
 		 */
-		waiterOpSet = true;
-		set_my_waiter_op(desc, action, lockMode, opCsn,
-						 (action == BTreeOperationUpdate) ?
-						 BTreeKeyLeafTuple : keyType,
-						 callbackInfo ? callbackInfo->delegatedCallbackId : 0,
-						 OXID_GET_XACT_INFO(opOxid, lockMode,
-											action == BTreeOperationLock),
-						 (action == BTreeOperationUpdate) ?
-						 tuple : *((OTuple *) key));
+		pageFindContext.insertTuple = (action == BTreeOperationUpdate) ?
+			tuple : *((OTuple *) key);
+		pageFindContext.waiterAction = action;
+		pageFindContext.waiterLockMode = lockMode;
+		pageFindContext.waiterOpCsn = opCsn;
+		pageFindContext.waiterKeyType = (action == BTreeOperationUpdate) ?
+			BTreeKeyLeafTuple : keyType;
+		pageFindContext.waiterDelegatedCallbackId =
+			callbackInfo ? callbackInfo->delegatedCallbackId : 0;
+		pageFindContext.insertXactInfo =
+			OXID_GET_XACT_INFO(opOxid, lockMode,
+							   action == BTreeOperationLock);
 	}
 
 	if (hint && OInMemoryBlknoIsValid(hint->blkno))
@@ -1684,40 +1686,20 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	else
 		findResult = find_page(&pageFindContext, key, keyType, 0);
 
-	if (waiterOpSet)
-		clear_my_waiter_op();
-
 	if (findResult == OFindPageResultServiced)
 	{
 		OPageWaiterShmemState *myState = &lockerStates[MYPROCNUMBER];
 
-		if (desc->undoType != UndoLogNone)
-		{
-			/*
-			 * Give the reservation up rather than release it.  The holder
-			 * took it over to write our undo record, so releasing would
-			 * subtract what we no longer have, and the accounting it
-			 * corrupts is what everyone flushing undo spins on.
-			 */
-			giveup_reserved_undo_size(desc->undoType);
-			if (GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType) != desc->undoType)
-				release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+		/*
+		 * lock_page_with_tuple() has already handed our undo reservation to
+		 * the holder that used it, and retained the record the holder wrote.
+		 * What is left is the page-level reservation, which the holder never
+		 * touches because it does not split the page for us.
+		 */
+		if (desc->undoType != UndoLogNone &&
+			GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType) != desc->undoType)
+			release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
 
-			/*
-			 * The record the holder wrote is ours: retain it, and register it
-			 * as this command's, which is bookkeeping only our own backend
-			 * can do.
-			 */
-			if (UndoLocationIsValid(myState->undoLocation))
-			{
-				if (!UndoLocationIsValid(curRetainUndoLocations[desc->undoType]))
-					curRetainUndoLocations[desc->undoType] = myState->undoLocation;
-
-				if (desc->undoType == UndoLogRegular && !IsParallelWorker())
-					update_command_undo_location(o_get_current_command(),
-												 myState->undoLocation);
-			}
-		}
 		ppool_release_reserved(desc->ppool, PPOOL_RESERVE_INSERT);
 		Assert(!have_locked_pages());
 

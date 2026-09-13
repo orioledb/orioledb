@@ -90,11 +90,6 @@ extern int	get_page_waiters(BTreeDescr *desc, OInMemoryBlkno blkno,
 							 uint64 state,
 							 int result[BTREE_PAGE_MAX_SPLIT_ITEMS]);
 extern uint64 page_locked_state(OInMemoryBlkno blkno);
-extern void set_my_waiter_op(BTreeDescr *desc, BTreeOperationType action,
-							 RowLockMode lockMode, CommitSeqNo opCsn,
-							 BTreeKeyType keyType, int delegatedCallbackId,
-							 OTupleXactInfo xactInfo, OTuple tuple);
-extern void clear_my_waiter_op(void);
 extern void mark_waiter_tuples_inserted(int procnums[BTREE_PAGE_MAX_SPLIT_ITEMS],
 										int count);
 extern void lock_page(OInMemoryBlkno blkno);
