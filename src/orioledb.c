@@ -42,6 +42,7 @@
 #include "tableam/handler.h"
 #include "tableam/operations.h"
 #include "tableam/scan.h"
+#include "tableam/setprogram.h"
 #include "tableam/toast.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
@@ -1540,6 +1541,7 @@ _PG_init(void)
 	set_rel_pathlist_hook = orioledb_set_rel_pathlist_hook;
 	set_plain_rel_pathlist_hook = orioledb_set_plain_rel_pathlist_hook;
 	RegisterXactCallback(orioledb_drop_database_xact_callback, NULL);
+	o_setprogram_init();
 	RegisterXactCallback(undo_xact_callback, NULL);
 	RegisterSubXactCallback(undo_subxact_callback, NULL);
 	get_xidless_commit_lsn_hook = orioledb_get_xidless_commit_lsn;

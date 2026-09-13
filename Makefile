@@ -79,6 +79,7 @@ OBJS = src/btree/btree.o \
 	   src/tableam/operations.o \
 	   src/tableam/radix_selftest.o \
 	   src/tableam/scan.o \
+	   src/tableam/setprogram.o \
 	   src/tableam/tree.o \
 	   src/tableam/vacuum.o \
 	   src/transam/undo.o \
