@@ -1047,6 +1047,40 @@ unlock_check_page(OInMemoryBlkno blkno)
  * from scratch (the latter is not possible, because we might already have
  * modified the list).
  */
+/*
+ * Waiters whose work is done but whose transaction has not committed yet.
+ * Taken off the page's queue by the unlock and kept here until
+ * btree_wake_deferred_waiters() lets them go.  A holder that collects any
+ * must wake them on every path out, or they sleep for good.
+ */
+static uint32 deferredWakeHead = PAGE_STATE_INVALID_PROCNO;
+
+void
+btree_wake_deferred_waiters(void)
+{
+	while (deferredWakeHead != PAGE_STATE_INVALID_PROCNO)
+	{
+		OPageWaiterShmemState *lockState = &lockerStates[deferredWakeHead];
+		PGPROC	   *proc = GetPGProcByNumber(deferredWakeHead);
+		uint32		next = lockState->next;
+
+		lockState->deferWake = false;
+
+		pg_memory_barrier();
+		lockState->status = OPageWaitWakeUp;
+		pg_memory_barrier();
+
+		PGSemaphoreUnlock(proc->sem);
+		deferredWakeHead = next;
+	}
+}
+
+bool
+btree_has_deferred_waiters(void)
+{
+	return deferredWakeHead != PAGE_STATE_INVALID_PROCNO;
+}
+
 static void
 unlock_page_internal(OInMemoryBlkno blkno, bool split)
 {
@@ -1222,6 +1256,20 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 		PGPROC	   *proc = GetPGProcByNumber(procno);
 
 		next = lockState->next;
+
+		/*
+		 * Work that is done but not yet committed: off the queue, so nobody
+		 * does it twice, but still asleep.  Ours to wake, once it is safe to
+		 * tell it that it succeeded.
+		 */
+		if (lockState->deferWake)
+		{
+			lockState->next = deferredWakeHead;
+			deferredWakeHead = procno;
+			actualWakeCount++;
+			procno = next;
+			continue;
+		}
 
 		/*
 		 * Ensure memory access ordering.  The effect of statement above must
