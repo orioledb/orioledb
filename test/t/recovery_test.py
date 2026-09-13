@@ -2731,6 +2731,77 @@ class RecoveryTest(BaseTest):
 		        "SELECT orioledb_tbl_check('o_sk_self'::regclass)")[0][0])
 		node.stop()
 
+	def test_recovery_sk_modify_pending_on_conflict(self):
+		"""
+		A non-conflicting INSERT ... ON CONFLICT DO NOTHING inserts a new row
+		through o_tbl_insert_with_arbiter(): the primary key is applied in the
+		arbiter loop and the non-arbiter unique secondary index in the second
+		loop.  A CHECKPOINT landing in that PK-applied/SK-pending window must
+		capture the pending fix-up into the xid file so crash recovery
+		reconciles the secondary index.  Without the postUndoRecorded hook
+		wired to the primary-index call the sk_modify_pending stopevent never
+		fires and recovery can lose the SK side of the row.
+		"""
+		node = self._sk_modify_pending_setup()
+
+		con_ctl = node.connect()
+		con_ctl.execute("SET application_name = 's_ctl';")
+		con_dml = node.connect()
+		con_dml.execute("SET application_name = 's_dml';")
+		con_dml.commit()
+		dml_pid = con_dml.execute("SELECT pg_backend_pid();")[0][0]
+		con_dml.commit()
+
+		con_ctl.execute("SELECT pg_stopevent_set('sk_modify_pending', "
+		                "'$applicationName == \"s_dml\"');")
+
+		expected_rows = 6  # 5 seeded + 1 new non-conflicting row
+
+		dml_thread = ThreadQueryExecutor(
+		    con_dml, "BEGIN; "
+		    "INSERT INTO o_sk_pending VALUES (100, 100) "
+		    "ON CONFLICT (id) DO NOTHING; COMMIT;")
+		dml_thread.start()
+
+		# Bounded wait: without the hook the stopevent never fires and an
+		# unbounded wait_stopevent() would hang the whole suite.
+		deadline = time.time() + 30
+		while time.time() < deadline:
+			if node.execute(
+			    'postgres', f"SELECT EXISTS(SELECT 1 FROM pg_stopevents() "
+			    f"WHERE waiter_pids @> ARRAY[{dml_pid}])")[0][0]:
+				break
+			time.sleep(0.1)
+		else:
+			con_ctl.execute("SELECT pg_stopevent_reset('sk_modify_pending');")
+			dml_thread.join()
+			con_ctl.close()
+			con_dml.close()
+			raise AssertionError(
+			    "sk_modify_pending stopevent did not fire for ON CONFLICT "
+			    "insert -- primary-index postUndoRecorded hook is missing in "
+			    "o_tbl_insert_with_arbiter()")
+
+		# Single CHECKPOINT scans the parked backend's pendingSkUndoLoc.
+		con_ctl.execute("CHECKPOINT;")
+		con_ctl.execute("SELECT pg_stopevent_reset('sk_modify_pending');")
+		dml_thread.join()
+
+		live_pk = node.execute('postgres',
+		                       "SELECT count(*) FROM o_sk_pending")[0][0]
+		live_sk = node.execute(
+		    'postgres', "SELECT count(DISTINCT token) FROM o_sk_pending")[0][0]
+		self.assertEqual((live_pk, live_sk), (expected_rows, expected_rows),
+		                 f"PK/SK diverged before crash: {live_pk}/{live_sk}")
+
+		con_ctl.close()
+		con_dml.close()
+
+		self.crash_with_os_buffer_loss()
+		node.start()
+		self._sk_modify_pending_assert_consistent(node, expected_rows)
+		node.stop()
+
 	def test_single_user_recovery(self):
 		"""
 		Crash recovery in a standalone backend
