@@ -205,7 +205,16 @@ o_convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 		ve.va_rawsize = otv.raw_size + VARHDRSZ;
 		ve.va_extinfo = (otv.toasted_size - VARHDRSZ) | (otv.compression << VARLENA_EXTSIZE_BITS);
 		ve.va_toastrelid = descr->toast->oids.reloid;
-		ve.va_valueid = ObjectIdGetDatum(toast_attn + 1 + 8000);
+
+		/*
+		 * Key it by the attnum the chunks were logged under, which is the
+		 * TOAST tree's key column: 1-based and relative to the leaf tuple.
+		 * toast_attn is something else -- an index into the arrays above,
+		 * already shifted past the ctid -- so using it here made the pointer
+		 * and its chunks disagree by ctid_off, and a table with no primary
+		 * key never delivered a TOASTed value at all.
+		 */
+		ve.va_valueid = ObjectIdGetDatum(descr->toastable[i] + 1 + 8000);
 
 		elog(DEBUG4, "New toast pointer compression: %u rawsize: %u, extinfo_size: %u, toastrelid %u, valueid %u  ",
 			 (ve.va_extinfo >> VARLENA_EXTSIZE_BITS), ve.va_rawsize,
