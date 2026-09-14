@@ -1698,9 +1698,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				 * - *Bridged* (any non-btree AM, or btree with
 				 * WITH(orioledb_index=false), or btree on a table whose
 				 * index_bridging is enabled): the index is a stock-PG index
-				 * keyed by bridge_ctid.  Non-unique CIC can use that path, but
-				 * UNIQUE must be downgraded until validate_scan can catch rows
-				 * committed during the phase-2 build.
+				 * keyed by bridge_ctid.  Non-unique CIC can use that path,
+				 * but UNIQUE must be downgraded until validate_scan can catch
+				 * rows committed during the phase-2 build.
 				 */
 				if (stmt->unique && !o_cic_is_native_index(rel, stmt))
 				{
