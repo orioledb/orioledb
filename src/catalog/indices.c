@@ -1018,7 +1018,8 @@ o_define_index_concurrent_finish(Relation heap, Relation index)
 					}
 					if (o_idx_cmp_value_bounds(&prev_bound.keys[i],
 											   &bound.keys[i],
-											   &idx->fields[i], NULL) != 0)
+											   &idx->fields[i],
+											   idx->oids.datoid, NULL) != 0)
 					{
 						all_equal = false;
 						break;

@@ -51,12 +51,13 @@
 #include "utils/syscache.h"
 #include "pgstat.h"
 
-static void o_invalidate_comparator_cache(Oid opfamily, Oid lefttype,
-										  Oid righttype);
+static void o_invalidate_comparator_cache(Oid datoid, Oid opfamily,
+										  Oid lefttype, Oid righttype);
 
 typedef struct
 {
 	OnCommitUndoStackItem header;
+	Oid			datoid;
 	Oid			opfamily;
 	Oid			lefttype;
 	Oid			righttype;
@@ -74,8 +75,8 @@ static inline OComparator *o_find_cached_comparator(OComparatorKey *key);
 static inline OComparator *o_add_comparator_to_cache(OComparator *comparator);
 static bool recreate_table_descr(OTableDescr *descr);
 static void recreate_index_descr(OIndexDescr *descr);
-static OExclusionFn *o_find_exclusion_op_fn(Oid exclusion_op);
-static inline OExclusionFn *o_find_cached_exclusion_fn(Oid exclusion_op);
+static OExclusionFn *o_find_exclusion_op_fn(Oid exclusion_op, Oid datoid);
+static inline OExclusionFn *o_find_cached_exclusion_fn(OExclusionFnKey *key);
 static inline OExclusionFn *o_add_exclusion_fn_to_cache(OExclusionFn *exclusion_fn);
 static OHashFn *o_find_hash_fn(Oid hash_fn_oid, Oid datoid);
 static inline OHashFn *o_find_cached_hash_fn(OHashFnKey *key);
@@ -117,6 +118,7 @@ static OTableDescr *filling_table_descr = NULL;
 
 struct OComparatorKey
 {
+	Oid			datoid;
 	Oid			opfamily;
 	Oid			lefttype;
 	Oid			righttype;
@@ -153,7 +155,7 @@ static HTAB *localSharedRootInfoHash = NULL;
 static OComparatorKey lastkey = {0};
 static OComparator *lastcmp = NULL;
 static MemoryContext descrCxt = NULL;
-static Oid	last_exclusion_op = InvalidOid;
+static OExclusionFnKey last_exclusion_key = {0};
 static OExclusionFn *last_exclusion_fn = NULL;
 static OHashFnKey last_hash_fn_key = {0};
 static OHashFn *last_hash_fn = NULL;
@@ -1927,7 +1929,7 @@ oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid,
 	field->comparator = o_find_opclass_comparator(opclass, field->collation,
 												  exacttype);
 	if (OidIsValid(exclusion_op))
-		field->exclusion_fn = o_find_exclusion_op_fn(exclusion_op);
+		field->exclusion_fn = o_find_exclusion_op_fn(exclusion_op, datoid);
 	if (hash_fn_oid == O_DEFAULT_HASH_FN_OID)
 		field->hash_fn = &o_default_hash_fn;
 	else
@@ -1941,9 +1943,11 @@ oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid,
  * if not found.
  */
 OComparator *
-o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
+o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation,
+				  Oid datoid)
 {
 	OComparatorKey key = {
+		.datoid = datoid,
 		.opfamily = opfamily,
 		.lefttype = lefttype,
 		.righttype = righttype,
@@ -1953,6 +1957,9 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 	OComparator *result;
 	OComparator comparator;
 	Oid			procOid;
+
+	Assert(OidIsValid(datoid));
+	o_set_sys_cache_search_datoid(datoid);
 
 	/*
 	 * At first, try to find existing comparator in cache.
@@ -2048,6 +2055,7 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation, Oid exacttype)
 
 	Assert(opclass != NULL);
 
+	key.datoid = opclass->key.common.datoid;
 	key.opfamily = opclass->opfamily;
 	key.lefttype = opclass->inputtype;
 	key.righttype = opclass->inputtype;
@@ -2154,17 +2162,20 @@ o_add_comparator_to_cache(OComparator *comparator)
 }
 
 static void
-o_invalidate_comparator_cache(Oid opfamily, Oid lefttype, Oid righttype)
+o_invalidate_comparator_cache(Oid datoid, Oid opfamily, Oid lefttype,
+							  Oid righttype)
 {
 	OComparator *comparator;
 	HASH_SEQ_STATUS scan_status;
 	OComparatorKey key = {
+		.datoid = datoid,
 		.opfamily = opfamily,
 		.lefttype = lefttype,
 		.righttype = righttype
 	};
 
-	if (key.opfamily == lastkey.opfamily &&
+	if (key.datoid == lastkey.datoid &&
+		key.opfamily == lastkey.opfamily &&
 		key.lefttype == lastkey.lefttype &&
 		key.righttype == lastkey.righttype)
 		lastcmp = NULL;
@@ -2172,7 +2183,8 @@ o_invalidate_comparator_cache(Oid opfamily, Oid lefttype, Oid righttype)
 	hash_seq_init(&scan_status, comparatorCache);
 	while ((comparator = (OComparator *) hash_seq_search(&scan_status)) != NULL)
 	{
-		if (key.opfamily == comparator->key.opfamily &&
+		if (key.datoid == comparator->key.datoid &&
+			key.opfamily == comparator->key.opfamily &&
 			key.lefttype == comparator->key.lefttype &&
 			key.righttype == comparator->key.righttype)
 		{
@@ -2198,13 +2210,15 @@ o_invalidate_comparator_callback(UndoLogType undoType, UndoLocation location,
 	if (stage == OUndoCallbackStagePreCommit)
 		return;
 
-	o_invalidate_comparator_cache(invalidateItem->opfamily,
+	o_invalidate_comparator_cache(invalidateItem->datoid,
+								  invalidateItem->opfamily,
 								  invalidateItem->lefttype,
 								  invalidateItem->righttype);
 }
 
 void
-o_add_invalidate_comparator_undo_item(Oid opfamily, Oid lefttype, Oid righttype)
+o_add_invalidate_comparator_undo_item(Oid datoid, Oid opfamily, Oid lefttype,
+									  Oid righttype)
 {
 	UndoLocation location;
 	InvalidateComparatorUndoStackItem *item;
@@ -2214,6 +2228,7 @@ o_add_invalidate_comparator_undo_item(Oid opfamily, Oid lefttype, Oid righttype)
 	item = (InvalidateComparatorUndoStackItem *) get_undo_record_unreserved(UndoLogSystem,
 																			&location,
 																			MAXALIGN(size));
+	item->datoid = datoid;
 	item->opfamily = opfamily;
 	item->lefttype = lefttype;
 	item->righttype = righttype;
@@ -2382,7 +2397,7 @@ o_tableam_descr_init(void)
 								  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
 	MemSet(&ctl, 0, sizeof(ctl));
-	ctl.keysize = sizeof(Oid);
+	ctl.keysize = sizeof(OExclusionFnKey);
 	ctl.entrysize = sizeof(OExclusionFn);
 	ctl.hcxt = descrCxt;
 	exclusionFnCache = hash_create("OrioleDB exclusion functions", 8,
@@ -2590,25 +2605,29 @@ o_add_invalidate_undo_item(ORelOids oids, uint32 flags)
  * Find exclusion function in cache or create new one.
  */
 static OExclusionFn *
-o_find_exclusion_op_fn(Oid exclusion_op)
+o_find_exclusion_op_fn(Oid exclusion_op, Oid datoid)
 {
+	OExclusionFnKey key = {
+		.datoid = datoid,
+		.operator = exclusion_op
+	};
 	OExclusionFn *result;
 	OExclusionFn exclusion_fn;
 	Oid			oprcode;
 	MemoryContext oldcontext;
 
-	if ((result = o_find_cached_exclusion_fn(exclusion_op)) != NULL)
+	if ((result = o_find_cached_exclusion_fn(&key)) != NULL)
 		return result;
 
 	memset(&exclusion_fn, 0, sizeof(exclusion_fn));
-	exclusion_fn.operator = exclusion_op;
+	exclusion_fn.key = key;
 
 	o_set_syscache_hooks();
 	oprcode = o_operator_cache_get_oprcode(exclusion_op);
 
 	/* See o_find_comparator() for why we switch to descrCxt. */
 	oldcontext = MemoryContextSwitchTo(descrCxt);
-	o_proc_cache_fill_finfo(&exclusion_fn.finfo, oprcode, MyDatabaseId);
+	o_proc_cache_fill_finfo(&exclusion_fn.finfo, oprcode, datoid);
 	MemoryContextSwitchTo(oldcontext);
 
 	o_unset_syscache_hooks();
@@ -2620,20 +2639,20 @@ o_find_exclusion_op_fn(Oid exclusion_op)
  * Tries to find an exclusion function in the cache.
  */
 static inline OExclusionFn *
-o_find_cached_exclusion_fn(Oid exclusion_op)
+o_find_cached_exclusion_fn(OExclusionFnKey *key)
 {
 	OExclusionFn *result;
 	bool		found;
 
 	/* compares with previous search */
-	if (exclusion_op == last_exclusion_op)
+	if (memcmp(key, &last_exclusion_key, sizeof(OExclusionFnKey)) == 0)
 		return last_exclusion_fn;
 
 	/* try to find in the cache */
-	result = hash_search(exclusionFnCache, &exclusion_op, HASH_FIND, &found);
+	result = hash_search(exclusionFnCache, key, HASH_FIND, &found);
 	if (found)
 	{
-		last_exclusion_op = exclusion_op;
+		last_exclusion_key = *key;
 		last_exclusion_fn = result;
 		return result;
 	}
@@ -2649,10 +2668,10 @@ o_add_exclusion_fn_to_cache(OExclusionFn *exclusion_fn)
 {
 	OExclusionFn *cached;
 
-	cached = hash_search(exclusionFnCache, &exclusion_fn->operator, HASH_ENTER, NULL);
+	cached = hash_search(exclusionFnCache, &exclusion_fn->key, HASH_ENTER, NULL);
 	memcpy(cached, exclusion_fn, sizeof(OExclusionFn));
 
-	last_exclusion_op = exclusion_fn->operator;
+	last_exclusion_key = exclusion_fn->key;
 	last_exclusion_fn = cached;
 
 	return cached;

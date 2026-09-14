@@ -787,6 +787,7 @@ int
 o_idx_cmp_value_bounds(OBTreeValueBound *bound1,
 					   OBTreeValueBound *bound2,
 					   OIndexField *field,
+					   Oid datoid,
 					   bool *equal)
 {
 	/* Keep clang analyzer quiet */
@@ -823,7 +824,8 @@ o_idx_cmp_value_bounds(OBTreeValueBound *bound1,
 				res = o_call_comparator(o_find_comparator(field->opfamily,
 														  bound1->type,
 														  bound2->type,
-														  field->collation),
+														  field->collation,
+														  datoid),
 										bound1->value,
 										bound2->value);
 		}
@@ -939,6 +941,7 @@ o_idx_cmp(BTreeDescr *desc,
 			cmp = o_idx_cmp_value_bounds(&key1->keys[i],
 										 &key2->keys[i],
 										 &id->fields[i],
+										 desc->oids.datoid,
 										 NULL);
 			if (cmp)
 				return cmp;
