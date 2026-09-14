@@ -36,6 +36,7 @@
 #include "transam/undo.h"
 #include "transam/undo.h"
 #include "tuple/slot.h"
+#include "tuple/toast.h"
 #include "utils/stopevent.h"
 
 #include "access/heapam.h"
@@ -1688,6 +1689,32 @@ o_tbl_insert_with_arbiter(Relation rel,
 	return NULL;
 }
 
+/*
+ * The old tuple of a REPLICA IDENTITY FULL modify record has to carry the
+ * values of its TOASTed attributes rather than the compact placeholder: it is
+ * the only record of what the row was, and its chunks are about to go away.
+ * Heap does the same in ExtractReplicaIdentity() via toast_flatten_tuple().
+ *
+ * Must be called before the TOAST values are removed, while the chunks are
+ * still there to be read.
+ */
+static OTuple
+flatten_old_tuple_for_wal(Relation rel, OTableDescr *descr,
+						  TupleTableSlot *oldSlot, bool *allocated)
+{
+	OTuple		tuple = ((OTableSlot *) oldSlot)->tuple;
+
+	*allocated = false;
+
+	if (descr->ntoastable == 0 ||
+		GET_PRIMARY(descr)->desc.storageType != BTreeStoragePersistence ||
+		rel->rd_rel->relreplident != REPLICA_IDENTITY_FULL ||
+		!RelationIsLogicallyLogged(rel))
+		return tuple;
+
+	return o_tuple_flatten_toast(descr, oldSlot, allocated);
+}
+
 OTableModifyResult
 o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			 OBTreeKeyBound *oldPkey, Relation rel, OXid oxid,
@@ -1890,8 +1917,14 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 
 		if (mres.action == BTreeOperationUpdate)
 		{
+			OTuple		oldWalTuple;
+			bool		oldWalTupleAllocated;
+
 			if (touched_indices)
 				delete_old_bridge_index_ctid(descr, rel, &((OTableSlot *) oldSlot)->bridge_ctid, csn);
+
+			oldWalTuple = flatten_old_tuple_for_wal(rel, descr, oldSlot,
+													&oldWalTupleAllocated);
 
 			mres.failedIxNum = TOASTIndexNumber;
 			mres.success = tts_orioledb_update_toast_values(oldSlot, slot, descr,
@@ -1903,17 +1936,26 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 				OTuple		final_tup = tts_orioledb_form_tuple(slot, descr);
 
 				elog(DEBUG3, "CALL o_wal_update");
-				o_wal_update(&primary->desc, final_tup, ((OTableSlot *) oldSlot)->tuple, rel->rd_rel->relreplident, descr->version);
+				o_wal_update(&primary->desc, final_tup, oldWalTuple, rel->rd_rel->relreplident, descr->version);
 			}
+
+			if (oldWalTupleAllocated)
+				pfree(oldWalTuple.data);
 		}
 		else if (mres.action == BTreeOperationDelete)
 		{
+			OTuple		oldWalTuple;
+			bool		oldWalTupleAllocated;
+
 			if (descr->bridge)
 			{
 				delete_old_bridge_index_ctid(descr, rel, &((OTableSlot *) oldSlot)->bridge_ctid, csn);
 				if (!touched_indices)
 					o_apply_new_bridge_index_ctid(descr, rel, slot, csn, false);
 			}
+
+			oldWalTuple = flatten_old_tuple_for_wal(rel, descr, oldSlot,
+													&oldWalTupleAllocated);
 
 			/* reinsert TOAST value */
 			mres.failedIxNum = TOASTIndexNumber;
@@ -1930,8 +1972,11 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			{
 				OTuple		final_tup = tts_orioledb_form_tuple(slot, descr);
 
-				o_wal_reinsert(&primary->desc, ((OTableSlot *) oldSlot)->tuple, final_tup, rel->rd_rel->relreplident, descr->version);
+				o_wal_reinsert(&primary->desc, oldWalTuple, final_tup, rel->rd_rel->relreplident, descr->version);
 			}
+
+			if (oldWalTupleAllocated)
+				pfree(oldWalTuple.data);
 		}
 		else
 		{
@@ -1989,6 +2034,7 @@ o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 		{
 			OIndexDescr *primary = GET_PRIMARY(descr);
 			OTuple		primary_tuple;
+			bool		primary_tuple_allocated;
 			OTableSlot *oslot = (OTableSlot *) result.oldTuple;
 
 			csn = arg->csn;
@@ -1996,18 +2042,24 @@ o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 			if (descr->bridge)
 				delete_old_bridge_index_ctid(descr, rel, &oslot->bridge_ctid, csn);
 
+			primary_tuple = flatten_old_tuple_for_wal(rel, descr, result.oldTuple,
+													  &primary_tuple_allocated);
+
 			/* if tuple has been deleted from index trees, remove TOAST values */
 			if (!tts_orioledb_remove_toast_values(result.oldTuple, descr, oxid, csn))
 			{
+				if (primary_tuple_allocated)
+					pfree(primary_tuple.data);
 				result.success = false;
 				result.failedIxNum = TOASTIndexNumber;
 				return result;
 			}
 
-			primary_tuple = ((OTableSlot *) result.oldTuple)->tuple;
-
 			if (primary->desc.storageType == BTreeStoragePersistence)
 				o_wal_delete(&primary->desc, primary_tuple, rel->rd_rel->relreplident, descr->version);
+
+			if (primary_tuple_allocated)
+				pfree(primary_tuple.data);
 		}
 		else
 		{

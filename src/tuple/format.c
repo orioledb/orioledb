@@ -46,15 +46,15 @@ o_tuple_init_reader(OTupleReaderState *state, OTuple tuple, TupleDesc desc,
 	}
 	else if (header->hasnulls)
 	{
-		state->bp = (bits8 *) (data + SizeOfOTupleHeader);
-		state->tp = (char *) (data + SizeOfOTupleHeader + MAXALIGN(BITMAPLEN(header->natts)));
+		state->bp = (bits8 *) (data + OTupleHeaderDataOff(header));
+		state->tp = (char *) (data + OTupleHeaderDataOff(header) + MAXALIGN(BITMAPLEN(header->natts)));
 		state->hasnulls = true;
 		state->natts = header->natts;
 	}
 	else
 	{
 		state->bp = NULL;
-		state->tp = (char *) (data + SizeOfOTupleHeader);
+		state->tp = (char *) (data + OTupleHeaderDataOff(header));
 		state->hasnulls = false;
 		state->natts = header->natts;
 	}
@@ -183,7 +183,7 @@ o_tuple_get_last_iptr(TupleDesc desc, OTupleFixedFormatSpec *spec,
 	if (!(tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
 	{
 		OTupleHeader header = (OTupleHeader) tuple.data;
-		uint8	   *bp = (uint8 *) (tuple.data + SizeOfOTupleHeader);
+		uint8	   *bp = (uint8 *) (tuple.data + OTupleHeaderDataOff(header));
 
 		if ((header->hasnulls) && att_isnull(desc->natts - 1, bp))
 		{
@@ -192,7 +192,7 @@ o_tuple_get_last_iptr(TupleDesc desc, OTupleFixedFormatSpec *spec,
 		}
 
 		*isnull = false;
-		return (ItemPointer) ((char *) header + header->len - sizeof(ItemPointerData));
+		return (ItemPointer) ((char *) header + OTupleHeaderGetLen(header) - sizeof(ItemPointerData));
 	}
 	else
 	{
@@ -249,7 +249,7 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 		 */
 		int			byte = attnum >> 3;
 		int			finalbit = attnum & 0x07;
-		bits8	   *bp = (bits8 *) (tuple.data + SizeOfOTupleHeader);
+		bits8	   *bp = (bits8 *) (tuple.data + OTupleHeaderDataOff(tup));
 
 		/* check for nulls "before" final bit of last byte */
 		if ((~bp[byte]) & ((1 << finalbit) - 1))
@@ -266,11 +266,11 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 				}
 			}
 		}
-		tp = (char *) (tuple.data + SizeOfOTupleHeader + MAXALIGN(BITMAPLEN(tup->natts)));
+		tp = (char *) (tuple.data + OTupleHeaderDataOff(tup) + MAXALIGN(BITMAPLEN(tup->natts)));
 	}
 	else
 	{
-		tp = (char *) (tuple.data + SizeOfOTupleHeader);
+		tp = (char *) (tuple.data + OTupleHeaderDataOff(tup));
 	}
 
 	if (!slow)
@@ -338,7 +338,7 @@ o_toast_nocachegetattr(OTuple tuple,
 		 */
 		int			byte = attnum >> 3;
 		int			finalbit = attnum & 0x07;
-		bits8	   *bp = (bits8 *) (tuple.data + SizeOfOTupleHeader);
+		bits8	   *bp = (bits8 *) (tuple.data + OTupleHeaderDataOff(tup));
 
 		/* check for nulls "before" final bit of last byte */
 		if ((~bp[byte]) & ((1 << finalbit) - 1))
@@ -355,11 +355,11 @@ o_toast_nocachegetattr(OTuple tuple,
 				}
 			}
 		}
-		tp = (char *) (tuple.data + SizeOfOTupleHeader + MAXALIGN(BITMAPLEN(tup->natts)));
+		tp = (char *) (tuple.data + OTupleHeaderDataOff(tup) + MAXALIGN(BITMAPLEN(tup->natts)));
 	}
 	else
 	{
-		tp = (char *) (tuple.data + SizeOfOTupleHeader);
+		tp = (char *) (tuple.data + OTupleHeaderDataOff(tup));
 	}
 
 	if (!slow)
@@ -406,8 +406,8 @@ o_tuple_get_data(OTuple tuple, int *size, OTupleFixedFormatSpec *spec)
 
 		hasnull_off = header->hasnulls ? MAXALIGN(BITMAPLEN(header->natts)) :
 			0;
-		hoff = SizeOfOTupleHeader + hasnull_off;
-		*size = header->len - hoff;
+		hoff = OTupleHeaderDataOff(header) + hasnull_off;
+		*size = OTupleHeaderGetLen(header) - hoff;
 		return (Pointer) tuple.data + hoff;
 	}
 	else
@@ -547,6 +547,14 @@ o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 	result += o_tuple_compute_data_size(tupleDesc, iptr, bridge_data, values,
 										isnull, to_toast, natts);
 
+	/*
+	 * A tuple this long cannot say so in 15 bits, so it takes the long header
+	 * and grows by exactly that difference.  The difference is MAXALIGNed, so
+	 * no attribute's alignment padding changes and one correction is enough.
+	 */
+	if (!fixedFormat && result >= O_TUPLE_LEN_LONG)
+		result += SizeOfOTupleHeaderLong - SizeOfOTupleHeader;
+
 	return result;
 }
 
@@ -594,16 +602,30 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 	if (!fixedFormat)
 	{
 		tup->hasnulls = hasnull;
-		tup->len = tuple_size;
 		tup->natts = natts;
 		tup->version = version;
-		len = SizeOfOTupleHeader;
+
+		/*
+		 * o_new_tuple_size() already reserved room for the long header when
+		 * it is needed, so the two must agree on which form this is.
+		 */
+		if (tuple_size >= O_TUPLE_LEN_LONG)
+		{
+			tup->len = O_TUPLE_LEN_LONG;
+			OTupleHeaderLongLen(tup) = tuple_size;
+			len = SizeOfOTupleHeaderLong;
+		}
+		else
+		{
+			tup->len = tuple_size;
+			len = SizeOfOTupleHeader;
+		}
 		if (hasnull)
 			len += MAXALIGN(BITMAPLEN(natts));
 		hoff = len;
 		if (hasnull)
 		{
-			bitP = (bits8 *) (tuple->data + SizeOfOTupleHeader - 1);
+			bitP = (bits8 *) (tuple->data + OTupleHeaderDataOff(tup) - 1);
 			bitmask = HIGHBIT;
 		}
 		else
@@ -866,10 +888,10 @@ o_tuple_set_ctid(OTuple tuple, ItemPointer iptr)
 	}
 	else if (header->hasnulls)
 	{
-		*((ItemPointer) (data + SizeOfOTupleHeader + MAXALIGN(BITMAPLEN(header->natts)))) = *iptr;
+		*((ItemPointer) (data + OTupleHeaderDataOff(header) + MAXALIGN(BITMAPLEN(header->natts)))) = *iptr;
 	}
 	else
 	{
-		*((ItemPointer) (data + SizeOfOTupleHeader)) = *iptr;
+		*((ItemPointer) (data + OTupleHeaderDataOff(header))) = *iptr;
 	}
 }

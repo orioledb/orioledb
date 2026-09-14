@@ -596,6 +596,84 @@ SELECT query_to_text_filtered($$ SELECT data from pg_logical_slot_get_changes('r
 SELECT * FROM pg_drop_replication_slot('regression_slot');
 DROP TABLE o_logical;
 
+-- REPLICA IDENTITY FULL.  The old tuple is the only record of what the row
+-- was, so it has to carry the TOASTed values themselves and not the
+-- placeholder -- heap does the same via toast_flatten_tuple().
+CREATE TABLE o_logical(id integer PRIMARY KEY, v1 text, v2 int)
+	USING orioledb WITH (compress = -1, toast_compress = -1, primary_compress = -1);
+ALTER TABLE o_logical REPLICA IDENTITY FULL;
+SELECT slot_name FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);
+INSERT INTO o_logical VALUES (1, generate_string(10 + 1, 4000), 10);
+-- rewrites the TOASTed attribute
+UPDATE o_logical SET v1 = 'short' WHERE id = 1;
+-- leaves the TOASTed attribute alone: its chunks are never removed, so the
+-- old value has to come from the tuple itself
+UPDATE o_logical SET v1 = generate_string(10 + 1, 4000) WHERE id = 1;
+UPDATE o_logical SET v2 = 20 WHERE id = 1;
+DELETE FROM o_logical WHERE id = 1;
+SELECT query_to_text_filtered($$ SELECT data from pg_logical_slot_get_changes('regression_slot', NULL, NULL); $$);
+SELECT * FROM pg_drop_replication_slot('regression_slot');
+DROP TABLE o_logical;
+
+-- Same, on a table with no primary key, where the leaf tuple carries a ctid
+-- ahead of the user attributes.
+CREATE TABLE o_logical_nopk(v1 text, v2 int)
+	USING orioledb WITH (compress = -1, toast_compress = -1, primary_compress = -1);
+ALTER TABLE o_logical_nopk REPLICA IDENTITY FULL;
+SELECT slot_name FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);
+INSERT INTO o_logical_nopk VALUES (generate_string(30 + 1, 4000), 10);
+UPDATE o_logical_nopk SET v2 = 20;
+DELETE FROM o_logical_nopk;
+SELECT query_to_text_filtered($$ SELECT data from pg_logical_slot_get_changes('regression_slot', NULL, NULL); $$);
+SELECT * FROM pg_drop_replication_slot('regression_slot');
+DROP TABLE o_logical_nopk;
+
+-- Several times the local WAL buffer, but still inside the tuple format's
+-- 15-bit length: the modify record cannot be buffered and takes the direct
+-- path into a WAL container of its own, and the value still travels.
+CREATE TABLE o_logical_big(id integer PRIMARY KEY, v1 text, v2 int)
+	USING orioledb WITH (compress = -1, toast_compress = -1, primary_compress = -1);
+ALTER TABLE o_logical_big REPLICA IDENTITY FULL;
+SELECT slot_name FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);
+INSERT INTO o_logical_big VALUES (1, generate_string(40 + 1, 30000), 10);
+UPDATE o_logical_big SET v2 = 20 WHERE id = 1;
+DELETE FROM o_logical_big WHERE id = 1;
+CREATE TEMP TABLE o_logical_big_changes AS
+	SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL)
+	WHERE data NOT LIKE 'BEGIN%' AND data NOT LIKE 'COMMIT%';
+-- the old tuple of both the UPDATE and the DELETE carries the value; the new
+-- tuple of the UPDATE says unchanged-toast-datum, exactly as heap does for an
+-- attribute the statement did not touch
+SELECT count(*) AS changes,
+	   count(*) FILTER (WHERE data ~ 'old-key:.*unchanged-toast-datum.*new-tuple:') AS update_old_lost,
+	   count(*) FILTER (WHERE data LIKE '%DELETE:%unchanged-toast-datum%') AS delete_lost,
+	   max(length(data)) > 30000 AS full_length
+	FROM o_logical_big_changes;
+DROP TABLE o_logical_big_changes;
+SELECT * FROM pg_drop_replication_slot('regression_slot');
+DROP TABLE o_logical_big;
+
+-- Past what OTupleHeaderData.len can say in 15 bits, so the tuple takes the
+-- long header form.  Nothing about the result changes.
+CREATE TABLE o_logical_huge(id integer PRIMARY KEY, v1 text, v2 int)
+	USING orioledb WITH (compress = -1, toast_compress = -1, primary_compress = -1);
+ALTER TABLE o_logical_huge REPLICA IDENTITY FULL;
+SELECT slot_name FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);
+INSERT INTO o_logical_huge VALUES (1, generate_string(50 + 1, 100000), 10);
+UPDATE o_logical_huge SET v2 = 20 WHERE id = 1;
+DELETE FROM o_logical_huge WHERE id = 1;
+CREATE TEMP TABLE o_logical_huge_changes AS
+	SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL)
+	WHERE data NOT LIKE 'BEGIN%' AND data NOT LIKE 'COMMIT%';
+SELECT count(*) AS changes,
+	   count(*) FILTER (WHERE data ~ 'old-key:.*unchanged-toast-datum.*new-tuple:') AS update_old_lost,
+	   count(*) FILTER (WHERE data LIKE '%DELETE:%unchanged-toast-datum%') AS delete_lost,
+	   max(length(data)) > 100000 AS full_length
+	FROM o_logical_huge_changes;
+DROP TABLE o_logical_huge_changes;
+SELECT * FROM pg_drop_replication_slot('regression_slot');
+DROP TABLE o_logical_huge;
+
 CREATE TABLE IF NOT EXISTS o_test_toast_update_delete (
 	id integer PRIMARY KEY,
 	v1 text,
