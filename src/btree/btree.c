@@ -211,6 +211,29 @@ free_meta_page(PagePool *pool, OInMemoryBlkno metaPageBlkno)
 		}
 	}
 
+#ifdef SEQBUF_LOCK_DEBUG
+	{
+		uint32		inflight = pg_atomic_read_u32(&meta_page->debugIoInFlight);
+
+		if (inflight != 0)
+			elog(PANIC, "SEQBUFIOFREE free_meta_page blkno=%u inflight=%u "
+				 "tag=(%u,%u,%u num=%u) pid=%d",
+				 metaPageBlkno, inflight,
+				 meta_page->nextChkp[0].tag.key.oids.datoid,
+				 meta_page->nextChkp[0].tag.key.oids.relnode,
+				 meta_page->nextChkp[0].tag.key.oids.spcoid,
+				 meta_page->nextChkp[0].tag.num, MyProcPid);
+	}
+	elog(LOG, "SEQBUFLIFE free_meta_page blkno=%u tag=(%u,%u,%u num=%u type=%c) nseqscans=%u pid=%d",
+		 metaPageBlkno,
+		 meta_page->nextChkp[0].tag.key.oids.datoid,
+		 meta_page->nextChkp[0].tag.key.oids.relnode,
+		 meta_page->nextChkp[0].tag.key.oids.spcoid,
+		 meta_page->nextChkp[0].tag.num,
+		 meta_page->nextChkp[0].tag.type ? meta_page->nextChkp[0].tag.type : '?',
+		 meta_page_get_num_seq_scans(metaPageBlkno), MyProcPid);
+#endif
+
 	/*
 	 * Additional protection: the resource owner might not have released its
 	 * seq scans yet (other transactions are excluded by locks).  Defer
@@ -245,8 +268,20 @@ o_btree_cleanup_pages(OInMemoryBlkno rootPageBlkno, OInMemoryBlkno metaPageBlkno
 	Assert(pool != NULL);
 
 	mark_page_pre_cleanup(rootPageBlkno, rootPageChangeCount);
-	free_page(pool, rootPageBlkno, rootPageChangeCount);
 
+#ifdef SEQBUF_LOCK_DEBUG
+	/*
+	 * Before the free, not after: a freed page is not ours to read, and for a
+	 * local temp tree free_page() hands the local pool slot back, so reading
+	 * the change count out of it afterwards hangs the DROP.
+	 */
+	elog(LOG, "SEQBUFLIFE cleanup_pages root=%u meta=%u rootcc=%u nowcc=%u pid=%d",
+		 rootPageBlkno, metaPageBlkno, rootPageChangeCount,
+		 O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(rootPageBlkno)),
+		 MyProcPid);
+#endif
+
+	free_page(pool, rootPageBlkno, rootPageChangeCount);
 	free_meta_page(pool, metaPageBlkno);
 }
 

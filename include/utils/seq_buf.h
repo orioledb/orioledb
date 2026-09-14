@@ -50,9 +50,33 @@ typedef struct
 	off_t		evictOffset;
 	SeqBufTag	tag;
 	SeqBufPrevPageState prevPageState;
+#ifdef SEQBUF_LOCK_DEBUG
+
+	/*
+	 * Owner tracking, so a process that cannot get `lock` can say whether
+	 * somebody holds it, who, and from where -- or whether the memory is no
+	 * longer a seq buf at all.
+	 */
+	int			lockOwnerPid;
+	int			lockOwnerLine;
+	uint64		lockAcquires;
+	uint64		initGeneration;
+#endif
 } SeqBufDescShared;
 
 #define SEQ_BUF_SHARED_EXIST(shared_ptr) (OInMemoryBlknoIsValid((shared_ptr)->pages[0]))
+
+#ifdef SEQBUF_LOCK_DEBUG
+extern void seq_buf_lock_impl(SeqBufDescShared *shared, int line);
+extern void seq_buf_unlock_impl(SeqBufDescShared *shared, int line);
+extern void seq_buf_describe(StringInfo str, SeqBufDescShared *shared);
+extern bool seq_buf_debug_trace;
+#define SEQ_BUF_LOCK(shared)	seq_buf_lock_impl((shared), __LINE__)
+#define SEQ_BUF_UNLOCK(shared)	seq_buf_unlock_impl((shared), __LINE__)
+#else
+#define SEQ_BUF_LOCK(shared)	SpinLockAcquire(&(shared)->lock)
+#define SEQ_BUF_UNLOCK(shared)	SpinLockRelease(&(shared)->lock)
+#endif
 
 typedef struct
 {

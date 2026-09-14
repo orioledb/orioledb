@@ -459,6 +459,9 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 	pg_atomic_init_u64(&metaPage->datafileLength[1], 0);
 	pg_atomic_init_u64(&metaPage->ctid, 0);
 	pg_atomic_init_u64(&metaPage->bridge_ctid, 0);
+#ifdef SEQBUF_LOCK_DEBUG
+	pg_atomic_init_u32(&metaPage->debugIoInFlight, 0);
+#endif
 	for (i = 0; i < NUM_SEQ_SCANS_ARRAY_SIZE; i++)
 		pg_atomic_init_u32(&metaPage->numSeqScans[i], 0);
 

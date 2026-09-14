@@ -306,6 +306,20 @@ o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 	Assert(!IS_DIRTY(blkno));
 
+#ifdef SEQBUF_LOCK_DEBUG
+
+	/*
+	 * free_page() in btree.c waits for the page's IO before it gets here, but
+	 * evict_btree() reaches this with nothing held.  Say so loudly rather
+	 * than handing a page that somebody is writing back to the pool.
+	 */
+	if (page_desc->ionum >= 0)
+		elog(PANIC, "SEQBUFIOFREE ppool_free_page blkno=%u ionum=%d oids=(%u,%u,%u) type=%d pid=%d",
+			 blkno, page_desc->ionum,
+			 page_desc->oids.datoid, page_desc->oids.relnode,
+			 page_desc->oids.spcoid, (int) page_desc->type, MyProcPid);
+#endif
+
 	/*
 	 * Reset page header and descriptor.  Do this while holding a page lock in
 	 * order to prevent race condition with walk_page().

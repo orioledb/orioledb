@@ -73,6 +73,16 @@ typedef struct
 	 * is needed because the number simply stops matching.
 	 */
 	uint32		reinitCheckpointNum;
+
+#ifdef SEQBUF_LOCK_DEBUG
+
+	/*
+	 * How many perform_page_io() calls are inside this tree right now.  They
+	 * hold pointers into this very page (the seq bufs), so it must not go
+	 * back to the page pool while the count is non-zero.
+	 */
+	pg_atomic_uint32 debugIoInFlight;
+#endif
 } BTreeMetaPage;
 
 StaticAssertDecl(sizeof(BTreeMetaPage) <= ORIOLEDB_BLCKSZ,

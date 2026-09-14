@@ -1970,11 +1970,117 @@ prewrite_image_check(Page p)
 }
 #endif
 
+#ifdef SEQBUF_LOCK_DEBUG
+/*
+ * The seq bufs live in the tree's meta page, which is shared memory that goes
+ * back to the page pool when the tree is evicted or dropped.  A writer that
+ * obtained its checkpoint number before that happened still holds a pointer
+ * into it.  Check the buffer still claims to belong to this tree before we
+ * touch it: on a recycled page the tag is whatever the new occupant wrote.
+ *
+ * Deliberately an unlocked read -- taking the spinlock is the very thing we
+ * are trying to establish is safe.
+ */
+static void
+seqbuf_check_identity(BTreeDescr *desc, int chkp_index, OInMemoryBlkno blkno,
+					  uint32 checkpoint_number, const char *where)
+{
+	static const char *const names[2] = {"nextChkp", "tmpBuf"};
+	SeqBufDescPrivate *bufs[2];
+	int			i;
+
+	if (btree_desc_is_local_temp(desc))
+		return;
+
+	bufs[0] = &desc->nextChkp[chkp_index];
+	bufs[1] = &desc->tmpBuf[chkp_index];
+
+	for (i = 0; i < 2; i++)
+	{
+		SeqBufDescShared *shared = bufs[i]->shared;
+		SeqBufTag	tag;
+
+		if (i == 0 && desc->storageType == BTreeStorageTemporary)
+			continue;
+		if (shared == NULL)
+			continue;
+
+		tag = shared->tag;		/* unlocked snapshot */
+
+		if (tag.key.oids.datoid == desc->oids.datoid &&
+			tag.key.oids.relnode == desc->oids.relnode &&
+			tag.key.oids.spcoid == desc->oids.spcoid &&
+			tag.type == (i == 0 ? 'm' : 't'))
+			continue;
+
+		{
+			StringInfoData str;
+
+			initStringInfo(&str);
+			appendStringInfo(&str,
+							 "SEQBUFALIEN %s at %s: tree=(%u,%u,%u) type=%d "
+							 "blkno=%u rootBlkno=%u metaBlkno=%u chkpNum=%u "
+							 "chkp_index=%d -- ",
+							 names[i], where,
+							 desc->oids.datoid, desc->oids.relnode,
+							 desc->oids.spcoid, (int) desc->type,
+							 blkno, desc->rootInfo.rootPageBlkno,
+							 desc->rootInfo.metaPageBlkno,
+							 checkpoint_number, chkp_index);
+			seq_buf_describe(&str, shared);
+			elog(PANIC, "%s", str.data);
+		}
+	}
+}
+#endif
+
+#ifdef SEQBUF_LOCK_DEBUG
+static uint64 perform_page_io_internal(BTreeDescr *desc, OInMemoryBlkno blkno,
+									   Page img, uint32 checkpoint_number,
+									   bool copy_blkno, bool *dirty_parent);
+
+/*
+ * Count ourselves in while we are inside perform_page_io(): everything below
+ * dereferences desc->nextChkp[]/tmpBuf[], which live in the tree's meta page.
+ * evict_btree() and free_meta_page() check this is zero before handing that
+ * page back to the pool.
+ */
+uint64
+perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
+				Page img, uint32 checkpoint_number, bool copy_blkno,
+				bool *dirty_parent)
+{
+	BTreeMetaPage *meta = OMetaPageIsValid(desc) ? BTREE_GET_META(desc) : NULL;
+	uint64		result;
+
+	if (meta == NULL)
+		return perform_page_io_internal(desc, blkno, img, checkpoint_number,
+										copy_blkno, dirty_parent);
+
+	pg_atomic_fetch_add_u32(&meta->debugIoInFlight, 1);
+	PG_TRY();
+	{
+		result = perform_page_io_internal(desc, blkno, img, checkpoint_number,
+										  copy_blkno, dirty_parent);
+	}
+	PG_FINALLY();
+	{
+		pg_atomic_fetch_sub_u32(&meta->debugIoInFlight, 1);
+	}
+	PG_END_TRY();
+
+	return result;
+}
+
+static uint64
+perform_page_io_internal(BTreeDescr *desc, OInMemoryBlkno blkno,
+#else
 /*
  * Returns downlink to the page or InvalidDiskDownlink if fails.
  */
 uint64
 perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
+#endif
 				Page img, uint32 checkpoint_number, bool copy_blkno,
 				bool *dirty_parent)
 {
@@ -2022,6 +2128,10 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 * Determine the file position to write this page.
 	 */
 	chkp_index = checkpoint_number % 2;
+#ifdef SEQBUF_LOCK_DEBUG
+	seqbuf_check_identity(desc, chkp_index, blkno, checkpoint_number,
+						  "perform_page_io");
+#endif
 	if (orioledb_s3_mode)
 	{
 		if (less_num)
@@ -2814,6 +2924,23 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	if (!orioledb_s3_mode || desc->storageType == BTreeStorageTemporary)
 		btree_finalize_private_seq_bufs(desc, &evicted_tree_data);
 
+#ifdef SEQBUF_LOCK_DEBUG
+	{
+		uint32		inflight = pg_atomic_read_u32(&metaPage->debugIoInFlight);
+		int			rootIonum = O_GET_IN_MEMORY_PAGEDESC(root_blkno)->ionum;
+
+		if (inflight != 0 || rootIonum >= 0)
+			elog(PANIC, "SEQBUFIOFREE evict_btree meta=%u root=%u tree=(%u,%u,%u) "
+				 "inflight=%u rootIonum=%d chkpNum=%u pid=%d",
+				 desc->rootInfo.metaPageBlkno, root_blkno,
+				 desc->oids.datoid, desc->oids.relnode, desc->oids.spcoid,
+				 inflight, rootIonum, checkpoint_number, MyProcPid);
+	}
+	elog(LOG, "SEQBUFLIFE evict_btree frees meta blkno=%u root=%u tree=(%u,%u,%u) type=%d chkpNum=%u pid=%d",
+		 desc->rootInfo.metaPageBlkno, root_blkno,
+		 desc->oids.datoid, desc->oids.relnode, desc->oids.spcoid,
+		 (int) desc->type, checkpoint_number, MyProcPid);
+#endif
 	ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, false);
 
 	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;

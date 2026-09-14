@@ -34,7 +34,12 @@
 #include "sys/stat.h"
 #include "utils/memdebug.h"
 
+#include <signal.h>
 #include <unistd.h>
+
+#include "lib/stringinfo.h"
+#include "miscadmin.h"
+#include "storage/s_lock.h"
 
 /*
  * We does not use orioledb page header and should not
@@ -55,6 +60,150 @@
 /* offset of current sequence buffer page in file */
 #define SEQBUF_FILE_OFFSET(shared, blkno) ((off_t) SEQBUF_CHUNK_SIZE * (blkno) \
 												+ (shared)->evictOffset)
+
+#ifdef SEQBUF_LOCK_DEBUG
+
+bool		seq_buf_debug_trace = false;
+
+/*
+ * Which of the five SeqBufDescShared members of a BTreeMetaPage this pointer
+ * is, so a report can name the buffer rather than an address.
+ */
+static const char *
+seq_buf_slot_name(SeqBufDescShared *shared, OInMemoryBlkno *blkno, Size *off)
+{
+	Size		byteoff;
+
+	*blkno = OInvalidInMemoryBlkno;
+	*off = 0;
+
+	if ((Pointer) shared < o_shared_buffers ||
+		(Pointer) shared >= o_shared_buffers +
+		(Size) ORIOLEDB_BLCKSZ * (Size) orioledb_buffers_count)
+		return "OUT-OF-POOL";
+
+	byteoff = (Pointer) shared - o_shared_buffers;
+	*blkno = byteoff / ORIOLEDB_BLCKSZ;
+	*off = byteoff % ORIOLEDB_BLCKSZ;
+
+	if (*off == offsetof(BTreeMetaPage, freeBuf))
+		return "freeBuf";
+	if (*off == offsetof(BTreeMetaPage, nextChkp))
+		return "nextChkp[0]";
+	if (*off == offsetof(BTreeMetaPage, nextChkp) + sizeof(SeqBufDescShared))
+		return "nextChkp[1]";
+	if (*off == offsetof(BTreeMetaPage, tmpBuf))
+		return "tmpBuf[0]";
+	if (*off == offsetof(BTreeMetaPage, tmpBuf) + sizeof(SeqBufDescShared))
+		return "tmpBuf[1]";
+	return "UNKNOWN-OFFSET";
+}
+
+/*
+ * Everything we know about a seq buf, for a report.  Reads are deliberately
+ * unlocked: this is called exactly when the lock cannot be had.
+ */
+void
+seq_buf_describe(StringInfo str, SeqBufDescShared *shared)
+{
+	OInMemoryBlkno blkno;
+	Size		off;
+	const char *slot = seq_buf_slot_name(shared, &blkno, &off);
+	int			owner = shared->lockOwnerPid;
+	uint32		word;
+
+	memcpy(&word, (void *) &shared->lock, sizeof(word));
+
+	appendStringInfo(str,
+					 "slot=%s blkno=%u off=" UINT64_FORMAT " lockword=0x%08x "
+					 "owner=%d ownerline=%d owneralive=%s acquires=" UINT64_FORMAT
+					 " initgen=" UINT64_FORMAT " "
+					 "tag=(%u,%u,%u num=%u type=%c) pages=(%u,%u) cur=%d "
+					 "loc=%d filepage=%u prevstate=%d",
+					 slot, blkno, (uint64) off, word,
+					 owner, shared->lockOwnerLine,
+					 owner > 0 ? (kill(owner, 0) == 0 ? "yes" : "NO") : "n/a",
+					 shared->lockAcquires, shared->initGeneration,
+					 shared->tag.key.oids.datoid,
+					 shared->tag.key.oids.relnode,
+					 shared->tag.key.oids.spcoid,
+					 shared->tag.num,
+					 shared->tag.type ? shared->tag.type : '?',
+					 shared->pages[0], shared->pages[1],
+					 shared->curPageNum, shared->location,
+					 shared->filePageNum, (int) shared->prevPageState);
+}
+
+static void
+seq_buf_report_stuck(SeqBufDescShared *shared, int line)
+{
+	StringInfoData str;
+
+	initStringInfo(&str);
+	appendStringInfo(&str, "SEQBUFSTUCK waiter=%d at seq_buf.c:%d -- ",
+					 MyProcPid, line);
+	seq_buf_describe(&str, shared);
+	elog(LOG, "%s", str.data);
+	pfree(str.data);
+}
+
+void
+seq_buf_lock_impl(SeqBufDescShared *shared, int line)
+{
+	SpinDelayStatus status;
+	bool		reported = false;
+
+	if (!TAS_SPIN(&shared->lock))
+	{
+		shared->lockOwnerPid = MyProcPid;
+		shared->lockOwnerLine = line;
+		shared->lockAcquires++;
+		return;
+	}
+
+	init_local_spin_delay(&status);
+	do
+	{
+		perform_spin_delay(&status);
+		if (!reported && status.delays >= 100)
+		{
+			reported = true;
+			seq_buf_report_stuck(shared, line);
+		}
+	} while (TAS_SPIN(&shared->lock));
+	finish_spin_delay(&status);
+
+	shared->lockOwnerPid = MyProcPid;
+	shared->lockOwnerLine = line;
+	shared->lockAcquires++;
+}
+
+void
+seq_buf_unlock_impl(SeqBufDescShared *shared, int line)
+{
+	/*
+	 * Releasing a lock we do not hold is the mirror-image defect of leaking
+	 * one; report it rather than silently handing the lock to a third party.
+	 */
+	if (shared->lockOwnerPid != MyProcPid)
+	{
+		StringInfoData str;
+
+		initStringInfo(&str);
+		appendStringInfo(&str,
+						 "SEQBUFFOREIGNUNLOCK releaser=%d at seq_buf.c:%d -- ",
+						 MyProcPid, line);
+		seq_buf_describe(&str, shared);
+		elog(WARNING, "%s", str.data);
+		pfree(str.data);
+	}
+	else
+		shared->lockOwnerPid = 0;
+
+	SpinLockRelease(&shared->lock);
+}
+
+#endif							/* SEQBUF_LOCK_DEBUG */
 
 /*
  * this functions returns true if success
@@ -87,7 +236,29 @@ init_seq_buf(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 		int			i;
 
 		SpinLockInit(&shared->lock);
-		SpinLockAcquire(&shared->lock);
+#ifdef SEQBUF_LOCK_DEBUG
+
+		/*
+		 * SpinLockInit() has just declared the lock free regardless of who
+		 * held it, so the owner bookkeeping has to be reset with it.  A
+		 * generation counter makes a re-init visible to a waiter that is
+		 * reporting on this buffer.
+		 */
+		{
+			uint64		gen = shared->initGeneration + 1;
+			int			prevOwner = shared->lockOwnerPid;
+
+			if (prevOwner != 0 && prevOwner != MyProcPid)
+				elog(WARNING,
+					 "SEQBUFINITOVER pid=%d re-inits a seq buf held by pid=%d (line %d)",
+					 MyProcPid, prevOwner, shared->lockOwnerLine);
+			shared->lockOwnerPid = 0;
+			shared->lockOwnerLine = 0;
+			shared->lockAcquires = 0;
+			shared->initGeneration = gen;
+		}
+#endif
+		SEQ_BUF_LOCK(shared);
 
 		Assert(OInMemoryBlknoIsValid(shared->pages[0])
 			   && OInMemoryBlknoIsValid(shared->pages[1]));
@@ -121,7 +292,7 @@ init_seq_buf(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 			Assert(write || (tag->type == 't' && (!evicted_used || evicted->offset == 0)));
 		}
 
-		SpinLockRelease(&shared->lock);
+		SEQ_BUF_UNLOCK(shared);
 		VALGRIND_CHECK_MEM_IS_DEFINED(shared, sizeof(*shared));
 	}
 	else
@@ -196,7 +367,7 @@ seq_buf_check_open_file(SeqBufDescPrivate *seqBufPrivate)
 				break;
 		}
 		seqBufPrivate->tag = shared->tag;
-		SpinLockRelease(&shared->lock);
+		SEQ_BUF_UNLOCK(shared);
 
 		filename = get_seq_buf_filename(&seqBufPrivate->tag);
 		if (seqBufPrivate->write)
@@ -217,11 +388,11 @@ seq_buf_check_open_file(SeqBufDescPrivate *seqBufPrivate)
 		seqBufPrivate->file = PathNameOpenFile(filename, flags);
 		pfree(filename);
 
-		SpinLockAcquire(&shared->lock);
+		SEQ_BUF_LOCK(shared);
 
 		if (seqBufPrivate->file < 0)
 		{
-			SpinLockRelease(&shared->lock);
+			SEQ_BUF_UNLOCK(shared);
 			ereport(PANIC, (errcode_for_file_access(),
 							errmsg("could not open seq buf file %s for %s: %m",
 								   get_seq_buf_filename(&shared->tag),
@@ -254,9 +425,9 @@ seq_buf_wait_prev_page(SeqBufDescShared *shared)
 	init_local_spin_delay(&status);
 	while (shared->prevPageState == SeqBufPrevPageInProgress)
 	{
-		SpinLockRelease(&shared->lock);
+		SEQ_BUF_UNLOCK(shared);
 		perform_spin_delay(&status);
-		SpinLockAcquire(&shared->lock);
+		SEQ_BUF_LOCK(shared);
 	}
 	finish_spin_delay(&status);
 	return true;
@@ -277,7 +448,7 @@ seq_buf_finish_prev_page(SeqBufDescPrivate *seqBufPrivate)
 					   SEQBUF_DATA_POS(O_GET_IN_MEMORY_PAGE(shared->pages[1 - shared->curPageNum])),
 					   SEQBUF_CHUNK_SIZE, offset, WAIT_EVENT_SLRU_WRITE) != SEQBUF_CHUNK_SIZE)
 		{
-			SpinLockRelease(&shared->lock);
+			SEQ_BUF_UNLOCK(shared);
 			ereport(PANIC, (errcode_for_file_access(),
 							errmsg("Error write seq buf %s at offset %u: %m",
 								   FilePathName(seqBufPrivate->file),
@@ -303,7 +474,7 @@ seq_buf_finish_prev_page(SeqBufDescPrivate *seqBufPrivate)
 			if ((nbytes = OFileRead(seqBufPrivate->file, SEQBUF_DATA_POS(buf), SEQBUF_CHUNK_SIZE,
 									offset, WAIT_EVENT_SLRU_READ)) == 0)
 			{
-				SpinLockRelease(&shared->lock);
+				SEQ_BUF_UNLOCK(shared);
 				ereport(PANIC, (errcode_for_file_access(),
 								errmsg("Error read seq buf %s at offset %u: %m",
 									   FilePathName(seqBufPrivate->file),
@@ -314,7 +485,7 @@ seq_buf_finish_prev_page(SeqBufDescPrivate *seqBufPrivate)
 			if (shared->freeBytesNum >= SEQBUF_CHUNK_SIZE &&
 				nbytes != SEQBUF_CHUNK_SIZE)
 			{
-				SpinLockRelease(&shared->lock);
+				SEQ_BUF_UNLOCK(shared);
 				Assert(nbytes < SEQBUF_CHUNK_SIZE);
 				elog(PANIC, "Error read sequence buffer file %s at offset %u."
 					 "Bytes read = %d is less than expected = %ld.",
@@ -325,7 +496,7 @@ seq_buf_finish_prev_page(SeqBufDescPrivate *seqBufPrivate)
 			else if (shared->freeBytesNum < SEQBUF_CHUNK_SIZE &&
 					 shared->freeBytesNum != nbytes)
 			{
-				SpinLockRelease(&shared->lock);
+				SEQ_BUF_UNLOCK(shared);
 				elog(PANIC, "Error read sequence buffer file %s at offset %u. "
 					 "Bytes read = %d is not equal than expected = " UINT64_FORMAT,
 					 get_seq_buf_filename(&seqBufPrivate->tag), (uint32) offset,
@@ -356,14 +527,14 @@ seq_buf_switch_page(SeqBufDescPrivate *seqBufPrivate)
 
 	if (!seq_buf_check_open_file(seqBufPrivate))
 	{
-		SpinLockRelease(&shared->lock);
+		SEQ_BUF_UNLOCK(shared);
 		return false;
 	}
 
 	/* Check if it's already switched after given page number... */
 	if (shared->filePageNum != filePageNum)
 	{
-		SpinLockRelease(&shared->lock);
+		SEQ_BUF_UNLOCK(shared);
 		return true;
 	}
 
@@ -374,7 +545,7 @@ seq_buf_switch_page(SeqBufDescPrivate *seqBufPrivate)
 	if (seq_buf_wait_prev_page(shared) &&
 		shared->filePageNum != filePageNum)
 	{
-		SpinLockRelease(&shared->lock);
+		SEQ_BUF_UNLOCK(shared);
 		return true;
 	}
 
@@ -382,7 +553,7 @@ seq_buf_switch_page(SeqBufDescPrivate *seqBufPrivate)
 	{
 		if (!seq_buf_finish_prev_page(seqBufPrivate))
 		{
-			SpinLockRelease(&shared->lock);
+			SEQ_BUF_UNLOCK(shared);
 			return false;
 		}
 		shared->prevPageState = SeqBufPrevPageDone;
@@ -395,14 +566,14 @@ seq_buf_switch_page(SeqBufDescPrivate *seqBufPrivate)
 	shared->filePageNum++;
 	shared->location = SEQBUF_DATA_OFF;
 	shared->prevPageState = SeqBufPrevPageInProgress;
-	SpinLockRelease(&shared->lock);
+	SEQ_BUF_UNLOCK(shared);
 
 	resultState = seq_buf_finish_prev_page(seqBufPrivate) ? SeqBufPrevPageDone
 		: SeqBufPrevPageError;
 
-	SpinLockAcquire(&shared->lock);
+	SEQ_BUF_LOCK(shared);
 	shared->prevPageState = resultState;
-	SpinLockRelease(&shared->lock);
+	SEQ_BUF_UNLOCK(shared);
 
 	/* If even we didn't finish the next page, current page is OK. */
 	return true;
@@ -422,7 +593,7 @@ seq_buf_rw(SeqBufDescPrivate *seqBufPrivate, char *data, Size data_size, bool wr
 
 	do
 	{
-		SpinLockAcquire(&shared->lock);
+		SEQ_BUF_LOCK(shared);
 		if (shared->location + data_size <= ORIOLEDB_BLCKSZ)
 		{
 			page = O_GET_IN_MEMORY_PAGE(shared->pages[shared->curPageNum]);
@@ -434,7 +605,7 @@ seq_buf_rw(SeqBufDescPrivate *seqBufPrivate, char *data, Size data_size, bool wr
 			}
 			shared->location += data_size;
 
-			SpinLockRelease(&shared->lock);
+			SEQ_BUF_UNLOCK(shared);
 			return true;
 		}
 		switched = seq_buf_switch_page(seqBufPrivate);	/* releases shared->lock */
@@ -494,13 +665,13 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 	SeqBufDescShared *shared = seqBufPrivate->shared;
 	off_t		result;
 
-	SpinLockAcquire(&shared->lock);
+	SEQ_BUF_LOCK(shared);
 	seq_buf_wait_prev_page(shared);
 	if (shared->prevPageState == SeqBufPrevPageError)
 	{
 		if (!seq_buf_finish_prev_page(seqBufPrivate))
 		{
-			SpinLockRelease(&shared->lock);
+			SEQ_BUF_UNLOCK(shared);
 			ereport(PANIC, (errcode_for_file_access(),
 							errmsg("could not finalize previous sequence buffer page to file %s: %m",
 								   get_seq_buf_filename(&seqBufPrivate->tag))));
@@ -512,7 +683,7 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 	{
 		if (!seq_buf_check_open_file(seqBufPrivate))
 		{
-			SpinLockRelease(&shared->lock);
+			SEQ_BUF_UNLOCK(shared);
 			ereport(PANIC, (errcode_for_file_access(),
 							errmsg("could not open sequence buffer file %s: %m",
 								   get_seq_buf_filename(&seqBufPrivate->tag))));
@@ -525,7 +696,7 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 			if (OFileWrite(seqBufPrivate->file, SEQBUF_DATA_POS(O_GET_IN_MEMORY_PAGE(shared->pages[shared->curPageNum])),
 						   shared->location - SEQBUF_DATA_OFF, offset, WAIT_EVENT_SLRU_WRITE) != shared->location - SEQBUF_DATA_OFF)
 			{
-				SpinLockRelease(&shared->lock);
+				SEQ_BUF_UNLOCK(shared);
 				ereport(PANIC, (errcode_for_file_access(),
 								errmsg("could not finalize sequence buffer into file %s: %m",
 									   FilePathName(seqBufPrivate->file))));
@@ -535,7 +706,7 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 
 	result = SEQBUF_FILE_OFFSET(shared, (off_t) shared->filePageNum)
 		+ (shared->location - SEQBUF_DATA_OFF);
-	SpinLockRelease(&shared->lock);
+	SEQ_BUF_UNLOCK(shared);
 
 	seq_buf_close_file(seqBufPrivate);
 
@@ -578,13 +749,13 @@ seq_buf_snapshot_pending_data(SeqBufDescPrivate *seqBufPrivate, char *buf)
 	if (!SEQ_BUF_SHARED_EXIST(shared))
 		return 0;
 
-	SpinLockAcquire(&shared->lock);
+	SEQ_BUF_LOCK(shared);
 	seq_buf_wait_prev_page(shared);
 	if (shared->prevPageState == SeqBufPrevPageError)
 	{
 		if (!seq_buf_finish_prev_page(seqBufPrivate))
 		{
-			SpinLockRelease(&shared->lock);
+			SEQ_BUF_UNLOCK(shared);
 			ereport(PANIC, (errcode_for_file_access(),
 							errmsg("could not finalize previous sequence buffer page to file %s: %m",
 								   get_seq_buf_filename(&seqBufPrivate->tag))));
@@ -599,7 +770,7 @@ seq_buf_snapshot_pending_data(SeqBufDescPrivate *seqBufPrivate, char *buf)
 		page = O_GET_IN_MEMORY_PAGE(shared->pages[shared->curPageNum]);
 		memcpy(buf, page + SEQBUF_DATA_OFF, len);
 	}
-	SpinLockRelease(&shared->lock);
+	SEQ_BUF_UNLOCK(shared);
 
 	return len;
 }
@@ -613,10 +784,10 @@ seq_buf_get_offset(SeqBufDescPrivate *seqBufPrivate)
 	SeqBufDescShared *shared = seqBufPrivate->shared;
 	uint64		offset;
 
-	SpinLockAcquire(&shared->lock);
+	SEQ_BUF_LOCK(shared);
 	offset = SEQBUF_FILE_OFFSET(shared, (off_t) shared->filePageNum)
 		+ (shared->location - SEQBUF_DATA_OFF);
-	SpinLockRelease(&shared->lock);
+	SEQ_BUF_UNLOCK(shared);
 
 	return offset;
 }
@@ -636,7 +807,7 @@ seq_buf_try_replace(SeqBufDescPrivate *seqBufPrivate, SeqBufTag *tag,
 	Assert(!seqBufPrivate->write);
 	Assert((SEQBUF_CHUNK_SIZE % data_size) == 0);
 
-	SpinLockAcquire(&shared->lock);
+	SEQ_BUF_LOCK(shared);
 	Assert(shared->tag.key.oids.datoid == tag->key.oids.datoid &&
 		   shared->tag.key.oids.relnode == tag->key.oids.relnode);
 
@@ -647,7 +818,7 @@ seq_buf_try_replace(SeqBufDescPrivate *seqBufPrivate, SeqBufTag *tag,
 	if (shared->tag.num >= tag->num)
 	{
 		/* Already have newer sequential file */
-		SpinLockRelease(&shared->lock);
+		SEQ_BUF_UNLOCK(shared);
 		return SeqBufReplaceAlready;
 	}
 
@@ -659,14 +830,14 @@ seq_buf_try_replace(SeqBufDescPrivate *seqBufPrivate, SeqBufTag *tag,
 		if (!seq_buf_read_pages(seqBufPrivate, shared, 0, 0))
 		{
 			shared->tag = old_tag;
-			SpinLockRelease(&shared->lock);
+			SEQ_BUF_UNLOCK(shared);
 			return SeqBufReplaceError;
 		}
 
 		if ((len = FileSize(seqBufPrivate->file)) < 0)
 		{
 			shared->tag = old_tag;
-			SpinLockRelease(&shared->lock);
+			SEQ_BUF_UNLOCK(shared);
 			ereport(PANIC, (errcode_for_file_access(),
 							errmsg("could not seek to the end of file %s: %m",
 								   FilePathName(seqBufPrivate->file))));
@@ -686,7 +857,7 @@ seq_buf_try_replace(SeqBufDescPrivate *seqBufPrivate, SeqBufTag *tag,
 	shared->evictOffset = 0;
 	shared->prevPageState = SeqBufPrevPageDone;
 
-	SpinLockRelease(&shared->lock);
+	SEQ_BUF_UNLOCK(shared);
 
 	return SeqBufReplaceSuccess;
 }
@@ -710,7 +881,7 @@ seq_buf_read_pages(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 	len = FileSize(seqBufPrivate->file);
 	if (len < header_off)
 	{
-		SpinLockRelease(&shared->lock);
+		SEQ_BUF_UNLOCK(shared);
 		ereport(PANIC, (errcode_for_file_access(),
 						errmsg("length %d of file %s is less than header %d: %m",
 							   len, FilePathName(seqBufPrivate->file), header_off)));
@@ -735,7 +906,7 @@ seq_buf_read_pages(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 	nbytes = OFileRead(seqBufPrivate->file, SEQBUF_DATA_POS(buf_first), should_read, evicted_off, WAIT_EVENT_SLRU_READ);
 	if (nbytes != should_read)
 	{
-		SpinLockRelease(&shared->lock);
+		SEQ_BUF_UNLOCK(shared);
 		ereport(PANIC, (errcode_for_file_access(),
 						errmsg("could not to read first page from file %s, read = %d, expected = %d: %m",
 							   FilePathName(seqBufPrivate->file), nbytes, should_read)));
@@ -752,7 +923,7 @@ seq_buf_read_pages(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 		nbytes = OFileRead(seqBufPrivate->file, SEQBUF_DATA_POS(buf_second), should_read, evicted_off, WAIT_EVENT_SLRU_READ);
 		if (nbytes != should_read)
 		{
-			SpinLockRelease(&shared->lock);
+			SEQ_BUF_UNLOCK(shared);
 			ereport(PANIC, (errcode_for_file_access(),
 							errmsg("could not to read second page from file %s, read = %d, expected = %d: %m",
 								   FilePathName(seqBufPrivate->file), nbytes, should_read)));
