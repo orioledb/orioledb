@@ -213,6 +213,30 @@ o_create_key_tuple(BTreeDescr *desc, OTuple tuple, Pointer data,
 	}
 
 	len = o_new_tuple_size(id->nonLeafTupdesc, &id->nonLeafSpec, NULL, NULL, version, key, isnull, NULL);
+
+	if (data == tuple.data)
+	{
+		OTuple		scratch;
+
+		/*
+		 * The caller handed us the very tuple we are reading -- replay
+		 * rewrites a REPLICA IDENTITY FULL tuple into a key in place.  A
+		 * varlena key attribute is a pointer into those bytes, so filling
+		 * over them would consume what it is copying: build the key elsewhere
+		 * and move it in once nothing reads the tuple any more.
+		 */
+		scratch.formatFlags = 0;
+		scratch.data = (Pointer) palloc0(len);
+		o_tuple_fill(id->nonLeafTupdesc, &id->nonLeafSpec, &scratch, len,
+					 NULL, NULL, version, key, isnull, NULL);
+		memcpy(data, scratch.data, len);
+		pfree(scratch.data);
+
+		result.data = data;
+		result.formatFlags = scratch.formatFlags;
+		return result;
+	}
+
 	if (data)
 	{
 		memset(data, 0, len);
