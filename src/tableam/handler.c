@@ -1319,13 +1319,13 @@ orioledb_index_validate_scan(Relation heapRelation,
 
 	/*
 	 * Bridged non-unique index (any non-btree AM, or btree with
-	 * orioledb_index = false):
-	 * it's a stock-PG index keyed by bridge_ctid.  The phase-2 build was done
-	 * by the AM's own ambuild via bridged_ambuild / btbuild, and PG has
-	 * already set indisready=true between phase 2 and this call, so
-	 * concurrent writers update the index live via bridged_aminsert.  We have
-	 * nothing native to do here -- no OIndex sys-tree row, no orioledb tree,
-	 * no spool.  PG will mark the index valid on return.
+	 * orioledb_index = false): it's a stock-PG index keyed by bridge_ctid.
+	 * The phase-2 build was done by the AM's own ambuild via bridged_ambuild
+	 * / btbuild, and PG has already set indisready=true between phase 2 and
+	 * this call, so concurrent writers update the index live via
+	 * bridged_aminsert.  We have nothing native to do here -- no OIndex
+	 * sys-tree row, no orioledb tree, no spool.  PG will mark the index valid
+	 * on return.
 	 *
 	 * PG's heap-AM validate_index would catch inserts made after the phase-2
 	 * snapshot by re-walking the heap here.  Orioledb-bridged does not yet
