@@ -3670,176 +3670,153 @@ worker_wait_shutdown(RecoveryWorkerState *worker)
 	}
 }
 
-static void
-cleanup_tablespace_old_files(const char *path, Oid tablespace, uint32 chkp_num,
-							 bool before_recovery)
-{
-	DIR		   *dir,
-			   *dbDir;
-	struct dirent *file,
-			   *dbFile;
-	char	   *filename;
-	char		ext[5];
-
-
-	dir = opendir(path);
-	if (dir == NULL)
-		return;
-
-	while (errno = 0, (file = readdir(dir)) != NULL)
-	{
-		Oid			dbOid;
-		char	   *dbDirName;
-		bool		fsyncDbDir = false;
-
-		if (sscanf(file->d_name, "%u", &dbOid) != 1)
-			continue;
-
-		dbDirName = psprintf("%s/%u", path, dbOid);
-
-		dbDir = opendir(dbDirName);
-		if (dbDir == NULL)
-		{
-			pfree(dbDirName);
-			continue;
-		}
-
-		while (errno = 0, (dbFile = readdir(dbDir)) != NULL)
-		{
-			uint32		file_reloid,
-						file_chkp,
-						file_segno;
-			bool		cleanup = false;
-
-			if (orioledb_s3_mode &&
-				(sscanf(dbFile->d_name, "%10u-%10u",
-						&file_reloid, &file_chkp) == 2 ||
-				 sscanf(dbFile->d_name, "%10u.%10u-%10u",
-						&file_reloid, &file_segno, &file_chkp) == 3) &&
-				file_chkp > chkp_num)
-			{
-				cleanup = true;
-			}
-
-			if (sscanf(dbFile->d_name, "%10u-%10u.%4s",
-					   &file_reloid, &file_chkp, ext) == 3)
-			{
-				if (before_recovery)
-				{
-					/*---
-					 * Before recovery we should cleanup:
-					 *
-					 * 1. *.map and *.tmp files which were not created by
-					 * checkpointer.
-					 * 2. All free extents tree files.
-					 *
-					 * Otherwise:
-					 *
-					 * 1. In some cases wrong *.map files will be created.
-					 * (if size of old *.map or *.tmp file is more than will
-					 * be created by checkpointer).
-					 */
-					if (!strcmp(ext, "tmp"))
-					{
-						cleanup = (file_chkp > chkp_num);
-					}
-					else if (!strcmp(ext, "map"))
-					{
-						uint32		my_chkp_num;
-						bool		found;
-
-						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
-															tablespace,
-															chkp_num, &found);
-
-						cleanup = (file_chkp > my_chkp_num);
-
-						if (!found && file_chkp == chkp_num)
-							o_update_latest_chkp_num(dbOid, file_reloid,
-													 tablespace, file_chkp);
-					}
-
-					if (!cleanup)
-					{
-						ORelOids	oids = {dbOid, file_reloid, file_reloid};
-
-						cleanup = IS_SYS_TREE_OIDS(oids) && sys_tree_get_storage_type(oids.relnode) == BTreeStorageTemporary;
-					}
-				}
-				else
-				{
-					/*
-					 * After recovery we should cleanup old *.tmp and *.map
-					 * files.
-					 */
-					if (!strcmp(ext, "tmp"))
-					{
-						cleanup = (file_chkp <= chkp_num);
-					}
-					else if (!strcmp(ext, "map"))
-					{
-						uint32		my_chkp_num;
-
-						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
-															tablespace,
-															chkp_num, NULL);
-
-						cleanup = (file_chkp < my_chkp_num);
-					}
-				}
-			}
-			else if (before_recovery &&
-					 sscanf(dbFile->d_name, "%10u", &file_reloid) == 1)
-			{
-				/*
-				 * Removes free extents tree data files.
-				 */
-				ORelOids	oids = {dbOid, file_reloid, file_reloid};
-
-				cleanup = IS_SYS_TREE_OIDS(oids) && sys_tree_get_storage_type(oids.relnode) == BTreeStorageTemporary;
-			}
-
-			if (cleanup)
-			{
-				filename = psprintf("%s/%u/%s", path, dbOid, dbFile->d_name);
-
-				if (unlink(filename) < 0)
-				{
-					ereport(FATAL,
-							(errcode_for_file_access(),
-							 errmsg("could not remove file \"%s\": %m",
-									filename)));
-				}
-				fsyncDbDir = true;
-			}
-		}
-		closedir(dbDir);
-		if (fsyncDbDir)
-			fsync_fname_ext(dbDirName, true, false, FATAL);
-		pfree(dbDirName);
-	}
-
-	if (errno != 0)
-	{
-		ereport(ERROR, (errcode_for_file_access(),
-						errmsg("unable to clean up temporary files: %m")));
-	}
-	closedir(dir);
-}
-
 typedef struct CleanupOldFilesArg
 {
 	uint32		chkp_num;
 	bool		before_recovery;
 } CleanupOldFilesArg;
 
+static bool
+cleanup_old_file(Oid tablespace, Oid dbOid, const char *db_path,
+				 const char *filename, CleanupOldFilesArg *c)
+{
+	uint32		file_reloid,
+				file_chkp,
+				file_segno;
+	bool		cleanup = false;
+	char		ext[5];
+
+	if (orioledb_s3_mode &&
+		(sscanf(filename, "%10u-%10u",
+				&file_reloid, &file_chkp) == 2 ||
+		 sscanf(filename, "%10u.%10u-%10u",
+				&file_reloid, &file_segno, &file_chkp) == 3) &&
+		file_chkp > c->chkp_num)
+	{
+		cleanup = true;
+	}
+
+	if (sscanf(filename, "%10u-%10u.%4s",
+			   &file_reloid, &file_chkp, ext) == 3)
+	{
+		if (c->before_recovery)
+		{
+			/*---
+			 * Before recovery we should cleanup:
+			 *
+			 * 1. *.map and *.tmp files which were not created by
+			 * checkpointer.
+			 * 2. All free extents tree files.
+			 *
+			 * Otherwise:
+			 *
+			 * 1. In some cases wrong *.map files will be created.
+			 * (if size of old *.map or *.tmp file is more than will
+			 * be created by checkpointer).
+			 */
+			if (!strcmp(ext, "tmp"))
+			{
+				cleanup = (file_chkp > c->chkp_num);
+			}
+			else if (!strcmp(ext, "map"))
+			{
+				uint32		my_chkp_num;
+				bool		found;
+
+				my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
+													tablespace,
+													c->chkp_num, &found);
+
+				cleanup = (file_chkp > my_chkp_num);
+
+				if (!found && file_chkp == c->chkp_num)
+					o_update_latest_chkp_num(dbOid, file_reloid,
+											 tablespace, file_chkp);
+			}
+
+			if (!cleanup)
+			{
+				ORelOids	oids = {dbOid, file_reloid, file_reloid};
+
+				cleanup = IS_SYS_TREE_OIDS(oids) && sys_tree_get_storage_type(oids.relnode) == BTreeStorageTemporary;
+			}
+		}
+		else
+		{
+			/*
+			 * After recovery we should cleanup old *.tmp and *.map files.
+			 */
+			if (!strcmp(ext, "tmp"))
+			{
+				cleanup = (file_chkp <= c->chkp_num);
+			}
+			else if (!strcmp(ext, "map"))
+			{
+				uint32		my_chkp_num;
+
+				my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
+													tablespace,
+													c->chkp_num, NULL);
+
+				cleanup = (file_chkp < my_chkp_num);
+			}
+		}
+	}
+	else if (c->before_recovery &&
+			 sscanf(filename, "%10u", &file_reloid) == 1)
+	{
+		/*
+		 * Removes free extents tree data files.
+		 */
+		ORelOids	oids = {dbOid, file_reloid, file_reloid};
+
+		cleanup = IS_SYS_TREE_OIDS(oids) && sys_tree_get_storage_type(oids.relnode) == BTreeStorageTemporary;
+	}
+
+	if (cleanup)
+	{
+		char	   *file_path = psprintf("%s/%s", db_path, filename);
+
+		if (unlink(file_path) < 0)
+		{
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not remove file \"%s\": %m",
+							file_path)));
+		}
+		pfree(file_path);
+		return true;
+	}
+	return false;
+}
+
+static void
+cleanup_database_old_files_cb(Oid tablespace, Oid dbOid,
+							  const char *db_path, void *arg)
+{
+	CleanupOldFilesArg *c = (CleanupOldFilesArg *) arg;
+	DIR		   *dir;
+	struct dirent *file;
+	bool		fsync_db_dir = false;
+
+	dir = opendir(db_path);
+	if (dir == NULL)
+		return;
+
+	while (errno = 0, (file = readdir(dir)) != NULL)
+		fsync_db_dir |= cleanup_old_file(tablespace, dbOid, db_path,
+										 file->d_name, c);
+	closedir(dir);
+	if (fsync_db_dir)
+		fsync_fname_ext(db_path, true, false, FATAL);
+}
+
 static void
 cleanup_old_files_cb(Oid tablespace, const char *prefix, void *arg)
 {
-	CleanupOldFilesArg *c = (CleanupOldFilesArg *) arg;
-
-	cleanup_tablespace_old_files(prefix, tablespace, c->chkp_num,
-								 c->before_recovery);
+	(void) o_tablespace_foreach_database(tablespace, prefix,
+										 cleanup_database_old_files_cb,
+										 arg, ERROR);
 }
 
 void

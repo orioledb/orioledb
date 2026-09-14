@@ -139,3 +139,42 @@ o_tablespaces_foreach_prefix(OTablespacesPrefixCallback callback, void *arg)
 	}
 	closedir(dir);
 }
+
+bool
+o_tablespace_foreach_database(Oid tablespace, const char *prefix,
+							  OTablespaceDatabaseCallback callback,
+							  void *arg, int elevel)
+{
+	DIR		   *dir;
+	struct dirent *file;
+	int			saved_errno;
+
+	dir = opendir(prefix);
+	if (dir == NULL)
+		return false;
+
+	while (errno = 0, (file = readdir(dir)) != NULL)
+	{
+		Oid			datoid;
+		char	   *db_path;
+
+		if (sscanf(file->d_name, "%u", &datoid) != 1)
+			continue;
+
+		db_path = psprintf("%s/%u", prefix, datoid);
+		callback(tablespace, datoid, db_path, arg);
+		pfree(db_path);
+	}
+
+	saved_errno = errno;
+	closedir(dir);
+	if (saved_errno != 0)
+	{
+		errno = saved_errno;
+		ereport(elevel,
+				(errcode_for_file_access(),
+				 errmsg("could not read directory \"%s\": %m", prefix)));
+	}
+
+	return true;
+}

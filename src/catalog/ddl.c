@@ -3201,38 +3201,28 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 }
 
 static void
-cleanup_tablespace_dir(const char *tablespace_path)
+cleanup_tablespace_database_dir_cb(Oid tablespace, Oid datoid,
+								   const char *db_path, void *arg)
 {
-	DIR		   *dir;
-	struct dirent *file;
+	/* We assume that postgres throws its own errors on nonempty directories. */
+	if (rmdir(db_path) < 0 && errno != ENOTEMPTY)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not remove orioledb db dir \"%s\": %m",
+						db_path)));
+}
 
-	dir = opendir(tablespace_path);
-	if (dir == NULL)
+static void
+cleanup_tablespace_dir(Oid tablespace, const char *tablespace_path)
+{
+	if (!o_tablespace_foreach_database(tablespace, tablespace_path,
+									   cleanup_tablespace_database_dir_cb,
+									   NULL, ERROR))
 		return;
 
-	while (errno = 0, (file = readdir(dir)) != NULL)
-	{
-		Oid			dbOid;
-		char	   *dbDirName;
-
-		if (sscanf(file->d_name, "%u", &dbOid) != 1)
-			continue;
-
-		dbDirName = psprintf("%s/%u", tablespace_path, dbOid);
-
-		/* We assume that postgres throws it's own errors on not empty dirs */
-		if (rmdir(dbDirName) < 0 && errno != ENOTEMPTY)
-		{
-			ereport(FATAL,
-					(errcode_for_file_access(),
-					 errmsg("could not remove orioledb db dir \"%s\": %m",
-							dbDirName)));
-		}
-		pfree(dbDirName);
-	}
 	fsync_fname_ext(tablespace_path, true, false, FATAL);
 
-	/* We assume that postgres throws it's own errors on not empty dirs */
+	/* We assume that postgres throws its own errors on nonempty directories. */
 	if (rmdir(tablespace_path) < 0 && errno != ENOTEMPTY)
 	{
 		ereport(FATAL,
@@ -3241,13 +3231,12 @@ cleanup_tablespace_dir(const char *tablespace_path)
 						tablespace_path)));
 	}
 
-	/* We assume that postgres throws it's own errors on not empty dirs */
+	/* We assume that postgres throws its own errors on nonempty directories. */
 	if (errno != 0 && errno != ENOTEMPTY)
 	{
 		ereport(ERROR, (errcode_for_file_access(),
 						errmsg("unable to clean up orioledb tablespace: %m")));
 	}
-	closedir(dir);
 }
 
 static void
@@ -3256,7 +3245,7 @@ cleanup_tablespace_dir_cb(Oid tablespace, const char *prefix,
 {
 	if (tablespace == DEFAULTTABLESPACE_OID)
 		return;
-	cleanup_tablespace_dir(prefix);
+	cleanup_tablespace_dir(tablespace, prefix);
 }
 
 /*
