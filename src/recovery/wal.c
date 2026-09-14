@@ -48,17 +48,32 @@ static void add_joint_commit_wal_record(TransactionId xid, OXid xmin,
 static void add_xid_wal_record(OXid oxid, TransactionId logicalXid);
 static void add_xid_wal_record_if_needed(void);
 static void flush_local_wal_if_needed(int required_length);
-static inline void add_local_modify(uint8 record_type, OTuple record, OffsetNumber length, OTuple record2, OffsetNumber length2);
+static inline void add_local_modify(uint8 record_type, OTuple record, uint32 length, OTuple record2, uint32 length2);
 static void add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
-										   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident, uint32 version, uint32 base_version);
+										   OTuple tuple, uint32 length, OTuple tuple2, uint32 length2, char relreplident, uint32 version, uint32 base_version);
+static void add_oversized_modify_wal_record(uint8 rec_type, ORelOids oids,
+											OIndexType type, OTuple tuple,
+											uint32 length, OTuple tuple2,
+											uint32 length2, bool write_two_tuples,
+											char relreplident, uint32 version,
+											uint32 base_version);
 static void add_relreplident_wal_record(char relreplident);
 static XLogRecPtr log_logical_wal_container(Pointer ptr, int length, bool withXactTime);
+static XLogRecPtr log_logical_wal_container_with_payload(Pointer ptr, int length,
+														 Pointer payload1, int payload1_length,
+														 Pointer payload2, int payload2_length,
+														 bool withXactTime);
+static void flush_local_wal_buffer(void);
+static void reset_local_wal_buffer(void);
+static inline void add_local_modify_header(uint8 record_type, OTuple record1,
+										   uint32 length1, OTuple record2,
+										   uint32 length2);
 
 #define XID_RESERVED_LENGTH ((local_wal.contains_xid) ? 0 : sizeof(WALRecXid))
 
 void
 add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
-					  OTuple tuple, OffsetNumber length, char relreplident, uint32 version, uint32 base_version)
+					  OTuple tuple, uint32 length, char relreplident, uint32 version, uint32 base_version)
 {
 	OTuple		nulltup;
 
@@ -72,7 +87,7 @@ add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
  */
 static void
 add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
-							   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident, uint32 version, uint32 base_version)
+							   OTuple tuple, uint32 length, OTuple tuple2, uint32 length2, char relreplident, uint32 version, uint32 base_version)
 {
 	int			required_length;
 	ORelOids	oids = desc->oids;
@@ -113,12 +128,26 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	}
 
 
-	elog(DEBUG4, "add_modify_wal_record_extended length1 %d length2 %d", length, length2);
+	elog(DEBUG4, "add_modify_wal_record_extended length1 %u length2 %u", length, length2);
 	if (!ORelOidsIsEqual(local_wal.oids, oids) || type != local_wal.ix_type)
 		required_length += sizeof(WALRecRelation);
 
 	if (relreplident != REPLICA_IDENTITY_DEFAULT)
 		required_length += sizeof(WALRecRelReplident);
+
+	/*
+	 * A REPLICA IDENTITY FULL old tuple carries its TOASTed attributes
+	 * inline, so a modify record has no bound the local buffer could satisfy.
+	 * Such a record gets a WAL container of its own.
+	 */
+	if (sizeof(WALRecXid) + sizeof(WALRecRelation) + sizeof(WALRecRelReplident) +
+		required_length > LOCAL_WAL_BUFFER_SIZE)
+	{
+		add_oversized_modify_wal_record(rec_type, oids, type, tuple, length,
+										tuple2, length2, write_two_tuples,
+										relreplident, version, base_version);
+		return;
+	}
 
 	flush_local_wal_if_needed(required_length);
 	Assert(local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
@@ -133,6 +162,48 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	}
 
 	add_local_modify(rec_type, tuple, length, tuple2, length2);
+}
+
+/*
+ * Write a modify record that the local WAL buffer cannot hold.
+ *
+ * The record gets a container of its own: the buffer holds only its headers,
+ * and the tuple bytes go straight into the XLog record, so a large old tuple
+ * is never copied.  Everything already buffered is flushed first, so WAL
+ * order is unchanged.
+ */
+static void
+add_oversized_modify_wal_record(uint8 rec_type, ORelOids oids, OIndexType type,
+								OTuple tuple, uint32 length, OTuple tuple2,
+								uint32 length2, bool write_two_tuples,
+								char relreplident, uint32 version,
+								uint32 base_version)
+{
+	OTuple		nulltup;
+
+	O_TUPLE_SET_NULL(nulltup);
+
+	flush_local_wal_buffer();
+	Assert(local_wal.buffer_offset == 0);
+
+	add_xid_wal_record_if_needed();
+	add_rel_wal_record(oids, type, version, base_version);
+	if (relreplident != REPLICA_IDENTITY_DEFAULT)
+		add_relreplident_wal_record(relreplident);
+
+	add_local_modify_header(rec_type, tuple, length,
+							write_two_tuples ? tuple2 : nulltup, length2);
+
+	START_CRIT_SECTION();
+	log_logical_wal_container_with_payload(local_wal.buffer,
+										   local_wal.buffer_offset,
+										   tuple.data, length,
+										   write_two_tuples ? tuple2.data : NULL,
+										   write_two_tuples ? length2 : 0,
+										   false);
+	reset_local_wal_buffer();
+	local_wal.has_material_changes = true;
+	END_CRIT_SECTION();
 }
 
 void
@@ -183,7 +254,8 @@ add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr, uint32 version, 
  * Adds the record to the local_wal.buffer.
  */
 static inline void
-add_local_modify(uint8 record_type, OTuple record1, OffsetNumber length1, OTuple record2, OffsetNumber length2)
+add_local_modify_header(uint8 record_type, OTuple record1, uint32 length1,
+						OTuple record2, uint32 length2)
 {
 	Assert(!O_TUPLE_IS_NULL(record1));
 	Assert(length1);
@@ -194,39 +266,51 @@ add_local_modify(uint8 record_type, OTuple record1, OffsetNumber length1, OTuple
 		WALRecModify2 *wal_rec;
 
 		Assert(length2);
-		Assert(local_wal.buffer_offset + sizeof(*wal_rec) + length1 + length2 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+		Assert(local_wal.buffer_offset + sizeof(*wal_rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 		wal_rec = (WALRecModify2 *) (&local_wal.buffer[local_wal.buffer_offset]);
 		wal_rec->recType = record_type;
 		wal_rec->tupleFormatFlags1 = record1.formatFlags;
 		wal_rec->tupleFormatFlags2 = record2.formatFlags;
-		memcpy(wal_rec->length1, &length1, sizeof(OffsetNumber));
-		memcpy(wal_rec->length2, &length2, sizeof(OffsetNumber));
+		memcpy(wal_rec->length1, &length1, sizeof(wal_rec->length1));
+		memcpy(wal_rec->length2, &length2, sizeof(wal_rec->length2));
 		local_wal.buffer_offset += sizeof(*wal_rec);
-
-		memcpy(&local_wal.buffer[local_wal.buffer_offset], record1.data, length1);
-		local_wal.buffer_offset += length1;
-		memcpy(&local_wal.buffer[local_wal.buffer_offset], record2.data, length2);
-		local_wal.buffer_offset += length2;
 	}
 	else
 	{
 		/* One-tuple modify record */
 		WALRecModify1 *wal_rec;
 
-		Assert(local_wal.buffer_offset + sizeof(*wal_rec) + length1 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+		Assert(local_wal.buffer_offset + sizeof(*wal_rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 		Assert(length2 == 0);
 
 		wal_rec = (WALRecModify1 *) (&local_wal.buffer[local_wal.buffer_offset]);
 		wal_rec->recType = record_type;
 		wal_rec->tupleFormatFlags = record1.formatFlags;
-		memcpy(wal_rec->length, &length1, sizeof(OffsetNumber));
+		memcpy(wal_rec->length, &length1, sizeof(wal_rec->length));
 		local_wal.buffer_offset += sizeof(*wal_rec);
-
-		memcpy(&local_wal.buffer[local_wal.buffer_offset], record1.data, length1);
-		local_wal.buffer_offset += length1;
 	}
 
 	local_wal.has_material_changes = true;
+}
+
+/*
+ * Same, with the tuple bytes appended to the buffer.  Only for records the
+ * buffer can hold; see add_oversized_modify_wal_record() for the rest.
+ */
+static inline void
+add_local_modify(uint8 record_type, OTuple record1, uint32 length1, OTuple record2, uint32 length2)
+{
+	add_local_modify_header(record_type, record1, length1, record2, length2);
+
+	Assert(local_wal.buffer_offset + length1 + length2 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	memcpy(&local_wal.buffer[local_wal.buffer_offset], record1.data, length1);
+	local_wal.buffer_offset += length1;
+	if (!O_TUPLE_IS_NULL(record2))
+	{
+		memcpy(&local_wal.buffer[local_wal.buffer_offset], record2.data, length2);
+		local_wal.buffer_offset += length2;
+	}
 }
 
 XLogRecPtr
@@ -781,22 +865,43 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	return location;
 }
 
+/*
+ * Hand whatever is buffered to WAL.  A no-op on an empty buffer, so it is
+ * safe to call just to establish ordering.
+ */
+static void
+flush_local_wal_buffer(void)
+{
+	Assert(!is_recovery_process());
+
+	if (local_wal.buffer_offset == 0)
+		return;
+
+	START_CRIT_SECTION();
+	log_logical_wal_container(local_wal.buffer, local_wal.buffer_offset, false);
+	reset_local_wal_buffer();
+	local_wal.has_material_changes = true;
+	END_CRIT_SECTION();
+}
+
 static void
 flush_local_wal_if_needed(int required_length)
 {
 	Assert(!is_recovery_process());
 	if (local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH > LOCAL_WAL_BUFFER_SIZE)
-	{
-		START_CRIT_SECTION();
-		log_logical_wal_container(local_wal.buffer, local_wal.buffer_offset, false);
-		reset_local_wal_buffer();
-		local_wal.has_material_changes = true;
-		END_CRIT_SECTION();
-	}
+		flush_local_wal_buffer();
 }
 
+/*
+ * Emit one WAL container.  The tuple bytes of an oversized modify record are
+ * passed as payload rather than copied into a buffer first, so the container
+ * is byte-identical to a buffered one.
+ */
 static XLogRecPtr
-log_logical_wal_container(Pointer ptr, int length, bool withXactTime)
+log_logical_wal_container_with_payload(Pointer ptr, int length,
+									   Pointer payload1, int payload1_length,
+									   Pointer payload2, int payload2_length,
+									   bool withXactTime)
 {
 	uint16		wal_version = ORIOLEDB_WAL_VERSION;
 	uint8		flags = 0;
@@ -839,7 +944,23 @@ log_logical_wal_container(Pointer ptr, int length, bool withXactTime)
 	}
 
 	XLogRegisterData(ptr, length);
+
+	if (payload1 != NULL && payload1_length > 0)
+		XLogRegisterData(payload1, payload1_length);
+	if (payload2 != NULL && payload2_length > 0)
+		XLogRegisterData(payload2, payload2_length);
+
 	return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
+}
+
+/*
+ * A container whose whole content is `ptr`.
+ */
+static XLogRecPtr
+log_logical_wal_container(Pointer ptr, int length, bool withXactTime)
+{
+	return log_logical_wal_container_with_payload(ptr, length, NULL, 0, NULL, 0,
+												  withXactTime);
 }
 
 /*

@@ -38,6 +38,29 @@ typedef struct
 
 #define O_TUPLE_FLAGS_FIXED_FORMAT	0x1
 
+/*
+ * `len` is 15 bits, which everything stored in a B-tree fits into several
+ * times over (O_BTREE_MAX_TUPLE_SIZE).  A tuple built for WAL alone has no
+ * such bound -- the old tuple of a REPLICA IDENTITY FULL record carries its
+ * TOASTed attributes inline -- so a longer one sets `len` to O_TUPLE_LEN_LONG
+ * and puts its real length in a uint32 right after the header.  The payload
+ * then starts SizeOfOTupleHeaderLong in.
+ *
+ * O_TUPLE_LEN_LONG is the largest value the field can hold, so a short tuple
+ * can never be mistaken for a long one: a tuple of exactly that many bytes
+ * simply takes the long form too.
+ */
+#define O_TUPLE_LEN_LONG			((1 << 15) - 1)
+#define SizeOfOTupleHeaderLong		(SizeOfOTupleHeader + MAXALIGN(sizeof(uint32)))
+
+#define OTupleHeaderIsLong(hdr)		((hdr)->len == O_TUPLE_LEN_LONG)
+#define OTupleHeaderLongLen(hdr)	\
+	(*((uint32 *) ((Pointer) (hdr) + SizeOfOTupleHeader)))
+#define OTupleHeaderGetLen(hdr)		\
+	(OTupleHeaderIsLong(hdr) ? OTupleHeaderLongLen(hdr) : (uint32) (hdr)->len)
+#define OTupleHeaderDataOff(hdr)	\
+	(OTupleHeaderIsLong(hdr) ? SizeOfOTupleHeaderLong : SizeOfOTupleHeader)
+
 typedef struct
 {
 	uint16		natts;
@@ -115,7 +138,8 @@ typedef struct BridgeData
 			OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
 			(														\
 				fetchatt(OTupleDescAttrFast((tupleDesc), (attnum)-1), \
-					(char *) (tup).data + SizeOfOTupleHeader +		\
+					(char *) (tup).data +							\
+					OTupleHeaderDataOff((OTupleHeader) (tup).data) +	\
 					OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff) \
 			)														\
 			:														\
@@ -123,7 +147,8 @@ typedef struct BridgeData
 		)															\
 		:															\
 		(															\
-			att_isnull((attnum) - 1, (bits8 *) ((tup).data + SizeOfOTupleHeader)) ? \
+			att_isnull((attnum) - 1, (bits8 *) ((tup).data +		\
+				OTupleHeaderDataOff((OTupleHeader) (tup).data))) ?		\
 			(														\
 				(*(isnull) = true),									\
 				(Datum) NULL										\
@@ -162,7 +187,8 @@ typedef struct BridgeData
 		(															\
 			OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
 			(														\
-				(char *) (tup).data + SizeOfOTupleHeader +				\
+				(char *) (tup).data +									\
+				OTupleHeaderDataOff((OTupleHeader) (tup).data) +		\
 				OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff \
 			)														\
 			:														\
@@ -170,7 +196,8 @@ typedef struct BridgeData
 		)															\
 		:															\
 		(															\
-			att_isnull((attnum) - 1, (bits8 *) ((tup).data + SizeOfOTupleHeader)) ? \
+			att_isnull((attnum) - 1, (bits8 *) ((tup).data +		\
+				OTupleHeaderDataOff((OTupleHeader) (tup).data))) ?		\
 			(														\
 				NULL												\
 			)														\
@@ -186,11 +213,11 @@ typedef struct BridgeData
 (																	\
 	((tup).formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT) ?				\
 	(																\
-		(spec)->len													\
+		(uint32) (spec)->len										\
 	)																\
 	:																\
 	(																\
-		((OTupleHeader) (tup).data)->len							\
+		OTupleHeaderGetLen((OTupleHeader) (tup).data)				\
 	)																\
 )
 

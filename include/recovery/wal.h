@@ -28,7 +28,7 @@
  * ORIOLEDB_COMPRESS_VERSION (see big comment on versioning
  * in include/orioledb.h)
  */
-#define ORIOLEDB_WAL_VERSION (19)
+#define ORIOLEDB_WAL_VERSION (20)
 
 /*
  * Value has been fixed at the moment of introducing WAL versioning.
@@ -68,6 +68,17 @@
  * record replay needed to see.
  */
 #define ORIOLEDB_SUBXACT_JOINT_COMMIT_WAL_VERSION (19)
+
+/*
+ * WAL version that made the old tuple of a REPLICA IDENTITY FULL modify
+ * record carry the TOASTed attributes inline instead of the compact
+ * placeholder, the way heap's toast_flatten_tuple() does.  Such a tuple has
+ * no useful bound, so the modify records' length fields grew to uint32 in the
+ * same version.
+ *
+ * We should never change this value.
+ */
+#define ORIOLEDB_FLAT_OLD_TUPLE_WAL_VERSION (20)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
@@ -131,12 +142,18 @@ typedef struct
 	uint8		new_relnode[sizeof(Oid)];
 } WALRecOTablesUnlockMeta;
 
-/* Modify record that contains one tuple */
+/*
+ * Modify record that contains one tuple.
+ *
+ * The length is 32-bit because a REPLICA IDENTITY FULL old tuple carries its
+ * TOASTed attributes inline and can be arbitrarily large; everything stored
+ * in a B-tree still fits in O_BTREE_MAX_TUPLE_SIZE.
+ */
 typedef struct
 {
 	uint8		recType;
 	uint8		tupleFormatFlags;
-	uint8		length[sizeof(OffsetNumber)];
+	uint8		length[sizeof(uint32)];
 	/* tuple[length] */
 } WALRecModify1;
 
@@ -146,8 +163,8 @@ typedef struct
 	uint8		recType;
 	uint8		tupleFormatFlags1;
 	uint8		tupleFormatFlags2;
-	uint8		length1[sizeof(OffsetNumber)];
-	uint8		length2[sizeof(OffsetNumber)];
+	uint8		length1[sizeof(uint32)];
+	uint8		length2[sizeof(uint32)];
 	/* tuple1[length1] */
 	/* tuple2[length2] */
 } WALRecModify2;
@@ -249,7 +266,7 @@ typedef struct
 
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
-								  OTuple tuple, OffsetNumber length, char relreplident, uint32 version, uint32 base_version);
+								  OTuple tuple, uint32 length, char relreplident, uint32 version, uint32 base_version);
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr, uint32 version, uint32 base_version);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);

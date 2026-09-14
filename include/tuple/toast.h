@@ -216,5 +216,9 @@ extern Datum o_get_src_value(Datum value, bool *free);
 
 /* returns true if left and right are equal orioledb TOAST values */
 extern bool o_toast_equal(BTreeDescr *primary, Datum left, Datum right);
+extern OTuple o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot,
+									bool *allocated);
+extern Pointer o_toast_get_value(OTableDescr *descr, OTuple pk, uint16 attn,
+								 OToastValue *otv, CommitSeqNo csn);
 
 #endif							/* __TOAST_H__ */

@@ -28,6 +28,7 @@
 #include "catalog/sys_trees.h"
 #include "recovery/wal_reader.h"
 #include "recovery/wal.h"
+#include "utils/memutils.h"
 
 /* Parsers */
 static WalParseResult wal_parse_empty(WalReaderState *r, WalRecord *rec);
@@ -45,6 +46,13 @@ static WalParseResult wal_parse_rec_relreplident(WalReaderState *r, WalRecord *r
 static WalParseResult wal_parse_rec_modify(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_dbcopy(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_dbcreate_copy(WalReaderState *r, WalRecord *rec);
+
+/*
+ * Home of the tuple copies that do not fit into the callers' OFixedTuple
+ * buffers.  Reset at the start of every build_fixed_tuples(), so a copy
+ * outlives its record by nothing.
+ */
+static MemoryContext bigTupleCxt = NULL;
 
 const char *
 wal_type_name(WalRecordType type)
@@ -328,6 +336,26 @@ wal_parse_rec_switch_logical_xid(WalReaderState *r, WalRecord *rec)
  * Read one or two tuples from modify WAL record.
  * Two tuples in certain cases: (1) WAL_REC_REINSERT, (2) WAL_REC_UPDATE with REPLICA_IDENTITY_FULL
  */
+/*
+ * Length of a tuple in a modify record.  It grew from 16 to 32 bits in
+ * ORIOLEDB_FLAT_OLD_TUPLE_WAL_VERSION, when the old tuple of a REPLICA
+ * IDENTITY FULL record started carrying its TOASTed attributes inline.
+ */
+#define WR_PARSE_MODIFY_LENGTH(r, out) \
+{ \
+	if ((r)->container.version >= ORIOLEDB_FLAT_OLD_TUPLE_WAL_VERSION) \
+	{ \
+		WR_PARSE(r, out); \
+	} \
+	else \
+	{ \
+		OffsetNumber shortLength; \
+\
+		WR_PARSE(r, &shortLength); \
+		*(out) = shortLength; \
+	} \
+}
+
 static WalParseResult
 wal_parse_rec_modify(WalReaderState *r, WalRecord *rec)
 {
@@ -339,7 +367,7 @@ wal_parse_rec_modify(WalReaderState *r, WalRecord *rec)
 	if (!rec->u.modify.read_two_tuples)
 	{
 		WR_PARSE(r, &rec->u.modify.t1.formatFlags);
-		WR_PARSE(r, &rec->u.modify.len1);
+		WR_PARSE_MODIFY_LENGTH(r, &rec->u.modify.len1);
 		Assert(rec->u.modify.len1 > 0);
 
 		rec->u.modify.t1.data = r->ptr;
@@ -352,8 +380,8 @@ wal_parse_rec_modify(WalReaderState *r, WalRecord *rec)
 		WR_PARSE(r, &rec->u.modify.t1.formatFlags);
 		WR_PARSE(r, &rec->u.modify.t2.formatFlags);
 
-		WR_PARSE(r, &rec->u.modify.len1);
-		WR_PARSE(r, &rec->u.modify.len2);
+		WR_PARSE_MODIFY_LENGTH(r, &rec->u.modify.len1);
+		WR_PARSE_MODIFY_LENGTH(r, &rec->u.modify.len2);
 
 		Assert(rec->u.modify.len1 > 0);
 		Assert(rec->u.modify.len2 > 0);
@@ -396,22 +424,35 @@ wal_parse_rec_dbcreate_copy(WalReaderState *r, WalRecord *rec)
 }
 
 static void
-build_fixed_tuple_from_tuple_view(const OTuple *view, const OffsetNumber len, OFixedTuple *tuple)
+build_fixed_tuple_from_tuple_view(const OTuple *view, const uint32 len, OFixedTuple *tuple)
 {
+	Pointer		dest;
+
 	Assert(view);
 	Assert(tuple);
 
 	tuple->tuple.formatFlags = view->formatFlags;
-	if (unlikely(MAXALIGN(len) > sizeof(tuple->fixedData)))
-		ereport(ERROR,
-				(errcode(ERRCODE_DATA_CORRUPTED),
-				 errmsg("WAL tuple length %u exceeds fixed buffer size %u",
-						(unsigned) len,
-						(unsigned) sizeof(tuple->fixedData))));
-	memcpy(tuple->fixedData, view->data, len);
+	Assert(tuple->fixedData);
+
+	/*
+	 * Everything a B-tree stores fits in fixedData, but the old tuple of a
+	 * REPLICA IDENTITY FULL record carries its TOASTed attributes inline and
+	 * has no such bound.  Those go to bigTupleCxt, which build_fixed_tuples()
+	 * resets per record, so the bytes stay valid for exactly as long as the
+	 * record they belong to.
+	 *
+	 * `len` needs no check of its own: the parser only hands it over after
+	 * WR_SKIP() has confirmed the container really holds that many bytes.
+	 */
+	if (MAXALIGN(len) > sizeof(tuple->fixedData))
+		dest = (Pointer) MemoryContextAlloc(bigTupleCxt, MAXALIGN(len));
+	else
+		dest = tuple->fixedData;
+
+	memcpy(dest, view->data, len);
 	if (len != MAXALIGN(len))
-		memset(&tuple->fixedData[len], 0, MAXALIGN(len) - len);
-	tuple->tuple.data = tuple->fixedData;
+		memset(&dest[len], 0, MAXALIGN(len) - len);
+	tuple->tuple.data = dest;
 }
 
 /*
@@ -441,6 +482,13 @@ build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple
 	Assert(tuple2);
 	Assert(rec->type == WAL_REC_INSERT || rec->type == WAL_REC_UPDATE || rec->type == WAL_REC_DELETE || rec->type == WAL_REC_REINSERT);
 
+	if (bigTupleCxt == NULL)
+		bigTupleCxt = AllocSetContextCreate(TopMemoryContext,
+											"orioledb WAL oversized tuples",
+											ALLOCSET_START_SMALL_SIZES);
+	else
+		MemoryContextReset(bigTupleCxt);
+
 	if (!rec->u.modify.read_two_tuples)
 	{
 		build_fixed_tuple_from_tuple_view(&rec->u.modify.t1, rec->u.modify.len1, tuple1);
@@ -452,6 +500,8 @@ build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple
 		build_fixed_tuple_from_tuple_view(&rec->u.modify.t2, rec->u.modify.len2, tuple2);
 	}
 }
+
+
 
 /*
  * wal_container_read_header()
