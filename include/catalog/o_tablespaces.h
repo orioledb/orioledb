@@ -25,4 +25,13 @@ typedef void (*OTablespacesPrefixCallback) (Oid tablespace,
 extern void o_tablespaces_foreach_prefix(OTablespacesPrefixCallback callback,
 										 void *arg);
 
+/* callback for o_tablespace_foreach_database() */
+typedef void (*OTablespaceDatabaseCallback) (Oid tablespace, Oid datoid,
+											 const char *db_path,
+											 void *arg);
+
+extern bool o_tablespace_foreach_database(Oid tablespace, const char *prefix,
+										  OTablespaceDatabaseCallback callback,
+										  void *arg, int elevel);
+
 #endif							/* __O_TABLESPACES_H__ */
