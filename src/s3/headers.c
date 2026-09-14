@@ -1003,84 +1003,81 @@ s3_headers_error_cleanup(void)
 
 typedef void (*IterateFilesCallback) (S3HeaderTag tag);
 
-static void
-iterate_tablespace_files(Oid tablespace, const char *path,
-						 IterateFilesCallback callback)
+typedef struct IterateFilesArg
 {
-	DIR		   *dir,
-			   *dbDir;
-	struct dirent *file,
-			   *dbFile;
+	IterateFilesCallback callback;
+} IterateFilesArg;
 
-	dir = opendir(path);
+static void
+iterate_file(Oid tablespace, Oid dbOid, const char *filename,
+			 IterateFilesCallback callback)
+{
+	uint32		file_relnode,
+				file_chkp,
+				file_segno;
+	S3HeaderTag tag = {0};
+	int			pos,
+				len = strlen(filename);
+
+	if (sscanf(filename, "%10u-%10u%n",
+			   &file_relnode, &file_chkp, &pos) == 2 &&
+		pos == len)
+	{
+		tag.key.oids.datoid = dbOid;
+		tag.key.oids.relnode = file_relnode;
+		tag.key.oids.spcoid = tablespace;
+		tag.checkpointNum = file_chkp;
+		tag.segNum = 0;
+		callback(tag);
+	}
+	else if (sscanf(filename, "%10u.%10u-%10u%n",
+					&file_relnode, &file_segno, &file_chkp, &pos) == 3 &&
+			 pos == len)
+	{
+		tag.key.oids.datoid = dbOid;
+		tag.key.oids.relnode = file_relnode;
+		tag.key.oids.spcoid = tablespace;
+		tag.checkpointNum = file_chkp;
+		tag.segNum = file_segno;
+		callback(tag);
+	}
+}
+
+static void
+iterate_database_files_cb(Oid tablespace, Oid dbOid, const char *db_path,
+						  void *arg)
+{
+	IterateFilesArg *files_arg = (IterateFilesArg *) arg;
+	DIR		   *dir;
+	struct dirent *file;
+
+	dir = opendir(db_path);
 	if (dir == NULL)
-		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not open orioledb data directory: %s: %m",
-							   path)));
+		return;
 
 	while (errno = 0, (file = readdir(dir)) != NULL)
-	{
-		Oid			dbOid;
-		char	   *dbDirName;
-
-		if (sscanf(file->d_name, "%u", &dbOid) != 1)
-			continue;
-
-		dbDirName = psprintf(ORIOLEDB_DATA_DIR "/%u", dbOid);
-		dbDir = opendir(dbDirName);
-		pfree(dbDirName);
-		if (dbDir == NULL)
-			continue;
-
-		while (errno = 0, (dbFile = readdir(dbDir)) != NULL)
-		{
-			uint32		file_relnode,
-						file_chkp,
-						file_segno;
-			S3HeaderTag tag = {0};
-			int			pos,
-						len = strlen(dbFile->d_name);
-
-			if (sscanf(dbFile->d_name, "%10u-%10u%n",
-					   &file_relnode, &file_chkp, &pos) == 2 &&
-				pos == len)
-			{
-				tag.key.oids.datoid = dbOid;
-				tag.key.oids.relnode = file_relnode;
-				tag.key.oids.spcoid = tablespace;
-				tag.checkpointNum = file_chkp;
-				tag.segNum = 0;
-				callback(tag);
-			}
-			else if (sscanf(dbFile->d_name, "%10u.%10u-%10u%n",
-							&file_relnode, &file_segno, &file_chkp, &pos) == 3 &&
-					 pos == len)
-			{
-				tag.key.oids.datoid = dbOid;
-				tag.key.oids.relnode = file_relnode;
-				tag.key.oids.spcoid = tablespace;
-				tag.checkpointNum = file_chkp;
-				tag.segNum = file_segno;
-				callback(tag);
-			}
-		}
-		closedir(dbDir);
-	}
-
+		iterate_file(tablespace, dbOid, file->d_name, files_arg->callback);
 	closedir(dir);
-
 }
 
 static void
 iterate_files_cb(Oid tablespace, const char *prefix, void *arg)
 {
-	iterate_tablespace_files(tablespace, prefix, (IterateFilesCallback) arg);
+	if (!o_tablespace_foreach_database(tablespace, prefix,
+									   iterate_database_files_cb, arg, PANIC))
+		ereport(PANIC,
+				(errcode_for_file_access(),
+				 errmsg("could not open orioledb data directory: %s: %m",
+						prefix)));
 }
 
 static void
 iterate_files(IterateFilesCallback callback)
 {
-	o_tablespaces_foreach_prefix(iterate_files_cb, callback);
+	IterateFilesArg arg;
+
+	arg.callback = callback;
+	o_tablespaces_foreach_prefix(iterate_files_cb, &arg);
 }
 
 static off_t totalFilesSize;
