@@ -1380,7 +1380,7 @@ o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn)
 		any_wal = table->persistence != RELPERSISTENCE_TEMP;
 		result = generic_toast_delete_optional_wal(&oTablesToastAPI,
 												   (Pointer) &key, oxid, csn,
-												   sys_tree, any_wal);
+												   sys_tree, any_wal, false, 0);
 	}
 	else
 	{

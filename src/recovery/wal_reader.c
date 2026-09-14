@@ -45,6 +45,7 @@ static WalParseResult wal_parse_rec_relreplident(WalReaderState *r, WalRecord *r
 static WalParseResult wal_parse_rec_modify(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_dbcopy(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_dbcreate_copy(WalReaderState *r, WalRecord *rec);
+static WalParseResult wal_parse_rec_toast_chunk(WalReaderState *r, WalRecord *rec);
 
 const char *
 wal_type_name(WalRecordType type)
@@ -379,6 +380,25 @@ wal_parse_rec_dbcreate_copy(WalReaderState *r, WalRecord *rec)
 
 	WR_PARSE(r, &rec->u.dbcreate_copy.src_datoid);
 	WR_PARSE(r, &rec->u.dbcreate_copy.dst_datoid);
+
+	return WALPARSE_OK;
+}
+
+/*
+ * Parser for WAL_REC_TOAST_CHUNK.  Like modify records, the payload is
+ * exposed as a pointer into the reader's buffer; the consumer copies it.
+ */
+static WalParseResult
+wal_parse_rec_toast_chunk(WalReaderState *r, WalRecord *rec)
+{
+	Assert(r);
+	Assert(rec);
+
+	WR_PARSE(r, &rec->u.toast_chunk.attnum);
+	WR_PARSE(r, &rec->u.toast_chunk.length);
+
+	rec->u.toast_chunk.data = r->ptr;
+	WR_SKIP(r, rec->u.toast_chunk.length);
 
 	return WALPARSE_OK;
 }

@@ -669,7 +669,8 @@ generic_toast_update_optional_wal(ToastAPI *api, void *key, Pointer data,
 	 * There might be tailing tuples.  We need to delete them.
 	 */
 	api->updateKey(key, chunknum, arg);
-	(void) generic_toast_delete_optional_wal(api, key, oxid, csn, arg, wal);
+	(void) generic_toast_delete_optional_wal(api, key, oxid, csn, arg, wal,
+											 false, 0);
 
 	return success;
 }
@@ -682,9 +683,15 @@ generic_toast_update(ToastAPI *api, void *key, Pointer data, Size data_size,
 											 csn, arg, true);
 }
 
+/*
+ * With logOldChunks set, the data of every removed chunk is also logged via
+ * WAL_REC_TOAST_CHUNK so logical decoding can reconstruct the old value
+ * (REPLICA IDENTITY FULL).
+ */
 bool
 generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
-								  CommitSeqNo csn, void *arg, bool wal)
+								  CommitSeqNo csn, void *arg, bool wal,
+								  bool logOldChunks, uint16 attnum)
 {
 	BTreeDescr *desc = api->getBTreeDesc(arg);
 	void	   *nextKey;
@@ -697,6 +704,8 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 		.needsUndoForSelfCreated = false,
 		.arg = NULL
 	};
+
+	Assert(!logOldChunks || attnum > 0);
 
 	nextKey = api->getNextKey(key, arg);
 	it = o_btree_iterator_create(desc, key, BTreeKeyBound,
@@ -754,6 +763,19 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 				add_modify_wal_record(WAL_REC_DELETE, desc, tuple,
 									  o_btree_len(desc, tuple, OTupleLength), REPLICA_IDENTITY_DEFAULT, version, base_version);
 			}
+
+			if (logOldChunks)
+			{
+				uint32		data_size = api->getTupleDataSize(tuple, arg);
+
+				/* Chunks are page-bounded, see tableGetMaxChunkSize() */
+				Assert(data_size > 0 && data_size <= PG_UINT16_MAX);
+
+				add_toast_chunk_wal_record(desc, attnum,
+										   api->getTupleData(tuple, arg),
+										   (uint16) data_size,
+										   version, base_version);
+			}
 		}
 
 		pfree(tuple.data);
@@ -768,7 +790,8 @@ bool
 generic_toast_delete(ToastAPI *api, void *key, OXid oxid, CommitSeqNo csn,
 					 void *arg)
 {
-	return generic_toast_delete_optional_wal(api, key, oxid, csn, arg, true);
+	return generic_toast_delete_optional_wal(api, key, oxid, csn, arg, true,
+											false, 0);
 }
 
 static Pointer
@@ -1019,10 +1042,15 @@ o_toast_sort_add(OTableDescr *descr, OTuple pk, uint16 attn,
 
 }
 
+/*
+ * If logOldChunks is set, the data of every removed chunk is also WAL-logged
+ * so logical decoding can reconstruct this attribute's old value.  Callers
+ * enable it only for REPLICA IDENTITY FULL tables under wal_level = logical.
+ */
 bool
 o_toast_delete(OTableDescr *descr,
 			   OTuple pk, uint16 attn,
-			   OXid oxid, CommitSeqNo csn)
+			   OXid oxid, CommitSeqNo csn, bool logOldChunks)
 {
 	OToastKey	tkey;
 	bool		result;
@@ -1035,9 +1063,11 @@ o_toast_delete(OTableDescr *descr,
 	tkey.chunknum = 0;
 
 	Assert(descr->toast->desc.type == oIndexToast);
+	Assert(attn > 0);
 
-	result = generic_toast_delete(&tableToastAPI, (Pointer) &tkey,
-								  oxid, csn, &arg);
+	result = generic_toast_delete_optional_wal(&tableToastAPI, (Pointer) &tkey,
+											   oxid, csn, &arg, true,
+											   logOldChunks, attn);
 
 	return result;
 }

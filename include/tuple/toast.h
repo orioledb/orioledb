@@ -110,7 +110,8 @@ extern bool generic_toast_update_optional_wal(ToastAPI *api, void *key,
 											  void *arg, bool wal);
 extern bool generic_toast_delete_optional_wal(ToastAPI *api, void *key,
 											  OXid oxid, CommitSeqNo csn,
-											  void *arg, bool wal);
+											  void *arg, bool wal,
+											  bool logOldChunks, uint16 attnum);
 
 /* Returns tuple only if its size equals data_size, or NULL otherwise */
 
@@ -154,7 +155,7 @@ extern void o_toast_sort_add(OTableDescr *descr,
 							 Tuplesortstate *sortstate);
 extern bool o_toast_delete(OTableDescr *descr,
 						   OTuple pk, uint16 attn,
-						   OXid oxid, CommitSeqNo csn);
+						   OXid oxid, CommitSeqNo csn, bool logOldChunks);
 
 extern int	o_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 						void *p2, BTreeKeyType k2);

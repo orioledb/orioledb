@@ -1724,7 +1724,8 @@ tts_orioledb_toast_sort_add(TupleTableSlot *slot,
 bool
 tts_orioledb_remove_toast_values(TupleTableSlot *slot,
 								 OTableDescr *descr,
-								 OXid oxid, CommitSeqNo csn)
+								 OXid oxid, CommitSeqNo csn,
+								 bool logOldChunks)
 {
 	int			i;
 	bool		result = true;
@@ -1762,7 +1763,8 @@ tts_orioledb_remove_toast_values(TupleTableSlot *slot,
 									key.tuple,
 									toast_attn + 1 + ctid_off,
 									oxid,
-									csn);
+									csn,
+									logOldChunks);
 			if (!result)
 				break;
 		}
@@ -1774,7 +1776,8 @@ bool
 tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 								 TupleTableSlot *newSlot,
 								 OTableDescr *descr,
-								 OXid oxid, CommitSeqNo csn)
+								 OXid oxid, CommitSeqNo csn,
+								 bool logOldChunks)
 {
 	OTableSlot *newOSlot = (OTableSlot *) newSlot;
 	OTuple		idx_tup;
@@ -1955,7 +1958,8 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 									key.tuple,
 									toast_attn + 1 + ctid_off,
 									oxid,
-									csn);
+									csn,
+									logOldChunks);
 			if (!result)
 				break;
 		}

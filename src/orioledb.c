@@ -110,7 +110,7 @@ static const struct config_enum_entry serializable_mode_options[] = {
 	{"table_lock", O_SERIALIZABLE_TABLE_LOCK, false},
 	{"error", O_SERIALIZABLE_ERROR, false},
 	{"repeatable_read", O_SERIALIZABLE_REPEATABLE_READ, false},
-	{NULL, 0, false}
+	{NULL, 0, false},
 };
 
 static int	main_buffers_guc;
@@ -311,11 +311,12 @@ wal_desc_on_record(WalReaderState *r, WalRecord *rec)
 	switch (rec->type)
 	{
 		case WAL_REC_XID:
-			appendStringInfo(ctx->buf, " (%lu %u %u);", rec->oxid, rec->logicalXid, rec->heapXid);
+			appendStringInfo(ctx->buf, " (" UINT64_FORMAT " %u %u);",
+							 rec->oxid, rec->logicalXid, rec->heapXid);
 			break;
 		case WAL_REC_COMMIT:
 		case WAL_REC_ROLLBACK:
-			appendStringInfo(ctx->buf, " (%lu %u %u - xmin %lu csn %lu);",
+			appendStringInfo(ctx->buf, " (" UINT64_FORMAT " %u %u - xmin " UINT64_FORMAT " csn " UINT64_FORMAT ");",
 							 rec->oxid, rec->logicalXid, rec->heapXid,
 							 rec->u.finish.xmin, rec->u.finish.csn);
 			break;
@@ -336,11 +337,12 @@ wal_desc_on_record(WalReaderState *r, WalRecord *rec)
 							 rec->logicalXid, rec->u.savepoint.parentLogicalXid, rec->u.savepoint.parentSubid);
 			break;
 		case WAL_REC_ROLLBACK_TO_SAVEPOINT:
-			appendStringInfo(ctx->buf, " (lxid %u parent subid %u xmin %lu csn %lu);",
-							 rec->logicalXid, rec->u.rb_to_sp.parentSubid, rec->u.rb_to_sp.xmin, rec->u.rb_to_sp.csn);
+			appendStringInfo(ctx->buf, " (lxid %u parent subid %u xmin " UINT64_FORMAT " csn " UINT64_FORMAT ");",
+							 rec->logicalXid, rec->u.rb_to_sp.parentSubid,
+							 rec->u.rb_to_sp.xmin, rec->u.rb_to_sp.csn);
 			break;
 		case WAL_REC_JOINT_COMMIT:
-			appendStringInfo(ctx->buf, " (xmin %lu xid %u csn %lu%s);",
+			appendStringInfo(ctx->buf, " (xmin " UINT64_FORMAT " xid %u csn " UINT64_FORMAT "%s);",
 							 rec->u.joint_commit.xmin, rec->u.joint_commit.xid,
 							 rec->u.joint_commit.csn,
 							 rec->u.joint_commit.subTransaction ? " subxact" : "");
@@ -378,7 +380,7 @@ orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 	Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
 
 	WalDescCtx	dctx = {
-		.buf = buf
+		.buf = buf,
 	};
 
 	WalReaderState r = {
@@ -389,7 +391,7 @@ orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 		.ctx = &dctx,
 		.check_version = wal_desc_check_version,
 		.on_container = NULL,
-		.on_record = wal_desc_on_record
+		.on_record = wal_desc_on_record,
 	};
 
 	WalParseResult st = wal_parse_container(&r, false);
@@ -427,7 +429,7 @@ static RmgrData rmgr =
 	.rm_desc = orioledb_rm_desc,
 	.rm_identify = orioledb_rm_identify,
 	.rm_mask = NULL,
-	.rm_decode = orioledb_decode
+	.rm_decode = orioledb_decode,
 };
 
 static bool
