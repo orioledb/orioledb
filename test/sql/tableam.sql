@@ -572,7 +572,7 @@ RESET enable_nestloop;
 
 -- Check full join
 EXPLAIN (COSTS off) SELECT id, val FROM heap_table FULL JOIN o_tableam_join1 USING (id);
-SELECT id, val FROM heap_table FULL JOIN o_tableam_join1 USING (id);
+SELECT id, val FROM heap_table FULL JOIN o_tableam_join1 USING (id) ORDER BY id;
 
 EXPLAIN (COSTS off) SELECT * FROM heap_table
 			     JOIN o_tableam_join1 ON o_tableam_join1.id = ANY (heap_table.ids);
