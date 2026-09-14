@@ -4555,6 +4555,144 @@ handle_movedb(Oid dbOid, Oid src_tblspcoid, Oid dst_tblspcoid)
 }
 
 static void
+destroy_tablespace_directories(Oid tablespaceoid)
+{
+	char	   *linkloc;
+	char	   *linkloc_with_version_dir;
+	DIR		   *dirdesc;
+	struct dirent *de;
+	char	   *subfile;
+	struct stat st;
+
+	linkloc_with_version_dir = psprintf("pg_tblspc/%u/%s", tablespaceoid,
+										TABLESPACE_VERSION_DIRECTORY);
+
+	/*
+	 * Check if the tablespace still contains any files.  We try to rmdir each
+	 * per-database directory we find in it.  rmdir failure implies there are
+	 * still files in that subdirectory, so give up.  (We do not have to worry
+	 * about undoing any already completed rmdirs, since the next attempt to
+	 * use the tablespace from that database will simply recreate the
+	 * subdirectory via TablespaceCreateDbspace.)
+	 *
+	 * Since we hold TablespaceCreateLock, no one else should be creating any
+	 * fresh subdirectories in parallel. It is possible that new files are
+	 * being created within subdirectories, though, so the rmdir call could
+	 * fail.  Worst consequence is a less friendly error message.
+	 *
+	 * ENOENT is a likely outcome during redo, and we allow it to pass without
+	 * comment.
+	 */
+	dirdesc = AllocateDir(linkloc_with_version_dir);
+	if (dirdesc == NULL)
+	{
+		if (errno == ENOENT)
+		{
+			/* The symlink might still exist, so go try to remove it */
+			goto remove_symlink;
+		}
+		ereport(LOG,
+				(errcode_for_file_access(),
+				 errmsg("could not open directory \"%s\": %m",
+						linkloc_with_version_dir)));
+		pfree(linkloc_with_version_dir);
+		return;
+	}
+
+	while ((de = ReadDir(dirdesc, linkloc_with_version_dir)) != NULL)
+	{
+		if (strcmp(de->d_name, ".") == 0 ||
+			strcmp(de->d_name, "..") == 0)
+			continue;
+
+		subfile = psprintf("%s/%s", linkloc_with_version_dir, de->d_name);
+
+		/* remove empty directory */
+		if (rmdir(subfile) < 0)
+			ereport(LOG,
+					(errcode_for_file_access(),
+					 errmsg("could not remove directory \"%s\": %m",
+							subfile)));
+
+		pfree(subfile);
+	}
+
+	FreeDir(dirdesc);
+
+	/* remove version directory */
+	if (rmdir(linkloc_with_version_dir) < 0)
+	{
+		ereport(LOG,
+				(errcode_for_file_access(),
+				 errmsg("could not remove directory \"%s\": %m",
+						linkloc_with_version_dir)));
+		pfree(linkloc_with_version_dir);
+		return;
+	}
+
+	/*
+	 * Try to remove the symlink.  We must however deal with the possibility
+	 * that it's a directory instead of a symlink --- this could happen during
+	 * WAL replay (see TablespaceCreateDbspace).
+	 *
+	 * There is no point in retrying if this final step fails.
+	 */
+remove_symlink:
+	linkloc = pstrdup(linkloc_with_version_dir);
+	get_parent_directory(linkloc);
+	if (lstat(linkloc, &st) < 0)
+	{
+		ereport(LOG,
+				(errcode_for_file_access(),
+				 errmsg("could not stat file \"%s\": %m",
+						linkloc)));
+	}
+	else if (S_ISDIR(st.st_mode))
+	{
+		if (rmdir(linkloc) < 0)
+		{
+			ereport(LOG,
+					(errcode_for_file_access(),
+					 errmsg("could not remove directory \"%s\": %m",
+							linkloc)));
+		}
+	}
+	else if (S_ISLNK(st.st_mode))
+	{
+		if (unlink(linkloc) < 0)
+		{
+			ereport(LOG,
+					(errcode_for_file_access(),
+					 errmsg("could not remove symbolic link \"%s\": %m",
+							linkloc)));
+		}
+	}
+	else
+	{
+		/* Refuse to remove anything that's not a directory or symlink */
+		ereport(LOG,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("\"%s\" is not a directory or symbolic link",
+						linkloc)));
+	}
+
+	pfree(linkloc_with_version_dir);
+	pfree(linkloc);
+}
+
+static void
+clean_tablespace_on_recovery(Oid tblspcoid)
+{
+	char		path[MAXPGPATH];
+
+	if (o_tablespace_resolve_prefix(tblspcoid, path, MAXPGPATH) &&
+		o_tablespace_destroy_orioledb_dir(tblspcoid, path))
+	{
+		destroy_tablespace_directories(tblspcoid);
+	}
+}
+
+static void
 invalidate_typcache(void)
 {
 	SharedInvalidationMessage msg;
@@ -4877,7 +5015,14 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			break;
 
 		case WAL_REC_DATABASE_COPY:
-			handle_movedb(rec->u.dbcopy.datOid, rec->u.dbcopy.src_tblspc, rec->u.dbcopy.dst_tblspc);
+			if (OidIsValid(rec->u.dbcopy.dst_tblspc))
+			{
+				handle_movedb(rec->u.dbcopy.datOid, rec->u.dbcopy.src_tblspc, rec->u.dbcopy.dst_tblspc);
+			}
+			else
+			{
+				clean_tablespace_on_recovery(rec->u.dbcopy.src_tblspc);
+			}
 			break;
 
 		case WAL_REC_DATABASE_TEMPLATE_CHECKPOINT:

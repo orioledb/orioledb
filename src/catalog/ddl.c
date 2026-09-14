@@ -3200,54 +3200,6 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	o_table_free(o_table);
 }
 
-static void
-cleanup_tablespace_database_dir_cb(Oid tablespace, Oid datoid,
-								   const char *db_path, void *arg)
-{
-	/* We assume that postgres throws its own errors on nonempty directories. */
-	if (rmdir(db_path) < 0 && errno != ENOTEMPTY)
-		ereport(FATAL,
-				(errcode_for_file_access(),
-				 errmsg("could not remove orioledb db dir \"%s\": %m",
-						db_path)));
-}
-
-static void
-cleanup_tablespace_dir(Oid tablespace, const char *tablespace_path)
-{
-	if (!o_tablespace_foreach_database(tablespace, tablespace_path,
-									   cleanup_tablespace_database_dir_cb,
-									   NULL, ERROR))
-		return;
-
-	fsync_fname_ext(tablespace_path, true, false, FATAL);
-
-	/* We assume that postgres throws its own errors on nonempty directories. */
-	if (rmdir(tablespace_path) < 0 && errno != ENOTEMPTY)
-	{
-		ereport(FATAL,
-				(errcode_for_file_access(),
-				 errmsg("could not remove tablespace orioledb dir \"%s\": %m",
-						tablespace_path)));
-	}
-
-	/* We assume that postgres throws its own errors on nonempty directories. */
-	if (errno != 0 && errno != ENOTEMPTY)
-	{
-		ereport(ERROR, (errcode_for_file_access(),
-						errmsg("unable to clean up orioledb tablespace: %m")));
-	}
-}
-
-static void
-cleanup_tablespace_dir_cb(Oid tablespace, const char *prefix,
-						  void *arg)
-{
-	if (tablespace == DEFAULTTABLESPACE_OID)
-		return;
-	cleanup_tablespace_dir(tablespace, prefix);
-}
-
 /*
  * get_collation		- fetch qualified name of a collation
  *
@@ -4819,7 +4771,17 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 	}
 	else if (access == OAT_DROP && classId == TableSpaceRelationId)
 	{
-		o_tablespaces_foreach_prefix(cleanup_tablespace_dir_cb, NULL);
+		char		path[MAXPGPATH];
+
+		if (o_tablespace_resolve_prefix(objectId, path, MAXPGPATH) &&
+			o_tablespace_destroy_orioledb_dir(objectId, path))
+		{
+			OSnapshot	oSnapshot;
+			OXid		oxid;
+
+			fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+			add_database_copy_wal_record(InvalidOid, objectId, InvalidOid);
+		}
 	}
 
 #if PG_VERSION_NUM >= 180000

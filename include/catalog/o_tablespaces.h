@@ -34,4 +34,19 @@ extern bool o_tablespace_foreach_database(Oid tablespace, const char *prefix,
 										  OTablespaceDatabaseCallback callback,
 										  void *arg, int elevel);
 
+/*
+ * Resolve the orioledb data directory path for a single tablespace.
+ * Returns false if the tablespace directory does not exist (ENOENT).
+ * Errors on other failures.
+ */
+extern bool o_tablespace_resolve_prefix(Oid tablespace, char *path,
+										size_t pathlen);
+
+/*
+ * Remove all per-database subdirectories found in the given orioledb data
+ * directory, fsync and rmdir the directory itself.  Returns false when the
+ * directory does not exist.
+ */
+extern bool o_tablespace_destroy_orioledb_dir(Oid tablespace, const char *path);
+
 #endif							/* __O_TABLESPACES_H__ */

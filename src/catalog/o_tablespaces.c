@@ -178,3 +178,85 @@ o_tablespace_foreach_database(Oid tablespace, const char *prefix,
 
 	return true;
 }
+
+static void
+destroy_tablespace_database_dir_cb(Oid tablespace, Oid datoid,
+								   const char *db_path, void *arg)
+{
+	/* We assume that postgres throws its own errors on nonempty directories. */
+	if (rmdir(db_path) < 0 && errno != ENOTEMPTY)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not remove orioledb db dir \"%s\": %m",
+						db_path)));
+}
+
+bool
+o_tablespace_resolve_prefix(Oid tablespace, char *path, size_t pathlen)
+{
+	char		targetpath[MAXPGPATH];
+	struct stat st;
+	int			rllen;
+
+	snprintf(path, pathlen, "%s/%u/%s", PG_TBLSPC_DIR, tablespace,
+			 TABLESPACE_VERSION_DIRECTORY);
+
+	if (lstat(path, &st) < 0)
+	{
+		if (errno == ENOENT)
+			return false;
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not stat file \"%s\": %m", path)));
+	}
+
+	if (!S_ISLNK(st.st_mode))
+	{
+		strlcat(path, "/" ORIOLEDB_DATA_DIR, pathlen);
+	}
+	else
+	{
+		rllen = readlink(path, targetpath, sizeof(targetpath));
+		if (rllen < 0)
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("could not read symbolic link \"%s\": %m", path)));
+		if (rllen >= (int) sizeof(targetpath))
+			ereport(ERROR,
+					(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+					 errmsg("symbolic link \"%s\" target is too long",
+							path)));
+		targetpath[rllen] = '\0';
+
+		snprintf(path, pathlen, "%s/" ORIOLEDB_DATA_DIR, targetpath);
+	}
+	return true;
+}
+
+bool
+o_tablespace_destroy_orioledb_dir(Oid tablespace, const char *path)
+{
+	if (!o_tablespace_foreach_database(tablespace, path,
+									   destroy_tablespace_database_dir_cb,
+									   NULL, ERROR))
+		return false;
+
+	fsync_fname_ext(path, true, false, FATAL);
+
+	/* We assume that postgres throws its own errors on nonempty directories. */
+	if (rmdir(path) < 0 && errno != ENOTEMPTY)
+	{
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not remove tablespace orioledb dir \"%s\": %m",
+						path)));
+	}
+
+	/* We assume that postgres throws its own errors on nonempty directories. */
+	if (errno != 0 && errno != ENOTEMPTY)
+	{
+		ereport(ERROR, (errcode_for_file_access(),
+						errmsg("unable to clean up orioledb tablespace: %m")));
+	}
+	return true;
+}
