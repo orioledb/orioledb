@@ -86,14 +86,15 @@ class ConcurrentIndexTest(BaseTest):
 				INSERT INTO o_cic_no_leftover
 				SELECT g, 'v' || g FROM generate_series(1, 100) g;
 			""")
-			node.safe_psql("CREATE INDEX CONCURRENTLY o_cic_no_leftover_val_idx "
-			               "ON o_cic_no_leftover (val);")
+			node.safe_psql(
+			    "CREATE INDEX CONCURRENTLY o_cic_no_leftover_val_idx "
+			    "ON o_cic_no_leftover (val);")
 
 			data_dir = os.path.join(node.data_dir, "orioledb_data")
 			leftover = glob.glob(os.path.join(data_dir, "cic_*"))
-			self.assertEqual(leftover, [],
-			                 "CIC left a spool directory behind after "
-			                 "a successful build: %s" % leftover)
+			self.assertEqual(
+			    leftover, [], "CIC left a spool directory behind after "
+			    "a successful build: %s" % leftover)
 		finally:
 			try:
 				node.stop()
