@@ -278,7 +278,7 @@ class BaseTest(unittest.TestCase):
 			                              '20000')) + self.getTestNum() * 2
 		return self.basePort
 
-	def getReplica(self, has_restoring: bool = False) -> testgres.PostgresNode:
+	def getReplica(self, options = None, has_restoring: bool = False) -> testgres.PostgresNode:
 		if self.replica is None:
 			(test_path, t) = os.path.split(
 			    os.path.dirname(inspect.getfile(self.__class__)))
@@ -287,7 +287,7 @@ class BaseTest(unittest.TestCase):
 			if os.path.exists(baseDir):
 				shutil.rmtree(baseDir)
 			replica = self.node.backup(
-			    base_dir=baseDir).spawn_replica('replica')
+			    base_dir=baseDir, options=options).spawn_replica('replica')
 			replica.append_conf(port=replica.port)
 
 			self.replica = replica
