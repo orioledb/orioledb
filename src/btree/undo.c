@@ -943,6 +943,30 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 	OIndexKey  *dropTrees;
 	bool		doCleanup;
 	bool		cleanupFiles = true;
+	Size		treesOffset;
+	Size		numTrees;
+
+	/*
+	 * The two counts say how the record's flexible array is split: the old
+	 * trees first, then the new ones at &trees[oldNumTrees].  Both come out
+	 * of the undo log, and everything below forms pointers and loop bounds
+	 * from them -- so a forged pair reads past the record and hands whatever
+	 * follows to cleanup_btree() and to the relation locking as an OIndexKey.
+	 * Establish they describe this record before anything uses them.
+	 */
+	treesOffset = offsetof(RelnodeUndoStackItem, trees);
+	numTrees = (Size) relnode_item->oldNumTrees + (Size) relnode_item->newNumTrees;
+
+	if (unlikely(relnode_item->oldNumTrees < 0 ||
+				 relnode_item->newNumTrees < 0 ||
+				 relnode_item->header.base.itemSize < treesOffset ||
+				 numTrees > (relnode_item->header.base.itemSize - treesOffset) /
+				 sizeof(OIndexKey)))
+		elog(PANIC, "invalid relnode undo item at location " UINT64_FORMAT
+			 ": %d old and %d new trees do not fit an item of %u bytes",
+			 (uint64) location,
+			 relnode_item->oldNumTrees, relnode_item->newNumTrees,
+			 (unsigned) relnode_item->header.base.itemSize);
 
 	/*
 	 * Fsync new files on precommit, before the commit WAL record is written,
