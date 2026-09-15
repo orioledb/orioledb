@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import os
 import unittest
 import testgres
 import string
@@ -15,6 +16,17 @@ from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_checkpointer_stopevent
 from .base_test import wait_stopevent
+
+# Sessions that drive test_merge_into_concurrently_dropped_tree.  They must
+# never park at merge_after_target_unlock: they are the ones that release it.
+DRIVER_APP = 'merge_test_driver'
+
+# Under Valgrind every step of that test costs tens of times more, so the wait
+# for someone to reach the merge window has to be given that much more room --
+# a cell reported "nothing parked in the merge window" after 90 seconds while
+# the presser was still working through its first scan.
+VALGRIND = os.environ.get('USE_VALGRIND', '') == '1'
+PARK_TIMEOUT = 900 if VALGRIND else 90
 
 
 class MergeTest(BaseTest):
@@ -54,9 +66,13 @@ class MergeTest(BaseTest):
 		NTABLES = 16
 		node = self.node
 		node.append_conf(
-		    'postgresql.conf', "orioledb.main_buffers = 8MB\n"
+		    'postgresql.conf',
+		    "orioledb.main_buffers = 8MB\n"
 		    "orioledb.undo_buffers = 32MB\n"
-		    "orioledb.bgwriter_num_workers = 0\n")
+		    # Not bgwriter_num_workers = 0: its minimum is 1, so that leaves
+		    # the worker running -- and running it reaches the window below.
+		    # Thanks to #1171 for finding this.
+		    "orioledb.debug_disable_bgwriter = true\n")
 		node.restart()
 
 		node.safe_psql(
@@ -85,18 +101,38 @@ class MergeTest(BaseTest):
 				maker.commit()
 
 		ctrl = node.connect()
-		ctrl.execute(
-		    "SELECT pg_stopevent_set('merge_after_target_unlock', 'true');")
 
 		# Under Valgrind the delete phase is slow enough for the clock sweep
 		# to evict every sparse o_mNN page before the stopevent is armed.
 		# Reload one leaf per tree so the presser can evict them.
 		with node.connect() as warmer:
+			warmer.execute("SET application_name = '%s';" % DRIVER_APP)
 			for i in range(NTABLES):
 				warmer.execute("SELECT 1 FROM o_m%02d ORDER BY id LIMIT 1;" %
 				               i)
 
 		presser = node.connect()
+
+		# Everything that runs page pool maintenance reaches this window, so
+		# 'true' parks whoever gets there first -- including this test's own
+		# sessions, and a test session that parks is a deadlock: the steps
+		# that would release the event are the ones that never run.  Both
+		# halves of that were seen on the same test: a CI job hung for 36
+		# minutes with four processes parked here (the checkpointer, the
+		# bgwriter, an autovacuum worker and the backend running the warm-up
+		# loop, which used to sit *after* this call), and the deadline below
+		# reported "nothing parked in the merge window" when the parked
+		# process was one the test was not waiting for.
+		#
+		# So exclude the sessions that drive the test, by name, and let
+		# everything else park: the presser, which is the scan this test means
+		# to catch in the window, and the checkpointer, which reaches it just
+		# as legitimately.  The bgwriter is out of the picture entirely now,
+		# being switched off above.
+		ctrl.execute("SET application_name = '%s';" % DRIVER_APP)
+		ctrl.execute("SELECT pg_stopevent_set('merge_after_target_unlock', "
+		             "'$applicationName != \"%s\"');" % DRIVER_APP)
+
 		running = {'go': True}
 
 		def press():
@@ -109,7 +145,7 @@ class MergeTest(BaseTest):
 		thread = Thread(target=press)
 		thread.start()
 		try:
-			deadline = time.time() + 90
+			deadline = time.time() + PARK_TIMEOUT
 			parked = None
 			while time.time() < deadline:
 				pids = [
@@ -121,11 +157,21 @@ class MergeTest(BaseTest):
 					parked = pids[0]
 					break
 				time.sleep(0.2)
-			self.assertIsNotNone(parked, "nothing parked in the merge window")
+			if parked is None:
+				# Say what the presser was doing, so that a failure here can be
+				# told apart from one where the sparse pages were gone.
+				state = ctrl.execute(
+				    "SELECT backend_type, state, wait_event_type, wait_event,"
+				    " left(query, 40) FROM pg_stat_activity"
+				    " WHERE backend_type <> 'client backend'"
+				    "    OR query NOT LIKE '%pg_stat_activity%';")
+				self.fail("nothing parked in the merge window within %d s;"
+				          " activity: %s" % (PARK_TIMEOUT, state))
 
 			# the merging tree is one of these; the presser holds no lock on any
 			names = ", ".join("o_m%02d" % i for i in range(NTABLES))
 			with node.connect() as dropper:
+				dropper.execute("SET application_name = '%s';" % DRIVER_APP)
 				dropper.execute("DROP TABLE %s;" % names)
 				dropper.commit()
 
