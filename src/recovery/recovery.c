@@ -5579,6 +5579,28 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 		   recType == RecoveryMsgTypeDelete ||
 		   recType == RecoveryMsgTypeBridgeErase);
 
+	/*
+	 * A message that does not fit the queue at all has to be refused here.
+	 * Flushing below only empties the buffer; the copies after it are not
+	 * bounded by anything, so an oversized message walks off the end of
+	 * queue_buf and over the rest of RecoveryWorkerState.  The assertion at
+	 * the end of this function reports that after the fact, and only in a
+	 * cassert build.
+	 *
+	 * No legitimate message reaches this: tuple_len comes from a tuple that
+	 * fitted a B-tree page, so it is at most O_BTREE_MAX_TUPLE_SIZE, a third
+	 * of a page.  A WAL record whose tuple header claims more than that has
+	 * been damaged or tampered with, and the queue is the wrong place to find
+	 * out.
+	 */
+	if (unlikely(max_msg_size > RECOVERY_QUEUE_BUF_SIZE))
+		ereport(FATAL,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("OrioleDB recovery message of %d bytes does not fit the %d byte worker queue",
+						max_msg_size, RECOVERY_QUEUE_BUF_SIZE),
+				 errdetail("Tuple length is %d, at most %d is possible.",
+						   tuple_len, (int) O_BTREE_MAX_TUPLE_SIZE)));
+
 	if (RECOVERY_QUEUE_BUF_SIZE - state->queue_buf_len < max_msg_size)
 		worker_queue_flush(worker_id);
 
