@@ -56,7 +56,7 @@ class MergeTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.main_buffers = 8MB\n"
 		    "orioledb.undo_buffers = 32MB\n"
-		    "orioledb.bgwriter_num_workers = 0\n")
+		    "orioledb.debug_disable_bgwriter = true\n")
 		node.restart()
 
 		node.safe_psql(
@@ -84,17 +84,17 @@ class MergeTest(BaseTest):
 					    (i, k, k + 12))
 				maker.commit()
 
-		ctrl = node.connect()
-		ctrl.execute(
-		    "SELECT pg_stopevent_set('merge_after_target_unlock', 'true');")
-
-		# Under Valgrind the delete phase is slow enough for the clock sweep
-		# to evict every sparse o_mNN page before the stopevent is armed.
-		# Reload one leaf per tree so the presser can evict them.
+		# Under Valgrind the delete phase can evict every sparse o_mNN page.
+		# Reload one leaf per tree so the presser can evict them.  Do this
+		# before arming the stopevent because these reads can trigger a merge.
 		with node.connect() as warmer:
 			for i in range(NTABLES):
 				warmer.execute("SELECT 1 FROM o_m%02d ORDER BY id LIMIT 1;" %
 				               i)
+
+		ctrl = node.connect()
+		ctrl.execute(
+		    "SELECT pg_stopevent_set('merge_after_target_unlock', 'true');")
 
 		presser = node.connect()
 		running = {'go': True}
