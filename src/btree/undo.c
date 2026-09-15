@@ -2192,6 +2192,14 @@ find_non_lock_only_undo_record(UndoLogType undoType, BTreeLeafTuphdr *tuphdr)
 			return InvalidUndoLocation;
 		if (!get_prev_leaf_header_from_undo_if_exists(undoType, tuphdr))
 			return InvalidUndoLocation;
+
+		/* Tuple undo chains only ever move backwards; a cycle means corruption. */
+		if (UndoLocationIsValid(tuphdr->undoLocation) &&
+			(UndoLocation) tuphdr->undoLocation >= undoLocation)
+			elog(PANIC,
+				 "corrupted undo chain: location " UINT64_FORMAT " links to non-decreasing location " UINT64_FORMAT,
+				 undoLocation, (UndoLocation) tuphdr->undoLocation);
+
 		xactInfo = tuphdr->xactInfo;
 	}
 
