@@ -41,11 +41,13 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "pgstat.h"
+#include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
+#include "utils/rls.h"
 
 PG_FUNCTION_INFO_V1(orioledb_tbl_structure);
 PG_FUNCTION_INFO_V1(orioledb_idx_structure);
@@ -335,6 +337,41 @@ tree_structure(StringInfo buf,
 	}
 }
 
+/*
+ * These diagnostics print the contents of B-tree leaf tuples through the type
+ * output functions -- the rows themselves, straight off the pages, with no
+ * regard for what the caller is allowed to read.  Ordinary SQL on the same
+ * relation goes through table privileges and through row-level security; a
+ * diagnostic that skips both hands a role the rows it was refused.
+ *
+ * Require table-level SELECT, which is what reading every column takes.  A
+ * column grant is deliberately not enough: the output covers all of them.
+ * (pg_attribute_aclcheck_all() is not the test for that -- it looks only at
+ * per-column ACLs, and with the usual NULL attacl it reports no privilege
+ * even for the owner.)
+ *
+ * Refuse outright when row-level security applies to the caller: a policy
+ * selects rows, and there is nothing here to apply it to.  The owner, who
+ * bypasses a policy that is not forced, and a superuser are unaffected --
+ * check_enable_rls() says so for both.
+ */
+static void
+check_structure_privileges(Oid relid)
+{
+	AclResult	aclresult;
+
+	aclresult = pg_class_aclcheck(relid, GetUserId(), ACL_SELECT);
+	if (aclresult != ACLCHECK_OK)
+		aclcheck_error(aclresult, OBJECT_TABLE, get_rel_name(relid));
+
+	if (check_enable_rls(relid, InvalidOid, true) == RLS_ENABLED)
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				 errmsg("permission denied for relation %s",
+						get_rel_name(relid)),
+				 errdetail("Row-level security applies to this relation, and OrioleDB structure diagnostics cannot apply it.")));
+}
+
 Datum
 orioledb_tbl_structure(PG_FUNCTION_ARGS)
 {
@@ -352,6 +389,8 @@ orioledb_tbl_structure(PG_FUNCTION_ARGS)
 	MemSet(&printOptions, 0, sizeof(printOptions));
 
 	orioledb_check_shmem();
+
+	check_structure_privileges(relid);
 
 	rel = relation_open(relid, AccessShareLock);
 
@@ -925,6 +964,8 @@ orioledb_idx_structure(PG_FUNCTION_ARGS)
 	BTreePrintOptions printOptions = {0};
 
 	orioledb_check_shmem();
+
+	check_structure_privileges(relid);
 
 	rel = relation_open(relid, AccessShareLock);
 

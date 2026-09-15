@@ -302,6 +302,57 @@ SELECT COUNT(*) as bob_sees_after_unforce FROM classified_docs;
 SET SESSION AUTHORIZATION regress_rls_carol;
 DROP TABLE classified_docs CASCADE;
 SET SESSION AUTHORIZATION DEFAULT;
+-- The structure diagnostics print leaf tuples straight off the pages, so they
+-- have to require what a plain SELECT would.  Without that, a role that was
+-- refused the table reads its rows out of the diagnostic text, and a policy
+-- that would have filtered them never runs.
+CREATE TABLE o_diag (
+	id int NOT NULL,
+	secret text NOT NULL,
+	PRIMARY KEY (id)
+) USING orioledb;
+INSERT INTO o_diag VALUES (1, 'classified');
+CREATE ROLE regress_diag_nopriv NOLOGIN;
+GRANT USAGE ON SCHEMA row_security_schema TO regress_diag_nopriv;
+SET SESSION AUTHORIZATION regress_diag_nopriv;
+-- no privilege at all on the table
+SELECT row_security_schema.orioledb_tbl_structure('o_diag'::regclass, 'nue');
+ERROR:  permission denied for table o_diag
+SELECT row_security_schema.orioledb_idx_structure('o_diag'::regclass, 'o_diag_pkey', 'nue');
+ERROR:  permission denied for table o_diag
+SET SESSION AUTHORIZATION DEFAULT;
+GRANT SELECT (id) ON o_diag TO regress_diag_nopriv;
+SET SESSION AUTHORIZATION regress_diag_nopriv;
+-- a column grant is not enough: every column is printed
+SELECT row_security_schema.orioledb_tbl_structure('o_diag'::regclass, 'nue');
+ERROR:  permission denied for table o_diag
+SET SESSION AUTHORIZATION DEFAULT;
+GRANT SELECT ON o_diag TO regress_diag_nopriv;
+ALTER TABLE o_diag ENABLE ROW LEVEL SECURITY;
+CREATE POLICY o_diag_pol ON o_diag USING (id < 0);
+SET SESSION AUTHORIZATION regress_diag_nopriv;
+-- SELECT is granted now, but a policy applies and the diagnostic cannot
+SELECT count(*) FROM o_diag;
+ count 
+-------
+     0
+(1 row)
+
+SELECT row_security_schema.orioledb_tbl_structure('o_diag'::regclass, 'nue');
+ERROR:  permission denied for relation o_diag
+DETAIL:  Row-level security applies to this relation, and OrioleDB structure diagnostics cannot apply it.
+SET SESSION AUTHORIZATION DEFAULT;
+-- the owner bypasses a policy that is not forced, so nothing changes for it
+SELECT row_security_schema.orioledb_tbl_structure('o_diag'::regclass, 'nue') IS NOT NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+DROP POLICY o_diag_pol ON o_diag;
+DROP TABLE o_diag;
+REVOKE USAGE ON SCHEMA row_security_schema FROM regress_diag_nopriv;
+DROP ROLE regress_diag_nopriv;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table uaccount
