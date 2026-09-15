@@ -52,6 +52,115 @@ static void update_leaf_header_in_undo(UndoLogType undoType,
 									   UndoLocation location);
 
 /*
+ * Undo application walks the transaction chain backwards, so a long
+ * run of records deletes from one and the same leaf page.  Once that page
+ * drops below the is_page_too_sparse() threshold it stays below it, and
+ * modify_undo_callback() would go after a tries for merge again and again
+ * for every remaining row on the page.
+ *
+ * Now btree_try_merge_and_unlock_extended() outputs the size of our page
+ * that has to reach until we try to merge again.
+ *
+ * Here we have to notice: the concurrent process can compact the sibling (left)
+ * page, so this cache won't notice it.  It means the possible merge is missing,
+ * the page stays sparse and the walk/eviction path in o_btree_page_walk() runs
+ * the same is_page_too_sparse() + btree_try_merge_and_unlock() over it later.
+ */
+static OInMemoryBlkno mergeSkipBlkno = OInvalidInMemoryBlkno;
+static uint32 mergeSkipPageChangeCount = 0;
+static LocationIndex mergeSkipOccupied = 0;
+
+/*
+ * The same idea as above: another way of merge is refused without even
+ * looking at a siblings: no capacity in the page-level undo log for the page
+ * image the merge would write. reserve_undo_size_extended() refuses when:
+ *	advanceReservedLocation + size > minProcReservedLocation + size_of_the_ring
+ * and advanceReservedLocation never goes backwars, so the answer cannot change
+ * until minPrtocReservedLocation moves.
+ *
+ * Here is the idea: remember the frontier we were refused before
+ * (by reserve_undo_size_extended) and read it back instead.
+ */
+static uint64 mergeSkipUndoFrontier = 0;
+static bool mergeSkipUndoFrontierValid = false;
+
+static void
+undo_merge_forget_refusal(void)
+{
+	mergeSkipBlkno = OInvalidInMemoryBlkno;
+}
+
+static void
+undo_merge_remember_refusal(OInMemoryBlkno blkno, uint32 pageChangeCount,
+							LocationIndex threshold)
+{
+	if (threshold >= ORIOLEDB_BLCKSZ)
+	{
+		undo_merge_forget_refusal();
+		return;
+	}
+
+	mergeSkipBlkno = blkno;
+	mergeSkipPageChangeCount = pageChangeCount;
+	mergeSkipOccupied = threshold;
+}
+
+static void
+undo_merge_forget_undo_refusal(void)
+{
+	mergeSkipUndoFrontierValid = false;
+}
+
+static void
+undo_merge_remember_undo_refusal(BTreeDescr *desc)
+{
+	UndoMeta   *meta;
+
+	if (desc->undoType == UndoLogNone)
+		return;
+
+	meta = get_undo_meta_by_type(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+	mergeSkipUndoFrontier = pg_atomic_read_u64(&meta->minProcReservedLocation);
+	mergeSkipUndoFrontierValid = true;
+}
+
+/*
+ * Is the page-level undo log still exactly as full as when it last refused us?
+ */
+static bool
+undo_merge_is_undo_refused(BTreeDescr *desc)
+{
+	UndoMeta   *meta;
+
+	if (!mergeSkipUndoFrontierValid || desc->undoType == UndoLogNone)
+		return false;
+
+	meta = get_undo_meta_by_type(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+
+	return pg_atomic_read_u64(&meta->minProcReservedLocation) ==
+		mergeSkipUndoFrontier;
+}
+
+/*
+ * Would a merge attempt on this page just repeat the refusal we remember?
+ */
+static bool
+undo_merge_is_refused(OInMemoryBlkno blkno, Page p)
+{
+	int			occupied;
+
+	if (mergeSkipBlkno != blkno ||
+		mergeSkipPageChangeCount != O_PAGE_GET_CHANGE_COUNT(p) ||
+		!O_PAGE_IS(p, LEAF))
+		return false;
+
+	occupied = (ORIOLEDB_BLCKSZ - (int) BTREE_PAGE_FREE_SPACE(p)) -
+		(int) PAGE_GET_N_VACATED(p);
+
+	return occupied > (int) mergeSkipOccupied;
+}
+
+/*
  * Add page image to the undo log.
  */
 UndoLocation
@@ -623,10 +732,32 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	}
 
 	MARK_DIRTY(desc, blkno);
-	if (blkno != desc->rootInfo.rootPageBlkno && is_page_too_sparse(desc, p))
+	if (blkno != desc->rootInfo.rootPageBlkno &&
+		!undo_merge_is_refused(blkno, p) &&
+		!undo_merge_is_undo_refused(desc) &&
+		is_page_too_sparse(desc, p))
 	{
+		uint32		pageChangeCount = O_PAGE_GET_CHANGE_COUNT(p);
+		LocationIndex mergeThreshold;
+		bool		undoSpaceLacking;
+
 		/* We can try to merge this page */
-		btree_try_merge_and_unlock(context.desc, blkno, true, true);
+		if (btree_try_merge_and_unlock_extended(context.desc, blkno, true, true,
+												&mergeThreshold,
+												&undoSpaceLacking))
+		{
+			undo_merge_forget_refusal();
+			undo_merge_forget_undo_refusal();
+		}
+		else if (undoSpaceLacking)
+		{
+			undo_merge_remember_undo_refusal(desc);
+		}
+		else
+		{
+			undo_merge_forget_undo_refusal();
+			undo_merge_remember_refusal(blkno, pageChangeCount, mergeThreshold);
+		}
 	}
 	else
 		unlock_page(blkno);
