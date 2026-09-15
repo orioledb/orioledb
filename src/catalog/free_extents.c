@@ -491,6 +491,8 @@ foreach_free_extent(BTreeDescr *desc, ForEachExtentCallback callback, void *arg)
 	OTuple		tmpTup;
 	OTuple		toTup;
 	OTuple		fromTup;
+	BTreeMetaPage *metaPage;
+	uint64		data_file_len;
 
 	enable_stopevents = false;
 
@@ -513,6 +515,10 @@ foreach_free_extent(BTreeDescr *desc, ForEachExtentCallback callback, void *arg)
 								 &o_in_progress_snapshot,
 								 ForwardScanDirection);
 
+	metaPage = BTREE_GET_META(desc);
+	data_file_len = Max(pg_atomic_read_u64(&metaPage->datafileLength[0]),
+						pg_atomic_read_u64(&metaPage->datafileLength[1]));
+
 	while (true)
 	{
 		tmpTup = o_btree_iterator_fetch(it, NULL, &toTup,
@@ -524,6 +530,29 @@ foreach_free_extent(BTreeDescr *desc, ForEachExtentCallback callback, void *arg)
 		Assert(cur->ixType == desc->type);
 		Assert(cur->datoid == desc->oids.datoid);
 		Assert(cur->relnode == desc->oids.relnode);
+
+		/*
+		 * The length is a persisted 64-bit count, and the loop below turns it
+		 * into one callback per UINT16_MAX blocks.  A forged near-maximum
+		 * value is therefore ~2.8e14 callbacks -- a checkpoint that never
+		 * finishes, with the extents array growing until memory runs out.
+		 *
+		 * An extent describes space inside this tree's data file, so the
+		 * file's own length bounds it.  Both entries are allowed for: a free
+		 * extent may belong to either of the two checkpoint states the meta
+		 * page carries.
+		 */
+		if (unlikely(cur->extent.length == 0 ||
+					 cur->extent.offset > data_file_len ||
+					 cur->extent.length > data_file_len - cur->extent.offset))
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_CORRUPTED),
+					 errmsg("invalid free extent of tree %u in database %u",
+							cur->relnode, cur->datoid),
+					 errdetail("Extent is %llu blocks at offset %llu, while the data file is %llu blocks.",
+							   (unsigned long long) cur->extent.length,
+							   (unsigned long long) cur->extent.offset,
+							   (unsigned long long) data_file_len)));
 
 		/* FreeTreeFileExtent.length may be more than FileExtent.len */
 		while (cur->extent.length > UINT16_MAX)
