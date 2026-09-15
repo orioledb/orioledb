@@ -3199,15 +3199,15 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	o_table_free(o_table);
 }
 
-static void
-cleanup_tablespace_dir(char *tablespace_path)
+static bool
+destroy_tablespace_directory(char *tablespace_path)
 {
 	DIR		   *dir;
 	struct dirent *file;
 
 	dir = opendir(tablespace_path);
 	if (dir == NULL)
-		return;
+		return false;
 
 	while (errno = 0, (file = readdir(dir)) != NULL)
 	{
@@ -3247,6 +3247,7 @@ cleanup_tablespace_dir(char *tablespace_path)
 						errmsg("unable to clean up orioledb tablespace: %m")));
 	}
 	closedir(dir);
+	return true;
 }
 
 /*
@@ -4820,63 +4821,62 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 	}
 	else if (access == OAT_DROP && classId == TableSpaceRelationId)
 	{
-		DIR		   *dir;
 		char		path[MAXPGPATH];
 		char		targetpath[MAXPGPATH];
-		struct dirent *file;
 
 #define PG_TBLSPC "pg_tblspc"
 
-		dir = opendir(PG_TBLSPC);
-		while (errno = 0, (file = readdir(dir)) != NULL)
-		{
-			struct stat st;
-			int			rllen;
+		struct stat st;
+		int			rllen;
+		bool		cleanup_orioledb = false;
 
-			/* Skip special stuff */
-			if (strcmp(file->d_name, ".") == 0 || strcmp(file->d_name, "..") == 0)
-				continue;
+		path[0] = '\0';
+		pg_snprintf(path, MAXPGPATH,
+					PG_TBLSPC "/%d/" TABLESPACE_VERSION_DIRECTORY,
+					objectId);
+		if (lstat(path, &st) < 0)
+		{
+			ereport(ERROR,
+					(errcode_for_file_access(),
+						errmsg("could not stat file \"%d\": %m",
+							objectId)));
+		}
+
+		if (!S_ISLNK(st.st_mode))
+		{
+			strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
+			cleanup_orioledb = destroy_tablespace_directory(path);
+		}
+		else
+		{
+			rllen = readlink(path, targetpath, sizeof(targetpath));
+			if (rllen < 0)
+				ereport(ERROR,
+						(errcode_for_file_access(),
+							errmsg("could not read symbolic link \"%s\": %m",
+								path)));
+			if (rllen >= sizeof(targetpath))
+				ereport(ERROR,
+						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+							errmsg("symbolic link \"%s\" target is too long",
+								path)));
+			targetpath[rllen] = '\0';
 
 			path[0] = '\0';
 			pg_snprintf(path, MAXPGPATH,
-						PG_TBLSPC "/%s/" TABLESPACE_VERSION_DIRECTORY,
-						file->d_name);
-			if (lstat(path, &st) < 0)
-			{
-				ereport(ERROR,
-						(errcode_for_file_access(),
-						 errmsg("could not stat file \"%s\": %m",
-								file->d_name)));
-			}
-
-			if (!S_ISLNK(st.st_mode))
-			{
-				strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
-				cleanup_tablespace_dir(path);
-			}
-			else
-			{
-				rllen = readlink(path, targetpath, sizeof(targetpath));
-				if (rllen < 0)
-					ereport(ERROR,
-							(errcode_for_file_access(),
-							 errmsg("could not read symbolic link \"%s\": %m",
-									path)));
-				if (rllen >= sizeof(targetpath))
-					ereport(ERROR,
-							(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-							 errmsg("symbolic link \"%s\" target is too long",
-									path)));
-				targetpath[rllen] = '\0';
-
-				path[0] = '\0';
-				pg_snprintf(path, MAXPGPATH,
-							"%s/" ORIOLEDB_DATA_DIR,
-							targetpath);
-				cleanup_tablespace_dir(path);
-			}
+						"%s/" ORIOLEDB_DATA_DIR,
+						targetpath);
+			cleanup_orioledb = destroy_tablespace_directory(path);
 		}
-		closedir(dir);
+		if (cleanup_orioledb)
+		{
+			OSnapshot	oSnapshot;
+			OXid		oxid;
+
+			fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+			add_database_copy_wal_record(InvalidOid, objectId, InvalidOid);
+		}
+
 #undef PG_TBLSPC
 	}
 
