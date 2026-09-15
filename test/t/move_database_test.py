@@ -1069,3 +1069,84 @@ class TablespaceTest(BaseTest):
 			self.assertEqual(
 			    replica.execute("SELECT value FROM o_move WHERE id = 1",
 			                    dbname='testdb')[0][0], 2)
+
+	def test_drop_tablespace_recovery_replay_idempotent(self):
+		"""
+		Verify that replaying the DROP TABLESPACE WAL record a second time
+		(after a crash-during-recovery) does not fail when the tablespace
+		directory is already gone (ENOENT).
+
+		debug_recovery_crash_lsn PANICs at the start of orioledb_redo for
+		the first container whose ReadRecPtr >= the given LSN.  We capture
+		the LSN before a trivial INSERT that follows DROP TABLESPACE, so
+		the crash fires on the INSERT container -- meaning the DROP
+		TABLESPACE container was already applied (symlink removed).  The
+		restart then replays the DROP TABLESPACE container again from the
+		checkpoint, and destroy_tablespace_directories() must tolerate the
+		already removed directory rather than ERROR, allowing recovery to
+		complete.
+		"""
+		node = self.node
+		node.append_conf('postgresql.conf', "fsync = on\n")
+		os.sync()
+
+		node.start()
+		node.safe_psql("CREATE EXTENSION orioledb;")
+		node.safe_psql(
+		    "postgres", """CREATE TABLE drop_ts_tbl(f1 int, f2 text)
+		                   USING orioledb TABLESPACE user_ts1;
+		                   INSERT INTO drop_ts_tbl VALUES (1,'popa');
+		                   CHECKPOINT;""")
+		ts1_oid = node.execute(
+		    "select oid from pg_tablespace where spcname = 'user_ts1'")[0][0]
+
+		node.safe_psql("postgres", "DROP TABLE drop_ts_tbl CASCADE;")
+		node.safe_psql("DROP TABLESPACE user_ts1;")
+
+		# Capture LSN before generating a post-drop orioledb WAL container.
+		# The crash LSN must be <= the container's ReadRecPtr for the PANIC
+		# to fire on it (not on the DROP TABLESPACE container).
+		crash_lsn = node.execute("SELECT pg_current_wal_lsn();")[0][0]
+		node.safe_psql("CREATE TABLE after_drop(f1 int) USING orioledb;"
+		               "INSERT INTO after_drop VALUES (1);")
+
+		# Crash before any checkpoint advances past these WAL records.
+		node.stop(['-m', 'immediate'])
+
+		# First start: recovery applies the DROP TABLESPACE record (removes
+		# the symlink), then PANICs at the crash LSN on the INSERT container.
+		node.append_conf('postgresql.conf',
+		                 f"orioledb.debug_recovery_crash_lsn = '{crash_lsn}'")
+		os.sync()
+		with self.expected_postgres_panic():
+			with self.assertRaises(Exception):
+				node.start()
+
+		with open(os.path.join(node.logs_dir, 'postgresql.log')) as f:
+			self.assertIn('orioledb.debug_recovery_crash_lsn reached',
+			              f.read())
+
+		# Remove the crash GUC so the second start can proceed.
+		conf_path = os.path.join(node.data_dir, 'postgresql.conf')
+		with open(conf_path, 'r') as f:
+			lines = [
+			    l for l in f.readlines() if 'debug_recovery_crash_lsn' not in l
+			]
+		with open(conf_path, 'w') as f:
+			f.writelines(lines)
+
+		# Second start: replays the DROP TABLESPACE WAL record again.  The
+		# version directory is already gone, so destroy_tablespace_directories()
+		# hits ENOENT and must tolerate it (not ERROR) for recovery to succeed.
+		node.start()
+		self.assertEqual(
+		    0,
+		    node.execute("select count(*) from pg_tablespace "
+		                 "where spcname = 'user_ts1';")[0][0])
+		self.assertFalse(
+		    os.path.exists(
+		        os.path.join(node.data_dir, "pg_tblspc", str(ts1_oid))))
+		self.assertEqual(
+		    1,
+		    node.execute("SELECT count(*) FROM after_drop;")[0][0])
+		node.stop()
