@@ -25,6 +25,7 @@
 #include "catalog/o_indices.h"
 #include "catalog/o_sys_cache.h"
 #include "catalog/o_tables.h"
+#include "catalog/o_tablespaces.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
@@ -3669,238 +3670,166 @@ worker_wait_shutdown(RecoveryWorkerState *worker)
 	}
 }
 
-static void
-cleanup_tablespace_old_files(char *path, Oid tablespace, uint32 chkp_num,
-							 bool before_recovery)
+typedef struct CleanupOldFilesArg
 {
-	DIR		   *dir,
-			   *dbDir;
-	struct dirent *file,
-			   *dbFile;
-	char	   *filename;
+	uint32		chkp_num;
+	bool		before_recovery;
+} CleanupOldFilesArg;
+
+static bool
+cleanup_old_file(Oid tablespace, Oid dbOid, const char *db_path,
+				 const char *filename, CleanupOldFilesArg *c)
+{
+	uint32		file_reloid,
+				file_chkp,
+				file_segno;
+	bool		cleanup = false;
 	char		ext[5];
 
-
-	dir = opendir(path);
-	if (dir == NULL)
-		return;
-
-	while (errno = 0, (file = readdir(dir)) != NULL)
+	if (orioledb_s3_mode &&
+		(sscanf(filename, "%10u-%10u",
+				&file_reloid, &file_chkp) == 2 ||
+		 sscanf(filename, "%10u.%10u-%10u",
+				&file_reloid, &file_segno, &file_chkp) == 3) &&
+		file_chkp > c->chkp_num)
 	{
-		Oid			dbOid;
-		char	   *dbDirName;
-		bool		fsyncDbDir = false;
+		cleanup = true;
+	}
 
-		if (sscanf(file->d_name, "%u", &dbOid) != 1)
-			continue;
-
-		dbDirName = psprintf("%s/%u", path, dbOid);
-
-		dbDir = opendir(dbDirName);
-		if (dbDir == NULL)
+	if (sscanf(filename, "%10u-%10u.%4s",
+			   &file_reloid, &file_chkp, ext) == 3)
+	{
+		if (c->before_recovery)
 		{
-			pfree(dbDirName);
-			continue;
-		}
-
-		while (errno = 0, (dbFile = readdir(dbDir)) != NULL)
-		{
-			uint32		file_reloid,
-						file_chkp,
-						file_segno;
-			bool		cleanup = false;
-
-			if (orioledb_s3_mode &&
-				(sscanf(dbFile->d_name, "%10u-%10u",
-						&file_reloid, &file_chkp) == 2 ||
-				 sscanf(dbFile->d_name, "%10u.%10u-%10u",
-						&file_reloid, &file_segno, &file_chkp) == 3) &&
-				file_chkp > chkp_num)
+			/*---
+			 * Before recovery we should cleanup:
+			 *
+			 * 1. *.map and *.tmp files which were not created by
+			 * checkpointer.
+			 * 2. All free extents tree files.
+			 *
+			 * Otherwise:
+			 *
+			 * 1. In some cases wrong *.map files will be created.
+			 * (if size of old *.map or *.tmp file is more than will
+			 * be created by checkpointer).
+			 */
+			if (!strcmp(ext, "tmp"))
 			{
-				cleanup = true;
+				cleanup = (file_chkp > c->chkp_num);
+			}
+			else if (!strcmp(ext, "map"))
+			{
+				uint32		my_chkp_num;
+				bool		found;
+
+				my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
+													tablespace,
+													c->chkp_num, &found);
+
+				cleanup = (file_chkp > my_chkp_num);
+
+				if (!found && file_chkp == c->chkp_num)
+					o_update_latest_chkp_num(dbOid, file_reloid,
+											 tablespace, file_chkp);
 			}
 
-			if (sscanf(dbFile->d_name, "%10u-%10u.%4s",
-					   &file_reloid, &file_chkp, ext) == 3)
+			if (!cleanup)
 			{
-				if (before_recovery)
-				{
-					/*---
-					 * Before recovery we should cleanup:
-					 *
-					 * 1. *.map and *.tmp files which were not created by
-					 * checkpointer.
-					 * 2. All free extents tree files.
-					 *
-					 * Otherwise:
-					 *
-					 * 1. In some cases wrong *.map files will be created.
-					 * (if size of old *.map or *.tmp file is more than will
-					 * be created by checkpointer).
-					 */
-					if (!strcmp(ext, "tmp"))
-					{
-						cleanup = (file_chkp > chkp_num);
-					}
-					else if (!strcmp(ext, "map"))
-					{
-						uint32		my_chkp_num;
-						bool		found;
-
-						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
-															tablespace,
-															chkp_num, &found);
-
-						cleanup = (file_chkp > my_chkp_num);
-
-						if (!found && file_chkp == chkp_num)
-							o_update_latest_chkp_num(dbOid, file_reloid,
-													 tablespace, file_chkp);
-					}
-
-					if (!cleanup)
-					{
-						ORelOids	oids = {dbOid, file_reloid, file_reloid};
-
-						cleanup = IS_SYS_TREE_OIDS(oids) && sys_tree_get_storage_type(oids.relnode) == BTreeStorageTemporary;
-					}
-				}
-				else
-				{
-					/*
-					 * After recovery we should cleanup old *.tmp and *.map
-					 * files.
-					 */
-					if (!strcmp(ext, "tmp"))
-					{
-						cleanup = (file_chkp <= chkp_num);
-					}
-					else if (!strcmp(ext, "map"))
-					{
-						uint32		my_chkp_num;
-
-						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
-															tablespace,
-															chkp_num, NULL);
-
-						cleanup = (file_chkp < my_chkp_num);
-					}
-				}
-			}
-			else if (before_recovery &&
-					 sscanf(dbFile->d_name, "%10u", &file_reloid) == 1)
-			{
-				/*
-				 * Removes free extents tree data files.
-				 */
 				ORelOids	oids = {dbOid, file_reloid, file_reloid};
 
 				cleanup = IS_SYS_TREE_OIDS(oids) && sys_tree_get_storage_type(oids.relnode) == BTreeStorageTemporary;
 			}
-
-			if (cleanup)
+		}
+		else
+		{
+			/*
+			 * After recovery we should cleanup old *.tmp and *.map files.
+			 */
+			if (!strcmp(ext, "tmp"))
 			{
-				filename = psprintf("%s/%u/%s", path, dbOid, dbFile->d_name);
+				cleanup = (file_chkp <= c->chkp_num);
+			}
+			else if (!strcmp(ext, "map"))
+			{
+				uint32		my_chkp_num;
 
-				if (unlink(filename) < 0)
-				{
-					ereport(FATAL,
-							(errcode_for_file_access(),
-							 errmsg("could not remove file \"%s\": %m",
-									filename)));
-				}
-				fsyncDbDir = true;
+				my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
+													tablespace,
+													c->chkp_num, NULL);
+
+				cleanup = (file_chkp < my_chkp_num);
 			}
 		}
-		closedir(dbDir);
-		if (fsyncDbDir)
-			fsync_fname_ext(dbDirName, true, false, FATAL);
-		pfree(dbDirName);
+	}
+	else if (c->before_recovery &&
+			 sscanf(filename, "%10u", &file_reloid) == 1)
+	{
+		/*
+		 * Removes free extents tree data files.
+		 */
+		ORelOids	oids = {dbOid, file_reloid, file_reloid};
+
+		cleanup = IS_SYS_TREE_OIDS(oids) && sys_tree_get_storage_type(oids.relnode) == BTreeStorageTemporary;
 	}
 
-	if (errno != 0)
+	if (cleanup)
 	{
-		ereport(ERROR, (errcode_for_file_access(),
-						errmsg("unable to clean up temporary files: %m")));
+		char	   *file_path = psprintf("%s/%s", db_path, filename);
+
+		if (unlink(file_path) < 0)
+		{
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not remove file \"%s\": %m",
+							file_path)));
+		}
+		pfree(file_path);
+		return true;
 	}
+	return false;
+}
+
+static void
+cleanup_database_old_files_cb(Oid tablespace, Oid dbOid,
+							  const char *db_path, void *arg)
+{
+	CleanupOldFilesArg *c = (CleanupOldFilesArg *) arg;
+	DIR		   *dir;
+	struct dirent *file;
+	bool		fsync_db_dir = false;
+
+	dir = opendir(db_path);
+	if (dir == NULL)
+		return;
+
+	while (errno = 0, (file = readdir(dir)) != NULL)
+		fsync_db_dir |= cleanup_old_file(tablespace, dbOid, db_path,
+										 file->d_name, c);
 	closedir(dir);
+	if (fsync_db_dir)
+		fsync_fname_ext(db_path, true, false, FATAL);
+}
+
+static void
+cleanup_old_files_cb(Oid tablespace, const char *prefix, void *arg)
+{
+	(void) o_tablespace_foreach_database(tablespace, prefix,
+										 cleanup_database_old_files_cb,
+										 arg, ERROR);
 }
 
 void
 recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 {
-	DIR		   *dir;
-	char		path[MAXPGPATH];
-	char		targetpath[MAXPGPATH];
-	struct dirent *file;
-
-#define PG_TBLSPC "pg_tblspc"
+	CleanupOldFilesArg arg;
 
 	if (!before_recovery && chkp_num == 0)
 		return;
 
-	path[0] = '\0';
-	strlcat(path, ORIOLEDB_DATA_DIR, MAXPGPATH);
-	cleanup_tablespace_old_files(path, DEFAULTTABLESPACE_OID, chkp_num,
-								 before_recovery);
-
-	dir = opendir(PG_TBLSPC);
-	while (errno = 0, (file = readdir(dir)) != NULL)
-	{
-		struct stat st;
-		int			rllen;
-		Oid			tablespace;
-
-		/* Skip special stuff */
-		if (strcmp(file->d_name, ".") == 0 || strcmp(file->d_name, "..") == 0)
-			continue;
-
-		tablespace = pg_strtoint64(file->d_name);
-		Assert(OidIsValid(tablespace));
-
-		path[0] = '\0';
-		pg_snprintf(path, MAXPGPATH,
-					PG_TBLSPC "/%s/" TABLESPACE_VERSION_DIRECTORY,
-					file->d_name);
-		if (lstat(path, &st) < 0)
-		{
-			ereport(ERROR,
-					(errcode_for_file_access(),
-					 errmsg("could not stat file \"%s\": %m",
-							file->d_name)));
-		}
-
-		if (!S_ISLNK(st.st_mode))
-		{
-			strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
-			cleanup_tablespace_old_files(path, tablespace, chkp_num,
-										 before_recovery);
-		}
-		else
-		{
-			rllen = readlink(path, targetpath, sizeof(targetpath));
-			if (rllen < 0)
-				ereport(ERROR,
-						(errcode_for_file_access(),
-						 errmsg("could not read symbolic link \"%s\": %m",
-								path)));
-			if (rllen >= sizeof(targetpath))
-				ereport(ERROR,
-						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-						 errmsg("symbolic link \"%s\" target is too long",
-								path)));
-			targetpath[rllen] = '\0';
-
-			path[0] = '\0';
-			pg_snprintf(path, MAXPGPATH,
-						"%s/" ORIOLEDB_DATA_DIR,
-						targetpath);
-			cleanup_tablespace_old_files(path, tablespace, chkp_num,
-										 before_recovery);
-		}
-	}
-	closedir(dir);
-#undef PG_TBLSPC
+	arg.chkp_num = chkp_num;
+	arg.before_recovery = before_recovery;
+	o_tablespaces_foreach_prefix(cleanup_old_files_cb, &arg);
 }
 
 static OIndexKey *
@@ -4626,6 +4555,144 @@ handle_movedb(Oid dbOid, Oid src_tblspcoid, Oid dst_tblspcoid)
 }
 
 static void
+destroy_tablespace_directories(Oid tablespaceoid)
+{
+	char	   *linkloc;
+	char	   *linkloc_with_version_dir;
+	DIR		   *dirdesc;
+	struct dirent *de;
+	char	   *subfile;
+	struct stat st;
+
+	linkloc_with_version_dir = psprintf("pg_tblspc/%u/%s", tablespaceoid,
+										TABLESPACE_VERSION_DIRECTORY);
+
+	/*
+	 * Check if the tablespace still contains any files.  We try to rmdir each
+	 * per-database directory we find in it.  rmdir failure implies there are
+	 * still files in that subdirectory, so give up.  (We do not have to worry
+	 * about undoing any already completed rmdirs, since the next attempt to
+	 * use the tablespace from that database will simply recreate the
+	 * subdirectory via TablespaceCreateDbspace.)
+	 *
+	 * Since we hold TablespaceCreateLock, no one else should be creating any
+	 * fresh subdirectories in parallel. It is possible that new files are
+	 * being created within subdirectories, though, so the rmdir call could
+	 * fail.  Worst consequence is a less friendly error message.
+	 *
+	 * ENOENT is a likely outcome during redo, and we allow it to pass without
+	 * comment.
+	 */
+	dirdesc = AllocateDir(linkloc_with_version_dir);
+	if (dirdesc == NULL)
+	{
+		if (errno == ENOENT)
+		{
+			/* The symlink might still exist, so go try to remove it */
+			goto remove_symlink;
+		}
+		ereport(LOG,
+				(errcode_for_file_access(),
+				 errmsg("could not open directory \"%s\": %m",
+						linkloc_with_version_dir)));
+		pfree(linkloc_with_version_dir);
+		return;
+	}
+
+	while ((de = ReadDir(dirdesc, linkloc_with_version_dir)) != NULL)
+	{
+		if (strcmp(de->d_name, ".") == 0 ||
+			strcmp(de->d_name, "..") == 0)
+			continue;
+
+		subfile = psprintf("%s/%s", linkloc_with_version_dir, de->d_name);
+
+		/* remove empty directory */
+		if (rmdir(subfile) < 0)
+			ereport(LOG,
+					(errcode_for_file_access(),
+					 errmsg("could not remove directory \"%s\": %m",
+							subfile)));
+
+		pfree(subfile);
+	}
+
+	FreeDir(dirdesc);
+
+	/* remove version directory */
+	if (rmdir(linkloc_with_version_dir) < 0)
+	{
+		ereport(LOG,
+				(errcode_for_file_access(),
+				 errmsg("could not remove directory \"%s\": %m",
+						linkloc_with_version_dir)));
+		pfree(linkloc_with_version_dir);
+		return;
+	}
+
+	/*
+	 * Try to remove the symlink.  We must however deal with the possibility
+	 * that it's a directory instead of a symlink --- this could happen during
+	 * WAL replay (see TablespaceCreateDbspace).
+	 *
+	 * There is no point in retrying if this final step fails.
+	 */
+remove_symlink:
+	linkloc = pstrdup(linkloc_with_version_dir);
+	get_parent_directory(linkloc);
+	if (lstat(linkloc, &st) < 0)
+	{
+		ereport(LOG,
+				(errcode_for_file_access(),
+				 errmsg("could not stat file \"%s\": %m",
+						linkloc)));
+	}
+	else if (S_ISDIR(st.st_mode))
+	{
+		if (rmdir(linkloc) < 0)
+		{
+			ereport(LOG,
+					(errcode_for_file_access(),
+					 errmsg("could not remove directory \"%s\": %m",
+							linkloc)));
+		}
+	}
+	else if (S_ISLNK(st.st_mode))
+	{
+		if (unlink(linkloc) < 0)
+		{
+			ereport(LOG,
+					(errcode_for_file_access(),
+					 errmsg("could not remove symbolic link \"%s\": %m",
+							linkloc)));
+		}
+	}
+	else
+	{
+		/* Refuse to remove anything that's not a directory or symlink */
+		ereport(LOG,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("\"%s\" is not a directory or symbolic link",
+						linkloc)));
+	}
+
+	pfree(linkloc_with_version_dir);
+	pfree(linkloc);
+}
+
+static void
+clean_tablespace_on_recovery(Oid tblspcoid)
+{
+	char		path[MAXPGPATH];
+
+	if (o_tablespace_resolve_prefix(tblspcoid, path, MAXPGPATH) &&
+		o_tablespace_destroy_orioledb_dir(tblspcoid, path))
+	{
+		destroy_tablespace_directories(tblspcoid);
+	}
+}
+
+static void
 invalidate_typcache(void)
 {
 	SharedInvalidationMessage msg;
@@ -4977,7 +5044,14 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			break;
 
 		case WAL_REC_DATABASE_COPY:
-			handle_movedb(rec->u.dbcopy.datOid, rec->u.dbcopy.src_tblspc, rec->u.dbcopy.dst_tblspc);
+			if (OidIsValid(rec->u.dbcopy.dst_tblspc))
+			{
+				handle_movedb(rec->u.dbcopy.datOid, rec->u.dbcopy.src_tblspc, rec->u.dbcopy.dst_tblspc);
+			}
+			else
+			{
+				clean_tablespace_on_recovery(rec->u.dbcopy.src_tblspc);
+			}
 			break;
 
 		case WAL_REC_DATABASE_TEMPLATE_CHECKPOINT:
