@@ -4040,6 +4040,66 @@ BEGIN
 	END IF;
 END $$;
 DROP TABLE bitmap_cover_test;
+-- A qualifier that does not answer the same way twice must not be asked
+-- twice.  The key-bitmap fetch path evaluated it once for its filtered-rows
+-- counter and again for the loop condition, so a row the first call rejected
+-- was returned by the second.  With a row-level security policy calling a
+-- volatile function, that row is one the role is not allowed to see.
+--
+-- The OR over a secondary index is what keeps this off the single-primary
+-- streaming fast path, which asks once and is unaffected.
+CREATE TABLE o_qual_once (
+	id int NOT NULL,
+	v int NOT NULL,
+	PRIMARY KEY (id)
+) USING orioledb;
+CREATE INDEX o_qual_once_v_idx ON o_qual_once (v);
+INSERT INTO o_qual_once SELECT g, g FROM generate_series(1, 20) g;
+CREATE SEQUENCE qual_calls;
+CREATE FUNCTION qual_flip() RETURNS bool LANGUAGE sql VOLATILE AS
+	$$ SELECT nextval('qual_calls') % 2 = 0 $$;
+ANALYZE o_qual_once;
+SET enable_seqscan = off;
+SET enable_indexscan = off;
+SET enable_indexonlyscan = off;
+CREATE FUNCTION qual_once_plan() RETURNS SETOF text LANGUAGE plpgsql AS $$
+BEGIN
+	RETURN QUERY EXECUTE 'EXPLAIN (COSTS OFF) SELECT id FROM o_qual_once'
+		' WHERE (id = 7 OR v = 12) AND qual_flip()';
+END $$;
+-- Both indexes under a BitmapOr is what keeps the query off the streaming
+-- path.  Which child the planner puts first differs between major versions,
+-- so ask for the shape rather than print the plan.
+SELECT count(*) FILTER (WHERE l ~ 'BitmapOr') AS bitmap_or,
+       count(*) FILTER (WHERE l ~ 'o_qual_once_pkey') AS pkey_scan,
+       count(*) FILTER (WHERE l ~ 'o_qual_once_v_idx') AS v_idx_scan
+	FROM qual_once_plan() l;
+ bitmap_or | pkey_scan | v_idx_scan 
+-----------+-----------+------------
+         1 |         1 |          1
+(1 row)
+
+-- Two candidates, one call each: id = 7 is rejected (call 1, false) and has
+-- to stay rejected; id = 12 is accepted (call 2, true).
+SELECT id FROM o_qual_once WHERE (id = 7 OR v = 12) AND qual_flip();
+ id 
+----
+ 12
+(1 row)
+
+SELECT last_value FROM qual_calls;
+ last_value 
+------------
+          2
+(1 row)
+
+RESET enable_seqscan;
+RESET enable_indexscan;
+RESET enable_indexonlyscan;
+DROP FUNCTION qual_once_plan();
+DROP FUNCTION qual_flip();
+DROP SEQUENCE qual_calls;
+DROP TABLE o_qual_once;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to table bitmap_test
