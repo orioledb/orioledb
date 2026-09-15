@@ -1401,6 +1401,7 @@ walk_undo_range(UndoLogType undoType,
 {
 	UndoStackItem *item;
 	UndoItemTypeDescr *descr;
+	UndoLocation next;
 
 	while (UndoLocationIsValid(location) && (location > toLoc || !UndoLocationIsValid(toLoc)))
 	{
@@ -1428,12 +1429,20 @@ walk_undo_range(UndoLogType undoType,
 		{
 			OnCommitUndoStackItem *fItem = (OnCommitUndoStackItem *) item;
 
-			location = fItem->onCommitLocation;
+			next = fItem->onCommitLocation;
 		}
 		else
 		{
-			location = item->prev;
+			next = item->prev;
 		}
+
+		/* Undo chains only ever move backwards; a cycle means corruption. */
+		if (UndoLocationIsValid(next) && next >= location)
+			elog(PANIC,
+				 "corrupted undo chain: location " UINT64_FORMAT " links to non-decreasing location " UINT64_FORMAT,
+				 location, next);
+
+		location = next;
 	}
 
 	return location;
@@ -1470,6 +1479,7 @@ apply_undo_branches(UndoLogType undoType, OXid oxid)
 	UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS(undoType);
 	BranchUndoStackItem *item;
 	UndoLocation location;
+	UndoLocation prevBranchLocation;
 
 	init_undo_item_buf(&buf);
 
@@ -1478,7 +1488,15 @@ apply_undo_branches(UndoLogType undoType, OXid oxid)
 	{
 		item = (BranchUndoStackItem *) undo_item_buf_read_item(&buf, undoType,
 															   location);
-		location = item->prevBranchLocation;
+		prevBranchLocation = item->prevBranchLocation;
+
+		/* Branch chains only ever move backwards; a cycle means corruption. */
+		if (UndoLocationIsValid(prevBranchLocation) && prevBranchLocation >= location)
+			elog(PANIC,
+				 "corrupted undo branch chain: location " UINT64_FORMAT " links to non-decreasing location " UINT64_FORMAT,
+				 location, prevBranchLocation);
+
+		location = prevBranchLocation;
 		walk_undo_range(undoType, item->longPathLocation, item->header.prev,
 						&buf, oxid, OUndoCallbackStageAbort, NULL, false);
 	}
@@ -3074,7 +3092,18 @@ search_for_undo_sub_location(UndoLogType undoType,
 			{
 				if (item->parentSubid > parentSubid)
 				{
-					location = item->prevSubLocation;
+					UndoLocation prevSubLocation = item->prevSubLocation;
+
+					/*
+					 * Subxact chains only ever move backwards; a cycle
+					 * means corruption.
+					 */
+					if (UndoLocationIsValid(prevSubLocation) && prevSubLocation >= location)
+						elog(PANIC,
+							 "corrupted undo subxact chain: location " UINT64_FORMAT " links to non-decreasing location " UINT64_FORMAT,
+							 location, prevSubLocation);
+
+					location = prevSubLocation;
 					continue;
 				}
 				else
