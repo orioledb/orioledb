@@ -1727,6 +1727,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		ListCell   *indexId;
 		int			attnum;
 		TupleTableSlot *newSlot;
+
 		/* Match pull_varattnos()'s offset attribute-number representation. */
 		Bitmapset  *changed_attrs = NULL;
 
