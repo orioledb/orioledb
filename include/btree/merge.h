@@ -28,5 +28,9 @@ extern bool btree_try_merge_pages(BTreeDescr *desc,
 extern bool btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 									   bool nested, bool wait_io);
 extern bool is_page_too_sparse(BTreeDescr *desc, Page p);
-
+extern bool btree_try_merge_and_unlock_extended(BTreeDescr *desc,
+												OInMemoryBlkno blkno,
+												bool nested, bool wait_io,
+												LocationIndex *mergeThreshold,
+												bool *undoSpaceLacking);
 #endif							/* __BTREE_MERGE_H__ */

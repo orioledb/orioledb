@@ -298,6 +298,38 @@ btree_try_merge_pages(BTreeDescr *desc,
 	return true;
 }
 
+/*
+ * Work-horse for non-successfull merge: can_be_merged() is predicate:
+ *	mergeable <=> (free(left) + vac(left) + vac(right) >= data_size(right))
+ * The same can be inverted:
+ * 	non-mergeable <=> free(left) + vac(left) + vac(right) < data_size(right);
+ * hence, we're able to estimate the predictor:
+ *	data_size(right) > free(left) + vac(left)
+ * So the heuristic is to keep this sum of free(left) and vac(left) and do
+ * not try to merge pages on every item until data_size(right) reach this
+ * bound.
+ */
+static inline void
+merge_note_sibling_capacity(Page sibling, LocationIndex *bound, bool *known)
+{
+	int capacity;
+
+	if (!*known)
+		return;
+
+	/* Only leaf pages keep a vacated-bytes counter. */
+	if (!O_PAGE_IS(sibling, LEAF))
+	{
+		*known = false;
+		return;
+	}
+
+	capacity = (int) BTREE_PAGE_FREE_SPACE(sibling) +
+		(int) PAGE_GET_N_VACATED(sibling);
+	capacity = Min(capacity, ORIOLEDB_BLCKSZ);
+
+	*bound = Max(*bound, (LocationIndex) capacity);
+}
 
 /*
  * Returns true if page is successfully merged to the left or to the right.
@@ -305,6 +337,23 @@ btree_try_merge_pages(BTreeDescr *desc,
 bool
 btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 						   bool nested, bool wait_io)
+{
+	return btree_try_merge_and_unlock_extended(desc, blkno, nested, wait_io,
+											   NULL, NULL);
+}
+
+/*
+ * Likewise btree_try_merge_and_unlock, except that it outputs how much
+ * the target page would have to shrink before a merge retry could
+ * possibly succeed.
+ *
+ * See merge_note_sibling_capacity comments for details.
+ */
+bool
+btree_try_merge_and_unlock_extended(BTreeDescr *desc, OInMemoryBlkno blkno,
+									bool nested, bool wait_io,
+									LocationIndex *mergeThreshold,
+									bool *undoSpaceLacking)
 {
 	BTreePageItemLocator target_loc,
 				left_loc,
@@ -324,6 +373,14 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	uint32		parent_change_count;
 	bool		success = false;
 	bool		needsUndo = desc->undoType != UndoLogNone;
+	LocationIndex mergeBound = 0;
+	bool		boundKnown = false;
+
+	/* Until we reach a capacity check, the caller learns nothing. */
+	if (mergeThreshold)
+		*mergeThreshold = ORIOLEDB_BLCKSZ;
+	if (undoSpaceLacking)
+		*undoSpaceLacking = false;
 
 	/*
 	 * Reserve the required undo size.  We are holding the page lock, so we
@@ -334,6 +391,8 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 												 false))
 	{
 		/* unable to reserve undo location, no opportunity to resume */
+		if (undoSpaceLacking)
+			*undoSpaceLacking = true;
 		unlock_page(blkno);
 		Assert(!have_locked_pages());
 		return false;
@@ -419,6 +478,8 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 		bool		merge_parent,
 					merged = false;
 
+		boundKnown = false;
+
 		if (!page_is_locked(parent_blkno))
 		{
 			OFindPageResult result;
@@ -486,6 +547,13 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 		merge_parent = (nested && find_context.index > 0);
 
 		/*
+		 * Only leaves carry PAGE_GET_N_VACATED() and only leaves are
+		 * retried row-by-row, so the bound is leaf-level notion.
+		 */
+		boundKnown = (level == 0);
+		mergeBound = 0;
+
+		/*
 		 * Step 4: try to merge to the right.  On success, all page lock are
 		 * released.  On failure, target and parent page locks are held.
 		 */
@@ -536,13 +604,22 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 												   &right_loc, right_blkno,
 												   false);
 					if (!merged)
+					{
+						merge_note_sibling_capacity(right, &mergeBound, &boundKnown);
 						unlock_page(right_blkno);
+					}
 				}
 				else
 				{
 					merged = false;
+					boundKnown = false;
 					unlock_page(right_blkno);
 				}
+			}
+			else
+			{
+				/* Downlink is on disk or in IO we chose not to wait for.  */
+				boundKnown = false;
 			}
 		}
 
@@ -581,6 +658,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 				 */
 				if (!try_lock_page(left_blkno))
 				{
+					boundKnown = false;
 					unlock_page(parent_blkno);
 					unlock_page(target_blkno);
 					target_blkno = OInvalidInMemoryBlkno;
@@ -610,13 +688,22 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 												   &target_loc, target_blkno,
 												   false);
 					if (!merged)
+					{
+						merge_note_sibling_capacity(left, &mergeBound, &boundKnown);
 						unlock_page(left_blkno);
+					}
 				}
 				else
 				{
 					merged = false;
+					boundKnown = false;
 					unlock_page(left_blkno);
 				}
+			}
+			else
+			{
+				/* Downlink is on disk or in IO we chose not to wait for.  */
+				boundKnown = false;
 			}
 		}
 
@@ -648,6 +735,9 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	if (needsUndo)
 		release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+
+	if (mergeThreshold && !success && boundKnown)
+		*mergeThreshold = mergeBound;
 
 	Assert(!have_locked_pages());
 	return success;
