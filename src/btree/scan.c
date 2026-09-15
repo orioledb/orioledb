@@ -508,6 +508,28 @@ load_next_historical_page(BTreeSeqScan *scan)
 	BTREE_PAGE_LOCATOR_FIRST(scan->histImg, &scan->histLoc);
 }
 
+/*
+ * Params for STOPEVENT_SEQ_SCAN_LOAD_INTERNAL_PAGE_FAIL: which tree the load
+ * belongs to, and whether it is the walk's first internal page -- which is
+ * how a test aims the error at one load rather than all of them, since the
+ * key a load descends by cannot serve for that: the first page has none.
+ */
+static Jsonb *
+btree_int_page_load_stopevent_params(BTreeDescr *desc, bool firstPage)
+{
+	JsonbParseState *state = NULL;
+	Jsonb	   *res;
+	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	btree_desc_stopevent_params_internal(desc, &state);
+	jsonb_push_bool_key(&state, "firstPage", firstPage);
+	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+	MemoryContextSwitchTo(mctx);
+
+	return res;
+}
+
 static Jsonb *
 btree_lokey_stopevent_params(BTreeDescr *desc, OTuple lokey,
 							 bool prevIsLeftmostOrNone)
@@ -585,6 +607,11 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 			findResult = find_page(&scan->context, NULL, BTreeKeyNone, 1);
 		}
 		Assert(findResult == OFindPageResultSuccess);
+
+		if (STOPEVENT_CONDITION(STOPEVENT_SEQ_SCAN_LOAD_INTERNAL_PAGE_FAIL,
+								btree_int_page_load_stopevent_params(scan->desc,
+																	 O_TUPLE_IS_NULL(prevHikey))))
+			elog(ERROR, "Debug condition: internal page load failed.");
 
 		if (scan->context.partial.isPartial)
 		{
@@ -1880,6 +1907,11 @@ load_prev_internal_page(BTreeSeqScan *scan, OTuple lokey, Page page,
 	else
 		findResult = find_page(&scan->context, &lokey, BTreeKeyPageHiKey, 1);
 	Assert(findResult == OFindPageResultSuccess);
+
+	if (STOPEVENT_CONDITION(STOPEVENT_SEQ_SCAN_LOAD_INTERNAL_PAGE_FAIL,
+							btree_int_page_load_stopevent_params(scan->desc,
+																 O_TUPLE_IS_NULL(lokey))))
+		elog(ERROR, "Debug condition: internal page load failed.");
 
 	if (PAGE_GET_LEVEL(scan->context.img) != 1)
 	{
