@@ -281,6 +281,10 @@ PERFCHECKS = $(sort $(wildcard perf/*_perf.py))
 PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test --temp-instance=./test/tmp_check
 PG_ISOLATION_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test/output_iso --temp-instance=./test/tmp_check_iso
 
+# Churn branch only: build every cell with the seq buf detectors of the
+# previous commit, which are the whole point of this branch.
+override PG_CPPFLAGS += -DSEQBUF_LOCK_DEBUG
+
 ifdef IS_DEV
 override PG_CPPFLAGS += -DIS_DEV
 
