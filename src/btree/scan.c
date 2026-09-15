@@ -1445,8 +1445,20 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 			else if (curPage->status == OParallelScanPageInProgress)
 			{
 				SpinLockRelease(&poscan->intpageAccess);
+
+				/*
+				 * Wait for whoever is loading the page.  The lock is free
+				 * when an error unwound out of the load -- LWLockReleaseAll()
+				 * released it at abort and left the slot in progress -- and
+				 * then this waits on nothing and becomes a spin.  That has to
+				 * stay interruptible: the error takes the whole parallel
+				 * group down, and a participant that never reaches an
+				 * interrupt point neither ends the query nor lets the
+				 * postmaster shut down.
+				 */
 				if (LWLockAcquireOrWait(&poscan->intpageLoad, LW_EXCLUSIVE))
 					LWLockRelease(&poscan->intpageLoad);
+				CHECK_FOR_INTERRUPTS();
 				continue;
 			}
 
@@ -1992,8 +2004,11 @@ get_prev_downlink_parallel(BTreeSeqScan *scan, uint64 *downlink,
 		else if (curPage->status == OParallelScanPageInProgress)
 		{
 			SpinLockRelease(&poscan->intpageAccess);
+
+			/* Interruptible for the reason given in get_next_downlink(). */
 			if (LWLockAcquireOrWait(&poscan->intpageLoad, LW_EXCLUSIVE))
 				LWLockRelease(&poscan->intpageLoad);
+			CHECK_FOR_INTERRUPTS();
 			continue;
 		}
 
