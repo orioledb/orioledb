@@ -247,6 +247,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/parallel_test.py \
 						test/t/parallel_ordered_scan_test.py \
 						test/t/parallel_bitmap_scan_test.py \
+						test/t/parallel_scan_load_error_test.py \
 						test/t/pending_truncates_test.py \
 						test/t/recovery_heap_verdict_test.py \
 						test/t/recovery_heap_xid_binding_test.py \
