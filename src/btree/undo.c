@@ -1485,6 +1485,21 @@ reconstruct_split_diff(BTreeDescr *desc, UndoLocation undoLocation,
 }
 
 /*
+ * Page-image undo chains only ever move backwards; a cycle means corruption.
+ * Checked once here so every get_page_from_undo() caller is covered.
+ */
+static inline void
+check_page_undo_link(UndoLocation undoLocation, Pointer dest)
+{
+	UndoLocation next = ((BTreePageHeader *) dest)->undoLocation;
+
+	if (UndoLocationIsValid(next) && next >= undoLocation)
+		elog(PANIC,
+			 "corrupted undo chain: location " UINT64_FORMAT " links to non-decreasing location " UINT64_FORMAT,
+			 undoLocation, next);
+}
+
+/*
  * Finds page image in undoLocation.
  */
 void
@@ -1515,6 +1530,7 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 	{
 		reconstruct_merge_diff_half(desc, undoLocation, key, kind, dest,
 									is_left, is_right, lokey);
+		check_page_undo_link(undoLocation, dest);
 		return;
 	}
 
@@ -1522,6 +1538,7 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 	{
 		reconstruct_split_diff(desc, undoLocation, dest,
 							   is_left, is_right, lokey, page_lokey);
+		check_page_undo_link(undoLocation, dest);
 		return;
 	}
 
@@ -1572,6 +1589,7 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 							&splitKey.tuple, BTreeKeyNonLeafKey) > 0)
 				copy_fixed_key(desc, page_lokey, splitKey.tuple);
 		}
+		check_page_undo_link(undoLocation, dest);
 		return;
 	}
 
@@ -1631,6 +1649,8 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 		default:
 			Assert(false);
 	}
+
+	check_page_undo_link(undoLocation, dest);
 }
 
 /*
@@ -2203,12 +2223,19 @@ get_prev_leaf_header_from_undo(UndoLogType undoType,
 							   BTreeLeafTuphdr *tuphdr, bool inPage)
 {
 	BTreeLeafTuphdr prevTuphdr = {0, 0};
+	UndoLocation location = tuphdr->undoLocation;
 
-	Assert(UndoLocationIsValid(tuphdr->undoLocation));
-	Assert(UNDO_REC_EXISTS(undoType, tuphdr->undoLocation));
+	Assert(UndoLocationIsValid(location));
+	Assert(UNDO_REC_EXISTS(undoType, location));
 
-	undo_read(undoType, tuphdr->undoLocation,
-			  sizeof(prevTuphdr), (Pointer) &prevTuphdr);
+	undo_read(undoType, location, sizeof(prevTuphdr), (Pointer) &prevTuphdr);
+
+	/* Tuple undo chains only ever move backwards; a cycle means corruption. */
+	if (UndoLocationIsValid(prevTuphdr.undoLocation) &&
+		(UndoLocation) prevTuphdr.undoLocation >= location)
+		elog(PANIC,
+			 "corrupted undo chain: location " UINT64_FORMAT " links to non-decreasing location " UINT64_FORMAT,
+			 location, (UndoLocation) prevTuphdr.undoLocation);
 
 	if (!XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo) || !inPage)
 	{
@@ -2232,13 +2259,21 @@ get_prev_leaf_header_from_undo_if_exists(UndoLogType undoType,
 										 BTreeLeafTuphdr *tuphdr)
 {
 	BTreeLeafTuphdr prevTuphdr = {0, 0};
+	UndoLocation location = tuphdr->undoLocation;
 
-	if (!UndoLocationIsValid(tuphdr->undoLocation))
+	if (!UndoLocationIsValid(location))
 		return false;
 
-	if (!undo_read_if_exists(undoType, tuphdr->undoLocation,
+	if (!undo_read_if_exists(undoType, location,
 							 sizeof(prevTuphdr), (Pointer) &prevTuphdr))
 		return false;
+
+	/* Tuple undo chains only ever move backwards; a cycle means corruption. */
+	if (UndoLocationIsValid(prevTuphdr.undoLocation) &&
+		(UndoLocation) prevTuphdr.undoLocation >= location)
+		elog(PANIC,
+			 "corrupted undo chain: location " UINT64_FORMAT " links to non-decreasing location " UINT64_FORMAT,
+			 location, (UndoLocation) prevTuphdr.undoLocation);
 
 	*tuphdr = prevTuphdr;
 	return true;
@@ -2287,6 +2322,14 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 	Assert(item.action == BTreeOperationUpdate);
 
 	*tuphdr = item.tuphdr;
+
+	/* Tuple undo chains only ever move backwards; a cycle means corruption. */
+	if (UndoLocationIsValid(tuphdr->undoLocation) &&
+		(UndoLocation) tuphdr->undoLocation >= undoLocation)
+		elog(PANIC,
+			 "corrupted undo chain: location " UINT64_FORMAT " links to non-decreasing location " UINT64_FORMAT,
+			 undoLocation, (UndoLocation) tuphdr->undoLocation);
+
 	tuple->formatFlags = tuphdr->formatFlags;
 	tupleSize = validate_undo_item_size(item.header.itemSize);
 	if (sizeAvailable == 0)
