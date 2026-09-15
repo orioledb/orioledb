@@ -527,10 +527,23 @@ item_type_get_descr(UndoItemType type)
 {
 	UndoItemTypeDescr *result;
 
-	Assert((int) type >= 1 && (int) type <= sizeof(undoItemTypeDescrs) / sizeof(undoItemTypeDescrs[0]));
+	/*
+	 * The type is read from the undo log too, and it indexes a static table
+	 * of callbacks -- so an out-of-range value picks up whatever follows the
+	 * table and calls it.  Checked at runtime for the same reason as the item
+	 * size in undo_item_buf_read_item().
+	 */
+	if (unlikely((int) type < 1 ||
+				 (int) type > (int) lengthof(undoItemTypeDescrs)))
+		elog(PANIC, "invalid undo item type %d: must be between 1 and %d",
+			 (int) type, (int) lengthof(undoItemTypeDescrs));
 
 	result = &undoItemTypeDescrs[(int) type - 1];
-	Assert(result->type == type);
+
+	if (unlikely(result->type != type))
+		elog(PANIC, "undo item type %d does not match the descriptor at its index",
+			 (int) type);
+
 	return result;
 }
 
@@ -1334,6 +1347,27 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 	undo_read(undoType, location, sizeof(UndoStackItem), buf->data);
 
 	itemSize = ((UndoStackItem *) buf->data)->itemSize;
+
+	/*
+	 * The size comes out of the undo log, which is a file that may have been
+	 * damaged or replaced, and it is not checksummed.  Establish it can be an
+	 * item size before using it: the subtraction below is unsigned, so
+	 * anything under sizeof(UndoStackItem) asks undo_read() for about 4 GB
+	 * into a 2 kB buffer, and the Assert that used to stand for this check is
+	 * not there in a production build.
+	 *
+	 * The walker runs during transaction abort and during recovery, where an
+	 * ERROR would unwind into the very code that is failing, so this is a
+	 * PANIC: the record cannot be skipped and its chain cannot be trusted.
+	 */
+	if (unlikely(itemSize < sizeof(UndoStackItem) ||
+				 itemSize > O_MAX_UNDO_RECORD_SIZE))
+		elog(PANIC, "invalid undo item size %u at location " UINT64_FORMAT
+			 " of undo log %d: must be between %u and %u",
+			 (unsigned) itemSize, (uint64) location, (int) undoType,
+			 (unsigned) sizeof(UndoStackItem),
+			 (unsigned) O_MAX_UNDO_RECORD_SIZE);
+
 	if (itemSize > buf->length)
 	{
 		buf->length = pg_nextpower2_32(itemSize);
