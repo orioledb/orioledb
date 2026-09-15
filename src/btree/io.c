@@ -1695,6 +1695,37 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 }
 
 /*
+ * Does every downlink on this page point at the disk?
+ *
+ * An in-memory downlink names a block of this cluster's page pool and an
+ * in-IO one names an IO slot, neither of which a file can know anything
+ * about: a page that has just been read from disk must carry on-disk
+ * downlinks only.  The invariant was checked by prewrite_image_check() on the
+ * way out and asserted on the way in; a file that has been damaged or
+ * tampered with does not honour it, and O_GET_IN_MEMORY_PAGE() indexes the
+ * pool with the low 31 bits of whatever it is given.
+ */
+static bool
+page_downlinks_are_on_disk(Page p)
+{
+	BTreePageItemLocator loc;
+
+	if (O_PAGE_IS(p, LEAF))
+		return true;
+
+	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
+	{
+		BTreeNonLeafTuphdr *tuphdr =
+			(BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+
+		if (unlikely(!DOWNLINK_IS_ON_DISK(tuphdr->downlink)))
+			return false;
+	}
+
+	return true;
+}
+
+/*
  * Load the page where context is pointing from disk to memory, assuming parent
  * page is locked.
  */
@@ -1766,6 +1797,16 @@ load_page(OBTreeFindPageContext *context)
 	/* Read page data and put it to the page */
 	read_result = read_page_from_disk(desc, buf, downlink,
 									  &page_desc->fileExtent);
+
+	/*
+	 * A forged in-memory downlink on the image would be followed into the
+	 * page pool by index, so refuse the page here rather than let the
+	 * descent, the verifier or page cleanup dereference it.
+	 */
+	if (read_result == OReadPageResultOk &&
+		!page_downlinks_are_on_disk((Page) buf))
+		read_result = OReadPageResultDownlinkNotOnDisk;
+
 	if (read_result != OReadPageResultOk)
 	{
 		int_hdr->downlink = downlink;
@@ -1774,7 +1815,12 @@ load_page(OBTreeFindPageContext *context)
 		if (orioledb_s3_mode)
 			chkpNum = S3_GET_CHKP_NUM(page_desc->fileExtent.off);
 
-		if (read_result == OReadPageResultChecksumFailed)
+		if (read_result == OReadPageResultDownlinkNotOnDisk)
+			ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("page with file offset " UINT64_FORMAT " in %s has a downlink that is not on disk",
+								   DOWNLINK_GET_DISK_OFF(downlink),
+								   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
+		else if (read_result == OReadPageResultChecksumFailed)
 			ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
 							errmsg("invalid page with file offset " UINT64_FORMAT " in %s",
 								   DOWNLINK_GET_DISK_OFF(downlink),
