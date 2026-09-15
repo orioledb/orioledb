@@ -1739,6 +1739,7 @@ TupleTableSlot *
 o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 {
 	bool		fetched;
+	bool		qual_ok = true;
 	TupleTableSlot *slot = NULL;
 	OCustomScanState *ocstate = (OCustomScanState *) node;
 	OBitmapHeapPlanState *bitmap_state =
@@ -1926,15 +1927,27 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 			}
 		}
 
+		/*
+		 * Qualify the row once and keep the answer.  Asking twice -- once for
+		 * the counter, once for the loop -- lets a qualifier that does not
+		 * return the same thing twice hand back a row it just rejected: the
+		 * first call filters it, the second admits it, and the loop exits
+		 * with that row in the slot.  A row-level security policy calling a
+		 * volatile function is the case that matters, since the row it
+		 * rejected is one the role is not allowed to see, but any volatile
+		 * qualifier was evaluated twice per row as well.
+		 */
 		if (!fetched)
 			InstrCountFiltered2(node, 1);
-		else if (!TupIsNull(slot) && !o_exec_qual(node->ss.ps.ps_ExprContext,
-												  node->ss.ps.qual, slot))
-			InstrCountFiltered1(node, 1);
+		else if (!TupIsNull(slot))
+		{
+			qual_ok = o_exec_qual(node->ss.ps.ps_ExprContext,
+								  node->ss.ps.qual, slot);
+			if (!qual_ok)
+				InstrCountFiltered1(node, 1);
+		}
 
-	} while (!fetched || (!TupIsNull(slot) &&
-						  !o_exec_qual(node->ss.ps.ps_ExprContext,
-									   node->ss.ps.qual, slot)));
+	} while (!fetched || (!TupIsNull(slot) && !qual_ok));
 	return slot;
 }
 
