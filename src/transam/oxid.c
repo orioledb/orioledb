@@ -1557,6 +1557,19 @@ advance_global_xmin(OXid newXid)
 }
 
 /*
+ * The most a single advance_oxids() will extend the xidmap by.
+ *
+ * The extension is linear in the gap: every oxid in between gets an
+ * OXidMapItem that recovery fills here and eventually flushes, so 2^32 of
+ * them is already 64 GB of xidmap writes.  No cluster that really handed
+ * those oxids out asks for them in one step -- the gap a legitimate recovery
+ * closes is bounded by the transactions that were in flight -- so a value
+ * beyond this says the artifact we read it from is corrupt, and filling it
+ * would be indistinguishable from a hang.
+ */
+#define MAX_OXID_ADVANCE_GAP		(UINT64CONST(1) << 32)
+
+/*
  * Extends xidmap to given value if needed.  New values are filled with
  * COMMITSEQNO_INPROGRESS value.  Used during recovery when procnum from xidmap
  * isn't used (transaction doesn't belong to particular pid).
@@ -1569,10 +1582,42 @@ void
 advance_oxids(OXid new_xid)
 {
 	OXid		xid,
-				xmax;
+				xmax,
+				next;
 
-	if (new_xid < pg_atomic_read_u64(&xid_meta->nextXid))
+	next = pg_atomic_read_u64(&xid_meta->nextXid);
+	if (new_xid < next)
 		return;
+
+	/*
+	 * The value reached us from a checkpoint xid file or a WAL record, and
+	 * neither of those carries a checksum, so establish it can be an oxid at
+	 * all before extending anything to it.  Fail recovery if it cannot: a
+	 * cluster that refuses to start says what is wrong with it, while one
+	 * that never finishes starting does not.
+	 *
+	 * InvalidOXid is the largest value oxid allocation can ever reach, so at
+	 * or above it the value is malformed -- and the endless loop this guards
+	 * lives right there.  With UINT64_MAX the xmax below wrapped to zero,
+	 * which moved nextXid *backwards*, after which the loop waited for a
+	 * value nextXid could never reach again.
+	 */
+	if (new_xid >= InvalidOXid)
+		ereport(FATAL,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("OrioleDB transaction id " UINT64_FORMAT " read during recovery is not a valid one",
+						(uint64) new_xid),
+				 errdetail("Transaction ids are allocated below " UINT64_FORMAT ".",
+						   (uint64) InvalidOXid)));
+
+	if (new_xid - next > MAX_OXID_ADVANCE_GAP)
+		ereport(FATAL,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("OrioleDB transaction id " UINT64_FORMAT " read during recovery is too far ahead",
+						(uint64) new_xid),
+				 errdetail("Extending the transaction id map to it from " UINT64_FORMAT " would take " UINT64_FORMAT " entries, more than the " UINT64_FORMAT " allowed.",
+						   (uint64) next, (uint64) (new_xid - next),
+						   (uint64) MAX_OXID_ADVANCE_GAP)));
 
 	/*
 	 * We might need to extend xidmap more than xid_circular_buffer_size.  So,
@@ -1594,7 +1639,17 @@ advance_oxids(OXid new_xid)
 
 		/* Fill xidmap in circular buffer. */
 		xid = pg_atomic_read_u64(&xid_meta->nextXid);
-		xmax = Min(new_xid + 1, pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size);
+
+		/*
+		 * Written as a comparison rather than Min(new_xid + 1, ...) so that
+		 * the +1 cannot wrap whatever new_xid is: a wrapped xmax would set
+		 * nextXid backwards and spin this loop for ever.  The range check
+		 * above already rules that out; this keeps the arithmetic safe on its
+		 * own terms.
+		 */
+		xmax = pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size;
+		if (new_xid < xmax)
+			xmax = new_xid + 1;
 		for (; xid < xmax; xid++)
 		{
 			pg_atomic_write_u64(&xidBuffer[xid % xid_circular_buffer_size].csn,
