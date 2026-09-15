@@ -100,10 +100,10 @@ typedef struct WalRecord
 		struct
 		{
 			OTuple		t1;
-			OffsetNumber len1;
+			uint32		len1;
 
 			OTuple		t2;
-			OffsetNumber len2;
+			uint32		len2;
 
 			bool		read_two_tuples;
 		}			modify;

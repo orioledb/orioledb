@@ -25,6 +25,7 @@
 #include "transam/oxid.h"
 #include "tuple/toast.h"
 #include "tuple/format.h"
+#include "tuple/slot.h"
 #include "tuple/sort.h"
 
 #include "access/heapam.h"
@@ -245,6 +246,112 @@ o_detoast(struct varlena *attr)
 	O_LOAD_SNAPSHOT_CSN(&oSnapshot, ote.csn);
 	return (struct varlena *) o_toast_get(descr, key.tuple, ote.attnum,
 										  ote.toasted_size, &oSnapshot);
+}
+
+/*
+ * Replace every TOASTed attribute of the slot's row with the value it stands
+ * for, the way heap's toast_flatten_tuple() does before WAL-logging an old
+ * tuple for REPLICA IDENTITY FULL.
+ *
+ * The value is substituted as it is stored -- still compressed if it was
+ * compressed -- which is what a heap tuple holds for a de-externalized
+ * attribute, and what logical decoding hands to the output plugin.
+ *
+ * Returns the slot's own tuple (with *allocated false) when nothing is
+ * TOASTed, which is the common case.  Must be called before the TOAST chunks
+ * are removed, while they are still there to be read.
+ */
+OTuple
+o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
+{
+	OTableSlot *oslot = (OTableSlot *) slot;
+	OIndexDescr *idx = GET_PRIMARY(descr);
+	TupleDesc	tupdesc = idx->leafTupdesc;
+	OTupleFixedFormatSpec *spec = &idx->leafSpec;
+	ItemPointer iptr;
+	BridgeData	bridge_data;
+	BridgeData *bridge_data_arg = NULL;
+	Datum	   *values;
+	bool	   *tofree;
+	OTuple		result;
+	Size		len;
+	int			ctid_off = idx->primaryIsCtid ? 1 : 0;
+	bool		found = false;
+	int			natts;
+	int			i;
+
+	*allocated = false;
+
+	if (idx->bridging)
+		ctid_off++;
+	natts = tupdesc->natts - ctid_off;
+
+	slot_getallattrs(slot);
+
+	for (i = 0; i < descr->ntoastable; i++)
+	{
+		int			attn = descr->toastable[i] - ctid_off;
+
+		if (!slot->tts_isnull[attn] &&
+			VARATT_IS_EXTERNAL_ORIOLEDB(DatumGetPointer(slot->tts_values[attn])))
+		{
+			found = true;
+			break;
+		}
+	}
+
+	if (!found)
+		return oslot->tuple;
+
+	/*
+	 * Build the leaf tuple the way tts_orioledb_form_tuple() does -- the ctid
+	 * and bridge attributes are not ordinary values and have to be handed
+	 * over separately -- but with the TOASTed attributes fetched, and with no
+	 * to_toast map, so nothing turns back into a placeholder.
+	 */
+	values = (Datum *) palloc(natts * sizeof(Datum));
+	tofree = (bool *) palloc0(natts * sizeof(bool));
+	memcpy(values, slot->tts_values, natts * sizeof(Datum));
+
+	for (i = 0; i < descr->ntoastable; i++)
+	{
+		int			attn = descr->toastable[i] - ctid_off;
+
+		if (slot->tts_isnull[attn])
+			continue;
+		if (!VARATT_IS_EXTERNAL_ORIOLEDB(DatumGetPointer(values[attn])))
+			continue;
+
+		values[attn] = PointerGetDatum(o_detoast((struct varlena *) DatumGetPointer(values[attn])));
+		tofree[attn] = true;
+	}
+
+	iptr = idx->primaryIsCtid ? &slot->tts_tid : NULL;
+	if (idx->bridging &&
+		(idx->desc.type == oIndexPrimary || idx->desc.type == oIndexBridge))
+	{
+		bridge_data.bridge_iptr = &oslot->bridge_ctid;
+		bridge_data.is_pkey = idx->desc.type == oIndexPrimary;
+		bridge_data.attnum = idx->desc.type == oIndexBridge ? 1 : idx->primaryIsCtid ? 2 : 1;
+		bridge_data_arg = &bridge_data;
+	}
+
+	len = o_new_tuple_size(tupdesc, spec, iptr, bridge_data_arg, 0,
+						   values, slot->tts_isnull, NULL);
+
+	result.data = (Pointer) palloc0(len);
+	result.formatFlags = 0;
+	o_tuple_fill(tupdesc, spec, &result, len, iptr, bridge_data_arg, 0,
+				 values, slot->tts_isnull, NULL);
+	*allocated = true;
+
+	for (i = 0; i < natts; i++)
+		if (tofree[i])
+			pfree(DatumGetPointer(values[i]));
+	pfree(values);
+	pfree(tofree);
+
+	return result;
 }
 
 static BTreeDescr *
