@@ -800,6 +800,144 @@ page_get_hikey(Page p)
 	return result;
 }
 
+/*
+ * Report one broken layout invariant and give up on the page.
+ *
+ * Shaped like check_orioledb_page_checksum(): the specifics go into a WARNING
+ * here, and the caller turns the false into the ERROR that names the file and
+ * offset the image came from.
+ */
+#define PAGE_STRUCT_CHECK(cond, ...) \
+	do { \
+		if (unlikely(!(cond))) \
+		{ \
+			ereport(WARNING, \
+					(errcode(ERRCODE_DATA_CORRUPTED), \
+					 errmsg("invalid B-tree page structure"), \
+					 errdetail(__VA_ARGS__))); \
+			return false; \
+		} \
+	} while (0)
+
+/*
+ * Check that the page's own layout fields describe something that fits inside
+ * the page.
+ *
+ * Consumers compute offsets and lengths from these fields and then trust the
+ * result.  page_get_hikey_size() is the sharpest example: it returns
+ * hikeysEnd - <the last chunk's hikey location>, and merge_pages() copies
+ * that many bytes into a buffer sized for one tuple.  hikeysEnd is a plain
+ * uint16, so an image claiming 65535 there asks for a 64 kB copy onto the
+ * stack.  Page images arrive from storage -- a file that may have been
+ * damaged, or in S3 mode an endpoint answering with bytes of its own choosing
+ * -- and the checksum only proves the bytes are the ones that were stored,
+ * not that they describe a page.  So establish that much before anything
+ * reads the image.
+ *
+ * Deliberately cheap: the header plus the chunk descriptors, of which there
+ * are at most BTREE_PAGE_MAX_CHUNKS, so this can run on every image that
+ * comes off disk.  It says nothing about the items themselves or about key
+ * order -- o_check_page_struct() does that under CHECK_PAGE_STRUCT.
+ */
+bool
+page_struct_is_valid(Page p)
+{
+	BTreePageHeader *header = (BTreePageHeader *) p;
+	LocationIndex firstHikeyLocation;
+	int			i;
+
+	PAGE_STRUCT_CHECK(header->chunksCount >= 1 &&
+					  header->chunksCount <= BTREE_PAGE_MAX_CHUNKS,
+					  "chunksCount is %u, not within 1..%u",
+					  (unsigned) header->chunksCount,
+					  (unsigned) BTREE_PAGE_MAX_CHUNKS);
+	PAGE_STRUCT_CHECK(header->itemsCount <= BTREE_PAGE_MAX_ITEMS,
+					  "itemsCount is %u, more than the %u a page can hold",
+					  (unsigned) header->itemsCount,
+					  (unsigned) BTREE_PAGE_MAX_ITEMS);
+	PAGE_STRUCT_CHECK(header->dataSize <= ORIOLEDB_BLCKSZ,
+					  "dataSize is %u, more than the page size %u",
+					  (unsigned) header->dataSize,
+					  (unsigned) ORIOLEDB_BLCKSZ);
+	PAGE_STRUCT_CHECK(header->hikeysEnd <= header->dataSize,
+					  "hikeysEnd is %u, past dataSize %u",
+					  (unsigned) header->hikeysEnd,
+					  (unsigned) header->dataSize);
+
+	/* The hikeys start right after the descriptors that point at them. */
+	firstHikeyLocation = MAXALIGN(offsetof(BTreePageHeader, chunkDesc) +
+								  sizeof(BTreePageChunkDesc) * header->chunksCount);
+	PAGE_STRUCT_CHECK(SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation) ==
+					  firstHikeyLocation,
+					  "first hikey is at %u, not at %u where the %u chunk descriptors end",
+					  (unsigned) SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation),
+					  (unsigned) firstHikeyLocation,
+					  (unsigned) header->chunksCount);
+	PAGE_STRUCT_CHECK(header->chunkDesc[0].offset == 0,
+					  "first chunk starts at item %u, not at 0",
+					  (unsigned) header->chunkDesc[0].offset);
+
+	for (i = 0; i < header->chunksCount; i++)
+	{
+		BTreePageChunkDesc *chunk = &header->chunkDesc[i];
+		LocationIndex hikeyLocation = SHORT_GET_LOCATION(chunk->hikeyShortLocation);
+		LocationIndex dataLocation = SHORT_GET_LOCATION(chunk->shortLocation);
+		LocationIndex hikeyEnd;
+		bool		lastChunk = (i == header->chunksCount - 1);
+
+		PAGE_STRUCT_CHECK(dataLocation >= header->hikeysEnd &&
+						  dataLocation <= header->dataSize,
+						  "chunk %d data is at %u, not within %u..%u",
+						  i, (unsigned) dataLocation,
+						  (unsigned) header->hikeysEnd,
+						  (unsigned) header->dataSize);
+		PAGE_STRUCT_CHECK(chunk->offset <= header->itemsCount,
+						  "chunk %d starts at item %u of %u",
+						  i, (unsigned) chunk->offset,
+						  (unsigned) header->itemsCount);
+		if (i > 0)
+		{
+			BTreePageChunkDesc *prev = &header->chunkDesc[i - 1];
+
+			PAGE_STRUCT_CHECK(hikeyLocation > SHORT_GET_LOCATION(prev->hikeyShortLocation) &&
+							  dataLocation >= SHORT_GET_LOCATION(prev->shortLocation) &&
+							  chunk->offset >= prev->offset,
+							  "chunk %d does not follow chunk %d: hikey %u vs %u, data %u vs %u, item %u vs %u",
+							  i, i - 1,
+							  (unsigned) hikeyLocation,
+							  (unsigned) SHORT_GET_LOCATION(prev->hikeyShortLocation),
+							  (unsigned) dataLocation,
+							  (unsigned) SHORT_GET_LOCATION(prev->shortLocation),
+							  (unsigned) chunk->offset, (unsigned) prev->offset);
+		}
+
+		/*
+		 * A chunk's hikey runs up to the next chunk's hikey, and the last one
+		 * up to hikeysEnd.  The last chunk of a rightmost page has no hikey
+		 * at all, so there is nothing to size there.
+		 */
+		if (lastChunk && O_PAGE_IS(p, RIGHTMOST))
+		{
+			PAGE_STRUCT_CHECK(hikeyLocation <= header->hikeysEnd,
+							  "chunk %d hikey is at %u, past hikeysEnd %u",
+							  i, (unsigned) hikeyLocation,
+							  (unsigned) header->hikeysEnd);
+			continue;
+		}
+
+		hikeyEnd = lastChunk ? header->hikeysEnd :
+			SHORT_GET_LOCATION(header->chunkDesc[i + 1].hikeyShortLocation);
+
+		PAGE_STRUCT_CHECK(hikeyLocation < hikeyEnd &&
+						  hikeyEnd - hikeyLocation <= O_BTREE_MAX_TUPLE_SIZE,
+						  "chunk %d hikey spans %u..%u, not a size within 1..%u",
+						  i, (unsigned) hikeyLocation, (unsigned) hikeyEnd,
+						  (unsigned) O_BTREE_MAX_TUPLE_SIZE);
+	}
+
+	return true;
+}
+
 int
 page_get_hikey_size(Page p)
 {

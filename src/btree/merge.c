@@ -666,6 +666,24 @@ can_be_merged(BTreeDescr *desc, Page left, Page right, CommitSeqNo csn)
 	Assert(O_PAGE_IS(left, LEAF) == O_PAGE_IS(right, LEAF));
 	Assert(!O_PAGE_IS(left, RIGHTMOST));
 
+	/*
+	 * merge_pages() copies the left page's hikey into a buffer sized for one
+	 * tuple, and hands the right page's to btree_page_reorg() as the merged
+	 * page's own, so a page claiming a bigger hikey than a tuple can be must
+	 * not reach either.  Images off storage have been through
+	 * page_struct_is_valid(), so this is about a page that went wrong while
+	 * in memory: refuse the merge rather than take the copy.  It has to
+	 * happen here, before the caller's critical section, where an error would
+	 * be a PANIC.
+	 */
+	if (BTREE_PAGE_GET_HIKEY_SIZE(left) > O_BTREE_MAX_TUPLE_SIZE ||
+		(!O_PAGE_IS(right, RIGHTMOST) &&
+		 BTREE_PAGE_GET_HIKEY_SIZE(right) > O_BTREE_MAX_TUPLE_SIZE))
+	{
+		elog(WARNING, "refusing to merge a page whose hikey does not fit a tuple");
+		return false;
+	}
+
 	space_free = BTREE_PAGE_FREE_SPACE(left);
 	space_needed = ORIOLEDB_BLCKSZ - BTREE_PAGE_FREE_SPACE(right);
 
