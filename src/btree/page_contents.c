@@ -623,6 +623,24 @@ o_btree_page_calculate_statistics(BTreeDescr *desc, Pointer p)
 	}
 }
 
+/*
+ * The lengths these copies work from are decoded out of a page or an undo
+ * image -- files that a restore can supply and, in S3 mode, that an endpoint
+ * answers with, and whose checksum only says the bytes are the ones that were
+ * stored.  A forged tuple header can claim a length larger than the fixed
+ * buffer it is copied into, so the copies check at runtime instead of
+ * asserting and overflowing in a production build.
+ */
+static pg_noinline void
+report_invalid_fixed_length(const char *what, int len, Size capacity)
+{
+	ereport(ERROR,
+			(errcode(ERRCODE_DATA_CORRUPTED),
+			 errmsg("invalid OrioleDB %s length %d", what, len),
+			 errdetail("At most %u bytes fit the destination.",
+					   (unsigned) capacity)));
+}
+
 void
 copy_fixed_tuple(BTreeDescr *desc, OFixedTuple *dst, OTuple src)
 {
@@ -635,7 +653,8 @@ copy_fixed_tuple(BTreeDescr *desc, OFixedTuple *dst, OTuple src)
 	}
 
 	tuplen = o_btree_len(desc, src, OTupleLength);
-	Assert(tuplen <= sizeof(dst->fixedData));
+	if (unlikely(tuplen < 0 || (Size) tuplen > sizeof(dst->fixedData)))
+		report_invalid_fixed_length("tuple", tuplen, sizeof(dst->fixedData));
 	dst->tuple.formatFlags = src.formatFlags;
 	dst->tuple.data = dst->fixedData;
 	memcpy(dst->fixedData, src.data, tuplen);
@@ -651,6 +670,9 @@ copy_fixed_key_with_len(OFixedKey *dst, OTuple src, int tuplen)
 		clear_fixed_key(dst);
 		return;
 	}
+
+	if (unlikely(tuplen < 0 || (Size) tuplen > sizeof(dst->fixedData)))
+		report_invalid_fixed_length("key", tuplen, sizeof(dst->fixedData));
 
 	dst->tuple.formatFlags = src.formatFlags;
 	dst->tuple.data = dst->fixedData;
@@ -671,7 +693,6 @@ copy_fixed_key(BTreeDescr *desc, OFixedKey *dst, OTuple src)
 	}
 
 	tuplen = o_btree_len(desc, src, OKeyLength);
-	Assert(tuplen <= sizeof(dst->fixedData));
 	copy_fixed_key_with_len(dst, src, tuplen);
 }
 
@@ -717,6 +738,10 @@ copy_from_fixed_shmem_key(OFixedKey *dst, OFixedShmemKey *src)
 		return;
 	}
 
+	if (unlikely(src->len > sizeof(dst->fixedData)))
+		elog(PANIC, "invalid OrioleDB shared key length %u: at most %u fits",
+			 (unsigned) src->len, (unsigned) sizeof(dst->fixedData));
+
 	memcpy(dst->fixedData, src->data.fixedData, src->len);
 	dst->tuple.data = dst->fixedData;
 	dst->tuple.formatFlags = src->formatFlags;
@@ -732,7 +757,17 @@ copy_fixed_shmem_key(BTreeDescr *desc, OFixedShmemKey *dst, OTuple src)
 	}
 
 	dst->len = o_btree_len(desc, src, OKeyLength);
-	Assert(dst->len <= sizeof(dst->data.fixedData));
+
+	/*
+	 * PANIC, not ERROR: this runs with poscan->intpageAccess held -- the
+	 * parallel scan fills prevHikey under it -- and a spinlock is not
+	 * released by error unwinding, so the cluster would hang on it instead,
+	 * which is the failure mode of issue #1113.
+	 */
+	if (unlikely(dst->len > sizeof(dst->data.fixedData)))
+		elog(PANIC, "invalid OrioleDB key length %u for shared memory: at most %u fits",
+			 (unsigned) dst->len, (unsigned) sizeof(dst->data.fixedData));
+
 	memcpy(dst->data.fixedData, src.data, dst->len);
 	dst->notNull = true;
 	dst->formatFlags = src.formatFlags;
