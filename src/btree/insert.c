@@ -1454,10 +1454,27 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 		{
 			int			prevItemSize;
 			BTreeLeafTuphdr prev;
+			bool		keptForVacuum;
 
 			prev = *((BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc));
 			prevItemSize = BTREE_PAGE_GET_ITEM_SIZE(p, &loc);
 			Assert(O_PAGE_IS(p, LEAF));
+
+			/*
+			 * How much of this item the vacated counter holds depends on what
+			 * happened to the version we are replacing.  A live version is
+			 * not in it, a deleted one is -- put there by the delete -- so
+			 * counting the live one here brings both cases to "the whole item
+			 * is vacated", which is what the arithmetic below assumes.
+			 *
+			 * A deleted tuple of a bridge tree is the exception.  Its space
+			 * is not reclaimable at all: the tuple stays until VACUUM has
+			 * cleaned the bridged indexes, so the delete leaves it out of the
+			 * counter (see o_btree_modify_delete()), and the counter holds
+			 * nothing for this item.  This happens when a bridge ctid comes
+			 * back around to a deleted row's tuple.
+			 */
+			keptForVacuum = prev.deleted && desc->type == oIndexBridge;
 
 			if (!prev.deleted)
 			{
@@ -1477,7 +1494,8 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 			if (newItemSize > prevItemSize)
 			{
 				page_locator_resize_item(p, &loc, newItemSize);
-				PAGE_SUB_N_VACATED(p, prevItemSize);
+				if (!keptForVacuum)
+					PAGE_SUB_N_VACATED(p, prevItemSize);
 				header->prevInsertOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
 			}
 			else
@@ -1485,8 +1503,20 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 				OTuple		tuple pg_attribute_unused();
 
 				BTREE_PAGE_READ_TUPLE(tuple, p, &loc);
-				PAGE_SUB_N_VACATED(p, BTreeLeafTuphdrSize +
-								   MAXALIGN(insert_item->tuplen));
+				if (keptForVacuum)
+				{
+					/*
+					 * The item keeps its size, so what the new tuple does not
+					 * use becomes reclaimable -- and that is all of this item
+					 * the counter may hold.
+					 */
+					PAGE_ADD_N_VACATED(p, prevItemSize - newItemSize);
+				}
+				else
+				{
+					PAGE_SUB_N_VACATED(p, BTreeLeafTuphdrSize +
+									   MAXALIGN(insert_item->tuplen));
+				}
 				header->prevInsertOffset = MaxOffsetNumber;
 			}
 

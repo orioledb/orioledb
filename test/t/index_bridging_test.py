@@ -86,6 +86,75 @@ class IndexBridgingTest(BaseTest):
 		    expected_ctids, key=lambda ctid: int(ctid[0][1:-1].split(',')[1]))
 		check(expected_ctids)
 
+	def test_ctid_reuse_over_deleted_tuple(self):
+		"""A reused bridge ctid must not unbalance the vacated counter.
+
+		Tuples of a bridge tree are kept after a delete, for VACUUM to clean
+		the bridged indexes with, so their space is never counted as vacated
+		(o_btree_modify_delete()).  When the ctid counter comes back around to
+		such a tuple, the insert replaces it -- and the replace used to take
+		that space back out of the counter, which no one had put in:
+
+		    TRAP: failed Assert("((BTreePageHeader *)(p))->field2 >= ..."),
+		          File: "src/btree/insert.c"
+
+		Without assertions the counter is a LocationIndex and wraps instead,
+		which leaves the page looking almost entirely reclaimable to page
+		compaction and to the merge heuristic.
+
+		debug_max_bridge_ctid_blkno caps the counter at one block, so the
+		wraparound arrives after MaxHeapTuplesPerPage rows rather than after
+		2^32 blocks of them.
+		"""
+		node = self.node
+		node.append_conf("orioledb.debug_max_bridge_ctid_blkno=1")
+		node.start()
+		node.safe_psql("CREATE EXTENSION orioledb;")
+		node.safe_psql("""
+			CREATE TABLE o_test (
+				i int NOT NULL,
+				j int,
+				PRIMARY KEY (i)
+			) USING orioledb;
+
+			CREATE INDEX o_test_ix ON o_test USING btree (j)
+				WITH (orioledb_index = off);
+		""")
+
+		nrows = 291  # MaxHeapTuplesPerPage, so the block is full afterwards
+		node.safe_psql("INSERT INTO o_test SELECT v, v"
+		               " FROM generate_series(1, %d) v;" % nrows)
+		# Their ctids are the ones the counter comes back to; the tuples stay
+		# in the bridge tree, deleted.
+		node.safe_psql("DELETE FROM o_test WHERE i <= 10;")
+
+		node.safe_psql("INSERT INTO o_test SELECT v, v"
+		               " FROM generate_series(1000, 1005) v;")
+		# Rolling one back walks the same accounting backwards.
+		with node.connect() as con:
+			con.begin()
+			con.execute("INSERT INTO o_test SELECT v, v"
+			            " FROM generate_series(2000, 2002) v;")
+			con.rollback()
+		node.safe_psql("""
+			DELETE FROM o_test WHERE i BETWEEN 20 AND 30;
+			INSERT INTO o_test SELECT v, v FROM generate_series(3000, 3010) v;
+			UPDATE o_test SET j = j + 1 WHERE i BETWEEN 100 AND 150;
+		""")
+
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_test;")[0][0],
+		    nrows - 10 + 6 - 11 + 11)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_test'::regclass);")[0]
+		    [0])
+		# The bridged index has to answer like the table itself.
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_test"
+		                 " WHERE j BETWEEN 100 AND 200;")[0][0],
+		    node.execute("SELECT count(*) FROM (SELECT j FROM o_test) x"
+		                 " WHERE j BETWEEN 100 AND 200;")[0][0])
+
 	@unittest.skipIf(not BaseTest.extension_installed("pageinspect"),
 	                 "'pageinspect' is not installed")
 	def test_ctid_overflow_two_times(self):
