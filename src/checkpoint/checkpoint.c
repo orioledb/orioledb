@@ -1057,7 +1057,15 @@ close_xids_file(void)
 		CHECK_FOR_INTERRUPTS();
 	}
 
-	count = pg_atomic_read_u64(&checkpoint_state->xidRecLastPos);
+	STOPEVENT(STOPEVENT_CLOSE_XIDS_BEFORE_COUNT, NULL);
+
+	/*
+	 * Use xidRecFlushPos, not xidRecLastPos: a concurrent
+	 * write_to_xids_queue() can claim a slot (bumping xidRecLastPos) between
+	 * the drain-loop exit above and this read, without flushing the record to
+	 * the file.  xidRecFlushPos tracks what was actually written.
+	 */
+	count = pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos);
 
 	if (OFileWrite(xidFile, (Pointer) &count,
 				   sizeof(count), 0, WAIT_EVENT_SLRU_WRITE) != sizeof(count))
