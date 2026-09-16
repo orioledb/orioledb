@@ -4977,7 +4977,14 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			break;
 
 		case WAL_REC_DATABASE_COPY:
-			handle_movedb(rec->u.dbcopy.datOid, rec->u.dbcopy.src_tblspc, rec->u.dbcopy.dst_tblspc);
+			if (OidIsValid(rec->u.dbcopy.dst_tblspc))
+			{
+				handle_movedb(rec->u.dbcopy.datOid, rec->u.dbcopy.src_tblspc, rec->u.dbcopy.dst_tblspc);
+			}
+			else
+			{
+				(void) destroy_tablespace_directories(rec->u.dbcopy.src_tblspc, true);
+			}
 			break;
 
 		case WAL_REC_DATABASE_TEMPLATE_CHECKPOINT:

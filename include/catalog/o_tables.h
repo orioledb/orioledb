@@ -396,4 +396,6 @@ extern List *o_reuse_indices;
 
 extern void redefine_pkey_for_rel(Relation rel);
 
+extern bool destroy_tablespace_directories(Oid tablespaceoid, bool redo);
+
 #endif							/* __O_TABLES_H__ */
