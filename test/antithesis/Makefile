@@ -64,3 +64,18 @@ push: push-services push-config
 down:
 	config/make-compose $(CFG) | docker compose -f - down --volumes
 	rm -rf ./target
+
+SOURCES := $(shell \
+	find . -type f \( -name "*.clj" \
+	-o -name "*.cljc" \
+	-o -name "*.edn" \
+	-o -path "*/sbin/*" \
+	-o -name "Makefile" \))
+
+.PHONY: watch # Continuously executes make target when sources change: make watch test
+watch:
+	echo $(SOURCES) | tr ' ' '\n' | entr $(MAKE) $(filter-out watch,$(MAKECMDGOALS))
+
+.PHONY: test # run tests
+test:
+	@bb sbin/debug-jepsen-append --test

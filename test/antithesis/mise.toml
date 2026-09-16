@@ -1,5 +1,5 @@
 [tools]
-babashka = "1.13.220"
-"cargo:snouty" = "0.7.0-rc.3"
+babashka = "1.13.222"
+"cargo:snouty" = "0.7.1"
 jq = "1.8.2"
 rust = "1.94.1"

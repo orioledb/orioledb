@@ -132,6 +132,31 @@ make down # [CFG='...']
     - You need to define the `ANTITHESIS_API_KEY` env var
     - run `snouty doctor` if you have any errors executing snouty
 
+## Triage Tools
+
+### antithesis-skills
+
+[antithesis-skills](https://github.com/antithesishq/antithesis-skills) are effective.  Give your agent a run-id or report link, tell it which property to investigate.
+Each run from the github agent includes the OrioleDB commit sha and the orioledb image for the run also includes metadata necessary to correlate results
+with evidence in the property failures and run logs.  Depending on the model used, it can usually figure out to pull the simulation image and check `/opt/orioledb/manifest.out` on its own.
+You will need to install `snouty` to fully use the skills (see pre-requisites above, installable via mise).
+
+### `sbin/debug-jepsen-append`
+
+This script requires babshka.  You can get it automatically with mise (see pre-requisites above).
+
+```shell
+# 1. Choose a recent run (or pass --run-id)
+# 2. Choose a jepsen anomaly and detection moment
+# 3. Wizard prints results.edn report
+# 4. Wizard prints operation log events related to the anomaly
+# 5. Launch an MVD debug sesson at chosen log event
+
+sbin/debug-jepsen-append [--run-id 9f95138a6ce1234501b5c8d900e730ca-60-11]
+```
+
+You can use the moment selected with `antithesis-skills` to guide your agent or explore MVD yourself.
+
 # Appendix
 
 ## Reference

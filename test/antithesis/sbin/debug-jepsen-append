@@ -113,7 +113,7 @@ Usage: select_jepsen_moment [options]\n\n"
                          (update log :output_text #(string/replace % #"^[^{]*" ""))
                          log)))
         (map :output_text))
-       (reduce str "")
+       (apply str)
        (edn/read-string)))
 
 (defn get-anomaly-example
@@ -286,10 +286,110 @@ Usage: select_jepsen_moment [options]\n\n"
       (println (print-stack-trace throwable))
       (System/exit 1))))
 
+;; tests ;;
+
+(require '[clojure.test :as t :refer [deftest are]])
+
+(deftest logs-between-test
+  (let [start {:output_text "start"}
+        end {:output_text "end"}
+        first-line {:output_text "first" :moment {:vtime 1}}
+        last-line {:output_text "last" :moment {:vtime 2}}
+        metadata {:moment {:vtime 3}}]
+    (are [expected logs] (= expected (logs-between logs #"^start$" #"^end$"))
+      [first-line metadata last-line]
+      [{:output_text "before"} start first-line metadata last-line end {:output_text "after"}]
+
+      [last-line]
+      [start first-line end start last-line end metadata start first-line]
+
+      ;; Empty blocks and missing or out-of-order markers.
+      [] [start end]
+      nil []
+      nil [first-line metadata]
+      nil [start first-line]
+      nil [first-line end]
+      nil [end first-line start])))
+
+(deftest jepsen-results-test
+  (let [start {:output_text "INFO jepsen results - jepsen.store Wrote /tmp/jepsen/results.edn"}
+        end {:output_text "ERROR jepsen results - jepsen.cli Analysis invalid!"}
+        results {:valid? false
+                 :workload {:append {:anomalies {:internal [{:mop [:r 42 [7]]}]}}}}
+        logs [start
+              {:output_text "INFO jepsen results - jepsen.cli {:valid? false,\n"}
+              {:output_text " :workload {:append {:anomalies\n"}
+              {:output_text " {:internal [{:mop [:r 42 [7]]}]}}}}\n"}
+              end]]
+    (are [expected input-logs] (= expected (jepsen-results input-logs))
+      ;; Reconstruct multiline EDN and strip the first line's log prefix.
+      results (into [{:output_text "unrelated earlier log"}]
+                    (conj logs {:output_text "unrelated later log"}))
+
+      ;; Return nil when there is no report.
+      nil []
+      nil [{:output_text "unrelated log"}]
+      nil [start {:output_text "{:valid? false}"}]
+      nil [{:output_text "{:valid? false}"} end]
+      nil [start end])
+    ;; Malformed EDN is rejected
+    (are [input-logs] (thrown? RuntimeException (jepsen-results input-logs))
+      [start {:output_text "{:valid? false"} end])))
+
+(deftest get-anomaly-keys-test
+  (are [expected example] (= expected (get-anomaly-keys example))
+    #{42} {:mop [:append 42 7]}
+    #{42} {:key 42}
+    #{41 42} {:steps [{:key 41} {:key 42}]}
+    nil {}))
+
+(deftest anomaly-micro-op-logs-test
+  (let [read-log {:output_text "INFO jepsen worker 0 - jepsen.print 0 :ok :txn [[:r 42 [7]]]"
+                  :moment {:input_hash "123" :vtime 1}}
+        other-key-log {:output_text "INFO jepsen worker 1 - jepsen.print 1 :invoke :txn [[:append 41 8]]"
+                       :moment {:input_hash "123" :vtime 2}}
+        append-log {:output_text "INFO jepsen worker 0 - jepsen.print 0 :invoke :txn [[:r 99 []] [:append 42 9]]"
+                    :moment {:input_hash "123" :vtime 3}}
+        logs [{:moment {:vtime 0}}
+              read-log
+              {:output_text nil}
+              other-key-log
+              {:output_text "INFO jepsen worker 0 - jepsen.print 0 :ok :txn [[:r 99 [42]]]"}
+              {:output_text "INFO jepsen worker 0 - jepsen.print 0 :ok :txn [[:write 42 7]]"}
+              append-log]
+        results-for (fn [examples]
+                      {:workload {:append {:anomalies {:internal examples}}}})]
+    (are [expected input-logs results anomaly-type]
+         (= expected (anomaly-micro-op-logs input-logs results anomaly-type))
+      [read-log append-log] logs (results-for [{:mop [:r 42 [7]]}]) :internal
+      [read-log append-log] logs (results-for [{:key 42}]) :internal
+      [read-log other-key-log append-log]
+      logs (results-for [{:steps [{:key 41} {:key 42} {:key 41}]}]) :internal
+      [] logs (results-for [{:key 100}]) :internal
+
+      ;; Only the first anomaly example is used.
+      [read-log append-log] logs (results-for [{:key 42} {:key 41}]) :internal
+
+      ;; Missing or unsupported anomalies return nil.
+      nil logs {} :internal
+      nil logs (results-for []) :internal
+      nil logs (results-for true) :internal
+      nil logs (results-for [{}]) :internal
+      nil logs (results-for [{:key 42}]) :G0
+
+      ;; A supported anomaly with no log records returns an empty vector.
+      [] [] (results-for [{:key 42}]) :internal)))
+
+;; entrypoint ;;
+
 (when (= *file* (System/getProperty "babashka.file"))
-  (apply -main *command-line-args*))
+  (if (= ["--test"] (vec *command-line-args*))
+    (let [{:keys [fail error]} (t/run-tests)]
+      (System/exit (if (zero? (+ fail error)) 0 1)))
+    (apply -main *command-line-args*)))
 
 (comment
+  (failing-jepsen-moments "9f95138a6ce1234501b5c8d900e730ca-60-11")
   (def logs (-> (failing-jepsen-moments "a2fb1a12237ed0535311feb56702daf1-58-11")
                 (get-in [:internal 0])
                 (moment-logs)))
