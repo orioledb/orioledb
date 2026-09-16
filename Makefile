@@ -219,6 +219,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/rewind_xid_test.py \
 						test/t/rewind_xid_evict_large_test.py \
 						test/t/page_fit_items_test.py \
+						test/t/relnode_collision_test.py \
 						test/t/page_level_guard_test.py \
 						test/t/proc_cache_guard_test.py \
 						test/t/sys_tree_guard_test.py \
