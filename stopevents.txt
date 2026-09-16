@@ -48,3 +48,4 @@ undo_write_after_reserve
 seq_scan_load_internal_page_fail
 after_tree_root_page_alloc
 after_tree_evict
+close_xids_before_count

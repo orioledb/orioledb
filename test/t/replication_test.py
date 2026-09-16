@@ -294,6 +294,60 @@ class ReplicationTest(BaseTest):
 
 				replica.safe_psql("SELECT * FROM o_test;")
 
+	def test_replication_xid_count_race(self):
+		with self.node as master:
+			master.start()
+
+			with self.getReplica() as replica:
+				replica.append_conf("orioledb.enable_stopevents = true")
+				replica.start()
+
+				master.safe_psql("""CREATE EXTENSION orioledb;
+					CREATE TABLE o_test (
+						id integer NOT NULL,
+						val text
+					) USING orioledb;""")
+
+				replica.catchup()
+
+				con1 = master.connect()
+				con1.execute("""INSERT INTO o_test (
+								SELECT id, id || 'val'
+								FROM generate_series(1, 10000, 1) id);""")
+
+				self.catchup_orioledb(replica)
+				master.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				con2 = replica.connect()
+				con2.execute(
+				    "SELECT pg_stopevent_set('close_xids_before_count', 'true');"
+				)
+
+				t1 = ThreadQueryExecutor(con2, "CHECKPOINT;")
+				t1.start()
+				wait_checkpointer_stopevent(replica)
+
+				master.safe_psql(
+				    "INSERT INTO o_test VALUES(0, 'trigger_wal');")
+				time.sleep(2)
+
+				con3 = replica.connect()
+				con3.execute(
+				    "SELECT pg_stopevent_reset('close_xids_before_count');")
+				t1.join()
+
+				con2.close()
+				con3.close()
+
+				replica.stop()
+				replica.start()
+
+				self.catchup_orioledb(replica)
+				con1.rollback()
+				self.catchup_orioledb(replica)
+				replica.safe_psql("SELECT * FROM o_test;")
+
 	def test_replication_non_transactional_truncate(self):
 		node = self.node
 		node.start()
