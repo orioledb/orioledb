@@ -289,9 +289,15 @@ oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 	}
 
 	/*
-	 * Return current tuple with unmatched key to iterator immediately to
-	 * finish the scan.
+	 * The O_TABLES comparator orders by (datoid, relnode, chunknum) and omits
+	 * reloid, so a lookup can land on a chunk whose full relation OIDs do not
+	 * match the requested key (e.g. on a relnode collision). Reject such a
+	 * chunk instead of returning it: the iterator turns NotMatch into a NULL
+	 * result, preventing foreign metadata from being deserialized.
 	 */
+	if (!ORelOidsIsEqual(tupleKey->oids, boundKey->key.oids))
+		return OTupleFetchNotMatch;
+
 	return OTupleFetchMatch;
 }
 
