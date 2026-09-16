@@ -58,7 +58,8 @@ rc=$?
 #
 # NB invalid results (1) are model failures.
 # Those are reported per-anomaly by finally_jepsen-results,
-# so we return 0 for both case 0 and 1
+# unknown is also handled in finally_jepsen-results.
+# So we return 0 for cases 0, 1 and 2
 #
 # For 255
 #
@@ -80,6 +81,6 @@ rc=$?
 # For now, we explicitly ignore crashed jepsen processes as the only observed
 # crash is during a startup network partition.
 case "$rc" in
-0 | 1 | 255) exit 0 ;;
+0 | 1 | 2 | 255) exit 0 ;;
 *) exit "$rc" ;;
 esac
