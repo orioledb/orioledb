@@ -2007,11 +2007,13 @@ o_resolve_collation(Oid collation)
 
 	/*
 	 * pg_newlocale_from_collation() insists on a transaction to read
-	 * pg_collation in, and makes an exception only for recovery.  The
-	 * checkpointer therefore cannot be warmed up here even though its
-	 * comparisons have the same problem; it stays as it was.
+	 * pg_collation in, and makes exceptions for recovery and for a lookup
+	 * this extension answers itself (o_set_syscache_hooks(), which the caller
+	 * has set).  The checkpointer is covered by the last one: it compares
+	 * index keys while writing a tree and has no transaction to offer.
 	 */
-	if (!IsTransactionState() && !RecoveryInProgress())
+	if (!IsTransactionState() && !RecoveryInProgress() &&
+		!o_is_syscache_hooks_set())
 		return;
 
 #if PG_VERSION_NUM < 180000
