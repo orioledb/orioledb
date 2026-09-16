@@ -457,25 +457,32 @@ unlock_release(BTreeModifyInternalContext *context, bool unlock)
 		LockRelease(&context->hwLockTag, context->hwLockMode, false);
 }
 
+/*
+ * Wait for the transaction that holds the tuple we want.
+ *
+ * tupleHash identifies the tuple in the heavyweight lock tag, and the caller
+ * has to compute it before releasing the page: the tuple lives in the page,
+ * and once the page is unlocked its bytes are anyone's to move or overwrite.
+ * Hashing a key from an unlocked page reads a length that may no longer
+ * belong to it, and the hash functions of collatable types copy the value
+ * they are given -- a copy sized by one read of that length and filled by
+ * another writes past its own buffer.
+ */
 static void
-wait_for_tuple(BTreeDescr *desc, OTuple tuple, OXid oxid,
+wait_for_tuple(BTreeDescr *desc, uint32 tupleHash, OXid oxid,
 			   RowLockMode lockMode, BTreeModifyLockStatus lockStatus,
 			   LOCKTAG *hwLockTag, LOCKMODE *hwLockMode)
 {
-	uint32		hash;
-
 	/*
 	 * Acquire the lock, if necessary (but skip it when we're requesting a
 	 * lock and already have one; avoids deadlock).
 	 */
 	if (*hwLockMode == NoLock && lockStatus == BTreeModifyNoLock)
 	{
-		hash = o_btree_hash(desc, tuple, BTreeKeyLeafTuple);
-
 		SET_LOCKTAG_TUPLE(*hwLockTag,
 						  desc->oids.datoid,
 						  desc->oids.reloid,
-						  hash,
+						  tupleHash,
 						  0);
 		*hwLockMode = hwLockModes[lockMode];
 
@@ -650,6 +657,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 */
 				OBTreeWaitCallbackAction cbAction = OBTreeCallbackActionXidWait;
 				OFindPageResult result PG_USED_FOR_ASSERTS_ONLY;
+				uint32		tupleHash = 0;
 
 				Assert(COMMITSEQNO_IS_INPROGRESS(csn));
 
@@ -667,12 +675,23 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 																   context->callbackInfo->arg);
 				}
 
+				/*
+				 * The wait below locks the tuple by hash, and curTuple points
+				 * into the page -- so hash it here, while the page is still
+				 * ours.  See wait_for_tuple().
+				 */
+				if (context->hwLockMode == NoLock &&
+					context->lockStatus == BTreeModifyNoLock)
+					tupleHash = o_btree_hash(desc, curTuple,
+											 BTreeKeyLeafTuple);
+
 				unlock_page(blkno);
+
 
 				Assert(cbAction <= OBTreeCallbackActionXidExit);
 
 				if (cbAction == OBTreeCallbackActionXidWait)
-					wait_for_tuple(desc, curTuple, oxid,
+					wait_for_tuple(desc, tupleHash, oxid,
 								   context->lockMode,
 								   context->lockStatus,
 								   &context->hwLockTag,
