@@ -37,6 +37,7 @@
 #include "utils/stopevent.h"
 
 #include "access/nbtree.h"
+#include "catalog/pg_collation.h"
 #include "catalog/pg_opfamily.h"
 #include "common/hashfn.h"
 #include "executor/functions.h"
@@ -47,6 +48,7 @@
 #include "utils/fmgrtab.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/pg_locale.h"
 #include "utils/resowner.h"
 #include "utils/syscache.h"
 #include "pgstat.h"
@@ -1939,6 +1941,48 @@ oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid,
 }
 
 /*
+ * Resolve the collation before anything compares with it.
+ *
+ * A comparison function for a collatable type asks pg_locale.c for the
+ * collation, and pg_locale.c reads pg_collation on its first use in a
+ * process.  Under recovery or the checkpointer that read is answered from
+ * OrioleDB's own system trees (o_set_syscache_hooks()), which can mean
+ * reading a page -- and the comparison itself happens wherever the B-tree
+ * code needs it, including with a page locked for modification, where
+ * reserving a page is forbidden:
+ *
+ *     TRAP: failed Assert("!have_locked_pages()"), src/utils/page_pool.c
+ *
+ * A backend never gets there because the sort support function below
+ * resolves the collation while building the comparator.  Processes with no
+ * database of their own skip that branch, so they have to be told here,
+ * where no page is locked yet.  The result is cached per process by
+ * pg_locale.c, so this costs one lookup per collation per process.
+ */
+static void
+o_resolve_collation(Oid collation)
+{
+	if (!OidIsValid(collation) || collation == DEFAULT_COLLATION_OID)
+		return;
+
+	/*
+	 * pg_newlocale_from_collation() insists on a transaction to read
+	 * pg_collation in, and makes an exception only for recovery.  The
+	 * checkpointer therefore cannot be warmed up here even though its
+	 * comparisons have the same problem; it stays as it was.
+	 */
+	if (!IsTransactionState() && !RecoveryInProgress())
+		return;
+
+#if PG_VERSION_NUM < 180000
+	if (lc_collate_is_c(collation))
+		return;
+#endif
+
+	(void) pg_newlocale_from_collation(collation);
+}
+
+/*
  * Find opfamily omparator for given datatypes and collation.  Throws error
  * if not found.
  */
@@ -2034,6 +2078,8 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation,
 		oldcontext = MemoryContextSwitchTo(descrCxt);
 		fmgr_info(procOid, &comparator.finfo);
 		MemoryContextSwitchTo(oldcontext);
+
+		o_resolve_collation(collation);
 	}
 
 	return o_add_comparator_to_cache(&comparator);
@@ -2113,6 +2159,8 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation, Oid exacttype)
 		o_proc_cache_fill_finfo(&comparator.finfo, opclass->cmpOid, opclass->key.common.datoid);
 
 		MemoryContextSwitchTo(oldcontext);
+
+		o_resolve_collation(collation);
 	}
 	o_unset_syscache_hooks();
 
