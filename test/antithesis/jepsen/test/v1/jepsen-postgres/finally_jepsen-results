@@ -117,15 +117,37 @@
 (defn anomaly-assertion-id [anomaly-type]
   (str "jepsen: no " (kw-name anomaly-type) " anomalies"))
 
+(def sometimes {:assert-type "sometimes" :display-type "Sometimes"})
+
+(def type->assert-opts
+  {  ;; Anomalies which cause the analysis to yield :valid? :unknown, rather than false.
+     ;; Occurrence of these anomaly types are 'no evidence' and happen with large volumes of network faults.
+     ;; If these properties always fail or always succeed in a simulation run,
+     ;; that would mean something is badly broken with test setup
+     ;; or we don't have enough chaos in the sim or it didn't run long enough.
+     ;; Therefore, we create SOMETIMES instead of ALWAYS assertions in the catalog for these properties.
+   :empty-transaction-graph sometimes
+   :cycle-search-timeout sometimes})
+
 (def catch-all-assertion-id "jepsen: no failures")
 
 (defn emit! [message]
   (println (json/generate-string message)))
 
 (defn declaration!
-  "Prints one catalog declaration: hit=false, condition=false, details=null."
-  [id]
-  (emit! (assertion {:id id :hit false :condition false :details nil})))
+  "Prints one catalog declaration: hit=false, condition=false, details=null.
+  opts may override the assertion type (defaults to Always)."
+  ([id] (declaration! id nil))
+  ([id opts]
+   (emit! (assertion (merge opts {:id id :hit false :condition false :details nil})))))
+
+(defn op-stats
+  "Operation counts from jepsen's :stats checker; explains an inconclusive
+  analysis (e.g. :ok-count 0 => nothing for elle to build a graph from)."
+  [results]
+  (let [stats (:stats results)]
+    (when (map? stats)
+      (select-keys stats [:count :ok-count :fail-count :info-count]))))
 
 (defn evaluate-all! [anomaly-types found results]
   (doseq [anomaly-type anomaly-types]
@@ -133,24 +155,24 @@
           condition (empty? hits)
           details (when (seq hits)
                     {:anomaly (kw-name anomaly-type)
-                     :found hits})]
-      (emit! (assertion {:id (anomaly-assertion-id anomaly-type)
-                         :hit true
-                         :condition condition
-                         :details details}))))
-  (let [valid? (:valid? results)
-        ;; :unknown must not fail the catch-all
-        ;; the singleton driver exits non-zero for unknown runs.
-        condition (not (false? valid?))
-        details (when-not condition
-                  {:valid? (pr-str valid?)
-                   :invalid-checkers (invalid-checkers results)
-                   :invalid-workload-checkers (invalid-checkers
-                                               (:workload results))})]
+                     :found hits
+                     :stats (op-stats results)})]
+      (emit! (assertion (merge {:id (anomaly-assertion-id anomaly-type)
+                                :hit true
+                                :condition condition
+                                :details details}
+                               (type->assert-opts anomaly-type))))))
+
+  (let [valid? (:valid? results)] ;; true/false/:unknown
     (emit! (assertion {:id catch-all-assertion-id
                        :hit true
-                       :condition condition
-                       :details details}))))
+                       :condition (boolean valid?) ; treat :unkown as true, handled by "unknown" properties
+                       :details (when-not valid?
+                                  {:valid? (pr-str valid?)
+                                   :stats (op-stats results)
+                                   :invalid-checkers (invalid-checkers results)
+                                   :invalid-workload-checkers (invalid-checkers
+                                                               (:workload results))})}))))
 
 (defn sdk-writer
   "Writer for $ANTITHESIS_OUTPUT_DIR/sdk.jsonl (append); *out* when running outside Antithesis."
@@ -165,7 +187,7 @@
   (let [r (read-edn-file anomalies-file)]
     (when-not (:ok r)
       (log "WARNING: anomaly catalog unusable:" (pr-str r)))
-    (:ok r)))
+    (into (:ok r) (keys type->assert-opts))))
 
 (defn run-declare
   "On startup write the assertion catalog"
@@ -175,7 +197,8 @@
     (with-open [w (sdk-writer)]
       (binding [*out* w]
         (doseq [anomaly-type anomaly-types]
-          (declaration! (anomaly-assertion-id anomaly-type)))
+          (declaration! (anomaly-assertion-id anomaly-type)
+                        (type->assert-opts anomaly-type)))
         (declaration! catch-all-assertion-id)))
     (if catalog 0 1)))
 
