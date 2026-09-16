@@ -253,7 +253,9 @@ retry:
 			PAGE_ADD_N_VACATED(p, MAXALIGN(prev_tuplen));
 			PAGE_SUB_N_VACATED(p, MAXALIGN(tuplen));
 		}
-		if (prev_header.deleted != BTreeLeafTupleNonDeleted)
+		/* Bridge index deleted tuples not treated as vacated */
+		if (prev_header.deleted != BTreeLeafTupleNonDeleted &&
+			desc->type != oIndexBridge)
 			PAGE_ADD_N_VACATED(p, BTreeLeafTuphdrSize + MAXALIGN(tuplen));
 
 		if (!UndoLocationIsValid(nonLockUndoLocation))
