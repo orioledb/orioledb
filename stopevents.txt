@@ -50,3 +50,4 @@ after_tree_root_page_alloc
 after_tree_evict
 after_tree_root_page_write
 raw_iterate_chunk_crossing
+close_xids_before_count
