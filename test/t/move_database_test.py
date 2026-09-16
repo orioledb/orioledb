@@ -347,28 +347,6 @@ class TablespaceTest(BaseTest):
 		self.move_database_test(ddl_query, created_ts, moved_ts, stay_ts,
 		                        moved_relations, stay_relations)
 
-	def getReplica_TS(self,
-	                  options,
-	                  has_restoring: bool = False) -> testgres.PostgresNode:
-		if self.replica is None:
-			(test_path, t) = os.path.split(
-			    os.path.dirname(inspect.getfile(self.__class__)))
-			baseDir = os.path.join(test_path, 'tmp_check_t',
-			                       self.myName + '_tgsb')
-			if os.path.exists(baseDir):
-				shutil.rmtree(baseDir)
-			replica = self.node.backup(
-			    base_dir=baseDir, options=options).spawn_replica('replica')
-			replica.append_conf(port=replica.port)
-
-			self.replica = replica
-
-			if has_restoring:
-				self.enableRestoring(
-				    self.replica, os.path.join(self.node.base_dir, "archives"))
-
-		return self.replica
-
 	def test_replication_database_move(self):
 		master = self.node
 		master_ts1_path = os.path.dirname(self.user_ts1_path)
@@ -386,7 +364,7 @@ class TablespaceTest(BaseTest):
 		replica_ts2_path = os.path.join(replica_ts2_path, self.ts_cat_version)
 
 		master.start()
-		with self.getReplica_TS(ts_mapping).start() as replica:
+		with self.getReplica(ts_mapping).start() as replica:
 			self.catchup_orioledb(replica)
 			master.safe_psql("CREATE DATABASE testdb TABLESPACE user_ts1;")
 			dbOid = master.execute(
@@ -533,7 +511,7 @@ class TablespaceTest(BaseTest):
 		replica_ts2_path = os.path.join(replica_ts2_path, self.ts_cat_version)
 
 		master.start()
-		with self.getReplica_TS(ts_mapping).start() as replica:
+		with self.getReplica(ts_mapping).start() as replica:
 			self.catchup_orioledb(replica)
 			master.safe_psql("CREATE DATABASE testdb TABLESPACE user_ts1;")
 			dbOid = master.execute(
@@ -679,7 +657,7 @@ class TablespaceTest(BaseTest):
 		replica_ts2_path = os.path.join(replica_ts2_path, self.ts_cat_version)
 
 		master.start()
-		with self.getReplica_TS(ts_mapping).start() as replica:
+		with self.getReplica(ts_mapping).start() as replica:
 			self.catchup_orioledb(replica)
 			master.safe_psql("CREATE DATABASE testdb TABLESPACE user_ts1;")
 			dbOid = master.execute(
@@ -808,3 +786,248 @@ class TablespaceTest(BaseTest):
 			self.assertEqual(
 			    files_to_check,
 			    get_files_in_directory(replica_ts2_path, files_to_check))
+
+	def test_replication_drop_tablespace(self):
+		master = self.node
+		master_ts1_path = os.path.dirname(self.user_ts1_path)
+		master_ts2_path = os.path.dirname(self.user_ts2_path)
+		replica_ts1_path = create_and_clear_directory(self.ts_tmpdir,
+		                                              'replica_user_ts1')
+		replica_ts2_path = create_and_clear_directory(self.ts_tmpdir,
+		                                              'replica_user_ts2')
+		ts_mapping = [
+		    '-T', f"{master_ts1_path}={replica_ts1_path}", '-T',
+		    f"{master_ts2_path}={replica_ts2_path}"
+		]
+
+		master.start()
+		with self.getReplica(ts_mapping).start() as replica:
+			master.safe_psql("CREATE DATABASE testdb;")
+			master.safe_psql(
+			    "testdb", """CREATE EXTENSION orioledb;
+										  CREATE TABLE another_test_tbl(f1 int, f2 text) USING orioledb TABLESPACE user_ts1;
+										  CREATE TABLE test_cascade_parts(f1 int, f2 text) USING orioledb TABLESPACE user_ts1;
+										  INSERT INTO another_test_tbl VALUES (1,'popa');
+										  INSERT INTO test_cascade_parts VALUES (1,'popa');
+										  INSERT INTO test_cascade_parts VALUES (1,'pupa');
+										  INSERT INTO test_cascade_parts VALUES (3,'kupa');
+										  CHECKPOINT;
+										  """)
+			master.safe_psql("CREATE DATABASE testdb2;")
+			master.safe_psql(
+			    "testdb2", """CREATE EXTENSION orioledb;
+										  CREATE TABLE another_test_tbl(f1 int, f2 text) USING heap TABLESPACE user_ts1;
+										  CREATE TABLE test_cascade_parts(f1 int, f2 text) USING orioledb TABLESPACE user_ts1;
+										  INSERT INTO another_test_tbl VALUES (1,'popa');
+										  INSERT INTO test_cascade_parts VALUES (1,'popa');
+										  INSERT INTO test_cascade_parts VALUES (1,'pupa');
+										  INSERT INTO test_cascade_parts VALUES (3,'kupa');
+										  CHECKPOINT;
+										  """)
+
+			ts1_oid = master.execute(
+			    "select oid from pg_tablespace where spcname = 'user_ts1'"
+			)[0][0]
+			ts2_oid = master.execute(
+			    "select oid from pg_tablespace where spcname = 'user_ts2'"
+			)[0][0]
+			master.safe_psql("testdb",
+			                 """drop table test_cascade_parts cascade ;""")
+			with self.assertRaises(QueryException):
+				master.safe_psql("DROP TABLESPACE IF EXISTS user_ts1;")
+			master.safe_psql("testdb",
+			                 """drop table another_test_tbl cascade ;""")
+			master.safe_psql("testdb2",
+			                 """drop table another_test_tbl cascade ;""")
+			master.safe_psql("testdb2",
+			                 """drop table test_cascade_parts cascade ;""")
+			self.catchup_orioledb(replica)
+			master.safe_psql("DROP TABLESPACE IF EXISTS user_ts1;")
+			self.catchup_orioledb(replica)
+
+			master.stop()
+			replica.stop()
+			self.assertFalse(
+			    os.path.exists(
+			        os.path.join(master.data_dir, "pg_tblspc", str(ts1_oid))))
+			self.assertFalse(
+			    os.path.exists(
+			        os.path.join(replica.data_dir, "pg_tblspc", str(ts1_oid))))
+			self.assertTrue(
+			    os.path.exists(
+			        os.path.join(master.data_dir, "pg_tblspc", str(ts2_oid))))
+			self.assertTrue(
+			    os.path.exists(
+			        os.path.join(master.data_dir, "pg_tblspc", str(ts2_oid))))
+
+			master.start()
+			replica.start()
+
+			self.assertEqual(
+			    1,
+			    master.execute(
+			        "select count(*) from pg_tablespace where spcname in ('user_ts1', 'user_ts2');"
+			    )[0][0])
+			self.assertEqual(
+			    1,
+			    replica.execute(
+			        "select count(*) from pg_tablespace where spcname in ('user_ts1', 'user_ts2');"
+			    )[0][0])
+			master.stop()
+			replica.stop()
+
+	def test_replication_drop_inplace_tablespace(self):
+		master = self.node
+		master_ts1_path = os.path.dirname(self.user_ts1_path)
+		master_ts2_path = os.path.dirname(self.user_ts2_path)
+		replica_ts1_path = create_and_clear_directory(self.ts_tmpdir,
+		                                              'replica_user_ts1')
+		replica_ts2_path = create_and_clear_directory(self.ts_tmpdir,
+		                                              'replica_user_ts2')
+		ts_mapping = [
+		    '-T', f"{master_ts1_path}={replica_ts1_path}", '-T',
+		    f"{master_ts2_path}={replica_ts2_path}"
+		]
+
+		master.append_conf("postgresql.conf",
+		                   "allow_in_place_tablespaces = true")
+		master.start()
+		master.safe_psql("CREATE TABLESPACE user_ts LOCATION '';")
+		with self.getReplica(ts_mapping).start() as replica:
+			master.safe_psql("CREATE DATABASE testdb;")
+			master.safe_psql(
+			    "testdb", """CREATE EXTENSION orioledb;
+										  CREATE TABLE another_test_tbl(f1 int, f2 text) USING orioledb TABLESPACE user_ts;
+										  CREATE TABLE test_cascade_parts(f1 int, f2 text) USING orioledb TABLESPACE user_ts;
+										  INSERT INTO another_test_tbl VALUES (1,'popa');
+										  INSERT INTO test_cascade_parts VALUES (1,'popa');
+										  INSERT INTO test_cascade_parts VALUES (1,'pupa');
+										  INSERT INTO test_cascade_parts VALUES (3,'kupa');
+										  CHECKPOINT;
+										  """)
+
+			ts_oid = master.execute(
+			    "select oid from pg_tablespace where spcname = 'user_ts'"
+			)[0][0]
+			ts1_oid = master.execute(
+			    "select oid from pg_tablespace where spcname = 'user_ts1'"
+			)[0][0]
+			master.safe_psql("testdb",
+			                 """drop table test_cascade_parts cascade ;""")
+			with self.assertRaises(QueryException):
+				master.safe_psql("DROP TABLESPACE IF EXISTS user_ts;")
+			master.safe_psql("testdb",
+			                 """drop table another_test_tbl cascade ;""")
+			self.catchup_orioledb(replica)
+			master.safe_psql("DROP TABLESPACE IF EXISTS user_ts;")
+			self.catchup_orioledb(replica)
+
+			master.stop()
+			replica.stop()
+			self.assertFalse(
+			    os.path.exists(
+			        os.path.join(master.data_dir, "pg_tblspc", str(ts_oid))))
+			self.assertFalse(
+			    os.path.exists(
+			        os.path.join(replica.data_dir, "pg_tblspc", str(ts_oid))))
+			self.assertTrue(
+			    os.path.exists(
+			        os.path.join(master.data_dir, "pg_tblspc", str(ts1_oid))))
+			self.assertTrue(
+			    os.path.exists(
+			        os.path.join(master.data_dir, "pg_tblspc", str(ts1_oid))))
+
+			master.append_conf("postgresql.conf",
+			                   "allow_in_place_tablespaces = false")
+			replica.append_conf("postgresql.conf",
+			                    "allow_in_place_tablespaces = false")
+			master.start()
+			replica.start()
+
+			self.assertEqual(
+			    2,
+			    master.execute(
+			        "select count(*) from pg_tablespace where spcname in ('user_ts', 'user_ts1', 'user_ts2');"
+			    )[0][0])
+			self.assertEqual(
+			    2,
+			    replica.execute(
+			        "select count(*) from pg_tablespace where spcname in ('user_ts','user_ts1', 'user_ts2');"
+			    )[0][0])
+			master.stop()
+			replica.stop()
+
+	def test_drop_tablespace_recovery_replay_idempotent(self):
+		"""
+		Verify that replaying the DROP TABLESPACE WAL record a second time
+		(after a crash-during-recovery) does not fail when the tablespace
+		directory is already gone (ENOENT).
+
+		debug_recovery_crash_lsn PANICs at the start of orioledb_redo for
+		the first container whose ReadRecPtr >= the given LSN.  We capture
+		the LSN before a trivial INSERT that follows DROP TABLESPACE, so
+		the crash fires on the INSERT container -- meaning the DROP
+		TABLESPACE container was already applied (symlink removed).  The
+		restart then replays the DROP TABLESPACE container again from the
+		checkpoint, and o_tablespace_resolve_prefix must return false on
+		ENOENT rather than ERROR, allowing recovery to complete.
+		"""
+		node = self.node
+		node.append_conf('postgresql.conf', "fsync = on\n")
+		os.sync()
+
+		node.start()
+		node.safe_psql("CREATE EXTENSION orioledb;")
+		node.safe_psql(
+		    "postgres", """CREATE TABLE drop_ts_tbl(f1 int, f2 text)
+		                   USING orioledb TABLESPACE user_ts1;
+		                   INSERT INTO drop_ts_tbl VALUES (1,'popa');
+		                   CHECKPOINT;""")
+		ts1_oid = node.execute(
+		    "select oid from pg_tablespace where spcname = 'user_ts1'")[0][0]
+
+		node.safe_psql("postgres", "DROP TABLE drop_ts_tbl CASCADE;")
+		node.safe_psql("DROP TABLESPACE user_ts1;")
+
+		# Capture LSN before generating a post-drop orioledb WAL container.
+		# The crash LSN must be <= the container's ReadRecPtr for the PANIC
+		# to fire on it (not on the DROP TABLESPACE container).
+		crash_lsn = node.execute("SELECT pg_current_wal_lsn();")[0][0]
+		node.safe_psql("CREATE TABLE after_drop(f1 int) USING orioledb;"
+		               "INSERT INTO after_drop VALUES (1);")
+
+		# Crash before any checkpoint advances past these WAL records.
+		node.stop(['-m', 'immediate'])
+
+		# First start: recovery applies the DROP TABLESPACE record (removes
+		# the symlink), then PANICs at the crash LSN on the INSERT container.
+		node.append_conf('postgresql.conf',
+		                 f"orioledb.debug_recovery_crash_lsn = '{crash_lsn}'")
+		os.sync()
+		with self.assertRaises(Exception):
+			node.start()
+
+		# Remove the crash GUC so the second start can proceed.
+		conf_path = os.path.join(node.data_dir, 'postgresql.conf')
+		with open(conf_path, 'r') as f:
+			lines = [
+			    l for l in f.readlines() if 'debug_recovery_crash_lsn' not in l
+			]
+		with open(conf_path, 'w') as f:
+			f.writelines(lines)
+
+		# Second start: replays the DROP TABLESPACE WAL record again.
+		# The symlink is already gone, so o_tablespace_resolve_prefix hits
+		# ENOENT and must return false (not ERROR) for recovery to succeed.
+		node.start()
+		self.assertEqual(
+		    0,
+		    node.execute("select count(*) from pg_tablespace "
+		                 "where spcname = 'user_ts1';")[0][0])
+		self.assertFalse(
+		    os.path.exists(
+		        os.path.join(node.data_dir, "pg_tblspc", str(ts1_oid))))
+		self.assertEqual(
+		    1,
+		    node.execute("SELECT count(*) FROM after_drop;")[0][0])
+		node.stop()
