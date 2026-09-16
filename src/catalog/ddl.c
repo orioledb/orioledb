@@ -109,6 +109,7 @@
 #include "utils/rls.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "commands/tablespace.h"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -3199,55 +3200,203 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	o_table_free(o_table);
 }
 
-static void
-cleanup_tablespace_dir(char *tablespace_path)
+
+/*
+ * Based on destroy_tablespace_directories() in
+ * src/backend/commands/tablespace.c.  The key difference is that it also
+ * removes the orioledb_data subdirectory.  The redo flag selects the
+ * context: on the primary (redo = false) only the orioledb_data directory
+ * is removed, because PG core removes the version directory and the
+ * symlink itself as part of DROP TABLESPACE; on the standby (redo = true)
+ * PG's XLOG_TBLSPC_DROP redo runs first but cannot remove the version
+ * directory while orioledb_data still makes it non-empty, so this
+ * function additionally removes the version directory and the symlink.
+ */
+bool
+destroy_tablespace_directories(Oid tablespaceoid, bool redo)
 {
-	DIR		   *dir;
-	struct dirent *file;
+	char	   *linkloc;
+	char	   *linkloc_with_version_dir;
+	DIR		   *dirdesc;
+	struct dirent *de;
+	char	   *subfile;
+	struct stat st;
 
-	dir = opendir(tablespace_path);
-	if (dir == NULL)
-		return;
+#define PG_TBLSPC "pg_tblspc"
+	linkloc_with_version_dir = psprintf("%s/%u/%s/%s", PG_TBLSPC, tablespaceoid,
+										TABLESPACE_VERSION_DIRECTORY, ORIOLEDB_DATA_DIR);
 
-	while (errno = 0, (file = readdir(dir)) != NULL)
+	/*
+	 * Check if the tablespace still contains any files.  We try to rmdir each
+	 * per-database directory we find in it.  rmdir failure implies there are
+	 * still files in that subdirectory, so give up.  (We do not have to worry
+	 * about undoing any already completed rmdirs, since the next attempt to
+	 * use the tablespace from that database will simply recreate the
+	 * subdirectory via TablespaceCreateDbspace.)
+	 *
+	 * Since we hold TablespaceCreateLock, no one else should be creating any
+	 * fresh subdirectories in parallel. It is possible that new files are
+	 * being created within subdirectories, though, so the rmdir call could
+	 * fail.  Worst consequence is a less friendly error message.
+	 *
+	 * If redo is true then ENOENT is a likely outcome here, and we allow it
+	 * to pass without comment.  In normal operation we still allow it, but
+	 * with a warning.  This is because even though ProcessUtility disallows
+	 * DROP TABLESPACE in a transaction block, it's possible that a previous
+	 * DROP failed and rolled back after removing the tablespace directories
+	 * and/or symlink.  We want to allow a new DROP attempt to succeed at
+	 * removing the catalog entries (and symlink if still present), so we
+	 * should not give a hard error here.
+	 */
+	dirdesc = AllocateDir(linkloc_with_version_dir);
+	if (dirdesc == NULL)
 	{
-		Oid			dbOid;
-		char	   *dbDirName;
+		if (errno == ENOENT)
+		{
+			if (!redo)
+			{
+				/* It seem there are no orioledb relations in this tablespace */
+				pfree(linkloc_with_version_dir);
+				return false;
+			}
+			/* The symlink might still exist, so go try to remove it */
+			goto remove_symlink;
+		}
+		else if (redo)
+		{
+			/* in redo, just log other types of error */
+			ereport(LOG,
+					(errcode_for_file_access(),
+					 errmsg("could not open directory \"%s\": %m",
+							linkloc_with_version_dir)));
+			pfree(linkloc_with_version_dir);
+			return false;
+		}
+		/* else let ReadDir report the error */
+	}
 
-		if (sscanf(file->d_name, "%u", &dbOid) != 1)
+	while ((de = ReadDir(dirdesc, linkloc_with_version_dir)) != NULL)
+	{
+		if (strcmp(de->d_name, ".") == 0 ||
+			strcmp(de->d_name, "..") == 0)
 			continue;
 
-		dbDirName = psprintf("%s/%u", tablespace_path, dbOid);
+		subfile = psprintf("%s/%s", linkloc_with_version_dir, de->d_name);
 
-		/* We assume that postgres throws it's own errors on not empty dirs */
-		if (rmdir(dbDirName) < 0 && errno != ENOTEMPTY)
+		/* This check is just to deliver a friendlier error message */
+		if (!redo && !directory_is_empty(subfile))
 		{
-			ereport(FATAL,
-					(errcode_for_file_access(),
-					 errmsg("could not remove orioledb db dir \"%s\": %m",
-							dbDirName)));
+			FreeDir(dirdesc);
+			pfree(subfile);
+			pfree(linkloc_with_version_dir);
+			return false;
 		}
-		pfree(dbDirName);
-	}
-	fsync_fname_ext(tablespace_path, true, false, FATAL);
 
-	/* We assume that postgres throws it's own errors on not empty dirs */
-	if (rmdir(tablespace_path) < 0 && errno != ENOTEMPTY)
+		/* remove empty directory */
+		if (rmdir(subfile) < 0)
+			ereport(redo ? LOG : ERROR,
+					(errcode_for_file_access(),
+					 errmsg("could not remove directory \"%s\": %m",
+							subfile)));
+
+		pfree(subfile);
+	}
+
+	FreeDir(dirdesc);
+
+	/* remove orioledb directory */
+	if (rmdir(linkloc_with_version_dir) < 0)
 	{
-		ereport(FATAL,
+		ereport(redo ? LOG : ERROR,
 				(errcode_for_file_access(),
-				 errmsg("could not remove tablespace orioledb dir \"%s\": %m",
-						tablespace_path)));
+				 errmsg("could not remove directory \"%s\": %m",
+						linkloc_with_version_dir)));
+		pfree(linkloc_with_version_dir);
+		return false;
 	}
 
-	/* We assume that postgres throws it's own errors on not empty dirs */
-	if (errno != 0 && errno != ENOTEMPTY)
+	if (!redo)
 	{
-		ereport(ERROR, (errcode_for_file_access(),
-						errmsg("unable to clean up orioledb tablespace: %m")));
+		pfree(linkloc_with_version_dir);
+		return true;
 	}
-	closedir(dir);
+
+	/* remove version directory */
+	linkloc = pstrdup(linkloc_with_version_dir);
+	get_parent_directory(linkloc);
+	if (rmdir(linkloc) < 0)
+	{
+		ereport(redo ? LOG : ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not remove directory \"%s\": %m",
+						linkloc)));
+		pfree(linkloc);
+		pfree(linkloc_with_version_dir);
+		return false;
+	}
+	pfree(linkloc);
+
+	/*
+	 * Try to remove the symlink.  We must however deal with the possibility
+	 * that it's a directory instead of a symlink --- this could happen during
+	 * WAL replay (see TablespaceCreateDbspace).
+	 *
+	 * Note: in the redo case, we'll return true if this final step fails;
+	 * there's no point in retrying it.  Also, ENOENT should provoke no more
+	 * than a warning.
+	 */
+remove_symlink:
+	linkloc = pstrdup(linkloc_with_version_dir);
+	get_parent_directory(linkloc);
+	get_parent_directory(linkloc);
+	if (lstat(linkloc, &st) < 0)
+	{
+		int			saved_errno = errno;
+
+		ereport(redo ? LOG : (saved_errno == ENOENT ? WARNING : ERROR),
+				(errcode_for_file_access(),
+				 errmsg("could not stat file \"%s\": %m",
+						linkloc)));
+	}
+	else if (S_ISDIR(st.st_mode))
+	{
+		if (rmdir(linkloc) < 0)
+		{
+			int			saved_errno = errno;
+
+			ereport(redo ? LOG : (saved_errno == ENOENT ? WARNING : ERROR),
+					(errcode_for_file_access(),
+					 errmsg("could not remove directory \"%s\": %m",
+							linkloc)));
+		}
+	}
+	else if (S_ISLNK(st.st_mode))
+	{
+		if (unlink(linkloc) < 0)
+		{
+			int			saved_errno = errno;
+
+			ereport(redo ? LOG : (saved_errno == ENOENT ? WARNING : ERROR),
+					(errcode_for_file_access(),
+					 errmsg("could not remove symbolic link \"%s\": %m",
+							linkloc)));
+		}
+	}
+	else
+	{
+		/* Refuse to remove anything that's not a directory or symlink */
+		ereport(redo ? LOG : ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("\"%s\" is not a directory or symbolic link",
+						linkloc)));
+	}
+
+	pfree(linkloc_with_version_dir);
+	pfree(linkloc);
+#undef PG_TBLSPC
+	return true;
 }
+
 
 /*
  * get_collation		- fetch qualified name of a collation
@@ -4820,64 +4969,18 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 	}
 	else if (access == OAT_DROP && classId == TableSpaceRelationId)
 	{
-		DIR		   *dir;
-		char		path[MAXPGPATH];
-		char		targetpath[MAXPGPATH];
-		struct dirent *file;
-
-#define PG_TBLSPC "pg_tblspc"
-
-		dir = opendir(PG_TBLSPC);
-		while (errno = 0, (file = readdir(dir)) != NULL)
+		if (destroy_tablespace_directories(objectId, false))
 		{
-			struct stat st;
-			int			rllen;
-
-			/* Skip special stuff */
-			if (strcmp(file->d_name, ".") == 0 || strcmp(file->d_name, "..") == 0)
-				continue;
-
-			path[0] = '\0';
-			pg_snprintf(path, MAXPGPATH,
-						PG_TBLSPC "/%s/" TABLESPACE_VERSION_DIRECTORY,
-						file->d_name);
-			if (lstat(path, &st) < 0)
-			{
-				ereport(ERROR,
-						(errcode_for_file_access(),
-						 errmsg("could not stat file \"%s\": %m",
-								file->d_name)));
-			}
-
-			if (!S_ISLNK(st.st_mode))
-			{
-				strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
-				cleanup_tablespace_dir(path);
-			}
-			else
-			{
-				rllen = readlink(path, targetpath, sizeof(targetpath));
-				if (rllen < 0)
-					ereport(ERROR,
-							(errcode_for_file_access(),
-							 errmsg("could not read symbolic link \"%s\": %m",
-									path)));
-				if (rllen >= sizeof(targetpath))
-					ereport(ERROR,
-							(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-							 errmsg("symbolic link \"%s\" target is too long",
-									path)));
-				targetpath[rllen] = '\0';
-
-				path[0] = '\0';
-				pg_snprintf(path, MAXPGPATH,
-							"%s/" ORIOLEDB_DATA_DIR,
-							targetpath);
-				cleanup_tablespace_dir(path);
-			}
+			/*
+			 * Assign an orioledb oxid to this transaction if it doesn't have
+			 * one yet.  DROP TABLESPACE does not touch any orioledb table, so
+			 * without this the local WAL record below would have no valid xid
+			 * to commit under and would never be flushed to the replica.
+			 */
+			(void) get_current_oxid();
+			add_database_copy_wal_record(InvalidOid, objectId, InvalidOid);
 		}
-		closedir(dir);
-#undef PG_TBLSPC
+
 	}
 
 #if PG_VERSION_NUM >= 180000
