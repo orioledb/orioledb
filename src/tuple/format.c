@@ -567,6 +567,30 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 			 ItemPointer iptr, BridgeData *bridge_data, uint32 version,
 			 Datum *values, bool *isnull, char *to_toast)
 {
+	o_tuple_fill_ex(tupleDesc, spec, tuple, tuple_size,
+					iptr, bridge_data, version,
+					values, isnull, to_toast, NULL, NULL);
+}
+
+/*
+ * Like o_tuple_fill, but with two optional parameters:
+ *
+ * skip_copy[i] (indexed by user column, i.e. i - ctid_off): when true, the
+ * attribute's alignment and size are accounted for but its data is not copied.
+ * The Datum only needs to have a valid VARSIZE header (first 4 bytes).
+ *
+ * attr_offsets[i] (same indexing): filled with the byte offset from
+ * tuple->data where each non-null user attribute's data starts.
+ *
+ * Memory is expected to be already zeroed!
+ */
+void
+o_tuple_fill_ex(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
+				OTuple *tuple, Size tuple_size,
+				ItemPointer iptr, BridgeData *bridge_data, uint32 version,
+				Datum *values, bool *isnull, char *to_toast,
+				bool *skip_copy, Size *attr_offsets)
+{
 	OTupleHeader tup = (OTupleHeader) tuple->data;
 	bits8	   *bitP;
 	bits8		bitmask;
@@ -656,18 +680,21 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 		Datum		value;
 		bool		null;
 		bool		cur_to_toast;
+		bool		skip;
 
 		if (i == 0 && iptr)
 		{
 			cur_to_toast = false;
 			value = PointerGetDatum(iptr);
 			null = false;
+			skip = false;
 		}
 		else if (has_bridge_ctid && i == bridge_data->attnum - 1)
 		{
 			cur_to_toast = false;
 			value = PointerGetDatum(bridge_data->bridge_iptr);
 			null = false;
+			skip = false;
 		}
 		else
 		{
@@ -675,6 +702,7 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 							to_toast[i - ctid_off] == ORIOLEDB_TO_TOAST_ON);
 			value = values[i - ctid_off];
 			null = isnull[i - ctid_off];
+			skip = (skip_copy != NULL && skip_copy[i - ctid_off]);
 		}
 
 		if (cur_to_toast)
@@ -743,7 +771,10 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 		{
 			/* pass-by-value */
 			data = (char *) att_align_nominal(data, att->attalign);
-			store_att_byval(data, value, att->attlen);
+			if (attr_offsets && i >= ctid_off)
+				attr_offsets[i - ctid_off] = data - tuple->data;
+			if (!skip)
+				store_att_byval(data, value, att->attlen);
 			data_length = att->attlen;
 		}
 		else if (att->attlen == -1)
@@ -751,7 +782,7 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 			/* varlena */
 			Pointer		val = DatumGetPointer(value);
 
-			if (VARATT_IS_EXTERNAL(val))
+			if (!skip && VARATT_IS_EXTERNAL(val))
 			{
 				if (VARATT_IS_EXTERNAL_EXPANDED(val))
 				{
@@ -763,53 +794,74 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 
 					data = (char *) att_align_nominal(data,
 													  att->attalign);
+					if (attr_offsets && i >= ctid_off)
+						attr_offsets[i - ctid_off] = data - tuple->data;
 					data_length = EOH_get_flat_size(eoh);
 					EOH_flatten_into(eoh, data, data_length);
 				}
 				else
 				{
 					/* no alignment, since it's short by definition */
+					if (attr_offsets && i >= ctid_off)
+						attr_offsets[i - ctid_off] = data - tuple->data;
 					data_length = VARSIZE_EXTERNAL(val);
 					memcpy(data, val, data_length);
 				}
 			}
-			else if (VARATT_IS_SHORT(val))
+			else if (!skip && VARATT_IS_SHORT(val))
 			{
 				/* no alignment for short varlenas */
+				if (attr_offsets && i >= ctid_off)
+					attr_offsets[i - ctid_off] = data - tuple->data;
 				data_length = VARSIZE_SHORT(val);
 				memcpy(data, val, data_length);
 			}
-			else if (VARLENA_ATT_IS_PACKABLE(att) &&
+			else if (!skip && VARLENA_ATT_IS_PACKABLE(att) &&
 					 VARATT_CAN_MAKE_SHORT(val))
 			{
 				/* convert to short varlena -- no alignment */
+				if (attr_offsets && i >= ctid_off)
+					attr_offsets[i - ctid_off] = data - tuple->data;
 				data_length = VARATT_CONVERTED_SHORT_SIZE(val);
 				SET_VARSIZE_SHORT(data, data_length);
 				memcpy(data + 1, VARDATA(val), data_length - 1);
 			}
 			else
 			{
-				/* full 4-byte header varlena */
+				/*
+				 * Full 4-byte header varlena.  When skip is set the Datum is
+				 * a size-only cookie whose first 4 bytes carry a valid
+				 * VARSIZE; the data beyond that is not readable.
+				 */
 				data = (char *) att_align_nominal(data,
 												  att->attalign);
+				if (attr_offsets && i >= ctid_off)
+					attr_offsets[i - ctid_off] = data - tuple->data;
 				data_length = VARSIZE(val);
-				memcpy(data, val, data_length);
+				if (!skip)
+					memcpy(data, val, data_length);
 			}
 		}
 		else if (att->attlen == -2)
 		{
 			/* cstring ... never needs alignment */
 			Assert(att->attalign == 'c');
+			if (attr_offsets && i >= ctid_off)
+				attr_offsets[i - ctid_off] = data - tuple->data;
 			data_length = strlen(DatumGetCString(value)) + 1;
-			memcpy(data, DatumGetPointer(value), data_length);
+			if (!skip)
+				memcpy(data, DatumGetPointer(value), data_length);
 		}
 		else
 		{
 			/* fixed-length pass-by-reference */
 			data = (char *) att_align_nominal(data, att->attalign);
 			Assert(att->attlen > 0);
+			if (attr_offsets && i >= ctid_off)
+				attr_offsets[i - ctid_off] = data - tuple->data;
 			data_length = att->attlen;
-			memcpy(data, DatumGetPointer(value), data_length);
+			if (!skip)
+				memcpy(data, DatumGetPointer(value), data_length);
 		}
 
 		data += data_length;
