@@ -634,6 +634,12 @@ o_btree_page_calculate_statistics(BTreeDescr *desc, Pointer p)
 static pg_noinline void
 report_invalid_fixed_length(const char *what, int len, Size capacity)
 {
+	/*
+	 * Throws.  The callers below still write an explicit return afterwards:
+	 * cppcheck does not know that, and without it reads the copy that follows
+	 * as reachable with the length it has just rejected, which it reports as
+	 * an out-of-bounds index.
+	 */
 	ereport(ERROR,
 			(errcode(ERRCODE_DATA_CORRUPTED),
 			 errmsg("invalid OrioleDB %s length %d", what, len),
@@ -654,7 +660,10 @@ copy_fixed_tuple(BTreeDescr *desc, OFixedTuple *dst, OTuple src)
 
 	tuplen = o_btree_len(desc, src, OTupleLength);
 	if (unlikely(tuplen < 0 || (Size) tuplen > sizeof(dst->fixedData)))
+	{
 		report_invalid_fixed_length("tuple", tuplen, sizeof(dst->fixedData));
+		return;
+	}
 	dst->tuple.formatFlags = src.formatFlags;
 	dst->tuple.data = dst->fixedData;
 	memcpy(dst->fixedData, src.data, tuplen);
@@ -672,7 +681,10 @@ copy_fixed_key_with_len(OFixedKey *dst, OTuple src, int tuplen)
 	}
 
 	if (unlikely(tuplen < 0 || (Size) tuplen > sizeof(dst->fixedData)))
+	{
 		report_invalid_fixed_length("key", tuplen, sizeof(dst->fixedData));
+		return;
+	}
 
 	dst->tuple.formatFlags = src.formatFlags;
 	dst->tuple.data = dst->fixedData;
