@@ -1971,6 +1971,35 @@ prewrite_image_check(Page p)
 #endif
 
 /*
+ * A cached descriptor named a meta page that the page pool has since handed to
+ * another tree.  Make the descriptor forget the incarnation.
+ *
+ * Forgetting matters as much as not using the page: a descriptor that keeps
+ * naming the wrong pages would skip the tree on every later pass, and its
+ * dirty pages would never be written.  Clearing the block numbers is enough --
+ * the next o_btree_try_use_shmem() then takes its slow path, reads the current
+ * root info out of shared memory and re-runs the tree init, which is what
+ * re-points the seq bufs at the meta page the tree has now.
+ *
+ * This is the repair that a cached descriptor otherwise never gets.  A backend
+ * gets it from the invalidation message an eviction sends
+ * (o_invalidate_oids() -> o_invalidate_descrs() ->
+ * index_descr_delete_from_hash() -> checkpointable_tree_free()) and from the
+ * change count check in find_page() on its next descent.  The orioledb
+ * bgwriter gets neither: it runs no statements, so it accepts no invalidation
+ * messages, and it reaches pages from the clock sweep rather than through a
+ * descent.
+ */
+static void
+forget_stale_tree_incarnation(BTreeDescr *desc)
+{
+	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
+	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
+	desc->rootInfo.rootPageChangeCount = 0;
+	desc->rootInfo.metaPageChangeCount = 0;
+}
+
+/*
  * Returns downlink to the page or InvalidDiskDownlink if fails.
  */
 uint64
@@ -2719,6 +2748,27 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 		   (O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u64(&(O_PAGE_HEADER(rootPageBlkno)->state))) || O_PAGE_IS_LOCAL(root_blkno)));
 
 	/*
+	 * walk_page() asked the same question before it got here, but it released
+	 * the page lock in between -- walk_page_evict_root() has to, to take the
+	 * evict locks in the right order -- so ask again before this function
+	 * starts changing anything.  Everything below finalizes the seq bufs in
+	 * the meta page, and doing that to whatever tree holds that page now is
+	 * the damage issue #1113 reported.  Skipping is what the caller does with
+	 * a false return.
+	 */
+	if (unlikely(!BTREE_META_PAGE_IS_OURS(desc)))
+	{
+		unlock_page(root_blkno);
+		ereport(LOG,
+				(errmsg("OrioleDB skipped evicting tree (%u, %u, %u): its meta page %u belongs to another tree now",
+						desc->oids.datoid, desc->oids.reloid,
+						desc->oids.relnode,
+						desc->rootInfo.metaPageBlkno)));
+		forget_stale_tree_incarnation(desc);
+		return false;
+	}
+
+	/*
 	 * Try to acquire oSharedRootInfoInsertLocks early to avoid deadlocks. If
 	 * we can't get it, bail out — the page will be evicted later.
 	 */
@@ -3301,6 +3351,34 @@ retry:
 	}
 	if (checkResult == WalkPageCheckFailed)
 		return OWalkPageSkipped;
+
+	/*
+	 * The write below reaches the seq bufs through desc->nextChkp[] and
+	 * desc->tmpBuf[], which live in the tree's meta page -- so before using
+	 * them, ask whether that page is still this tree's.  This walk arrived
+	 * from the clock sweep with a descriptor cached in this process, and
+	 * nothing kept the tree loaded in the meantime: the meta page may have
+	 * gone back to the pool and been handed to another tree, whose data then
+	 * reads as a seq buf, including a "spinlock" word that is really a block
+	 * number and never becomes free.  That is issue #1113.
+	 *
+	 * The answer holds for the rest of the walk because the page is locked: a
+	 * concurrent eviction of the tree would have to take the same page --
+	 * this one if it is the root, or a parent downlink that stays in memory
+	 * while this page is -- and the in-flight IO the write leaves behind
+	 * keeps it out just as well.
+	 */
+	if (unlikely(!BTREE_META_PAGE_IS_OURS(desc)))
+	{
+		unlock_page(blkno);
+		ereport(LOG,
+				(errmsg("OrioleDB skipped writing page %u of tree (%u, %u, %u): its meta page %u belongs to another tree now",
+						blkno, desc->oids.datoid, desc->oids.reloid,
+						desc->oids.relnode,
+						desc->rootInfo.metaPageBlkno)));
+		forget_stale_tree_incarnation(desc);
+		return OWalkPageSkipped;
+	}
 
 	/* Try to merge sparse page instead of eviction */
 	if (!merge_tried && is_page_too_sparse(desc, p))
