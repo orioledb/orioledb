@@ -874,7 +874,7 @@ class TablespaceTest(BaseTest):
 			        os.path.join(master.data_dir, "pg_tblspc", str(ts2_oid))))
 			self.assertTrue(
 			    os.path.exists(
-			        os.path.join(master.data_dir, "pg_tblspc", str(ts2_oid))))
+			        os.path.join(replica.data_dir, "pg_tblspc", str(ts2_oid))))
 
 			master.start()
 			replica.start()
@@ -951,7 +951,7 @@ class TablespaceTest(BaseTest):
 			        os.path.join(master.data_dir, "pg_tblspc", str(ts1_oid))))
 			self.assertTrue(
 			    os.path.exists(
-			        os.path.join(master.data_dir, "pg_tblspc", str(ts1_oid))))
+			        os.path.join(replica.data_dir, "pg_tblspc", str(ts1_oid))))
 
 			master.append_conf("postgresql.conf",
 			                   "allow_in_place_tablespaces = false")
