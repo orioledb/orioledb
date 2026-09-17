@@ -275,7 +275,9 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 	bool	   *skip_copy;
 	Size	   *attr_offsets;
 	int		   *toasted_atts;
+	int		   *eager_atts;
 	int			ntoasted = 0;
+	int			neager = 0;
 	OTuple		result;
 	Size		len;
 	int			ctid_off = idx->primaryIsCtid ? 1 : 0;
@@ -322,6 +324,7 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 	skip_copy = (bool *) palloc0(natts * sizeof(bool));
 	attr_offsets = (Size *) palloc(natts * sizeof(Size));
 	toasted_atts = (int *) palloc(descr->ntoastable * sizeof(int));
+	eager_atts = (int *) palloc(descr->ntoastable * sizeof(int));
 	memcpy(values, slot->tts_values, natts * sizeof(Datum));
 
 	for (i = 0; i < descr->ntoastable; i++)
@@ -338,6 +341,25 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 		toasted_size = o_get_src_size(slot->tts_values[attn]);
 		cookie = (struct varlena *) palloc(VARHDRSZ);
 		SET_VARSIZE(cookie, toasted_size);
+
+		/*
+		 * A cookie carries nothing but a length, so o_tuple_fill_ex() has to
+		 * take the four-byte-header branch for it -- while o_new_tuple_size()
+		 * gets no skip_copy to consult and reserves a short varlena for
+		 * anything small enough to pack.  Sizing and filling would then
+		 * disagree, and the fill would run past the allocation.  Holding a
+		 * value that small costs nothing, so detoast it here instead and let
+		 * both sides agree on the real thing.
+		 */
+		if (VARATT_CAN_MAKE_SHORT(cookie))
+		{
+			pfree(cookie);
+			values[attn] = PointerGetDatum(o_detoast((struct varlena *)
+													 DatumGetPointer(values[attn])));
+			eager_atts[neager++] = attn;
+			continue;
+		}
+
 		values[attn] = PointerGetDatum(cookie);
 		skip_copy[attn] = true;
 		toasted_atts[ntoasted++] = attn;
@@ -363,9 +385,11 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 					skip_copy, attr_offsets);
 	*allocated = true;
 
-	/* Free cookies */
+	/* Free cookies, and the values that were detoasted up front */
 	for (i = 0; i < ntoasted; i++)
 		pfree(DatumGetPointer(values[toasted_atts[i]]));
+	for (i = 0; i < neager; i++)
+		pfree(DatumGetPointer(values[eager_atts[i]]));
 
 	/* Detoast one at a time into pre-computed positions */
 	for (i = 0; i < ntoasted; i++)
@@ -383,6 +407,7 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 	pfree(skip_copy);
 	pfree(attr_offsets);
 	pfree(toasted_atts);
+	pfree(eager_atts);
 
 	return result;
 }
