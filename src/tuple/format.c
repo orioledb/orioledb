@@ -832,7 +832,15 @@ o_tuple_fill_ex(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 				 * Full 4-byte header varlena.  When skip is set the Datum is
 				 * a size-only cookie whose first 4 bytes carry a valid
 				 * VARSIZE; the data beyond that is not readable.
+				 *
+				 * Which is why a caller must not skip a value that
+				 * o_new_tuple_size() would have packed into a short varlena:
+				 * it gets no skip_copy to consult, so it would reserve the
+				 * short form while this branch writes the long one, and the
+				 * fill would run past the allocation.
 				 */
+				Assert(!skip || !(VARLENA_ATT_IS_PACKABLE(att) &&
+								  VARATT_CAN_MAKE_SHORT(val)));
 				data = (char *) att_align_nominal(data,
 												  att->attalign);
 				if (attr_offsets && i >= ctid_off)

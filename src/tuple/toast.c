@@ -274,8 +274,10 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 	Datum	   *values;
 	bool	   *skip_copy;
 	Size	   *attr_offsets;
-	int		   *toasted_atts;
-	int			ntoasted = 0;
+	int		   *toasted_deferred_atts;
+	int		   *toasted_upfront_atts;
+	int			ndeferred = 0;
+	int			nupfront = 0;
 	OTuple		result;
 	Size		len;
 	int			ctid_off = idx->primaryIsCtid ? 1 : 0;
@@ -311,7 +313,7 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 	 * avoid holding all detoasted values and the result tuple simultaneously.
 	 *
 	 * Phase 1: replace each external toast pointer in values[] with a
-	 * size-only cookie (4 bytes, valid VARSIZE header).  o_new_tuple_size and
+	 * size-only stub (4 bytes, valid VARSIZE header).  o_new_tuple_size and
 	 * o_tuple_fill_ex read only VARSIZE from these, never the payload.
 	 *
 	 * Phase 2: detoast each attribute into the pre-computed offset in the
@@ -321,14 +323,15 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 	values = (Datum *) palloc(natts * sizeof(Datum));
 	skip_copy = (bool *) palloc0(natts * sizeof(bool));
 	attr_offsets = (Size *) palloc(natts * sizeof(Size));
-	toasted_atts = (int *) palloc(descr->ntoastable * sizeof(int));
+	toasted_deferred_atts = (int *) palloc(descr->ntoastable * sizeof(int));
+	toasted_upfront_atts = (int *) palloc(descr->ntoastable * sizeof(int));
 	memcpy(values, slot->tts_values, natts * sizeof(Datum));
 
 	for (i = 0; i < descr->ntoastable; i++)
 	{
 		int			attn = descr->toastable[i] - ctid_off;
 		int32		toasted_size;
-		struct varlena *cookie;
+		struct varlena *size_stub;
 
 		if (slot->tts_isnull[attn])
 			continue;
@@ -336,11 +339,31 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 			continue;
 
 		toasted_size = o_get_src_size(slot->tts_values[attn]);
-		cookie = (struct varlena *) palloc(VARHDRSZ);
-		SET_VARSIZE(cookie, toasted_size);
-		values[attn] = PointerGetDatum(cookie);
-		skip_copy[attn] = true;
-		toasted_atts[ntoasted++] = attn;
+		size_stub = (struct varlena *) palloc(VARHDRSZ);
+		SET_VARSIZE(size_stub, toasted_size);
+
+		/*
+		 * A stub carries nothing but a length, so o_tuple_fill_ex() has to
+		 * take the four-byte-header branch for it -- while o_new_tuple_size()
+		 * gets no skip_copy to consult and reserves a short varlena for
+		 * anything small enough to pack.  Sizing and filling would then
+		 * disagree, and the fill would run past the allocation.  Holding a
+		 * value that small costs nothing, so detoast it here instead and let
+		 * both sides agree on the real thing.
+		 */
+		if (VARATT_CAN_MAKE_SHORT(size_stub))
+		{
+			pfree(size_stub);
+			values[attn] = PointerGetDatum(o_detoast((struct varlena *)
+													 DatumGetPointer(values[attn])));
+			toasted_upfront_atts[nupfront++] = attn;
+		}
+		else
+		{
+			values[attn] = PointerGetDatum(size_stub);
+			skip_copy[attn] = true;
+			toasted_deferred_atts[ndeferred++] = attn;
+		}
 	}
 
 	iptr = idx->primaryIsCtid ? &slot->tts_tid : NULL;
@@ -363,14 +386,16 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 					skip_copy, attr_offsets);
 	*allocated = true;
 
-	/* Free cookies */
-	for (i = 0; i < ntoasted; i++)
-		pfree(DatumGetPointer(values[toasted_atts[i]]));
+	/* Free the stubs, and the values that were detoasted up front */
+	for (i = 0; i < ndeferred; i++)
+		pfree(DatumGetPointer(values[toasted_deferred_atts[i]]));
+	for (i = 0; i < nupfront; i++)
+		pfree(DatumGetPointer(values[toasted_upfront_atts[i]]));
 
 	/* Detoast one at a time into pre-computed positions */
-	for (i = 0; i < ntoasted; i++)
+	for (i = 0; i < ndeferred; i++)
 	{
-		int			attn = toasted_atts[i];
+		int			attn = toasted_deferred_atts[i];
 		struct varlena *detoasted;
 
 		detoasted = o_detoast((struct varlena *)
@@ -382,7 +407,8 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 	pfree(values);
 	pfree(skip_copy);
 	pfree(attr_offsets);
-	pfree(toasted_atts);
+	pfree(toasted_deferred_atts);
+	pfree(toasted_upfront_atts);
 
 	return result;
 }
