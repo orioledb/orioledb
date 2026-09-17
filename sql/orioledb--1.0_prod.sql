@@ -207,3 +207,14 @@ CREATE VIEW orioledb_table_descr AS
 
 CREATE VIEW orioledb_index_descr AS
   SELECT * FROM orioledb_get_index_descrs();
+
+
+CREATE FUNCTION orioledb_engine_status()
+RETURNS text
+AS 'MODULE_PATHNAME', 'orioledb_engine_status'
+LANGUAGE C STRICT PARALLEL SAFE;
+
+CREATE FUNCTION orioledb_custom_page_stats(text)
+RETURNS text
+AS 'MODULE_PATHNAME', 'orioledb_custom_page_stats'
+LANGUAGE C STRICT PARALLEL SAFE;

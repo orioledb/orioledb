@@ -149,6 +149,8 @@ REGRESSCHECKS = btree_sys_check \
 				trigger \
 				truncate \
 				types \
+				engine_status_test \
+				page_stats_test \
 				database_template
 ISOLATIONCHECKS = bitmap_hist_scan \
 				  bitmap_for_update_epq \
@@ -188,7 +190,8 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  table_lock_test \
 				  concurrent_truncate \
 				  seqscan_own_writes \
-				  uniq
+				  uniq \
+				  engine_isolation_test
 TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/collate_test.py \
 						test/t/commit_window_test.py \

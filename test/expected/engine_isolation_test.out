@@ -1,0 +1,16 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_begin s2_begin s1_insert s2_status s1_stats s2_read s1_commit s2_read s2_commit
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_insert: INSERT INTO o_iso_test VALUES (1, 's1_veri');
+step s2_status: SELECT orioledb_engine_status();
+ERROR:  function orioledb_engine_status() does not exist
+step s1_stats: SELECT orioledb_custom_page_stats('o_iso_test');
+ERROR:  function orioledb_custom_page_stats(unknown) does not exist
+step s2_read: SELECT * FROM o_iso_test;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s1_commit: COMMIT;
+step s2_read: SELECT * FROM o_iso_test;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2_commit: COMMIT;

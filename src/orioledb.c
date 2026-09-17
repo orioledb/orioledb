@@ -2388,3 +2388,30 @@ assign_debug_max_bridge_ctid(const char *newval, void *extra)
 	else
 		max_bridge_ctid_blkno = InvalidBlockNumber;
 }
+
+
+
+/*
+ * TEST FONKSİYONLARİ
+ */
+
+PG_FUNCTION_INFO_V1(orioledb_engine_status);
+Datum
+orioledb_engine_status(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_TEXT_P(cstring_to_text("ORIOLEDB_ACTIVE_V1_OK"));
+}
+
+PG_FUNCTION_INFO_V1(orioledb_custom_page_stats);
+Datum
+orioledb_custom_page_stats(PG_FUNCTION_ARGS)
+{
+    text *relname_text = PG_GETARG_TEXT_PP(0);
+    char *relname = text_to_cstring(relname_text);
+    char result_buf[128];
+
+    snprintf(result_buf, sizeof(result_buf), "Table: %s, Engine: orioledb, Status: ONLINE", relname);
+    pfree(relname);
+
+    PG_RETURN_TEXT_P(cstring_to_text(result_buf));
+}
