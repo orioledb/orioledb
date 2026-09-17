@@ -1989,6 +1989,22 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 #ifdef USE_ASSERT_CHECKING
 	prewrite_image_check(img);
+
+	/*
+	 * Everything below reaches the seq bufs through desc->nextChkp[] and
+	 * desc->tmpBuf[], which live in the meta page, so every caller has to
+	 * have established that the page is still this incarnation's: walk_page()
+	 * does it under the page lock and evict_btree() again after
+	 * walk_page_evict_root() released it.  State that here, at the use site
+	 * -- this is the line issue #1113 reported, and asserting the invariant
+	 * where it is relied on is what makes the regression test fail if the
+	 * checks above ever stop covering a path.
+	 *
+	 * Local temporary trees are exempt for the same reason they are exempt
+	 * from the seq buf assertions further down: they keep a backend-local
+	 * free space map and never touch these shared buffers.
+	 */
+	Assert(btree_desc_is_local_temp(desc) || BTREE_META_PAGE_IS_OURS(desc));
 #endif
 
 	EA_WRITE_INC(blkno);
@@ -3216,6 +3232,28 @@ walk_page_evict_root(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	release_evict_btree_locks(oids, &locksState);
 
+	/*
+	 * The tree is gone from shared memory and its pages are back in the pool,
+	 * and this process holds nothing.  A test parks here to stop the pool
+	 * from moving on: the block numbers the tree just gave up are the ones
+	 * its next incarnation will be handed.
+	 */
+	if (result && STOPEVENTS_ENABLED())
+	{
+		JsonbParseState *state = NULL;
+		Jsonb	   *params;
+		MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+		pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+		jsonb_push_int8_key(&state, "datoid", oids.datoid);
+		jsonb_push_int8_key(&state, "reloid", oids.reloid);
+		jsonb_push_int8_key(&state, "relnode", oids.relnode);
+		params = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+		MemoryContextSwitchTo(mctx);
+
+		STOPEVENT(STOPEVENT_AFTER_TREE_EVICT, params);
+	}
+
 	return result ? OWalkPageEvicted : OWalkPageSkipped;
 }
 
@@ -3456,6 +3494,7 @@ write_tree_pages(BTreeDescr *desc, int maxLevel, bool evict)
 		desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 		desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 		desc->rootInfo.rootPageChangeCount = 0;
+		desc->rootInfo.metaPageChangeCount = 0;
 		o_btree_load_shmem(desc);
 		(void) write_tree_pages_recursive(desc->undoType,
 										  desc->rootInfo.rootPageBlkno,

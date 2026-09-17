@@ -198,6 +198,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/eviction_bgwriter_test.py \
 						test/t/eviction_compression_test.py \
 						test/t/eviction_test.py \
+						test/t/evict_stale_descr_test.py \
 						test/t/file_operations_test.py \
 						test/t/files_test.py \
 						test/t/functions_test.py \

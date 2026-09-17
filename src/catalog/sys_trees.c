@@ -466,6 +466,7 @@ sys_trees_shmem_init(Pointer ptr, bool found)
 			header->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 			header->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 			header->rootInfo.rootPageChangeCount = 0;
+			header->rootInfo.metaPageChangeCount = 0;
 			header->initialized = false;
 		}
 	}
@@ -835,6 +836,7 @@ sys_tree_init(int i, bool init_shmem)
 		header->rootInfo.rootPageBlkno = ppool_alloc_page(pool, PPOOL_RESERVE_META);
 		header->rootInfo.metaPageBlkno = ppool_alloc_page(pool, PPOOL_RESERVE_META);
 		header->rootInfo.rootPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(header->rootInfo.rootPageBlkno));
+		header->rootInfo.metaPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(header->rootInfo.metaPageBlkno));
 	}
 	descr->rootInfo = header->rootInfo;
 

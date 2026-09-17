@@ -812,6 +812,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 			desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 			desc->rootInfo.rootPageChangeCount = 0;
+			desc->rootInfo.metaPageChangeCount = 0;
 			if (tryFlag)
 			{
 				if (!o_btree_try_use_shmem(desc))
