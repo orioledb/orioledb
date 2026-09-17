@@ -229,6 +229,7 @@ o_create_key_tuple(BTreeDescr *desc, OTuple tuple, Pointer data,
 		scratch.data = (Pointer) palloc0(len);
 		o_tuple_fill(id->nonLeafTupdesc, &id->nonLeafSpec, &scratch, len,
 					 NULL, NULL, version, key, isnull, NULL);
+		Assert(data != NULL);
 		memcpy(data, scratch.data, len);
 		pfree(scratch.data);
 
