@@ -256,6 +256,12 @@ extern void o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 						 OTuple *tuple, Size tuple_size,
 						 ItemPointer iptr, BridgeData *bridge_data, uint32 version,
 						 Datum *values, bool *isnull, char *to_toast);
+extern void o_tuple_fill_ex(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
+							OTuple *tuple, Size tuple_size,
+							ItemPointer iptr, BridgeData *bridge_data,
+							uint32 version,
+							Datum *values, bool *isnull, char *to_toast,
+							bool *skip_copy, Size *attr_offsets);
 extern OTuple o_form_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 						   uint32 version, Datum *values, bool *isnull,
 						   BridgeData *bridge_data);
