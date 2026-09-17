@@ -272,7 +272,10 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 	BridgeData	bridge_data;
 	BridgeData *bridge_data_arg = NULL;
 	Datum	   *values;
-	bool	   *tofree;
+	bool	   *skip_copy;
+	Size	   *attr_offsets;
+	int		   *toasted_atts;
+	int			ntoasted = 0;
 	OTuple		result;
 	Size		len;
 	int			ctid_off = idx->primaryIsCtid ? 1 : 0;
@@ -304,26 +307,40 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 		return oslot->tuple;
 
 	/*
-	 * Build the leaf tuple the way tts_orioledb_form_tuple() does -- the ctid
-	 * and bridge attributes are not ordinary values and have to be handed
-	 * over separately -- but with the TOASTed attributes fetched, and with no
-	 * to_toast map, so nothing turns back into a placeholder.
+	 * Build the leaf tuple with TOASTed attributes fetched one at a time to
+	 * avoid holding all detoasted values and the result tuple simultaneously.
+	 *
+	 * Phase 1: replace each external toast pointer in values[] with a
+	 * size-only cookie (4 bytes, valid VARSIZE header).  o_new_tuple_size and
+	 * o_tuple_fill_ex read only VARSIZE from these, never the payload.
+	 *
+	 * Phase 2: detoast each attribute into the pre-computed offset in the
+	 * result tuple, freeing immediately.  Peak = result + one detoasted
+	 * value.
 	 */
 	values = (Datum *) palloc(natts * sizeof(Datum));
-	tofree = (bool *) palloc0(natts * sizeof(bool));
+	skip_copy = (bool *) palloc0(natts * sizeof(bool));
+	attr_offsets = (Size *) palloc(natts * sizeof(Size));
+	toasted_atts = (int *) palloc(descr->ntoastable * sizeof(int));
 	memcpy(values, slot->tts_values, natts * sizeof(Datum));
 
 	for (i = 0; i < descr->ntoastable; i++)
 	{
 		int			attn = descr->toastable[i] - ctid_off;
+		int32		toasted_size;
+		struct varlena *cookie;
 
 		if (slot->tts_isnull[attn])
 			continue;
 		if (!VARATT_IS_EXTERNAL_ORIOLEDB(DatumGetPointer(values[attn])))
 			continue;
 
-		values[attn] = PointerGetDatum(o_detoast((struct varlena *) DatumGetPointer(values[attn])));
-		tofree[attn] = true;
+		toasted_size = o_get_src_size(slot->tts_values[attn]);
+		cookie = (struct varlena *) palloc(VARHDRSZ);
+		SET_VARSIZE(cookie, toasted_size);
+		values[attn] = PointerGetDatum(cookie);
+		skip_copy[attn] = true;
+		toasted_atts[ntoasted++] = attn;
 	}
 
 	iptr = idx->primaryIsCtid ? &slot->tts_tid : NULL;
@@ -341,15 +358,31 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 
 	result.data = (Pointer) palloc0(len);
 	result.formatFlags = 0;
-	o_tuple_fill(tupdesc, spec, &result, len, iptr, bridge_data_arg, 0,
-				 values, slot->tts_isnull, NULL);
+	o_tuple_fill_ex(tupdesc, spec, &result, len, iptr, bridge_data_arg, 0,
+					values, slot->tts_isnull, NULL,
+					skip_copy, attr_offsets);
 	*allocated = true;
 
-	for (i = 0; i < natts; i++)
-		if (tofree[i])
-			pfree(DatumGetPointer(values[i]));
+	/* Free cookies */
+	for (i = 0; i < ntoasted; i++)
+		pfree(DatumGetPointer(values[toasted_atts[i]]));
+
+	/* Detoast one at a time into pre-computed positions */
+	for (i = 0; i < ntoasted; i++)
+	{
+		int			attn = toasted_atts[i];
+		struct varlena *detoasted;
+
+		detoasted = o_detoast((struct varlena *)
+							  DatumGetPointer(slot->tts_values[attn]));
+		memcpy(result.data + attr_offsets[attn], detoasted, VARSIZE(detoasted));
+		pfree(detoasted);
+	}
+
 	pfree(values);
-	pfree(tofree);
+	pfree(skip_copy);
+	pfree(attr_offsets);
+	pfree(toasted_atts);
 
 	return result;
 }
