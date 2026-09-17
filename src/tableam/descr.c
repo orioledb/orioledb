@@ -1183,8 +1183,33 @@ init_shared_root_info(PagePool *pool, SharedRootInfo *sharedRootInfo)
 
 	sharedRootInfo->placeholder = false;
 	rootInfo->rootPageBlkno = ppool_alloc_page(pool, PPOOL_RESERVE_META);
+
+	/*
+	 * Which block numbers this incarnation of the tree gets is decided
+	 * between these two allocations, so this is where a test can drive them
+	 * apart: park here and let another backend take the page the meta page
+	 * would have got, and the tree comes up with its old root page and a new
+	 * meta page -- the one shape in which a cached descriptor of the previous
+	 * incarnation passes every check that looks at the root.
+	 */
+	if (STOPEVENTS_ENABLED())
+	{
+		JsonbParseState *state = NULL;
+		Jsonb	   *params;
+		MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+		pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+		jsonb_push_int8_key(&state, "datoid", sharedRootInfo->key.datoid);
+		jsonb_push_int8_key(&state, "relnode", sharedRootInfo->key.relnode);
+		params = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+		MemoryContextSwitchTo(mctx);
+
+		STOPEVENT(STOPEVENT_AFTER_TREE_ROOT_PAGE_ALLOC, params);
+	}
+
 	rootInfo->metaPageBlkno = ppool_alloc_page(pool, PPOOL_RESERVE_META);
 	rootInfo->rootPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(rootInfo->rootPageBlkno));
+	rootInfo->metaPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(rootInfo->metaPageBlkno));
 
 	Assert(OInMemoryBlknoIsValid(rootInfo->rootPageBlkno));
 	Assert(OInMemoryBlknoIsValid(rootInfo->metaPageBlkno));
@@ -1415,6 +1440,7 @@ o_insert_shared_root_placeholder(Oid datoid, Oid relnode, Oid tablespace)
 	sharedRootInfo.rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 	sharedRootInfo.rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 	sharedRootInfo.rootInfo.rootPageChangeCount = 0;
+	sharedRootInfo.rootInfo.metaPageChangeCount = 0;
 
 	inserted = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
 										 sharedRootInfoTuple);

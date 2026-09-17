@@ -109,6 +109,7 @@ index_btree_desc_init(BTreeDescr *desc, OCompress compress, int fillfactor,
 	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.rootPageChangeCount = 0;
+	desc->rootInfo.metaPageChangeCount = 0;
 	btree_init_smgr(desc);
 	desc->freeBuf.file = -1;
 	desc->nextChkp[0].file = -1;

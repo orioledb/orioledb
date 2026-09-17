@@ -137,6 +137,18 @@ typedef struct
 	OInMemoryBlkno rootPageBlkno;
 	uint32		rootPageChangeCount;
 	OInMemoryBlkno metaPageBlkno;
+
+	/*
+	 * Change count of the meta page, taken when this incarnation of the tree
+	 * got that page.  A descriptor is cached per backend and nothing keeps
+	 * the tree loaded, so the page pool may hand the meta page to another
+	 * tree behind the descriptor's back; freeing a page bumps its change
+	 * count, so this is what tells a writer that the seq bufs it is about to
+	 * use are still the ones it stored here.  The root page has the same
+	 * guard in rootPageChangeCount, which find_page() checks on every
+	 * descent.
+	 */
+	uint32		metaPageChangeCount;
 } BTreeRootInfo;
 
 typedef enum

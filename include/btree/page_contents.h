@@ -81,6 +81,27 @@ StaticAssertDecl(sizeof(BTreeMetaPage) <= ORIOLEDB_BLCKSZ,
 #define BTREE_GET_META(desc) \
 	((BTreeMetaPage *) O_GET_IN_MEMORY_PAGE((desc)->rootInfo.metaPageBlkno))
 
+/*
+ * Is the meta page this descriptor points at still this tree's?
+ *
+ * A descriptor is cached per backend and nothing keeps the tree loaded for the
+ * page pool's clock sweep, so by the time a writer uses the seq bufs -- which
+ * live in the meta page -- that page may have gone back to the pool and been
+ * handed to another tree.  o_ppool_free_page() bumps a page's change count
+ * under the page lock before handing it out, so comparing against the count
+ * this incarnation recorded answers the question at the moment it is asked:
+ * one shared-memory read, no lookup, cheap enough to sit in front of every
+ * write.  This is the same guard find_page() applies to the root page.
+ *
+ * The page's own oids cannot answer it instead: init_meta_page() invalidates
+ * them on purpose, so that the clock sweep never takes a meta page for a page
+ * of data, and a healthy meta page therefore never matches its tree.
+ */
+#define BTREE_META_PAGE_IS_OURS(desc) \
+	(OMetaPageIsValid(desc) && \
+	 O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE((desc)->rootInfo.metaPageBlkno)) == \
+	 (desc)->rootInfo.metaPageChangeCount)
+
 typedef struct
 {
 	uint32		shortLocation:12,
