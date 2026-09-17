@@ -1544,6 +1544,93 @@ SELECT * FROM pg_drop_replication_slot('regression_slot');
 (1 row)
 
 DROP TABLE o_logical_huge;
+-- A TOASTed attribute small enough that o_new_tuple_size() would pack it into
+-- a short varlena.  Flattening the old tuple for REPLICA IDENTITY FULL has to
+-- size and fill such an attribute the same way; disagreeing there overruns the
+-- tuple that was just allocated.  STORAGE EXTERNAL keeps the values away from
+-- the compressor, so their toasted sizes stay put, and the row is wide enough
+-- that TOASTing has to work its way down to them.
+CREATE TABLE o_logical_small (
+	id integer PRIMARY KEY,
+	v0 text COLLATE "C",
+	v1 text COLLATE "C",
+	v2 text COLLATE "C",
+	v3 text COLLATE "C",
+	v4 text COLLATE "C",
+	v5 text COLLATE "C",
+	v6 text COLLATE "C",
+	v7 text COLLATE "C",
+	v8 text COLLATE "C",
+	v9 text COLLATE "C",
+	v10 text COLLATE "C",
+	v11 text COLLATE "C",
+	v12 text COLLATE "C",
+	v13 text COLLATE "C",
+	v14 text COLLATE "C",
+	v15 text COLLATE "C",
+	v16 text COLLATE "C",
+	v17 text COLLATE "C",
+	v18 text COLLATE "C",
+	v19 text COLLATE "C",
+	v20 text COLLATE "C",
+	v21 text COLLATE "C",
+	v22 text COLLATE "C",
+	v23 text COLLATE "C"
+) USING orioledb;
+DO $$ BEGIN
+	FOR i IN 0..23 LOOP
+		EXECUTE format('ALTER TABLE o_logical_small ALTER COLUMN v%s SET STORAGE EXTERNAL', i);
+	END LOOP;
+END $$;
+ALTER TABLE o_logical_small REPLICA IDENTITY FULL;
+SELECT slot_name FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);
+    slot_name    
+-----------------
+ regression_slot
+(1 row)
+
+INSERT INTO o_logical_small VALUES (1,
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120),
+	repeat('s', 120)
+);
+-- the UPDATE is where the old tuple gets flattened and logged
+UPDATE o_logical_small SET id = 2 WHERE id = 1;
+DELETE FROM o_logical_small WHERE id = 2;
+SELECT count(*) AS rows_left FROM o_logical_small;
+ rows_left 
+-----------
+         0
+(1 row)
+
+SELECT * FROM pg_drop_replication_slot('regression_slot');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+DROP TABLE o_logical_small;
 CREATE TABLE IF NOT EXISTS o_test_toast_update_delete (
 	id integer PRIMARY KEY,
 	v1 text,
