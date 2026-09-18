@@ -90,8 +90,23 @@ oIndicesGetNextKey(void *key, void *arg)
 	static OIndexChunkKey nextKey;
 
 	nextKey = *ckey;
-	nextKey.oids.relnode++;
-	nextKey.chunknum = 0;
+	if (likely(nextKey.oids.relnode != UINT32_MAX))
+	{
+		nextKey.oids.relnode++;
+		nextKey.chunknum = 0;
+	}
+	else
+	{
+		/*
+		 * There is no relnode above this one to name, and incrementing it
+		 * wraps the bound round to zero -- below the very key it is supposed
+		 * to sit above, so the caller reads or deletes none of this value's
+		 * chunks.  Bound the key from above within itself instead: chunks are
+		 * numbered upwards from zero, so no real one reaches UINT32_MAX, and
+		 * the first key at or after that is whatever follows this tree.
+		 */
+		nextKey.chunknum = UINT32_MAX;
+	}
 
 	return &nextKey;
 }
@@ -2107,10 +2122,26 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 		 * tree (a higher relnode in this tablespace, or the first tree of the
 		 * next tablespace).
 		 */
-		oids.relnode += 1;
+		if (likely(oids.relnode != UINT32_MAX))
+		{
+			oids.relnode += 1;
+			chunkKey.chunknum = 0;
+		}
+		else
+		{
+			/*
+			 * The largest relnode has no successor to step onto, and the sum
+			 * wraps to zero -- which restarts the scan at the first tree of
+			 * this tablespace and walks the same set for ever (a cassert
+			 * build trips the repeat assertion above first).  Step past this
+			 * tree by its chunk number instead, which no real chunk reaches,
+			 * and let the tree order carry us into the next tablespace,
+			 * database or index type.
+			 */
+			chunkKey.chunknum = UINT32_MAX;
+		}
 		chunkKey.oids = oids;
 		chunkKey.type = type;
-		chunkKey.chunknum = 0;
 
 		it = o_btree_iterator_create(desc, (Pointer) &chunkKey, BTreeKeyBound,
 									 &o_non_deleted_snapshot, ForwardScanDirection);

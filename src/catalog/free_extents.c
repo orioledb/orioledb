@@ -504,11 +504,24 @@ foreach_free_extent(BTreeDescr *desc, ForEachExtentCallback callback, void *arg)
 	fromTup.data = (Pointer) &from;
 	fromTup.formatFlags = 0;
 
-	/* iterate from begin and to the end of the index */
-	to.relnode += 1;
+	/*
+	 * Iterate from the beginning to the end of the index.  At the largest
+	 * relnode the sum wraps to zero and the upper bound lands below the lower
+	 * one, so the range covers nothing and the index's extents are never
+	 * freed -- the assertion below used to catch that on a cassert build
+	 * only.  Bound by the extent instead, which no real one reaches.
+	 */
+	if (likely(to.relnode != UINT32_MAX))
+		to.relnode += 1;
+	else
+	{
+		to.extent.offset = UINT64_MAX;
+		to.extent.length = UINT64_MAX;
+	}
 	toTup.data = (Pointer) &to;
 	toTup.formatFlags = 0;
-	Assert(from.relnode < to.relnode);
+	Assert(from.relnode < to.relnode ||
+		   (from.relnode == to.relnode && from.extent.offset < to.extent.offset));
 
 	it = o_btree_iterator_create(off_len_tree, (Pointer) &fromTup,
 								 BTreeKeyNonLeafKey,
