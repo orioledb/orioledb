@@ -1217,7 +1217,10 @@ wait_recovery_undo_loc_flushed(uint32 chkpnum, bool shutdown)
 /*
  * Walk every backend's ODBProcData and emit a PendingSkFixup record for
  * any backend that is in the PK-applied / SK-pending window at the
- * moment we cross over from primary indices to secondary indices.
+ * moment we cross over from primary indices to secondary indices.  The
+ * record carries both ends of the backend's pending run, so that a
+ * multi-insert whose whole batch sits in that window is fixed up row by
+ * row instead of only at its last row.
  *
  * Called from checkpoint_tables_callback() just before
  * checkpoint_state->toastConsistentPtr is set so that the snapshot
@@ -1232,13 +1235,13 @@ checkpoint_write_pending_sk_fixups(void)
 	memset(&xidRec, 0, sizeof(xidRec));
 	xidRec.kind = XidRecPendingSkFixup;
 	xidRec.retainLocation = InvalidUndoLocation;
-	xidRec.undoLocation.branchLocation = InvalidUndoLocation;
 	xidRec.undoLocation.subxactLocation = InvalidUndoLocation;
 	xidRec.undoLocation.onCommitLocation = InvalidUndoLocation;
 
 	for (i = 0; i < max_procs; i++)
 	{
 		UndoLocation pendingLoc;
+		UndoLocation firstLoc;
 		OXid		oxid;
 		int			level;
 
@@ -1256,7 +1259,7 @@ checkpoint_write_pending_sk_fixups(void)
 		 */
 		for (;;)
 		{
-			pendingLoc = pg_atomic_read_u64(&oProcData[i].pendingSkUndoLoc);
+			pendingLoc = pg_atomic_read_u64(&oProcData[i].pendingSkUndoTail);
 			if (pendingLoc != WaitingSkUndoLoc)
 				break;
 			pg_usleep(100L);
@@ -1265,12 +1268,23 @@ checkpoint_write_pending_sk_fixups(void)
 		LWLockAcquire(&oProcData[i].undoStackLocationsFlushLock, LW_EXCLUSIVE);
 
 		/* Re-read under the lock; could have changed while we were spinning. */
-		pendingLoc = pg_atomic_read_u64(&oProcData[i].pendingSkUndoLoc);
+		pendingLoc = pg_atomic_read_u64(&oProcData[i].pendingSkUndoTail);
 		if (!UndoLocationIsValid(pendingLoc) || pendingLoc == WaitingSkUndoLoc)
 		{
 			LWLockRelease(&oProcData[i].undoStackLocationsFlushLock);
 			continue;
 		}
+
+		/*
+		 * Read the head after the tail, the order the backend writes them in
+		 * reverse.  A head that is missing or ahead of the tail is a run we
+		 * caught mid-publication: fall back to the tail alone, which is the
+		 * range this record used to carry anyway.
+		 */
+		pg_read_barrier();
+		firstLoc = pg_atomic_read_u64(&oProcData[i].pendingSkUndoHead);
+		if (!UndoLocationIsValid(firstLoc) || firstLoc > pendingLoc)
+			firstLoc = pendingLoc;
 
 		/*
 		 * The marker is set strictly inside a single PK->SK window; the
@@ -1287,7 +1301,8 @@ checkpoint_write_pending_sk_fixups(void)
 		if (OXidIsValid(oxid))
 		{
 			xidRec.oxid = oxid;
-			xidRec.undoLocation.location = pendingLoc;
+			XidRecSkFixupLast(&xidRec) = pendingLoc;
+			XidRecSkFixupFirst(&xidRec) = firstLoc;
 			write_to_xids_queue(&xidRec);
 		}
 

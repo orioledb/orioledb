@@ -409,38 +409,48 @@ static bool replay_start_reached = false;
 typedef struct PendingSkFixup
 {
 	OXid		oxid;
-	UndoLocation undoLocation;
+	UndoLocation firstLocation;
+	UndoLocation lastLocation;
 	struct PendingSkFixup *next;
 } PendingSkFixup;
 
 static PendingSkFixup *pending_sk_fixups_head = NULL;
 
 static void
-record_pending_sk_fixup(OXid oxid, UndoLocation undoLocation)
+record_pending_sk_fixup(OXid oxid, UndoLocation firstLocation,
+						UndoLocation lastLocation)
 {
 	PendingSkFixup *entry;
 
 	entry = (PendingSkFixup *) MemoryContextAlloc(TopMemoryContext,
 												  sizeof(*entry));
 	entry->oxid = oxid;
-	entry->undoLocation = undoLocation;
+	entry->firstLocation = firstLocation;
+	entry->lastLocation = lastLocation;
 	entry->next = pending_sk_fixups_head;
 	pending_sk_fixups_head = entry;
 }
 
 /*
- * Apply one PendingSkFixup entry: read the PK undo record back, locate
- * the current PK tuple, and for every secondary index whose key differs
- * between the pre-image and the post-image, dispatch a synthesised
- * DELETE old / INSERT new pair through the recovery_workers' modify
- * path.  Mirrors apply_tbl_update()'s per-SK logic.
+ * Apply the fix-up owed by one PK undo record at itemLoc: read the record
+ * back, locate the current PK tuple, and for every secondary index whose
+ * key differs between the pre-image and the post-image, dispatch a
+ * synthesised DELETE old / INSERT new pair through the recovery_workers'
+ * modify path.  Mirrors apply_tbl_update()'s per-SK logic.
+ *
+ * Reports the previous record of the owning transaction's undo stack
+ * through prevLoc so the caller can walk the rest of the run, and returns
+ * false only when the record itself could not be read -- there is nothing
+ * behind an unreadable record either, so that ends the walk.  A record
+ * that is readable but not ours (the undo stack interleaves other item
+ * types) yields true with nothing done.
  */
-static void
-apply_one_pending_sk_fixup(PendingSkFixup *entry)
+static bool
+apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
+						   UndoLocation *prevLoc)
 {
-	UndoLocation tuphdrLoc = entry->undoLocation;
-	UndoLocation itemLoc;
 	BTreeModifyUndoStackItem item = {0};
+	UndoStackItem header = {0};
 	LocationIndex oldTupleSize;
 	OTableDescr *descr;
 	OIndexDescr *primary;
@@ -457,15 +467,7 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 	TupleTableSlot *oldSlot;
 	int			i;
 
-	if (!UndoLocationIsValid(tuphdrLoc))
-		return;
-
-	/*
-	 * The marker we recorded is the location of the BTreeLeafTuphdr field
-	 * inside the BTreeModifyUndoStackItem (that's what make_undo_record()
-	 * returns); back up to the start of the item.
-	 */
-	itemLoc = tuphdrLoc - offsetof(BTreeModifyUndoStackItem, tuphdr);
+	*prevLoc = InvalidUndoLocation;
 
 	if (!UNDO_REC_EXISTS(UndoLogRegular, itemLoc))
 	{
@@ -473,12 +475,19 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 		elog(DEBUG2,
 			 "pending-SK fix-up: undo record at %X/%X recycled, skipping",
 			 (uint32) (itemLoc >> 32), (uint32) itemLoc);
-		return;
+		return false;
 	}
 
+	/*
+	 * Read the common header on its own: the record may be of any item type,
+	 * and only a modify item is as long as a BTreeModifyUndoStackItem.
+	 */
+	undo_read(UndoLogRegular, itemLoc, sizeof(header), (Pointer) &header);
+	*prevLoc = header.prev;
+	if (header.type != ModifyUndoItemType)
+		return true;
+
 	undo_read(UndoLogRegular, itemLoc, sizeof(item), (Pointer) &item);
-	if (item.header.type != ModifyUndoItemType)
-		return;
 
 	/*
 	 * Only PK modifications carry SK-side obligations; tuple inserts /
@@ -487,7 +496,7 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 	if (item.action != BTreeOperationUpdate &&
 		item.action != BTreeOperationInsert &&
 		item.action != BTreeOperationDelete)
-		return;
+		return true;
 
 	/*
 	 * item.oids is the PK index's relation OIDs (make_undo_record stores
@@ -500,17 +509,17 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 		indexDescr = o_fetch_index_descr(item.oids, oIndexPrimary,
 										 false, NULL);
 		if (indexDescr == NULL)
-			return;
+			return true;
 		descr = o_fetch_table_descr(indexDescr->tableOids);
 	}
 	if (descr == NULL || descr->nIndices < 2)
-		return;
+		return true;
 	primary = GET_PRIMARY(descr);
 
 	/* The undo entry stores the pre-image tuple right after the header. */
 	oldTupleSize = validate_undo_item_size(item.header.itemSize);
 	if (oldTupleSize == 0)
-		return;
+		return true;
 	oldTuple.formatFlags = item.tuphdr.formatFlags;
 	oldTuple.data = palloc(oldTupleSize);
 	undo_read(UndoLogRegular,
@@ -555,7 +564,7 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 	if (findResult != OFindPageResultSuccess)
 	{
 		pfree(oldTuple.data);
-		return;
+		return true;
 	}
 
 	pkPage = O_GET_IN_MEMORY_PAGE(context.items[context.index].blkno);
@@ -565,7 +574,7 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 	{
 		unlock_page(context.items[context.index].blkno);
 		pfree(oldTuple.data);
-		return;
+		return true;
 	}
 
 	BTREE_PAGE_READ_TUPLE(pkOnPage, pkPage, &pageLoc);
@@ -678,7 +687,7 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 			(void) o_btree_modify(&sk->desc, BTreeOperationDelete,
 								  nullTup, BTreeKeyNone,
 								  (Pointer) &oldSkKey, BTreeKeyBound,
-								  entry->oxid, COMMITSEQNO_INPROGRESS,
+								  entryOxid, COMMITSEQNO_INPROGRESS,
 								  RowLockUpdate, NULL, &cbInfo);
 		}
 
@@ -696,7 +705,7 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 				(void) o_btree_modify(&sk->desc, BTreeOperationInsert,
 									  newSkTup, BTreeKeyLeafTuple,
 									  (Pointer) &newSkKey, BTreeKeyBound,
-									  entry->oxid, COMMITSEQNO_INPROGRESS,
+									  entryOxid, COMMITSEQNO_INPROGRESS,
 									  RowLockUpdate, NULL, &cbInfo);
 			}
 			pfree(newSkTup.data);
@@ -713,6 +722,57 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 	ExecClearTuple(oldSlot);
 	if (item.action == BTreeOperationInsert)
 		pfree(oldTuple.data);
+
+	return true;
+}
+
+/*
+ * Fix up every row of one pending run.
+ *
+ * The checkpoint recorded the run's ends; the rows in between are found by
+ * following UndoStackItem.prev back from the last one, since the undo
+ * stack of a transaction chains its records in the order they were made.
+ * Records of other item types can be interleaved and are stepped over.
+ *
+ * Walking backwards is what makes the run self-delimiting: the chain is
+ * strictly descending and ends at the transaction's first record, so both
+ * a first location that never arrived and a chain that was recycled out
+ * from under us simply stop the walk early, having already fixed up the
+ * newest rows -- the ones a later record cannot repair.
+ */
+static void
+apply_pending_sk_fixup_run(PendingSkFixup *entry)
+{
+	UndoLocation firstItemLoc;
+	UndoLocation itemLoc;
+
+	if (!UndoLocationIsValid(entry->lastLocation))
+		return;
+
+	/*
+	 * Both ends name the BTreeLeafTuphdr field inside the record (that is
+	 * what make_undo_record() hands out); back up to the record itself.
+	 */
+	itemLoc = entry->lastLocation - offsetof(BTreeModifyUndoStackItem, tuphdr);
+	if (UndoLocationIsValid(entry->firstLocation) &&
+		entry->firstLocation <= entry->lastLocation)
+		firstItemLoc = entry->firstLocation -
+			offsetof(BTreeModifyUndoStackItem, tuphdr);
+	else
+		firstItemLoc = itemLoc;
+
+	for (;;)
+	{
+		UndoLocation prevLoc;
+
+		if (!apply_one_pending_sk_fixup(entry->oxid, itemLoc, &prevLoc))
+			break;
+		if (itemLoc <= firstItemLoc)
+			break;
+		if (!UndoLocationIsValid(prevLoc) || prevLoc >= itemLoc)
+			break;
+		itemLoc = prevLoc;
+	}
 }
 
 /*
@@ -735,7 +795,7 @@ apply_pending_sk_fixups(void)
 		recovery_switch_to_oxid(entry->oxid, -1);
 		set_oxid_csn(entry->oxid, COMMITSEQNO_INPROGRESS);
 
-		apply_one_pending_sk_fixup(entry);
+		apply_pending_sk_fixup_run(entry);
 
 		pfree(entry);
 		entry = next;
@@ -1036,7 +1096,9 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 				 * synthesised secondary-index modify records once the
 				 * recovery hits the toast-consistent boundary.
 				 */
-				record_pending_sk_fixup(xidRec.oxid, xidRec.undoLocation.location);
+				record_pending_sk_fixup(xidRec.oxid,
+										XidRecSkFixupFirst(&xidRec),
+										XidRecSkFixupLast(&xidRec));
 				offset += sizeof(xidRec);
 				continue;
 			}

@@ -165,6 +165,17 @@ typedef struct
 	UndoLocation retainLocation;
 } XidFileRec;
 
+/*
+ * An XidRecPendingSkFixup record describes a run of PK modifications whose
+ * secondary-index entries a checkpoint cut across, and reuses two of the
+ * UndoStackLocations slots -- the kind has no undo stack of its own -- to
+ * name its ends.  The last modification keeps the .location slot it had
+ * when a run was always one row long, so the record still reads correctly
+ * as "fix up this one row" to anything that does not know about runs.
+ */
+#define XidRecSkFixupLast(rec)	((rec)->undoLocation.location)
+#define XidRecSkFixupFirst(rec) ((rec)->undoLocation.branchLocation)
+
 /* Rewind kinds are shifted by UndoLogsCount compared to their UndoLogType base */
 #define XID_REC_REWIND_TYPES_OFFSET UndoLogsCount
 
