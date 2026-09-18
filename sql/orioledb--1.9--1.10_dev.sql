@@ -21,3 +21,8 @@ CREATE FUNCTION orioledb_test_wal_parse_relation(datoid oid,
 RETURNS text
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_test_raw_iterate_refind(relid oid)
+RETURNS int4[]
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;

@@ -2167,10 +2167,43 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 			it->curKeyReturned = true;
 			it->curKeyLazy = false;
 
+			/*
+			 * Test-only hook for raw_iterate_refind isolation spec: pause at
+			 * a chunk boundary so a concurrent session can modify the page,
+			 * then let iterator_advance_leaf detect the change and exercise
+			 * the refind path.
+			 */
+#ifdef IS_DEV
+			if (STOPEVENTS_ENABLED() &&
+				BTREE_PAGE_FIND_IS(context, FETCH))
+			{
+				bool		crossing;
+
+				if (IT_IS_FORWARD(it))
+					crossing = loc->itemOffset + 1 >= loc->chunkItemsCount;
+				else
+					crossing = loc->itemOffset == 0;
+				if (crossing)
+				{
+					/*
+					 * Stopevents disable fastpath, so hikeys are always
+					 * loaded during find_page.  Reset to simulate the
+					 * production fastpath path where hikeys are NOT loaded,
+					 * letting iterator_advance_leaf detect page changes.
+					 */
+					context->partial.hikeysChunkIsLoaded = false;
+					STOPEVENT(STOPEVENT_RAW_ITERATE_CHUNK_CROSSING,
+							  btree_page_stopevent_params(context->desc,
+														  context->img));
+				}
+			}
+#endif
+
 			if (!iterator_advance_leaf(it, loc))
 			{
+				it->curKeyReturned = false;
 				iterator_refind_partial_leaf(it);
-				loc = &context->items[context->index].locator;
+				continue;
 			}
 
 			if (!deleted_as_null ||
@@ -2726,6 +2759,92 @@ orioledb_test_back_refind_skip_tail(PG_FUNCTION_ARGS)
 										&primary->leafSpec, &isnull);
 		if (isnull)
 			elog(ERROR, "PK column unexpectedly NULL");
+	}
+
+	btree_iterator_free(it);
+	relation_close(rel, AccessShareLock);
+
+	dims[0] = nelems;
+	lbs[0] = 1;
+	PG_RETURN_ARRAYTYPE_P(construct_md_array(elems, NULL, 1, dims, lbs,
+											 INT4OID, sizeof(int32), true,
+											 TYPALIGN_INT));
+}
+
+/*
+ * Whitebox test: prove that btree_iterate_raw_internal returns valid data
+ * when iterator_advance_leaf fails at a chunk boundary.  The caller must
+ * arrange a stopevent on raw_iterate_chunk_crossing so that a concurrent
+ * session can modify the page before the advance detects the change.
+ *
+ * 1. Open a forward FETCH-mode iterator (o_in_progress_snapshot).
+ * 2. Drain via btree_iterate_raw, collecting every PK into int4[].
+ *
+ * The stopevent fires just before the advance crosses a chunk boundary.
+ * A concurrent UPDATE on the same page changes its changeCount, so
+ * partial_load_hikeys_chunk() returns false and the refind path fires.
+ *
+ * Pre-fix: result.data points into stale imgData, PK read is garbage.
+ * Post-fix: curKeyReturned=false + continue re-reads from fresh image.
+ */
+PG_FUNCTION_INFO_V1(orioledb_test_raw_iterate_refind);
+Datum
+orioledb_test_raw_iterate_refind(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	Relation	rel;
+	OTableDescr *descr;
+	OIndexDescr *primary;
+	BTreeIterator *it;
+	OTuple		result;
+	bool		scanEnd = false;
+	bool		isnull;
+	Datum	   *elems;
+	int			nelems = 0;
+	int			alloc = 64;
+	int			dims[1],
+				lbs[1];
+
+	rel = relation_open(relid, AccessShareLock);
+	descr = relation_get_descr(rel);
+	if (!descr)
+		elog(ERROR, "relation is not an orioledb table");
+	primary = GET_PRIMARY(descr);
+	if (primary->nKeyFields < 1 || primary->fields[0].inputtype != INT4OID)
+		elog(ERROR, "test requires a single int4 primary key column");
+
+	it = o_btree_iterator_create(&primary->desc, NULL,
+								 BTreeKeyNone, &o_in_progress_snapshot,
+								 ForwardScanDirection);
+
+	elems = (Datum *) palloc(alloc * sizeof(Datum));
+	for (;;)
+	{
+		int32		pk;
+
+		scanEnd = false;
+		result = btree_iterate_raw(it, NULL, BTreeKeyNone, false,
+								   &scanEnd, NULL);
+		if (O_TUPLE_IS_NULL(result))
+		{
+			if (!scanEnd)
+				elog(ERROR, "iterate_raw returned NULL without scanEnd");
+			break;
+		}
+		if (nelems == alloc)
+		{
+			alloc *= 2;
+			elems = (Datum *) repalloc(elems, alloc * sizeof(Datum));
+		}
+		elems[nelems] = o_fastgetattr(result, 1, primary->leafTupdesc,
+									  &primary->leafSpec, &isnull);
+		if (isnull)
+			elog(ERROR, "PK column unexpectedly NULL");
+		pk = DatumGetInt32(elems[nelems]);
+		if (nelems > 0 && pk <= DatumGetInt32(elems[nelems - 1]))
+			elog(ERROR, "PK out of order: %d after %d at position %d",
+				 pk, DatumGetInt32(elems[nelems - 1]), nelems);
+		nelems++;
 	}
 
 	btree_iterator_free(it);
