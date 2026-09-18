@@ -153,7 +153,9 @@ extern void o_check_tbl_delete_mres(OTableModifyResult mres,
 									OTableDescr *descr, Relation rel);
 
 extern void set_pending_sk_marker(OTableDescr *descr, UndoLocation pkUndoLoc);
-extern void fire_sk_modify_pending_stopevent(OTableDescr *descr);
+extern void fire_sk_modify_pending_stopevent(OTableDescr *descr,
+											 int pendingRows,
+											 bool batchComplete);
 extern void clear_pending_sk_marker(void);
 
 extern bool o_is_index_predicate_satisfied(OIndexDescr *idx,

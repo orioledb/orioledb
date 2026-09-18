@@ -1091,7 +1091,7 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 							  oxid, csn, RowLockUpdate,
 							  NULL, &callbackInfo);
 		if (isPrimary)
-			fire_sk_modify_pending_stopevent(descr);
+			fire_sk_modify_pending_stopevent(descr, 1, false);
 
 		if (!isPrimary)
 		{
@@ -1150,7 +1150,7 @@ apply_tbl_delete(OTableDescr *descr, OTuple key,
 										   (Pointer) &keyBound, BTreeKeyBound,
 										   oxid, csn, RowLockUpdate,
 										   NULL, &callbackInfo);
-			fire_sk_modify_pending_stopevent(descr);
+			fire_sk_modify_pending_stopevent(descr, 1, false);
 			if (modify_result != OBTreeModifyResultDeleted)
 				return;
 
@@ -1233,7 +1233,7 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 										   NULL, BTreeKeyNone, oxid, csn,
 										   RowLockNoKeyUpdate,
 										   NULL, &callbackInfo);
-			fire_sk_modify_pending_stopevent(descr);
+			fire_sk_modify_pending_stopevent(descr, 1, false);
 			if (modify_result != OBTreeModifyResultUpdated)
 				return;
 
