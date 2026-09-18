@@ -2866,6 +2866,26 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 		unlock_page(root_blkno);
 	}
 
+	/*
+	 * The root page is written and unlocked, and the tree is still whole:
+	 * everything below takes it apart.  A test parks here to sit in the gap
+	 * between the two questions this function asks about sequential scans --
+	 * it declined the eviction above if it saw one, and asserts below that
+	 * none appeared meanwhile.
+	 */
+	if (STOPEVENTS_ENABLED())
+	{
+		JsonbParseState *state = NULL;
+		Jsonb	   *params;
+		MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+		pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+		btree_desc_stopevent_params_internal(desc, &state);
+		params = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+		MemoryContextSwitchTo(mctx);
+		STOPEVENT(STOPEVENT_AFTER_TREE_ROOT_PAGE_WRITE, params);
+	}
+
 	if (!hasMetaLock)
 	{
 		if (!LWLockConditionalAcquire(&checkpoint_state->oTablesMetaLock,
