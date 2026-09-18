@@ -259,13 +259,24 @@ typedef struct
 	pg_atomic_uint64 xmin;
 
 	/*
-	 * Undo location of the most recent PK modification whose secondary-index
-	 * counterparts are still pending.  Set after the PK btree_modify and
+	 * Undo locations of the PK modifications whose secondary-index
+	 * counterparts are still pending: the first and the last of the run.
+	 * Single-row DML puts the same location in both.  A multi-insert applies
+	 * the whole batch to PK before the executor writes a single secondary
+	 * entry, so the batch needs both ends: the rows in between are reachable
+	 * by following UndoStackItem.prev back from the tail, the undo stack
+	 * being a per-transaction chain.  Set after the PK btree_modify and
 	 * before the WAL write, cleared by tuple_complete_modification.  Always
-	 * refers to UndoLogRegular; the other undo types do not participate in
+	 * refer to UndoLogRegular; the other undo types do not participate in
 	 * PK/SK recovery fix-up.
+	 *
+	 * Written by the owning backend, read by the checkpointer.  The tail is
+	 * published last and read first, so a reader that sees a valid tail sees
+	 * either the head that goes with it or an invalid one -- which it treats
+	 * as "the tail alone", the conservative answer.
 	 */
-	pg_atomic_uint64 pendingSkUndoLoc;
+	pg_atomic_uint64 pendingSkUndoHead;
+	pg_atomic_uint64 pendingSkUndoTail;
 	UndoStackSharedLocations undoStackLocations[PROC_XID_ARRAY_SIZE][(int) UndoLogsCount];
 	XidVXidMapElement vxids[PROC_XID_ARRAY_SIZE];
 } ODBProcData;

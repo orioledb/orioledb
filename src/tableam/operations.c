@@ -103,6 +103,8 @@ set_pending_sk_marker_from_ioc_arg(UndoLocation pkUndoLoc, void *arg)
 void
 set_pending_sk_marker(OTableDescr *descr, UndoLocation pkUndoLoc)
 {
+	ODBProcData *procData;
+
 	if (GET_PRIMARY(descr)->desc.undoType != UndoLogRegular)
 		return;
 
@@ -125,7 +127,26 @@ set_pending_sk_marker(OTableDescr *descr, UndoLocation pkUndoLoc)
 	if (!UndoLocationIsValid(pkUndoLoc) && pkUndoLoc != WaitingSkUndoLoc)
 		return;
 
-	pg_atomic_write_u64(&GET_CUR_PROCDATA()->pendingSkUndoLoc, pkUndoLoc);
+	procData = GET_CUR_PROCDATA();
+
+	/*
+	 * The head stays where the run started.  o_tbl_multi_insert() applies
+	 * every row of its batch to PK before the executor writes the first
+	 * secondary entry, so a checkpoint cutting across that window owes a
+	 * fix-up for the whole batch, not just for the row that happened to be
+	 * last.  WaitingSkUndoLoc is a sentinel rather than a location and never
+	 * becomes a range bound: the checkpointer waits that window out.
+	 */
+	if (UndoLocationIsValid(pkUndoLoc) &&
+		!UndoLocationIsValid(pg_atomic_read_u64(&procData->pendingSkUndoHead)))
+		pg_atomic_write_u64(&procData->pendingSkUndoHead, pkUndoLoc);
+
+	/*
+	 * Publish the tail last.  The checkpointer reads it first, so whatever
+	 * head it reads afterwards is at least as new as this one.
+	 */
+	pg_write_barrier();
+	pg_atomic_write_u64(&procData->pendingSkUndoTail, pkUndoLoc);
 }
 
 /*
@@ -154,7 +175,7 @@ fire_sk_modify_pending_stopevent(OTableDescr *descr, int pendingRows,
 	if (descr->nIndices < 2)
 		return;
 
-	cur = pg_atomic_read_u64(&GET_CUR_PROCDATA()->pendingSkUndoLoc);
+	cur = pg_atomic_read_u64(&GET_CUR_PROCDATA()->pendingSkUndoTail);
 	if (!UndoLocationIsValid(cur) && cur != WaitingSkUndoLoc)
 		return;
 
@@ -176,8 +197,12 @@ fire_sk_modify_pending_stopevent(OTableDescr *descr, int pendingRows,
 void
 clear_pending_sk_marker(void)
 {
-	pg_atomic_write_u64(&GET_CUR_PROCDATA()->pendingSkUndoLoc,
-						InvalidUndoLocation);
+	ODBProcData *procData = GET_CUR_PROCDATA();
+
+	/* Retract the tail first, mirroring the order set_ publishes them in. */
+	pg_atomic_write_u64(&procData->pendingSkUndoTail, InvalidUndoLocation);
+	pg_write_barrier();
+	pg_atomic_write_u64(&procData->pendingSkUndoHead, InvalidUndoLocation);
 }
 
 static OTableModifyResult o_tbl_indices_overwrite(OTableDescr *descr,
@@ -609,6 +634,15 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 	was_saving = o_start_saving_inval_messages();
 	CheckCmdReplicaIdentity(relation, CMD_INSERT);
 	o_stop_saving_inval_messages(was_saving);
+
+	/*
+	 * Start the pending-SK run at this batch.  COPY calls us once per buffer
+	 * and writes the secondary entries of a buffer before filling the next
+	 * one, so anything still marked from the previous batch is done with --
+	 * and copyfrom.c has no table_tuple_complete_modification() call to say
+	 * so.  Without this the run would span every batch of the COPY.
+	 */
+	clear_pending_sk_marker();
 
 	o_btree_load_shmem(pdesc);
 
