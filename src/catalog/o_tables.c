@@ -178,8 +178,16 @@ oTablesGetNextKey(void *key, void *arg)
 	static OTableChunkKey nextKey;
 
 	nextKey = *ckey;
-	nextKey.oids.relnode++;
-	nextKey.chunknum = 0;
+	if (likely(nextKey.oids.relnode != UINT32_MAX))
+	{
+		nextKey.oids.relnode++;
+		nextKey.chunknum = 0;
+	}
+	else
+	{
+		/* See oIndicesGetNextKey() for why the bound moves sideways here. */
+		nextKey.chunknum = UINT32_MAX;
+	}
 
 	return (Pointer) &nextKey;
 }
@@ -353,9 +361,15 @@ o_tables_foreach_oids(OTablesOidsCallback callback,
 		pfree(tuple.data);
 		btree_iterator_free(it);
 
-		oids.relnode += 1;		/* go to the next oid */
+		/* go to the next oid; see o_indices_foreach_oids() on the wrap */
+		if (likely(oids.relnode != UINT32_MAX))
+		{
+			oids.relnode += 1;
+			chunk_key.chunknum = 0;
+		}
+		else
+			chunk_key.chunknum = UINT32_MAX;
 		chunk_key.oids = oids;
-		chunk_key.chunknum = 0;
 
 		it = o_btree_iterator_create(desc, (Pointer) &chunk_key, BTreeKeyBound,
 									 oSnapshot, ForwardScanDirection);
