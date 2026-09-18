@@ -133,9 +133,17 @@ set_pending_sk_marker(OTableDescr *descr, UndoLocation pkUndoLoc)
  * deterministic tests can park here OUTSIDE any page lock.  No-op when the
  * marker was not actually installed for this proc (e.g. PK btree had no
  * undo, table has no SK, or the modify did not happen).
+ *
+ * pendingRows is how many rows of the current statement have reached the
+ * PK-applied/SK-pending state, counting this one: always 1 for single-row
+ * DML, and the running position within the batch for a multi-insert.
+ * batchComplete tells a multi-insert's last event, fired once the whole
+ * batch is PK-applied and WAL-logged, apart from the per-row events of the
+ * same batch.  Together they let a test park on any single row of a batch.
  */
 void
-fire_sk_modify_pending_stopevent(OTableDescr *descr)
+fire_sk_modify_pending_stopevent(OTableDescr *descr, int pendingRows,
+								 bool batchComplete)
 {
 	UndoLocation cur;
 
@@ -157,6 +165,8 @@ fire_sk_modify_pending_stopevent(OTableDescr *descr)
 
 		pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
 		btree_desc_stopevent_params_internal(&GET_PRIMARY(descr)->desc, &state);
+		jsonb_push_int8_key(&state, "pendingRows", pendingRows);
+		jsonb_push_bool_key(&state, "batchComplete", batchComplete);
 		params = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
 		MemoryContextSwitchTo(mctx);
 		STOPEVENT(STOPEVENT_SK_MODIFY_PENDING, params);
@@ -491,7 +501,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 	 * page lock so deterministic tests can park here without blocking
 	 * concurrent backends on the same leaf.
 	 */
-	fire_sk_modify_pending_stopevent(descr);
+	fire_sk_modify_pending_stopevent(descr, 1, false);
 	if (!mres.success)
 	{
 		mres.failedIxNum = 0;
@@ -776,7 +786,7 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 				orig = idx ? idx[i + k] : i + k;
 				((OTableSlot *) slots[orig])->version = o_tuple_get_version(use_tuples[i + k]);
 				pgstat_count_heap_insert(relation, 1);
-				fire_sk_modify_pending_stopevent(descr);
+				fire_sk_modify_pending_stopevent(descr, i + k + 1, false);
 			}
 			i += n;
 
@@ -811,7 +821,7 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 			{
 				pgstat_count_heap_insert(relation, 1);
 			}
-			fire_sk_modify_pending_stopevent(descr);
+			fire_sk_modify_pending_stopevent(descr, i + 1, false);
 			i++;
 		}
 	}
@@ -837,6 +847,14 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 			o_wal_insert(pdesc, tup, relation->rd_rel->relreplident,
 						 descr->version);
 	}
+
+	/*
+	 * Every row of the batch is now PK-applied and WAL-logged while none of
+	 * them has a secondary-index entry yet: the executor writes those after
+	 * table_multi_insert() returns.  This is the widest PK-applied/SK-pending
+	 * window orioledb has, so give tests a way to park right in it.
+	 */
+	fire_sk_modify_pending_stopevent(descr, ntuples, true);
 
 	pfree(tuples);
 	pfree(tuplens);
@@ -1277,7 +1295,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 			 * window before the non-arbiter secondary-index inserts.
 			 */
 			if (i == PrimaryIndexNumber)
-				fire_sk_modify_pending_stopevent(descr);
+				fire_sk_modify_pending_stopevent(descr, 1, false);
 
 			if (result != OBTreeModifyResultInserted)
 			{
@@ -2262,7 +2280,7 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 								   (Pointer) oldPkey, BTreeKeyBound,
 								   oxid, csn, RowLockNoKeyUpdate,
 								   hint, &callbackInfo);
-	fire_sk_modify_pending_stopevent(descr);
+	fire_sk_modify_pending_stopevent(descr, 1, false);
 
 	if (modify_result == OBTreeModifyResultLocked)
 	{
@@ -2370,7 +2388,7 @@ o_tbl_indices_reinsert(OTableDescr *descr,
 							  (Pointer) newPkey, BTreeKeyBound,
 							  oxid, csn, RowLockUpdate,
 							  NULL, &insertCallbackInfo) == OBTreeModifyResultInserted;
-	fire_sk_modify_pending_stopevent(descr);
+	fire_sk_modify_pending_stopevent(descr, 1, false);
 	((OTableSlot *) newSlot)->version = o_tuple_get_version(((OTableSlot *) newSlot)->tuple);
 
 	if (inserted)
@@ -2503,7 +2521,7 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
 											  (Pointer) key, BTreeKeyBound,
 											  oxid, csn, hint,
 											  &callbackInfo);
-	fire_sk_modify_pending_stopevent(descr);
+	fire_sk_modify_pending_stopevent(descr, 1, false);
 
 	slot = update_arg_get_slot(arg);
 	csn = arg->csn;

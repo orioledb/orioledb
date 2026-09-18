@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import io
 import os
 import random
 import subprocess
 import time
+from threading import Thread
 
 from .base_test import BaseTest
 from .base_test import DM_LOG_WRITES_ENABLED
@@ -2729,6 +2731,127 @@ class RecoveryTest(BaseTest):
 		    node.execute(
 		        'postgres',
 		        "SELECT orioledb_tbl_check('o_sk_self'::regclass)")[0][0])
+		node.stop()
+
+	def _sk_modify_pending_counts(self, node):
+		"""
+		Count the rows of o_sk_pending twice: once over the primary index
+		and once over the secondary one.  Forcing the plans is the whole
+		point -- a count that both times comes off the PK cannot tell a
+		missing secondary entry from a present one -- so assert the plans
+		as well.
+		"""
+		con = node.connect()
+		con.execute("SET enable_indexscan = off; SET enable_bitmapscan = off;")
+		pk_plan = con.execute("EXPLAIN SELECT count(*) FROM o_sk_pending;")
+		n_pk = con.execute("SELECT count(*) FROM o_sk_pending;")[0][0]
+		con.execute("RESET enable_indexscan; RESET enable_bitmapscan;"
+		            "SET enable_seqscan = off;")
+		sk_query = "SELECT count(*) FROM o_sk_pending WHERE token > 0;"
+		sk_plan = con.execute("EXPLAIN " + sk_query)
+		n_sk = con.execute(sk_query)[0][0]
+		con.close()
+
+		self.assertTrue(any("Seq Scan" in row[0] for row in pk_plan),
+		                f"primary count stopped reading the PK: {pk_plan}")
+		self.assertTrue(
+		    any("o_sk_pending_token_idx" in row[0] for row in sk_plan),
+		    f"secondary count stopped reading the SK: {sk_plan}")
+		return n_pk, n_sk
+
+	def test_recovery_sk_modify_pending_multi_insert(self):
+		"""
+		COPY applies a whole buffer of rows to the primary index in one
+		o_tbl_multi_insert() call, WAL-logs them, and only then lets the
+		executor write their secondary-index entries.  A CHECKPOINT landing
+		in that window therefore owes a fix-up for every row of the batch:
+		their WAL sits before the new checkpoint's toast-consistent
+		boundary, so replay re-applies it to the primary index alone.
+
+		Parking at the batchComplete event puts the checkpoint exactly
+		there.  While the marker was a single undo location it remembered
+		the last row of the batch only -- the one row that needed no
+		fix-up, its WAL still sitting unflushed in the backend's local
+		buffer -- and recovery came up with the other ~700 rows present in
+		the table and absent from the secondary index.
+		"""
+		node = self._sk_modify_pending_setup()
+		# Enough rows to overflow the 8 kB local WAL buffer several times
+		# over while the batch is being logged, which is what puts their
+		# records before the checkpoint boundary.  Also the number of rows
+		# copyfrom.c buffers before it flushes, so this is one batch.
+		nrows = 1000
+		expected_rows = 5 + nrows
+
+		con_ctl = node.connect()
+		con_ctl.execute("SET application_name = 's_ctl';")
+		con_copy = node.connect()
+		con_copy.execute("SET application_name = 's_copy';")
+		con_copy.commit()
+		copy_pid = con_copy.execute("SELECT pg_backend_pid();")[0][0]
+		con_copy.commit()
+
+		con_ctl.execute("SELECT pg_stopevent_set('sk_modify_pending', "
+		                "'$applicationName == \"s_copy\" "
+		                "&& $.batchComplete == true');")
+
+		rows = io.StringIO("".join("%d\t%d\n" % (i, i)
+		                           for i in range(100, 100 + nrows)))
+		copy_error = []
+
+		def do_copy():
+			try:
+				con_copy.cursor.copy_expert("COPY o_sk_pending FROM STDIN",
+				                            rows)
+				con_copy.commit()
+			except Exception as e:
+				copy_error.append(e)
+
+		copy_thread = Thread(target=do_copy)
+		copy_thread.start()
+		try:
+			# Bounded, unlike wait_stopevent(): should COPY ever stop going
+			# through o_tbl_multi_insert() the event never fires, and an
+			# armed stopevent left waiting is how this test would turn into
+			# a CI cell that runs until its own timeout.
+			deadline = time.time() + 60
+			while time.time() < deadline:
+				if node.execute(
+				    'postgres', f"SELECT EXISTS(SELECT 1 FROM pg_stopevents() "
+				    f"WHERE waiter_pids @> ARRAY[{copy_pid}])")[0][0]:
+					break
+				time.sleep(0.1)
+			else:
+				raise AssertionError(
+				    "COPY never parked at sk_modify_pending: it is not "
+				    "reaching o_tbl_multi_insert()'s batchComplete event")
+
+			con_ctl.execute("CHECKPOINT;")
+		finally:
+			con_ctl.execute("SELECT pg_stopevent_reset('sk_modify_pending');")
+			copy_thread.join()
+		self.assertEqual(copy_error, [])
+
+		live_pk, live_sk = self._sk_modify_pending_counts(node)
+		self.assertEqual((live_pk, live_sk), (expected_rows, expected_rows),
+		                 f"PK/SK diverged before crash: {live_pk}/{live_sk}")
+
+		con_ctl.close()
+		con_copy.close()
+
+		self.crash_with_os_buffer_loss()
+		node.start()
+
+		n_pk, n_sk = self._sk_modify_pending_counts(node)
+		self.assertEqual(
+		    n_sk, n_pk,
+		    f"PK rows ({n_pk}) != SK rows ({n_sk}) after recovery: the "
+		    f"batch's fix-up covered only part of it")
+		self.assertEqual(n_pk, expected_rows)
+		self.assertTrue(
+		    node.execute(
+		        'postgres',
+		        "SELECT orioledb_tbl_check('o_sk_pending'::regclass)")[0][0])
 		node.stop()
 
 	def test_recovery_sk_modify_pending_on_conflict(self):
