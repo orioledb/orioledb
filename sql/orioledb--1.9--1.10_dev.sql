@@ -21,3 +21,8 @@ CREATE FUNCTION orioledb_test_wal_parse_relation(datoid oid,
 RETURNS text
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_test_deserialize_string(value bytea)
+RETURNS bool
+AS 'MODULE_PATHNAME'
+VOLATILE STRICT LANGUAGE C;
