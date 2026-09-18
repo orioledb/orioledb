@@ -436,6 +436,7 @@ extern void clear_fixed_shmem_key(OFixedShmemKey *dst);
 extern OTuple fixed_shmem_key_get_tuple(OFixedShmemKey *src);
 extern void copy_from_fixed_shmem_key(OFixedKey *dst, OFixedShmemKey *src);
 
+extern bool page_struct_is_valid(Page p);
 extern OTuple page_get_hikey(Page p);
 extern int	page_get_hikey_size(Page p);
 extern void page_set_hikey_flags(Page p, uint8 flags);

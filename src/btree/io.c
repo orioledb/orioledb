@@ -1559,6 +1559,15 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 	store_read_page_checkpoint_stats(((BTreePageHeader *) img)->o_header.checkpointNum);
 #endif
 
+	/*
+	 * The image is whole and the checksum says these are the bytes that were
+	 * stored, which is not the same as them describing a page.  Everything
+	 * downstream computes offsets and lengths out of the layout fields, so
+	 * check they fit the page before anybody does.
+	 */
+	if (!page_struct_is_valid(img))
+		return OReadPageResultStructureInvalid;
+
 	return OReadPageResultOk;
 }
 
@@ -1774,7 +1783,8 @@ load_page(OBTreeFindPageContext *context)
 		if (orioledb_s3_mode)
 			chkpNum = S3_GET_CHKP_NUM(page_desc->fileExtent.off);
 
-		if (read_result == OReadPageResultChecksumFailed)
+		if (read_result == OReadPageResultChecksumFailed ||
+			read_result == OReadPageResultStructureInvalid)
 			ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
 							errmsg("invalid page with file offset " UINT64_FORMAT " in %s",
 								   DOWNLINK_GET_DISK_OFF(downlink),

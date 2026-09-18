@@ -1801,7 +1801,8 @@ read_disk_leaf_into_img(BTreeSeqScan *scan, uint64 downlinkLoc, CommitSeqNo csn)
 
 	if (read_result != OReadPageResultOk)
 	{
-		if (read_result == OReadPageResultChecksumFailed)
+		if (read_result == OReadPageResultChecksumFailed ||
+			read_result == OReadPageResultStructureInvalid)
 			ereport(ERROR,
 					(errcode(ERRCODE_DATA_CORRUPTED),
 					 errmsg("invalid leaf page with file offset " UINT64_FORMAT " read from disk",
