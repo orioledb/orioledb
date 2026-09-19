@@ -2,27 +2,16 @@
 # coding: utf-8
 
 import contextlib
-import os
 import time
-import unittest
 
 from threading import Thread
 
 from .base_test import BaseTest
 
 
-# Skipped under valgrind because stopping the standby hangs there, and the
-# hang is not this test's: the logs of the run that first showed it have the
-# test park, scan, disarm its stop event and ask for shutdown inside 27
-# seconds, and then the standby never finishes shutting down.  Its startup
-# process stays in shm_mq_send() to recovery worker 2's queue -- a worker
-# that exited seconds earlier -- and PGCTLTIMEOUT is 3000 under valgrind, so
-# each node costs up to 50 minutes and the cell dies on its own timeout.
-#
-# Re-enable once issue #1197 is fixed.
-@unittest.skipIf(
-    os.environ.get('USE_VALGRIND') == '1',
-    'stopping a standby mid-replay hangs under valgrind, see issue #1197')
+# DIAGNOSTIC BRANCH ONLY -- the valgrind skip is lifted on purpose so the
+# hang of issue #1197 can recur with the improved dump from list_stuck.sh.
+# Do not merge this branch.
 class EvictSeqScanRaceTest(BaseTest):
 	"""A sequential scan must not start on a tree that is being evicted.
 
