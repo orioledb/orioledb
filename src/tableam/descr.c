@@ -18,6 +18,7 @@
 #include "btree/io.h"
 #include "btree/iterator.h"
 #include "btree/modify.h"
+#include "btree/scan.h"
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "catalog/free_extents.h"
@@ -520,9 +521,9 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	else
 	{
 		/*
-		 * o_btree_load_shmem() must be called only under relation locks, in
-		 * this state BTree can not be evicted and removed from ShareDescr
-		 * cache because AccessExclusiveLock needed for this actions.
+		 * Whoever holds the shared root info holds pages: an evictor takes
+		 * the entry out before it hands them back, under the insert lock this
+		 * lookup goes through.
 		 */
 		Assert(OInMemoryBlknoIsValid(sharedRootInfo->rootInfo.rootPageBlkno));
 		Assert(OInMemoryBlknoIsValid(sharedRootInfo->rootInfo.metaPageBlkno));
@@ -553,10 +554,23 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 void
 o_btree_load_shmem(BTreeDescr *desc)
 {
+	OInMemoryBlkno metaPageBlkno = desc->rootInfo.metaPageBlkno;
 	bool		result PG_USED_FOR_ASSERTS_ONLY;
 
 	result = o_btree_load_shmem_internal(desc, false);
 	Assert(result == true);
+
+	/*
+	 * If that installed a new incarnation, this backend's running scans are
+	 * still counted against the meta page of the old one, where nothing asks
+	 * about them any more.  Move them over.
+	 *
+	 * Compare first: this function is on the way into every find_page(), and
+	 * walking the list of open scans on each of them would be paying for a
+	 * reload that almost never happens.
+	 */
+	if (desc->rootInfo.metaPageBlkno != metaPageBlkno)
+		btree_seq_scans_reregister(desc);
 }
 
 bool

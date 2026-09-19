@@ -1331,7 +1331,22 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 	if (!BTREE_PAGE_FIND_IS(context, TRY_LOCK))
 	{
+		OInMemoryBlkno rootBlkno = desc->rootInfo.rootPageBlkno;
+		uint32		rootPageChangeCount = desc->rootInfo.rootPageChangeCount;
+
 		o_btree_load_shmem(desc);
+
+		/*
+		 * The hint names a page of the incarnation the caller was looking at.
+		 * If loading just replaced that incarnation -- the tree was evicted
+		 * and read back in the meantime -- the hint names a page the pool has
+		 * since handed to somebody else, and descending from it would walk
+		 * another tree.  There is nothing to refind from, so go down from the
+		 * new root instead, which is what an invalid hint already does below.
+		 */
+		if (desc->rootInfo.rootPageBlkno != rootBlkno ||
+			desc->rootInfo.rootPageChangeCount != rootPageChangeCount)
+			return find_page(context, key, keyType, level);
 	}
 	else
 	{
