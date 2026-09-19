@@ -4,7 +4,9 @@
 import io
 import os
 import random
+import shutil
 import subprocess
+import tempfile
 import time
 from threading import Thread
 
@@ -16,6 +18,7 @@ from .base_test import wait_stopevent
 from .base_test import wait_checkpointer_stopevent
 
 from testgres.enums import NodeStatus
+from testgres.exceptions import QueryException
 
 
 class RecoveryTest(BaseTest):
@@ -3023,6 +3026,1816 @@ class RecoveryTest(BaseTest):
 		with open(os.path.join(node.logs_dir, 'postgresql.log')) as f:
 			log = f.read()
 		self.assertIn("corrupted checkpoint xid file: invalid kind", log)
+
+	def test_recovery_alter_type_indexed_pk(self):
+		"""
+		ALTER COLUMN TYPE on a PRIMARY KEY column triggers a heap rewrite
+		(rebuild_indices) via the meta-unlock path.  Crash before the
+		post-rewrite checkpoint and verify recovery replays the rebuild
+		so the PK index is consistent with the heap data.
+
+		Covers the ALTER TABLE SET TYPE scenario from the pg_tests
+		regression suite but with the crash-recovery dimension that
+		alter_type.sql does not exercise.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_alt_type (
+				id int NOT NULL,
+				val text NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			INSERT INTO o_alt_type
+				SELECT i, 'val' || i FROM generate_series(1, 100) i;
+			CHECKPOINT;
+		""")
+		# ALTER the PK column from int to bigint: binary-compatible but
+		# still triggers a meta-unlock + index rebuild path.
+		node.safe_psql('postgres',
+		               "ALTER TABLE o_alt_type ALTER COLUMN id TYPE bigint;")
+		# insert rows after the ALTER so recovery must replay both the
+		# rebuild and the post-rebuild inserts
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_alt_type
+				SELECT 1000 + i, 'new' || i FROM generate_series(1, 50) i;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		self.assertEqual(
+		    150,
+		    node.execute("SELECT count(*) FROM o_alt_type;")[0][0])
+		self.assertEqual(
+		    1,
+		    node.execute("SELECT count(*) FROM o_alt_type WHERE id = 1;")[0]
+		    [0])
+		self.assertEqual(
+		    1,
+		    node.execute("SELECT count(*) FROM o_alt_type WHERE id = 1050;")[0]
+		    [0])
+		# PK index must be usable after recovery
+		node.execute("SET enable_seqscan = off;")
+		self.assertEqual(
+		    'val1',
+		    node.execute("SELECT val FROM o_alt_type WHERE id = 1;")[0][0])
+		self.assertEqual(
+		    'new1',
+		    node.execute("SELECT val FROM o_alt_type WHERE id = 1001;")[0][0])
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_alt_type'::regclass);")
+		    [0][0])
+		node.stop()
+
+	def test_recovery_alter_type_secondary_index(self):
+		"""
+		ALTER COLUMN TYPE on a column that is part of a SECONDARY index.
+		The index must be rebuilt to match the new type representation.
+		Crash before checkpoint and verify the secondary index returns
+		correct results after recovery.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_alt_type_sk (
+				id int NOT NULL PRIMARY KEY,
+				val varchar(10) NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_alt_type_sk_ix1 ON o_alt_type_sk (val);
+			INSERT INTO o_alt_type_sk
+				SELECT i, 'v' || i FROM generate_series(1, 100) i;
+			CHECKPOINT;
+		""")
+		# ALTER the indexed (non-PK) column from varchar to text: triggers
+		# a rewrite of the secondary index via the meta-unlock path.
+		node.safe_psql(
+		    'postgres',
+		    "ALTER TABLE o_alt_type_sk ALTER COLUMN val TYPE text;")
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_alt_type_sk
+				SELECT 200 + i, 'new' || i FROM generate_series(1, 50) i;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		self.assertEqual(
+		    150,
+		    node.execute("SELECT count(*) FROM o_alt_type_sk;")[0][0])
+		# secondary index must be usable and return correct results
+		result = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_alt_type_sk WHERE val LIKE 'v%%';
+		""")
+		self.assertEqual(100, result[0][0])
+		result = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_alt_type_sk WHERE val LIKE 'new%%';
+		""")
+		self.assertEqual(50, result[0][0])
+		self.assertTrue(
+		    node.execute(
+		        "SELECT orioledb_tbl_check('o_alt_type_sk'::regclass);")[0][0])
+		node.stop()
+
+	def test_recovery_alter_type_using_expr(self):
+		"""
+		ALTER COLUMN TYPE with a USING expression that transforms the
+		data (int -> text via a computed expression).  Crash before
+		checkpoint and verify the converted data is intact after
+		recovery, exercising the rewrite path where the new tuple values
+		are computed from the old ones.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_alt_using (
+				id int NOT NULL PRIMARY KEY,
+				code int NOT NULL
+			) USING orioledb;
+			INSERT INTO o_alt_using
+				SELECT i, i * 10 FROM generate_series(1, 100) i;
+			CHECKPOINT;
+		""")
+		node.safe_psql(
+		    'postgres', """
+			ALTER TABLE o_alt_using
+				ALTER COLUMN code TYPE text USING 'C' || code::text;
+		""")
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_alt_using
+				SELECT 200 + i, 'C' || (i * 10)::text
+				FROM generate_series(1, 50) i;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		self.assertEqual(
+		    150,
+		    node.execute("SELECT count(*) FROM o_alt_using;")[0][0])
+		self.assertEqual(
+		    'C10',
+		    node.execute("SELECT code FROM o_alt_using WHERE id = 1;")[0][0])
+		self.assertEqual(
+		    'C10',
+		    node.execute("SELECT code FROM o_alt_using WHERE id = 201;")[0][0])
+		node.stop()
+
+	def test_recovery_alter_type_collation_change(self):
+		"""
+		ALTER COLUMN TYPE that changes the collation of an indexed text
+		column.  The collation change forces an index rewrite because the
+		comparator (sort order) changes.  Crash before checkpoint and
+		verify the index returns correctly-ordered results after recovery.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_alt_coll (
+				id int NOT NULL PRIMARY KEY,
+				val text COLLATE "C" NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_alt_coll_ix1 ON o_alt_coll (val);
+			INSERT INTO o_alt_coll
+				SELECT i, chr(96 + (i % 26) + 1) || i::text
+				FROM generate_series(1, 50) i;
+			CHECKPOINT;
+		""")
+		# Changing collation from "C" to "POSIX" forces index rewrite
+		node.safe_psql(
+		    'postgres', """
+			ALTER TABLE o_alt_coll
+				ALTER COLUMN val TYPE text COLLATE "POSIX";
+		""")
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_alt_coll
+				SELECT 200 + i, chr(96 + (i % 26) + 1) || (200 + i)::text
+				FROM generate_series(1, 20) i;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		self.assertEqual(
+		    70,
+		    node.execute("SELECT count(*) FROM o_alt_coll;")[0][0])
+		# index must return sorted results in the new collation
+		result = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT val FROM o_alt_coll ORDER BY val LIMIT 5;
+		""")
+		self.assertEqual(len(result), 5)
+		# verify the sorted order is correct
+		vals = [r[0] for r in result]
+		self.assertEqual(vals, sorted(vals))
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_alt_coll'::regclass);")
+		    [0][0])
+		node.stop()
+
+	def test_recovery_numeric_comparator_update(self):
+		"""
+		numeric-typed secondary index with UPDATEs that change the value
+		in ways that exercise the numeric comparator (varying scales,
+		leading zeros, values that are numerically equal but have
+		different representations).  Crash and verify the SK tree is
+		consistent with the PK tree after recovery.
+
+		numeric is a varlena type whose comparison depends on the scale
+		and precision, not just the byte representation -- a mismatch
+		between the comparator used at insert time and at recovery time
+		would corrupt the secondary index.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_num (
+				id int NOT NULL PRIMARY KEY,
+				val numeric NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_num_ix1 ON o_num (val);
+			INSERT INTO o_num
+				SELECT i, i * 1.000 FROM generate_series(1, 100) i;
+			CHECKPOINT;
+		""")
+		# UPDATEs that change numeric scale and precision: some values
+		# become numerically equal to others (e.g. 10.0 -> 10.00) which
+		# stresses the comparator's equality path in the SK tree
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_num SET val = val + 0.500 WHERE id <= 50;
+			UPDATE o_num SET val = val::numeric(20, 4) WHERE id > 50;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		n_pk = node.execute("SELECT count(*) FROM o_num;")[0][0]
+		n_sk = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_num;
+		""")[0][0]
+		self.assertEqual(n_pk, n_sk)
+		# verify a specific value survived with the correct scale
+		self.assertEqual(
+		    1.5,
+		    float(node.execute("SELECT val FROM o_num WHERE id = 1;")[0][0]))
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_num'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def test_recovery_float8_nan_comparator(self):
+		"""
+		float8 secondary index containing NaN, +inf, -inf and -0.0.
+		These values exercise edge cases of the float8 comparator (NaN
+		sorting, signed-zero handling).  UPDATEs that flip values between
+		normal and NaN/inf stress the comparator's ordering path.  Crash
+		and verify the SK tree is consistent.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_flt (
+				id int NOT NULL PRIMARY KEY,
+				val float8 NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_flt_ix1 ON o_flt (val);
+			INSERT INTO o_flt VALUES
+				(1, 'NaN'), (2, 'Infinity'), (3, '-Infinity'),
+				(4, -0.0), (5, 0.0), (6, 42.5);
+			CHECKPOINT;
+		""")
+		# UPDATEs that cross comparator boundaries: NaN <-> normal,
+		# -0.0 <-> 0.0 (numerically equal but different bits)
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_flt SET val = 99.9 WHERE val = 'NaN';
+			UPDATE o_flt SET val = 'NaN' WHERE id = 6;
+			UPDATE o_flt SET val = 0.0 WHERE val = -0.0;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		n_pk = node.execute("SELECT count(*) FROM o_flt;")[0][0]
+		n_sk = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_flt;
+		""")[0][0]
+		self.assertEqual(n_pk, n_sk)
+		# NaN is present (id=6 was set to NaN): in PostgreSQL NaN = NaN
+		# is true, so check via text representation
+		self.assertEqual(
+		    'NaN',
+		    node.execute("SELECT val::text FROM o_flt WHERE id = 6;")[0][0])
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_flt'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def test_recovery_uuid_index_update(self):
+		"""
+		uuid secondary index with UPDATEs that change the indexed value.
+		Crash and verify SK consistency.  uuid is a fixed-size 16-byte
+		type compared byte-by-byte; exercises the fixed-length varlena
+		path in the comparator.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_uuid (
+				id int NOT NULL PRIMARY KEY,
+				val uuid NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_uuid_ix1 ON o_uuid (val);
+			INSERT INTO o_uuid
+				SELECT i, md5(i::text || 'seed')::uuid
+				FROM generate_series(1, 100) i;
+			CHECKPOINT;
+		""")
+		# swap uuid values between rows to exercise the delete+insert
+		# path in the SK tree
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_uuid SET val = (
+				SELECT val FROM o_uuid u2 WHERE u2.id = 101 - o_uuid.id
+			) WHERE id <= 50;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		n_pk = node.execute("SELECT count(*) FROM o_uuid;")[0][0]
+		n_sk = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_uuid;
+		""")[0][0]
+		self.assertEqual(n_pk, n_sk)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_uuid'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def test_recovery_bytea_index_update(self):
+		"""
+		bytea secondary index with UPDATEs that change the indexed value.
+		Crash and verify SK consistency.  bytea is a varlena type with
+		no collation, compared by raw bytes.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_bytea (
+				id int NOT NULL PRIMARY KEY,
+				val bytea NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_bytea_ix1 ON o_bytea (val);
+			INSERT INTO o_bytea
+				SELECT i, ('\\x' || lpad(to_hex(i), 8, '0'))::bytea
+				FROM generate_series(1, 100) i;
+			CHECKPOINT;
+		""")
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_bytea SET val = ('\\x' || lpad(to_hex(id * 2), 8, '0'))::bytea
+				WHERE id <= 50;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		n_pk = node.execute("SELECT count(*) FROM o_bytea;")[0][0]
+		n_sk = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_bytea;
+		""")[0][0]
+		self.assertEqual(n_pk, n_sk)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_bytea'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def test_recovery_partial_index_predicate_move(self):
+		"""
+		Partial index where UPDATEs move rows IN and OUT of the index
+		predicate.  Recovery must correctly apply the predicate to
+		decide whether to insert or delete SK entries.  Crash and verify
+		the partial index contains exactly the rows matching the
+		predicate.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_partial (
+				id int NOT NULL PRIMARY KEY,
+				status int NOT NULL,
+				val text NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_partial_active_ix ON o_partial (val)
+				WHERE status > 0;
+			INSERT INTO o_partial
+				SELECT i, CASE WHEN i % 3 = 0 THEN -1 ELSE 1 END,
+					   'v' || i
+				FROM generate_series(1, 60) i;
+			CHECKPOINT;
+		""")
+		# Move rows in and out of the predicate: some status=-1 rows
+		# become >0 (enter the index), some status>0 rows become -1
+		# (leave the index)
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_partial SET status = 1 WHERE status < 0 AND id <= 30;
+			UPDATE o_partial SET status = -1 WHERE status > 0 AND id > 30;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		# count via partial index scan
+		n_index = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_partial WHERE status > 0;
+		""")[0][0]
+		n_seq = node.execute("""
+			SET enable_seqscan = on;
+			SELECT count(*) FROM o_partial WHERE status > 0;
+		""")[0][0]
+		self.assertEqual(n_index, n_seq)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_partial'::regclass);")
+		    [0][0])
+		node.stop()
+
+	def test_recovery_expression_index_multi_expr_crash(self):
+		"""
+		Expression index on multiple computed columns.  Crash and verify
+		the expression index returns correct results after recovery.
+		Exercises the recovery path that must re-evaluate the expression
+		to build the SK key bound for each row.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_expr (
+				id int NOT NULL PRIMARY KEY,
+				a int NOT NULL,
+				b text NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_expr_ix1 ON o_expr ((a * 2), (upper(b)));
+			INSERT INTO o_expr
+				SELECT i, i, 'val' || i FROM generate_series(1, 100) i;
+			CHECKPOINT;
+		""")
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_expr SET a = a + 1000, b = upper(b) WHERE id <= 50;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		# verify data integrity: 50 rows have a > 1000 (the UPDATEd ones)
+		self.assertEqual(
+		    50,
+		    node.execute("SELECT count(*) FROM o_expr WHERE a > 1000;")[0][0])
+		# expression index is usable: lookup via the exact expression
+		self.assertEqual(
+		    1,
+		    node.execute("""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT count(*) FROM o_expr WHERE (a * 2) = 2002;
+			""")[0][0])
+		# second expression column also usable
+		result = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_expr WHERE upper(b) = 'VAL1';
+		""")
+		self.assertEqual(1, result[0][0])
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_expr'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def test_recovery_add_pk_no_bridge_crash(self):
+		"""
+		ADD PRIMARY KEY on a table that has no bridge index, then crash
+		before checkpoint.  Recovery must replay the heap rewrite
+		(rebuild_indices) so the PK is present and usable.  This is the
+		native-PK counterpart to test_add_pk_with_bridge_index_crash.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_add_pk (
+				id int NOT NULL,
+				val text NOT NULL
+			) USING orioledb;
+			INSERT INTO o_add_pk
+				SELECT i, 'val' || i FROM generate_series(1, 100) i;
+			CHECKPOINT;
+		""")
+		node.safe_psql('postgres',
+		               "ALTER TABLE o_add_pk ADD PRIMARY KEY (id);")
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_add_pk
+				SELECT 200 + i, 'new' || i FROM generate_series(1, 50) i;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		self.assertEqual(150,
+		                 node.execute("SELECT count(*) FROM o_add_pk;")[0][0])
+		# PK must be present after recovery
+		self.assertEqual(
+		    1,
+		    node.execute("""
+				SELECT count(*) FROM pg_constraint
+					WHERE conrelid = 'o_add_pk'::regclass AND contype = 'p';
+			""")[0][0])
+		# PK usable via index scan
+		self.assertEqual(
+		    'val1',
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT val FROM o_add_pk WHERE id = 1;
+			""")[0][0])
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_add_pk'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def test_recovery_drop_pk_no_bridge_crash(self):
+		"""
+		DROP PRIMARY KEY on a table with no bridge index, then crash
+		before checkpoint.  Recovery must replay the rebuild so the PK
+		is gone and the table data is intact.  Native-PK counterpart to
+		test_drop_pk_with_bridge_index_crash.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_drop_pk (
+				id int NOT NULL,
+				val text NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			CREATE INDEX o_drop_pk_ix1 ON o_drop_pk (val);
+			INSERT INTO o_drop_pk
+				SELECT i, 'val' || i FROM generate_series(1, 100) i;
+			CHECKPOINT;
+		""")
+		node.safe_psql(
+		    'postgres',
+		    "ALTER TABLE o_drop_pk DROP CONSTRAINT o_drop_pk_pkey;")
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_drop_pk
+				SELECT 200 + i, 'new' || i FROM generate_series(1, 50) i;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		self.assertEqual(150,
+		                 node.execute("SELECT count(*) FROM o_drop_pk;")[0][0])
+		# PK must be gone after recovery
+		self.assertEqual(
+		    0,
+		    node.execute("""
+				SELECT count(*) FROM pg_constraint
+					WHERE conrelid = 'o_drop_pk'::regclass AND contype = 'p';
+			""")[0][0])
+		# secondary index still usable
+		result = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_drop_pk WHERE val LIKE 'val%%';
+		""")
+		self.assertEqual(100, result[0][0])
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_drop_pk'::regclass);")
+		    [0][0])
+		node.stop()
+
+	def test_recovery_alter_type_add_column_same_txn_crash(self):
+		"""
+		In one transaction: ALTER COLUMN TYPE (triggering rebuild) AND
+		ADD COLUMN with a default.  Crash before checkpoint.  Recovery
+		must replay the combined meta-unlock: the rebuilt table must have
+		the new type, the new column, and the default value filled in for
+		all existing rows.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_alt_add (
+				id int NOT NULL PRIMARY KEY,
+				code int NOT NULL
+			) USING orioledb;
+			INSERT INTO o_alt_add
+				SELECT i, i * 10 FROM generate_series(1, 100) i;
+			CHECKPOINT;
+		""")
+		with node.connect() as con:
+			con.begin()
+			con.execute("ALTER TABLE o_alt_add ALTER COLUMN code TYPE bigint;")
+			con.execute(
+			    "ALTER TABLE o_alt_add ADD COLUMN flag text DEFAULT 'Y';")
+			con.commit()
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_alt_add
+				SELECT 200 + i, i * 10, 'N'
+				FROM generate_series(1, 50) i;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		self.assertEqual(150,
+		                 node.execute("SELECT count(*) FROM o_alt_add;")[0][0])
+		# existing rows get the default 'Y'
+		self.assertEqual(
+		    'Y',
+		    node.execute("SELECT flag FROM o_alt_add WHERE id = 1;")[0][0])
+		# new rows get the explicit 'N'
+		self.assertEqual(
+		    'N',
+		    node.execute("SELECT flag FROM o_alt_add WHERE id = 201;")[0][0])
+		# the ALTER TYPE took effect
+		self.assertEqual(
+		    10,
+		    node.execute("SELECT code FROM o_alt_add WHERE id = 1;")[0][0])
+		node.stop()
+
+	def _tblspc_dir(self, name):
+		"""
+		Create an empty directory for a TABLESPACE inside the node's
+		base_dir (under tmp_check_t).  Because it lives under base_dir it
+		is removed together with the node on a successful tearDown, so no
+		explicit cleanup is needed.  The directory is a sibling of the
+		'data' pgdata dir so PostgreSQL accepts it as a tablespace location.
+		"""
+		path = os.path.join(self.node.base_dir, name)
+		os.makedirs(path, exist_ok=True)
+		return path
+
+	def test_recovery_alter_type_pk_non_binary_compatible(self):
+		"""
+		ALTER COLUMN TYPE on a PRIMARY KEY column where the old and new
+		types are NOT binary-compatible (int -> text via a USING
+		expression).  This forces a full heap rewrite plus a PK index
+		rebuild whose key representation changes from a 4-byte int to a
+		varlena text datum.  Crash before the post-rewrite checkpoint and
+		verify recovery replays the rebuild so the PK is usable and the
+		new key type is consistent.  alter_type.sql only checks the
+		post-ALTER state on a live node; this adds the crash-recovery
+		dimension that pg_tests does not exercise.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_alt_pk_text (
+				id int NOT NULL,
+				val text NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			INSERT INTO o_alt_pk_text
+				SELECT i, 'v' || i FROM generate_series(1, 100) i;
+			CHECKPOINT;
+		""")
+		# int -> text is NOT binary compatible: every PK key datum must be
+		# re-materialized, exercising the comparator/key-bound recovery path
+		node.safe_psql('postgres',
+		               "ALTER TABLE o_alt_pk_text "
+		               "ALTER COLUMN id TYPE text USING id::text;")
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_alt_pk_text
+				SELECT (1000 + i)::text, 'new' || i
+				FROM generate_series(1, 50) i;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		self.assertEqual(
+		    150,
+		    node.execute("SELECT count(*) FROM o_alt_pk_text;")[0][0])
+		# PK index usable with the new text key type
+		self.assertEqual(
+		    'v1',
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT val FROM o_alt_pk_text WHERE id = '1';
+			""")[0][0])
+		self.assertEqual(
+		    'new1',
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT val FROM o_alt_pk_text WHERE id = '1001';
+			""")[0][0])
+		self.assertTrue(
+		    node.execute(
+		        "SELECT orioledb_tbl_check('o_alt_pk_text'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def test_recovery_alter_type_composite_pk(self):
+		"""
+		ALTER COLUMN TYPE on one column of a COMPOSITE primary key
+		(int -> bigint, binary-compatible but the PK index has multiple
+		key columns).  Crash before checkpoint and verify recovery replays
+		the rebuild so the composite PK returns correct ordered results.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_comp_pk (
+				a int NOT NULL,
+				b int NOT NULL,
+				val text NOT NULL,
+				PRIMARY KEY (a, b)
+			) USING orioledb;
+			INSERT INTO o_comp_pk
+				SELECT i, i * 2, 'v' || i FROM generate_series(1, 80) i;
+			CHECKPOINT;
+		""")
+		node.safe_psql('postgres',
+		               "ALTER TABLE o_comp_pk ALTER COLUMN a TYPE bigint;")
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_comp_pk
+				SELECT 1000 + i, i * 3, 'new' || i
+				FROM generate_series(1, 40) i;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		self.assertEqual(
+		    120, node.execute("SELECT count(*) FROM o_comp_pk;")[0][0])
+		# composite PK index usable for an exact match on both columns
+		self.assertEqual(
+		    'v1',
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT val FROM o_comp_pk WHERE a = 1 AND b = 2;
+			""")[0][0])
+		# ordered scan via the composite PK after recovery
+		result = node.execute("""
+			SET enable_seqscan = off;
+			SELECT val FROM o_comp_pk ORDER BY a, b LIMIT 3;
+		""")
+		self.assertEqual([r[0] for r in result], ['v1', 'v2', 'v3'])
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_comp_pk'::regclass);")
+		    [0][0])
+		node.stop()
+
+	def test_recovery_alter_type_in_partial_predicate(self):
+		"""
+		ALTER COLUMN TYPE on a column that is BOTH indexed and referenced
+		in a partial index's WHERE predicate.  Recovery must rebuild the
+		partial index with the new type and re-evaluate the predicate so
+		the index contains exactly the rows matching the (possibly
+		type-changed) predicate.  Crash before checkpoint.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_alt_pred (
+				id int NOT NULL PRIMARY KEY,
+				status text NOT NULL,
+				val text NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_alt_pred_ix ON o_alt_pred (val)
+				WHERE status <> 'inactive';
+			INSERT INTO o_alt_pred
+				SELECT i,
+					   CASE WHEN i % 2 = 0 THEN 'inactive' ELSE 'active' END,
+					   'v' || i
+				FROM generate_series(1, 60) i;
+			CHECKPOINT;
+		""")
+		# text -> varchar: binary-compatible but forces a partial-index
+		# rewrite whose predicate must be re-evaluated with the new type
+		node.safe_psql(
+		    'postgres',
+		    "ALTER TABLE o_alt_pred "
+		    "ALTER COLUMN status TYPE varchar USING status::varchar;")
+		# move a previously-'inactive' row into the predicate
+		node.safe_psql(
+		    'postgres',
+		    "UPDATE o_alt_pred SET status = 'active' WHERE id = 2;")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		# rows matching the predicate via the partial index
+		n_index = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_alt_pred WHERE status <> 'inactive';
+		""")[0][0]
+		# same count via seqscan (ground truth)
+		n_seq = node.execute("""
+			SET enable_seqscan = on;
+			SELECT count(*) FROM o_alt_pred WHERE status <> 'inactive';
+		""")[0][0]
+		self.assertEqual(n_index, n_seq)
+		# id=2 was flipped into the predicate and must be index-visible
+		self.assertEqual(
+		    'active',
+		    node.execute("""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT status FROM o_alt_pred WHERE id = 2;
+			""")[0][0])
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_alt_pred'::regclass);")
+		    [0][0])
+		node.stop()
+
+	def test_recovery_weird_types_comparator(self):
+		"""
+		Secondary indexes on a set of 'weird' types whose comparators have
+		non-trivial byte representations: macaddr, inet, interval, money,
+		bit varying, jsonb, timestamp-with-typmod and an enum.  Updates
+		that move indexed values across comparator ordering boundaries
+		exercise the recovery-time comparator for each type.  Crash and
+		verify every secondary index stays consistent with the PK tree.
+
+		These types are accepted by orioledb's btree but are not covered
+		by the type-specific recovery tests (numeric/float8/uuid/bytea);
+		this closes that gap so a comparator mismatch on any of them
+		after recovery is caught.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TYPE recovery_weird_enum AS ENUM ('a', 'b', 'c', 'd');
+			CREATE TABLE o_weird (
+				id int NOT NULL PRIMARY KEY,
+				mac macaddr NOT NULL,
+				ip inet NOT NULL,
+				iv interval NOT NULL,
+				mn money NOT NULL,
+				bv bit varying(16) NOT NULL,
+				jb jsonb NOT NULL,
+				ts timestamp(3) NOT NULL,
+				en recovery_weird_enum NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_weird_mac_ix ON o_weird (mac);
+			CREATE INDEX o_weird_ip_ix ON o_weird (ip);
+			CREATE INDEX o_weird_iv_ix ON o_weird (iv);
+			CREATE INDEX o_weird_mn_ix ON o_weird (mn);
+			CREATE INDEX o_weird_bv_ix ON o_weird (bv);
+			CREATE INDEX o_weird_jb_ix ON o_weird (jb);
+			CREATE INDEX o_weird_ts_ix ON o_weird (ts);
+			CREATE INDEX o_weird_en_ix ON o_weird (en);
+		""")
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_weird
+			SELECT i,
+				   macaddr('08:00:2b:' ||
+						   lpad(to_hex((i / 16) % 256), 2, '0') || ':' ||
+						   lpad(to_hex(i % 256), 2, '0') || ':00'),
+				   ('10.0.0.' || (i % 200))::inet,
+				   make_interval(days => i, hours => i % 24),
+				   (i * 100)::money,
+				   (i % 65536)::bit(16),
+				   to_jsonb(row(i, 'x' || i)),
+				   timestamp '2000-01-01' + (i || ' days')::interval,
+				   CASE i % 4
+					   WHEN 0 THEN 'd'::recovery_weird_enum
+					   WHEN 1 THEN 'a'::recovery_weird_enum
+					   WHEN 2 THEN 'b'::recovery_weird_enum
+					   ELSE 'c'::recovery_weird_enum
+				   END
+			FROM generate_series(1, 80) i;
+			CHECKPOINT;
+		""")
+		# Updates that cross comparator boundaries for each type:
+		# ip moves to a different subnet, interval to negative-ish range,
+		# bit varying inverted (reverses byte order), enum 'a' -> 'd'.
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_weird
+				SET ip = ('10.0.1.' || (id % 200))::inet
+				WHERE id <= 30;
+			UPDATE o_weird
+				SET iv = make_interval(days => 1000 - id)
+				WHERE id <= 30;
+			UPDATE o_weird SET bv = ~ bv WHERE id <= 30;
+			UPDATE o_weird
+				SET en = 'd'::recovery_weird_enum
+				WHERE en = 'a'::recovery_weird_enum;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		n_pk = node.execute("SELECT count(*) FROM o_weird;")[0][0]
+		# Each secondary index must agree with the heap count when forced
+		# into an index scan over a predicate that matches every row.
+		checks = {
+			'mac': "mac IS NOT NULL",
+			'ip': "ip <<= '10.0.0.0/8'",
+			'iv': "iv > '-1 days'::interval",
+			'mn': "mn >= 0::money",
+			'bv': "bv IS NOT NULL",
+			'jb': "jb IS NOT NULL",
+			'ts': "ts >= timestamp '1999-01-01'",
+			'en': "en IS NOT NULL",
+		}
+		for col, pred in checks.items():
+			n_sk = node.execute(f"""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT count(*) FROM o_weird WHERE {pred};
+			""")[0][0]
+			self.assertEqual(
+			    n_sk, n_pk,
+			    f"secondary index on {col} diverged after recovery: "
+			    f"{n_sk} vs {n_pk}")
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_weird'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def test_recovery_weird_types_comparator_more(self):
+		"""
+		Second batch of 'weird' type secondary indexes exercising the
+		recovery-time comparator and the recovery-worker hash distribution
+		for types NOT covered by test_recovery_weird_types_comparator (which
+		covers macaddr/inet/interval/money/bit varying/jsonb/timestamp/enum)
+		or the per-type tests (numeric/float8/uuid/bytea).
+
+		Covers: timestamptz, timetz, time, date, bpchar (blank-padded),
+		name, cidr, macaddr8, tsvector, a named composite type and a text[]
+		array.  Each type's comparator has a non-trivial byte->order mapping
+		(timestamptz/timetz are zone-aware, bpchar ignores trailing spaces,
+		name is fixed NAMEDATALEN, tsvector compares lexeme lists, composite
+		and array use field-wise comparators).
+
+		recovery_pool_size is bumped to 8 so the per-key hash that routes
+		WAL records to recovery workers (spread_idx_modify) is spread across
+		workers; an inconsistency between the leaf-tuple hash and the
+		key-bound hash for any of these types trips the cassert
+		(hash == o_btree_hash(desc, key, BTreeKeyNonLeafKey)) and/or
+		corrupts the SK tree after crash recovery.  pg_tests does not
+		exercise these types under crash recovery.
+		"""
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "orioledb.recovery_pool_size = 8\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TYPE recovery_comp_t AS (a integer, b text);
+			CREATE TABLE o_weird2 (
+				id int NOT NULL PRIMARY KEY,
+				tsz timestamptz NOT NULL,
+				tz timetz NOT NULL,
+				tm time NOT NULL,
+				dt date NOT NULL,
+				pc bpchar(8) NOT NULL,
+				nm name NOT NULL,
+				cd cidr NOT NULL,
+				mc8 macaddr8 NOT NULL,
+				tsv tsvector NOT NULL,
+				cmp recovery_comp_t NOT NULL,
+				arr text[] NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_weird2_tsz_ix ON o_weird2 (tsz);
+			CREATE INDEX o_weird2_tz_ix ON o_weird2 (tz);
+			CREATE INDEX o_weird2_tm_ix ON o_weird2 (tm);
+			CREATE INDEX o_weird2_dt_ix ON o_weird2 (dt);
+			CREATE INDEX o_weird2_pc_ix ON o_weird2 (pc);
+			CREATE INDEX o_weird2_nm_ix ON o_weird2 (nm);
+			CREATE INDEX o_weird2_cd_ix ON o_weird2 (cd);
+			CREATE INDEX o_weird2_mc8_ix ON o_weird2 (mc8);
+			CREATE INDEX o_weird2_tsv_ix ON o_weird2 (tsv);
+			CREATE INDEX o_weird2_cmp_ix ON o_weird2 (cmp);
+			CREATE INDEX o_weird2_arr_ix ON o_weird2 (arr);
+		""")
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_weird2
+			SELECT i,
+				   timestamp '2000-01-01 00:00:00+00' + (i || ' hours')::interval,
+				   timetz '08:00:00+00' + (i || ' mins')::interval,
+				   time '00:01:00' + (i || ' mins')::interval,
+				   date '2000-01-01' + i,
+				   lpad(i::text, 8)::bpchar(8),
+				   (i::text)::name,
+				   ('10.0.0.0/' || (8 + i % 8))::cidr,
+				   ('00:00:00:00:00:' || lpad(to_hex(i % 256), 2, '0'))::macaddr8,
+				   to_tsvector('simple', 'word' || i || ' other'),
+				   (i, 'x' || i)::recovery_comp_t,
+				   ARRAY['a' || i, 'b' || i]
+			FROM generate_series(1, 80) i;
+			CHECKPOINT;
+		""")
+		# Updates that cross comparator boundaries for each type:
+		# timestamptz/time/date shift era, timetz zone jumps, bpchar flips
+		# leading<->trailing spaces, name reverses order, cidr to a
+		# different network, macaddr8 inverted, tsvector lexemes rewritten,
+		# composite field sign flipped, array element changed.
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_weird2
+				SET tsz = timestamp '1980-01-01 00:00:00+00' + (id || ' hours')::interval
+				WHERE id <= 30;
+			UPDATE o_weird2 SET tz = timetz '23:00:00+05' WHERE id <= 30;
+			UPDATE o_weird2 SET tm = tm + '12 hours'::interval WHERE id <= 30;
+			UPDATE o_weird2 SET dt = date '1970-01-01' + (id % 40) WHERE id <= 30;
+			UPDATE o_weird2 SET pc = rpad(id::text, 8)::bpchar(8) WHERE id <= 30;
+			UPDATE o_weird2 SET nm = ('zz' || id::text)::name WHERE id <= 30;
+			UPDATE o_weird2
+				SET cd = ('11.0.0.0/' || (8 + id % 8))::cidr WHERE id <= 30;
+			UPDATE o_weird2 SET mc8 = ~ mc8 WHERE id <= 30;
+			UPDATE o_weird2 SET tsv = to_tsvector('simple', 'aaa' || id) WHERE id <= 30;
+			UPDATE o_weird2
+				SET cmp = (id * 100, 'y' || id)::recovery_comp_t WHERE id <= 30;
+			UPDATE o_weird2 SET arr = ARRAY['z' || id] WHERE id <= 30;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		n_pk = node.execute("SELECT count(*) FROM o_weird2;")[0][0]
+		# Each secondary index must agree with the heap count when forced
+		# into an index scan over a predicate that matches every row.
+		checks = {
+			'tsz': "tsz IS NOT NULL",
+			'tz': "tz IS NOT NULL",
+			'tm': "tm IS NOT NULL",
+			'dt': "dt IS NOT NULL",
+			'pc': "pc IS NOT NULL",
+			'nm': "nm IS NOT NULL",
+			'cd': "cd IS NOT NULL",
+			'mc8': "mc8 IS NOT NULL",
+			'tsv': "tsv IS NOT NULL",
+			'cmp': "cmp IS NOT NULL",
+			'arr': "arr IS NOT NULL",
+		}
+		for col, pred in checks.items():
+			n_sk = node.execute(f"""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT count(*) FROM o_weird2 WHERE {pred};
+			""")[0][0]
+			self.assertEqual(
+			    n_sk, n_pk,
+			    f"secondary index on {col} diverged after recovery: "
+			    f"{n_sk} vs {n_pk}")
+		# A bitmap scan that re-checks the heap can mask a stale/duplicate
+		# SK entry (a replayed UPDATE whose old-key delete was skipped),
+		# so cross-check the live SK row count of every index against the
+		# heap: each non-partial secondary index holds exactly one live
+		# entry per live heap row.  orioledb_index_rows() reports total
+		# (live + dead) and dead separately, so live == total - dead;
+		# dead > 0 is normal right after UPDATEs (old versions await
+		# vacuum), but a stale LIVE entry (delete skipped) inflates live.
+		for col in checks.keys():
+			total, dead = node.execute(f"""
+				SELECT * FROM orioledb_index_rows(
+					'o_weird2_{col}_ix'::regclass);
+			""")[0]
+			self.assertEqual(
+			    total - dead, n_pk,
+			    f"index o_weird2_{col}_ix has {total - dead} live entries "
+			    f"after recovery, expected {n_pk} (stale/duplicate SK "
+			    f"entry: replayed delete was skipped)")
+		# Value-based index lookups prove the SK trees actually contain the
+		# replayed post-update keys (a bitmap scan that falls back to the
+		# heap could mask a stale index, but a key lookup cannot): each
+		# post-update key must resolve to exactly its owning row.
+		self.assertEqual(
+		    [(1, )],
+		    node.execute("""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT id FROM o_weird2 WHERE nm = 'zz1'::name;
+			"""))
+		self.assertEqual(
+		    [(1, )],
+		    node.execute("""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT id FROM o_weird2 WHERE pc = '1'::bpchar(8);
+			"""))
+		self.assertEqual(
+		    [(1, )],
+		    node.execute("""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT id FROM o_weird2 WHERE dt = date '1970-01-02';
+			"""))
+		self.assertEqual(
+		    [(1, )],
+		    node.execute("""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT id FROM o_weird2
+					WHERE cmp = (100, 'y1')::recovery_comp_t;
+			"""))
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_weird2'::regclass);")
+		    [0][0])
+		node.stop()
+
+	def test_recovery_bpchar_blank_padded_unique_partial(self):
+		"""
+		bpchar comparison is blank-padded: trailing spaces are
+		insignificant, so 'foo' and 'foo         ' (both within bpchar(12))
+		are EQUAL to the comparator but have different byte lengths.  This
+		is the classic type whose comparator order is NOT its byte order.
+
+		A UNIQUE PARTIAL index on bpchar(12) WHERE grp = 1: rows with grp
+		<> 1 may hold codes that are comparator-equal to a grp = 1 row
+		without violating uniqueness, because they are not index members.
+		After crash recovery the unique partial index must still:
+		  * reject a grp = 1 insert whose code is comparator-equal (but
+		    byte-different) to an existing grp = 1 row -- i.e. recovery
+		    rebuilt the index using the blank-padded comparator, not raw
+		    bytes;
+		  * accept the same comparator-equal code as a grp = 2 row, since
+		    the predicate keeps it out of the index.
+
+		UPDATEs also flip grp membership for rows whose codes are
+		comparator-equal but byte-different, so the recovery path that
+		recently learned to act on predicate changes (old_valid !=
+		new_valid) even when cmp == 0 is exercised on a type where the
+		two stored keys are genuinely byte-distinct.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_bpch (
+				id int NOT NULL PRIMARY KEY,
+				code bpchar(12) NOT NULL,
+				grp int NOT NULL
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_bpch_uix ON o_bpch (code) WHERE grp = 1;
+			INSERT INTO o_bpch VALUES
+				(1, 'foo', 1),
+				(2, 'bar', 1),
+				(3, 'baz       ', 1),
+				-- grp = 2 rows: comparator-equal to grp = 1 codes but
+				-- byte-different; allowed because the partial predicate
+				-- excludes them from the unique index.
+				(4, 'foo       ', 2),
+				(5, 'bar       ', 2),
+				(6, 'baz', 2);
+			CHECKPOINT;
+		""")
+		# Move grp = 2 rows into grp = 1 in a way that does NOT collide:
+		# codes 4,5,6 are comparator-equal to 1,2,3, so first delete the
+		# grp = 1 originals, then promote the byte-different copies.
+		node.safe_psql(
+		    'postgres', """
+			DELETE FROM o_bpch WHERE id IN (1, 2, 3);
+			UPDATE o_bpch SET grp = 1 WHERE id IN (4, 5, 6);
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		# Prove the committed DELETE + UPDATE actually replayed (a plain
+		# grp = 1 count would also hold if recovery had reverted to the
+		# checkpoint, since the original grp = 1 rows 1-3 would still be
+		# present): the deleted ids must be gone, and the promoted rows
+		# must carry grp = 1.
+		self.assertEqual(
+		    [],
+		    node.execute("SELECT id FROM o_bpch WHERE id IN (1, 2, 3);"))
+		self.assertEqual(
+		    [(1, ), (1, ), (1, )],
+		    node.execute("SELECT grp FROM o_bpch WHERE id IN (4, 5, 6) "
+		                 "ORDER BY id;"))
+		# Unique partial index preserved: a grp = 1 insert whose code is
+		# comparator-equal (but byte-different) to the promoted row must
+		# still be rejected by the recovered index.
+		with self.assertRaises(QueryException):
+			node.safe_psql('postgres',
+			               "INSERT INTO o_bpch VALUES (7, 'foo', 1);")
+		node.safe_psql('postgres', "INSERT INTO o_bpch VALUES (7, 'foo', 2);")
+		# The promoted rows survived recovery and are still unique within
+		# the grp = 1 partition.
+		self.assertEqual(
+		    3,
+		    node.execute(
+		        "SELECT count(*) FROM o_bpch WHERE grp = 1;")[0][0])
+		# Direct SK membership: the unique partial index holds exactly the
+		# three grp = 1 rows -- no stale entries from the deleted ids 1-3
+		# (a skipped replayed delete would leave them and inflate live).
+		total, dead = node.execute(
+		    "SELECT * FROM orioledb_index_rows('o_bpch_uix'::regclass);")[0]
+		self.assertEqual(total - dead, 3)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_bpch'::regclass);")
+		    [0][0])
+		node.stop()
+
+	def test_recovery_expression_index_weird_type_result(self):
+		"""
+		Expression indexes whose expression yields a type with a
+		non-trivial comparator: bpchar (blank-padded, NO typmod so that
+		comparator-equal keys keep distinct byte lengths) and timestamp
+		(ts AT TIME ZONE 'UTC' strips the zone).  Recovery must
+		re-evaluate the expression for every changed row to rebuild the
+		SK key bound, then order it with the type's comparator.
+
+		Two kinds of UPDATE are replayed:
+		  * comparator-equal but byte-different: 'foo' -> 'foo   '.
+		    cmp == 0 so the SK delete+insert is skipped on both the live
+		    and the recovery path -- the index entry must survive with
+		    the comparator still treating the two as equal.
+		  * comparator boundary crossing: 'foo' -> 'FOO' and ts shifted
+		    by a decade, forcing a real SK delete+insert during replay.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_exprw (
+				id int NOT NULL PRIMARY KEY,
+				s text NOT NULL,
+				ts timestamptz NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_exprw_bpc_ix ON o_exprw ((s::bpchar));
+			CREATE INDEX o_exprw_tsz_ix ON o_exprw ((ts AT TIME ZONE 'UTC'));
+			INSERT INTO o_exprw
+				SELECT i,
+					   'v' || (i % 20),
+					   timestamp '2000-01-01 00:00:00+00' +
+						   (i || ' hours')::interval
+				FROM generate_series(1, 80) i;
+			CHECKPOINT;
+		""")
+		# Boundary-crossing updates: case flip on s, decade shift on ts.
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_exprw SET s = upper(s) WHERE id <= 30;
+			UPDATE o_exprw
+				SET ts = ts - '10 years'::interval WHERE id <= 30;
+		""")
+		# comparator-equal but byte-different: append trailing spaces so
+		# s::bpchar stays equal (cmp == 0) while the stored bytes grow.
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_exprw SET s = s || '   ' WHERE id > 30 AND id <= 45;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		# Expression index on s::bpchar is usable for an exact lookup.
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = on;
+				SELECT count(*) FROM o_exprw WHERE s::bpchar = 'v1';
+			""")[0][0],
+		    node.execute("""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT count(*) FROM o_exprw WHERE s::bpchar = 'v1';
+			""")[0][0])
+		# Expression index on (ts AT TIME ZONE 'UTC') usable for a range.
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = on;
+				SELECT count(*) FROM o_exprw
+					WHERE (ts AT TIME ZONE 'UTC')
+						BETWEEN timestamp '1990-01-01'
+							AND timestamp '1990-12-31';
+			""")[0][0],
+		    node.execute("""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT count(*) FROM o_exprw
+					WHERE (ts AT TIME ZONE 'UTC')
+						BETWEEN timestamp '1990-01-01'
+							AND timestamp '1990-12-31';
+			""")[0][0])
+		# Prove the boundary-crossing UPDATEs replayed (a stale index could
+		# otherwise let the count checks above pass): id=1 was uppercased,
+		# and the comparator-equal trailing-space append grew id=31.
+		self.assertEqual(
+		    [('V1', )],
+		    node.execute("SELECT s FROM o_exprw WHERE id = 1;"))
+		self.assertEqual(
+		    [(6, )],
+		    node.execute("SELECT length(s) FROM o_exprw WHERE id = 31;"))
+		# Direct SK membership: each expression index holds exactly one
+		# live entry per live row -- a replayed boundary-crossing UPDATE
+		# whose old-key delete was skipped would leave a stale live entry
+		# (live > n_rows), and a missed insert would lose one (< n_rows).
+		n_rows = node.execute("SELECT count(*) FROM o_exprw;")[0][0]
+		for name in ('o_exprw_bpc_ix', 'o_exprw_tsz_ix'):
+			total, dead = node.execute(
+			    f"SELECT * FROM orioledb_index_rows('{name}'::regclass);")[0]
+			self.assertEqual(
+			    total - dead, n_rows,
+			    f"index {name} has {total - dead} live entries after "
+			    f"recovery, expected {n_rows}")
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_exprw'::regclass);")
+		    [0][0])
+		node.stop()
+
+	def test_recovery_partial_index_predicate_and_expression_keys(self):
+		"""
+		Two partial indexes that exercise recovery-time predicate
+		membership changes while the indexed key is itself an expression:
+
+		  * o_part2_expr_ix: expression key (n * 2) with a predicate on a
+		    SEPARATE column (grp > 0).  UPDATEs flip grp between 0 and
+		    nonzero WITHOUT touching n, so the expression key bound is
+		    unchanged (cmp == 0) while old_valid != new_valid -- the
+		    exact case recently fixed in apply_tbl_update, but here the
+		    SK key is a re-evaluated expression rather than a bare
+		    column.  Recovery must still issue the SK insert/delete.
+
+		  * o_part2_cplx_ix: a plain-key partial index with a complex
+		    predicate ((n > 0 AND half_even(n)) OR (grp = 7 AND s <>
+		    'skip')) combining AND/OR/NOT and a function.  Rows move
+		    in/out across the boolean structure, stressing the
+		    predicate re-evaluation per replayed UPDATE.
+
+		pg_tests does not crash-replay UPDATEs that change a partial
+		index's membership without changing its key, nor predicates this
+		branchy.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE FUNCTION half_even(int) RETURNS bool
+				AS $$ SELECT ($1 / 2) * 2 = $1 $$ LANGUAGE SQL IMMUTABLE;
+			CREATE TABLE o_part2 (
+				id int NOT NULL PRIMARY KEY,
+				n int NOT NULL,
+				grp int NOT NULL,
+				s text NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_part2_expr_ix ON o_part2 ((n * 2)) WHERE grp > 0;
+			CREATE INDEX o_part2_cplx_ix ON o_part2 (s)
+				WHERE (n > 0 AND half_even(n)) OR (grp = 7 AND s <> 'skip');
+			INSERT INTO o_part2
+				SELECT i, i, CASE WHEN i % 3 = 0 THEN 0 ELSE i END,
+					   'v' || i
+				FROM generate_series(1, 60) i;
+			CHECKPOINT;
+		""")
+		# Index A: flip grp in/out (cmp == 0, membership changes) while n
+		# stays the same -- the expression key (n*2) is unchanged.
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_part2 SET grp = id WHERE grp = 0 AND id <= 30;
+			UPDATE o_part2 SET grp = 0 WHERE grp > 0 AND id > 30 AND id <= 45;
+		""")
+		# Index B: move rows across the complex predicate by negating n
+		# (kills the (n > 0 AND half_even(n)) arm) and toggling grp to 7.
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_part2 SET n = -abs(n) WHERE id > 45 AND id <= 55;
+			UPDATE o_part2 SET grp = 7 WHERE id = 5;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		# Index A: index-visible rows (grp > 0) via index scan vs seqscan.
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = on;
+				SELECT count(*) FROM o_part2 WHERE grp > 0;
+			""")[0][0],
+		    node.execute("""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT count(*) FROM o_part2 WHERE grp > 0;
+			""")[0][0])
+		# Index B: predicate via index scan vs seqscan.
+		pred = ("(n > 0 AND half_even(n)) OR (grp = 7 AND s <> 'skip')")
+		self.assertEqual(
+		    node.execute(f"""
+				SET enable_seqscan = on;
+				SELECT count(*) FROM o_part2 WHERE {pred};
+			""")[0][0],
+		    node.execute(f"""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT count(*) FROM o_part2 WHERE {pred};
+			""")[0][0])
+		# Prove the membership-changing UPDATEs replayed: a grp>0 row that
+		# was sent to grp=0 (id in 31..45) must now be absent from index A,
+		# and id=5 was promoted to grp=7 (entering index B via its second
+		# arm).  Both force the cmp==0 predicate-change path on recovery.
+		self.assertEqual(
+		    [(0, )],
+		    node.execute("SELECT grp FROM o_part2 WHERE id = 40;"))
+		self.assertEqual(
+		    [(7, )],
+		    node.execute("SELECT grp FROM o_part2 WHERE id = 5;"))
+		# id=5 now matches index B only because of grp=7: a seqscan-off
+		# lookup over index B must still resolve it.  (Parenthesize pred:
+		# AND binds tighter than OR, so `pred AND id = 5` without parens
+		# would only constrain the second OR-arm.)
+		self.assertEqual(
+		    [(5, )],
+		    node.execute(f"""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT id FROM o_part2 WHERE ({pred}) AND id = 5;
+			"""))
+		# Direct SK membership counts (bitmap scans re-check the heap and
+		# would mask a stale entry left by a skipped cmp==0 delete): the
+		# live row count of each partial index must equal the number of
+		# heap rows satisfying its predicate.
+		n_grp_pos = node.execute(
+		    "SELECT count(*) FROM o_part2 WHERE grp > 0;")[0][0]
+		n_pred = node.execute(
+		    f"SELECT count(*) FROM o_part2 WHERE {pred};")[0][0]
+		for name, expected in (('o_part2_expr_ix', n_grp_pos),
+		                       ('o_part2_cplx_ix', n_pred)):
+			total, dead = node.execute(
+			    f"SELECT * FROM orioledb_index_rows('{name}'::regclass);")[0]
+			self.assertEqual(
+			    total - dead, expected,
+			    f"partial index {name} has {total - dead} live entries "
+			    f"after recovery, expected {expected} (predicate "
+			    f"membership change on a cmp==0 UPDATE was not replayed)")
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_part2'::regclass);")
+		    [0][0])
+		node.stop()
+
+	def test_recovery_expression_partial_index_crash(self):
+		"""
+		A single index that is BOTH an expression index and a partial
+		index: CREATE INDEX ... ((lower(b)), (a + 1)) WHERE a > 5.
+		Recovery must re-evaluate both the expression (for the key bound)
+		and the predicate (for membership) per row.  Updates that move
+		rows in/out of the predicate and change the expression value
+		stress both paths.  Crash before checkpoint.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_part_expr (
+				id int NOT NULL PRIMARY KEY,
+				a int NOT NULL,
+				b text NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_part_expr_ix ON o_part_expr ((lower(b)), (a + 1))
+				WHERE a > 5;
+			INSERT INTO o_part_expr
+				SELECT i, i, 'Val' || i FROM generate_series(1, 60) i;
+			CHECKPOINT;
+		""")
+		# rows id<=5 (a<=5) move INTO the predicate (a becomes >5);
+		# rows id>55 move OUT of the predicate (a becomes <=5)
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_part_expr SET a = a + 10 WHERE id <= 5;
+			UPDATE o_part_expr SET a = 1 WHERE id > 55;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		# index-visible rows (predicate a > 5) via index scan vs seqscan
+		n_index = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_part_expr WHERE a > 5;
+		""")[0][0]
+		n_seq = node.execute("""
+			SET enable_seqscan = on;
+			SELECT count(*) FROM o_part_expr WHERE a > 5;
+		""")[0][0]
+		self.assertEqual(n_index, n_seq)
+		# expression column usable for an exact lookup
+		self.assertEqual(
+		    1,
+		    node.execute("""
+				SET enable_seqscan = off;
+				SET enable_indexonlyscan = off;
+				SELECT count(*) FROM o_part_expr
+					WHERE lower(b) = 'val6' AND (a + 1) = 7;
+			""")[0][0])
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_part_expr'::regclass);")
+		    [0][0])
+		node.stop()
+
+	def test_recovery_drop_pk_readd_different_pk_crash(self):
+		"""
+		In one unrecovered window: DROP the PRIMARY KEY, then ADD a
+		PRIMARY KEY on a DIFFERENT column.  Recovery must replay the
+		rebuild so the new PK (on the new column) is present and usable
+		and the old PK is gone.  This is the drop+re-add counterpart to
+		test_recovery_add_pk_no_bridge_crash /
+		test_recovery_drop_pk_no_bridge_crash.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_repk (
+				id int NOT NULL,
+				code int NOT NULL,
+				val text NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			INSERT INTO o_repk
+				SELECT i, i * 10, 'v' || i FROM generate_series(1, 80) i;
+			CHECKPOINT;
+		""")
+		node.safe_psql(
+		    'postgres',
+		    "ALTER TABLE o_repk DROP CONSTRAINT o_repk_pkey;")
+		node.safe_psql(
+		    'postgres',
+		    "ALTER TABLE o_repk ADD PRIMARY KEY (code);")
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_repk
+				SELECT 1000 + i, 1000 + i * 13, 'new' || i
+				FROM generate_series(1, 40) i;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		self.assertEqual(
+		    120, node.execute("SELECT count(*) FROM o_repk;")[0][0])
+		# exactly one PK constraint, on column 'code'
+		pk_cols = node.execute("""
+			SELECT a.attname
+				FROM pg_constraint c
+				JOIN pg_attribute a
+					ON a.attrelid = c.conrelid
+					AND a.attnum = c.conkey[1]
+				WHERE c.conrelid = 'o_repk'::regclass AND c.contype = 'p';
+		""")
+		self.assertEqual([r[0] for r in pk_cols], ['code'])
+		# new PK usable for an index lookup
+		self.assertEqual(
+		    'v1',
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT val FROM o_repk WHERE code = 10;
+			""")[0][0])
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_repk'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def test_recovery_drop_bridge_index_crash_replay(self):
+		"""
+		DROP a bridged (GiST) index then crash before checkpoint.
+		Recovery must replay the drop so the bridge index is gone (no
+		dangling sys-tree entry) while the table and its PK stay usable.
+		index_bridging_test.test_drop_bridge_index_crash covers this on
+		the bridging suite; this is the recovery-suite mirror that runs
+		alongside the alter/PK/type recovery tests.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_drop_bridge (
+				id int PRIMARY KEY,
+				p point
+			) USING orioledb WITH (index_bridging);
+			CREATE INDEX o_drop_bridge_gix ON o_drop_bridge USING gist (p);
+			INSERT INTO o_drop_bridge
+				SELECT i, point(i, i) FROM generate_series(1, 60) i;
+			CHECKPOINT;
+		""")
+		self.assertEqual(
+		    1,
+		    node.execute("""
+				SELECT count(*) FROM pg_class WHERE relname = 'o_drop_bridge_gix';
+			""")[0][0])
+		node.safe_psql('postgres', "DROP INDEX o_drop_bridge_gix;")
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_drop_bridge
+				SELECT 1000 + i, point(i, i) FROM generate_series(1, 20) i;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		# PK data intact
+		self.assertEqual(
+		    80, node.execute("SELECT count(*) FROM o_drop_bridge;")[0][0])
+		# bridge index stayed dropped after recovery
+		self.assertEqual(
+		    0,
+		    node.execute("""
+				SELECT count(*) FROM pg_class WHERE relname = 'o_drop_bridge_gix';
+			""")[0][0])
+		# PK still usable
+		self.assertEqual(
+		    1,
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT count(*) FROM o_drop_bridge WHERE id = 42;
+			""")[0][0])
+		self.assertTrue(
+		    node.execute(
+		        "SELECT orioledb_tbl_check('o_drop_bridge'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def test_recovery_tablespace_split_table_and_index_crash(self):
+		"""
+		Table in one non-default tablespace, its secondary index in a
+		DIFFERENT non-default tablespace.  Crash before checkpoint.
+		Recovery must resolve each tree to its own tablespace and keep
+		the index consistent with the heap.  types_test.test_tablespace_
+		recovery checks a single tablespace on a clean stop; this covers
+		split tablespaces plus crash recovery.
+		"""
+		node = self.node
+		ts_tbl = self._tblspc_dir('tbsp_split_tbl')
+		ts_idx = self._tblspc_dir('tbsp_split_idx')
+		node.start()
+		node.safe_psql('postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql(
+		    'postgres',
+		    f"CREATE TABLESPACE recovery_split_tbl LOCATION '{ts_tbl}';")
+		node.safe_psql(
+		    'postgres',
+		    f"CREATE TABLESPACE recovery_split_idx LOCATION '{ts_idx}';")
+		node.safe_psql(
+		    'postgres', """
+			CREATE TABLE o_ts_split (
+				id int NOT NULL PRIMARY KEY,
+				val text NOT NULL
+			) USING orioledb TABLESPACE recovery_split_tbl;
+			CREATE INDEX o_ts_split_ix ON o_ts_split (val)
+				TABLESPACE recovery_split_idx;
+			INSERT INTO o_ts_split
+				SELECT i, 'v' || i FROM generate_series(1, 100) i;
+			CHECKPOINT;
+		""")
+		node.safe_psql(
+		    'postgres', """
+			UPDATE o_ts_split SET val = 'u' || id WHERE id <= 40;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		self.assertEqual(
+		    100, node.execute("SELECT count(*) FROM o_ts_split;")[0][0])
+		# secondary index in its own tablespace is usable and consistent
+		n_sk = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_ts_split WHERE val LIKE 'u%%';
+		""")[0][0]
+		self.assertEqual(40, n_sk)
+		# tablespace assignments survived recovery
+		(tbl_ts, idx_ts) = node.execute("""
+			SELECT
+				(SELECT spcname FROM pg_tablespace t
+				 JOIN pg_class c ON c.reltablespace = t.oid
+				 WHERE c.oid = 'o_ts_split'::regclass),
+				(SELECT spcname FROM pg_tablespace t
+				 JOIN pg_class c ON c.reltablespace = t.oid
+				 WHERE c.oid = 'o_ts_split_ix'::regclass);
+		""")[0]
+		self.assertEqual(tbl_ts, 'recovery_split_tbl')
+		self.assertEqual(idx_ts, 'recovery_split_idx')
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_ts_split'::regclass);")
+		    [0][0])
+		node.stop()
+
+	def test_recovery_alter_set_tablespace_crash(self):
+		"""
+		ALTER TABLE SET TABLESPACE (and ALTER INDEX SET TABLESPACE) on a
+		populated table, then crash before checkpoint.  Recovery must
+		replay the tablespace move so the data is found in the new
+		tablespace after restart.  tablespace_test only verifies the
+		primary tree follows the tablespace on a live node; this adds the
+		move-plus-crash dimension.
+		"""
+		node = self.node
+		ts_old = self._tblspc_dir('tbsp_mv_old')
+		ts_new_tbl = self._tblspc_dir('tbsp_mv_new_tbl')
+		ts_new_idx = self._tblspc_dir('tbsp_mv_new_idx')
+		node.start()
+		node.safe_psql('postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql(
+		    'postgres',
+		    f"CREATE TABLESPACE recovery_mv_old LOCATION '{ts_old}';")
+		node.safe_psql(
+		    'postgres',
+		    f"CREATE TABLESPACE recovery_mv_new_tbl LOCATION '{ts_new_tbl}';")
+		node.safe_psql(
+		    'postgres',
+		    f"CREATE TABLESPACE recovery_mv_new_idx LOCATION '{ts_new_idx}';")
+		node.safe_psql(
+		    'postgres', """
+			CREATE TABLE o_mvts (
+				id int NOT NULL PRIMARY KEY,
+				val text NOT NULL
+			) USING orioledb TABLESPACE recovery_mv_old;
+			CREATE INDEX o_mvts_ix ON o_mvts (val)
+				TABLESPACE recovery_mv_old;
+			INSERT INTO o_mvts
+				SELECT i, 'v' || i FROM generate_series(1, 80) i;
+			CHECKPOINT;
+		""")
+		# Move the table and the index to different new tablespaces
+		node.safe_psql(
+		    'postgres',
+		    "ALTER TABLE o_mvts SET TABLESPACE recovery_mv_new_tbl;")
+		node.safe_psql(
+		    'postgres',
+		    "ALTER INDEX o_mvts_ix SET TABLESPACE recovery_mv_new_idx;")
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_mvts
+				SELECT 1000 + i, 'new' || i FROM generate_series(1, 40) i;
+		""")
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		self.assertEqual(
+		    120, node.execute("SELECT count(*) FROM o_mvts;")[0][0])
+		# data found in the NEW tablespace after recovery
+		(tbl_ts, idx_ts) = node.execute("""
+			SELECT
+				(SELECT spcname FROM pg_tablespace t
+				 JOIN pg_class c ON c.reltablespace = t.oid
+				 WHERE c.oid = 'o_mvts'::regclass),
+				(SELECT spcname FROM pg_tablespace t
+				 JOIN pg_class c ON c.reltablespace = t.oid
+				 WHERE c.oid = 'o_mvts_ix'::regclass);
+		""")[0]
+		self.assertEqual(tbl_ts, 'recovery_mv_new_tbl')
+		self.assertEqual(idx_ts, 'recovery_mv_new_idx')
+		# secondary index usable from its new tablespace
+		n_sk = node.execute("""
+			SET enable_seqscan = off;
+			SET enable_indexonlyscan = off;
+			SELECT count(*) FROM o_mvts WHERE val LIKE 'v%%';
+		""")[0][0]
+		self.assertEqual(80, n_sk)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_mvts'::regclass);")[0]
+		    [0])
+		node.stop()
 
 
 class RecoverySkModifyPendingReplicaTest(BaseTest):
