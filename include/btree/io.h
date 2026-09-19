@@ -62,7 +62,9 @@ typedef enum
 	/* the page could not be read from the disk at all */
 	OReadPageResultIOError,
 	/* the page was read, but its checksum didn't match */
-	OReadPageResultChecksumFailed
+	OReadPageResultChecksumFailed,
+	/* the page was read, but a child downlink of it is not an on-disk one */
+	OReadPageResultDownlinkNotOnDisk
 } OReadPageResult;
 
 extern OReadPageResult read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink, FileExtent *extent);
