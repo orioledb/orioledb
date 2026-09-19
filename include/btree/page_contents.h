@@ -102,6 +102,16 @@ StaticAssertDecl(sizeof(BTreeMetaPage) <= ORIOLEDB_BLCKSZ,
 	 O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE((desc)->rootInfo.metaPageBlkno)) == \
 	 (desc)->rootInfo.metaPageChangeCount)
 
+/*
+ * The same question about the root page, which find_page() has always asked
+ * inline: a root whose change count moved on belongs to another incarnation,
+ * or to another tree entirely.
+ */
+#define BTREE_ROOT_PAGE_IS_OURS(desc) \
+	(ORootPageIsValid(desc) && \
+	 O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE((desc)->rootInfo.rootPageBlkno)) == \
+	 (desc)->rootInfo.rootPageChangeCount)
+
 typedef struct
 {
 	uint32		shortLocation:12,

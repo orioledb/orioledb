@@ -85,5 +85,6 @@ extern void btree_seq_scan_set_ordered(BTreeSeqScan *scan, bool ordered,
 									   ScanDirection scanDir);
 extern void seq_scans_cleanup(void);
 extern int	meta_page_get_num_seq_scans(OInMemoryBlkno metaPageBlkno);
+extern void btree_seq_scans_reregister(BTreeDescr *desc);
 
 #endif							/* __BTREE_SCAN_H__ */
