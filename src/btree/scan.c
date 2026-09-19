@@ -196,6 +196,16 @@ struct BTreeSeqScan
 	 */
 	uint32		checkpointNumber;
 
+	/*
+	 * The meta page the registration above was made on, and the change count
+	 * it had then.  The tree can be evicted and loaded again underneath a
+	 * running scan, which gives desc->rootInfo a different meta page, so the
+	 * count has to be given back to the page that took it rather than to
+	 * whatever the descriptor names at release time.
+	 */
+	OInMemoryBlkno registeredMetaPageBlkno;
+	uint32		registeredMetaPageChangeCount;
+
 	BTreeMetaPage *metaPageBlkno;
 	dlist_node	listNode;
 
@@ -268,6 +278,7 @@ struct BTreeSeqScan
 
 static dlist_head listOfScans = DLIST_STATIC_INIT(listOfScans);
 
+static void release_seq_scan_registration(BTreeSeqScan *scan);
 static void scan_make_iterator(BTreeSeqScan *scan, OTuple startKey, OTuple keyRangeHigh);
 static bool get_prev_downlink_parallel(BTreeSeqScan *scan, uint64 *downlink,
 									   OFixedKey *keyRangeLow, OFixedKey *keyRangeHigh);
@@ -2483,6 +2494,8 @@ init_checkpoit_number(BTreeSeqScan *scan)
 		if (checkpointNumberAfter == checkpointNumberBefore)
 		{
 			scan->checkpointNumber = checkpointNumberBefore;
+			scan->registeredMetaPageBlkno = desc->rootInfo.metaPageBlkno;
+			scan->registeredMetaPageChangeCount = desc->rootInfo.metaPageChangeCount;
 			scan->checkpointNumberSet = true;
 			break;
 		}
@@ -2682,6 +2695,8 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->dsmSeg = NULL;
 	scan->initialized = false;
 	scan->checkpointNumberSet = false;
+	scan->registeredMetaPageBlkno = OInvalidInMemoryBlkno;
+	scan->registeredMetaPageChangeCount = 0;
 	scan->haveHistImg = false;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 
@@ -3357,6 +3372,78 @@ btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
 }
 
 /*
+ * Give back the registration a scan took in init_checkpoit_number().
+ *
+ * It goes to the page that took it, which is not necessarily the one
+ * desc->rootInfo names now: the tree can be evicted and loaded again while
+ * the scan runs, and then the descriptor points at a different meta page.
+ * The old page is still there -- a page carrying registrations is marked
+ * toBeFreedOnSeqScanRelease rather than freed, so the last scan to leave
+ * frees it -- and its change count says whether it is still the page we
+ * mean.  Anything else means the bookkeeping is off, and decrementing would
+ * corrupt whatever tree owns that page now.
+ */
+static void
+release_seq_scan_registration(BTreeSeqScan *scan)
+{
+	OInMemoryBlkno metaPageBlkno = scan->registeredMetaPageBlkno;
+	BTreeMetaPage *metaPage;
+
+	if (!OInMemoryBlknoIsValid(metaPageBlkno) ||
+		O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(metaPageBlkno)) !=
+		scan->registeredMetaPageChangeCount)
+	{
+		scan->registeredMetaPageBlkno = OInvalidInMemoryBlkno;
+		return;
+	}
+
+	metaPage = (BTreeMetaPage *) O_GET_IN_MEMORY_PAGE(metaPageBlkno);
+	(void) pg_atomic_fetch_sub_u32(&metaPage->numSeqScans[scan->checkpointNumber % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
+
+	/* Complete deferred meta page free if this was the last scan. */
+	if (metaPage->toBeFreedOnSeqScanRelease &&
+		meta_page_get_num_seq_scans(metaPageBlkno) == 0)
+		ppool_free_page(scan->desc->ppool, metaPageBlkno, false);
+
+	scan->registeredMetaPageBlkno = OInvalidInMemoryBlkno;
+}
+
+/*
+ * Move this backend's scan registrations onto the tree's current meta page.
+ *
+ * o_btree_load_shmem() calls this after it has installed a new incarnation:
+ * the registration says "somebody is still reading the files of checkpoint
+ * N", and can_use_checkpoint_extents() asks that question of the meta page
+ * the descriptor names, so a registration left behind on the old page stops
+ * being an answer to it.
+ */
+void
+btree_seq_scans_reregister(BTreeDescr *desc)
+{
+	dlist_iter	iter;
+
+	if (!OMetaPageIsValid(desc))
+		return;
+
+	dlist_foreach(iter, &listOfScans)
+	{
+		BTreeSeqScan *scan = dlist_container(BTreeSeqScan, listNode, iter.cur);
+		BTreeMetaPage *metaPage;
+
+		if (scan->desc != desc || !scan->checkpointNumberSet)
+			continue;
+		if (scan->registeredMetaPageBlkno == desc->rootInfo.metaPageBlkno)
+			continue;
+
+		metaPage = BTREE_GET_META(desc);
+		(void) pg_atomic_fetch_add_u32(&metaPage->numSeqScans[scan->checkpointNumber % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
+		release_seq_scan_registration(scan);
+		scan->registeredMetaPageBlkno = desc->rootInfo.metaPageBlkno;
+		scan->registeredMetaPageChangeCount = desc->rootInfo.metaPageChangeCount;
+	}
+}
+
+/*
  * Internal cleanup for a sequential scan: decrements the numSeqScans counter
  * and completes deferred meta page free if this was the last scan.  Called
  * from both the normal free path and the resource owner release callback.
@@ -3374,16 +3461,9 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 		scan->resowner = NULL;
 	}
 
-	if (scan->checkpointNumberSet && OInMemoryBlknoIsValid(desc->rootInfo.metaPageBlkno))
+	if (scan->checkpointNumberSet)
 	{
-		BTreeMetaPage *metaPage = BTREE_GET_META(scan->desc);
-
-		(void) pg_atomic_fetch_sub_u32(&metaPage->numSeqScans[scan->checkpointNumber % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
-
-		/* Complete deferred meta page free if this was the last scan. */
-		if (metaPage->toBeFreedOnSeqScanRelease && meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0)
-			ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, false);
-
+		release_seq_scan_registration(scan);
 		scan->checkpointNumberSet = false;
 	}
 

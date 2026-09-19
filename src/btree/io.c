@@ -2783,18 +2783,6 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 		return false;
 	}
 
-	/*
-	 * Additional protection: don't evict the tree root page if the resource
-	 * owner hasn't released its seq scans yet.  According to the locks they
-	 * must be already finished, but not yet released from shmem.
-	 */
-	if (meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) != 0)
-	{
-		LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[evict_lockNo]);
-		unlock_page(root_blkno);
-		return false;
-	}
-
 	/* we check it before */
 	Assert(!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(rootPageBlkno)));
 	if (orioledb_s3_mode)
@@ -2880,7 +2868,6 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	file_header.ctid = pg_atomic_read_u64(&metaPage->ctid);
 	file_header.bridgeCtid = pg_atomic_read_u64(&metaPage->bridge_ctid);
 	file_header.numFreeBlocks = pg_atomic_read_u64(&metaPage->numFreeBlocks);
-	Assert(meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0);
 
 	evicted_tree_data.key.datoid = desc->oids.datoid;
 	evicted_tree_data.key.relnode = desc->oids.relnode;
@@ -2900,7 +2887,19 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	if (!orioledb_s3_mode || desc->storageType == BTreeStorageTemporary)
 		btree_finalize_private_seq_bufs(desc, &evicted_tree_data);
 
-	ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, false);
+	/*
+	 * Hand the meta page back only if nothing is registered against it.  A
+	 * sequential scan counts itself there to say it is still reading the
+	 * files of a checkpoint, and can_use_checkpoint_extents() reads that
+	 * count; freeing the page underneath would lose the answer and let the
+	 * page be handed to another tree while a scan still means to decrement
+	 * it.  The last scan to leave frees it instead -- the same bargain
+	 * cleanup_btree() already strikes.
+	 */
+	if (meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0)
+		ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, false);
+	else
+		metaPage->toBeFreedOnSeqScanRelease = true;
 
 	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
