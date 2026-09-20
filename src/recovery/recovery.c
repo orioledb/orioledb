@@ -307,6 +307,20 @@ static uint32 startup_chkp_num;
 static bool unexpected_worker_detach = false;
 
 /*
+ * How long worker_queue_flush() sleeps between asking whether the worker it
+ * is waiting for is still alive.  Short enough that a shutdown is not
+ * noticeably delayed, long enough that the question is never asked often.
+ */
+#define RECOVERY_QUEUE_FLUSH_WAIT_MS 100L
+
+/* PostgreSQL 17 generated the wait event names, and renamed this one. */
+#if PG_VERSION_NUM >= 170000
+#define O_WAIT_EVENT_MQ_SEND WAIT_EVENT_MESSAGE_QUEUE_SEND
+#else
+#define O_WAIT_EVENT_MQ_SEND WAIT_EVENT_MQ_SEND
+#endif
+
+/*
  * True if current process is a recovery process (worker or master).
  */
 static bool iam_recovery = false;
@@ -5952,6 +5966,22 @@ workers_notify_toast_consistent(void)
 
 /*
  * Flushes a queue buffer to the queue.
+ *
+ * A full queue is ordinary backpressure and the wait for room is the
+ * ordinary answer to it, but the wait must not be one we cannot come back
+ * from.  shm_mq wakes a blocked sender when the reader detaches, and that is
+ * the whole of its answer: a worker that goes away without the detach
+ * reaching us leaves this waiting for ever.  On a standby that is the
+ * startup process, and the startup process does not act on a shutdown
+ * request from CHECK_FOR_INTERRUPTS() -- it acts on it in the redo loop it
+ * is no longer in -- so the node then cannot be stopped at all.  Issue #1197
+ * is that, costing a valgrind cell its full timeout twice.
+ *
+ * So wait in steps, and at each step ask what the code just above already
+ * asks while waiting for a worker to catch up: is the worker still there?
+ * That answer does not depend on the queue handshake.  The wait itself stays
+ * a latch wait, which the reader sets on every read, so backpressure costs
+ * no more than it did.
  */
 static void
 worker_queue_flush(int worker_id)
@@ -5959,9 +5989,41 @@ worker_queue_flush(int worker_id)
 	RecoveryWorkerState *state = &workers_pool[worker_id];
 	shm_mq_result result;
 
-	result = shm_mq_send(state->queue, state->queue_buf_len, state->queue_buf, false, true);
+	for (;;)
+	{
+		int			rc;
+		BgwHandleStatus status;
+		pid_t		pid;
+
+		/*
+		 * Retrying with the same buffer is how shm_mq means a non-waiting
+		 * send to be finished: a partial message is remembered in the
+		 * handle, so state->queue_buf_len must not move until we are done.
+		 */
+		result = shm_mq_send(state->queue, state->queue_buf_len,
+							 state->queue_buf, true, true);
+		if (result != SHM_MQ_WOULD_BLOCK)
+			break;
+
+		rc = WaitLatch(MyLatch,
+					   WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
+					   RECOVERY_QUEUE_FLUSH_WAIT_MS,
+					   O_WAIT_EVENT_MQ_SEND);
+		ResetLatch(MyLatch);
+		o_worker_handle_interrupts();
+
+		if (!(rc & WL_TIMEOUT))
+			continue;
+
+		status = GetBackgroundWorkerPid(state->handle, &pid);
+		if (status != BGWH_STARTED && status != BGWH_NOT_YET_STARTED)
+		{
+			result = SHM_MQ_DETACHED;
+			break;
+		}
+	}
+
 	state->queue_buf_len = 0;
-	Assert(result != SHM_MQ_WOULD_BLOCK);
 	if (result == SHM_MQ_DETACHED)
 	{
 		unexpected_worker_detach = true;
