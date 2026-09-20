@@ -2811,6 +2811,19 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 		return false;
 	}
 
+	/*
+	 * Claim the tree, and give up if a backend is reaching into its meta
+	 * page.  Descending readers need nothing from us -- every page they touch
+	 * is checked by change count -- but a process holding the page itself has
+	 * no such check, so it says so in its own slot and we look.
+	 */
+	if (!btree_claim_meta_page_for_eviction(desc))
+	{
+		LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[evict_lockNo]);
+		unlock_page(root_blkno);
+		return false;
+	}
+
 	/* we check it before */
 	Assert(!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(rootPageBlkno)));
 	if (orioledb_s3_mode)
@@ -2879,6 +2892,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 		if (!LWLockConditionalAcquire(&checkpoint_state->oTablesMetaLock,
 									  LW_SHARED))
 		{
+			btree_release_meta_page_claim();
 			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[evict_lockNo]);
 			return false;
 		}
@@ -2928,6 +2942,14 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 		ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, false);
 	else
 		metaPage->toBeFreedOnSeqScanRelease = true;
+
+	/*
+	 * The claim held the page from the moment this eviction started until
+	 * now, so that nobody could pin a page about to be handed away.  It goes
+	 * with the page rather than being written back; see
+	 * btree_forget_meta_page_claim().
+	 */
+	btree_forget_meta_page_claim();
 
 	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
@@ -4053,7 +4075,12 @@ try_to_punch_holes(BTreeDescr *desc)
 	Assert(orioledb_use_sparse_files);
 	Assert(!OCompressIsValid(desc->compress));
 
-	o_btree_load_shmem(desc);
+	/*
+	 * Two of this page's own LWLocks are taken below, and its
+	 * punchHolesChkpNum is advanced, so the page must stay this tree's
+	 * throughout -- see add_free_extents_from_tmp().
+	 */
+	o_btree_load_shmem_pinned(desc);
 	metaPage = BTREE_GET_META(desc);
 	metaLock = &metaPage->metaLock;
 	punchHolesLock = &metaPage->punchHolesLock;
@@ -4154,4 +4181,5 @@ try_to_punch_holes(BTreeDescr *desc)
 		/* Try for next checkpoint number */
 		chkp_num++;
 	}
+	btree_unpin_meta_page();
 }

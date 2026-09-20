@@ -28,6 +28,7 @@
 #include "access/transam.h"
 #include "miscadmin.h"
 #include "pgstat.h"
+#include "postmaster/bgwriter.h"
 #include "storage/proc.h"
 #include "storage/proclist.h"
 #include "storage/s_lock.h"
@@ -461,6 +462,7 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 	pg_atomic_init_u64(&metaPage->bridge_ctid, 0);
 	for (i = 0; i < NUM_SEQ_SCANS_ARRAY_SIZE; i++)
 		pg_atomic_init_u32(&metaPage->numSeqScans[i], 0);
+	pg_atomic_init_u32(&metaPage->evictClaim, 0);
 
 	LWLockInitialize(&metaPage->copyBlknoLock,
 					 checkpoint_state->copyBlknoTrancheId);
@@ -952,4 +954,193 @@ btree_page_update_max_key_len(BTreeDescr *desc, Page p)
 		maxKeyLen = Max(maxKeyLen, keyLen);
 	}
 	header->maxKeyLen = maxKeyLen;
+}
+
+/*
+ * The meta page this backend has claimed for eviction, so that the claim can
+ * be dropped on the error path without the caller having to hold on to a
+ * descriptor that the error may well have been about.
+ */
+static OInMemoryBlkno claimedMetaPageBlkno = OInvalidInMemoryBlkno;
+
+/*
+ * Say that this backend is about to reach into a tree's shared state, and
+ * report whether it may.
+ *
+ * Publish first and read the claim after; an evictor claims first and reads
+ * the slots after.  Whichever of the two went second sees the other, and it
+ * is the caller here that stands down, because waiting costs it a reload
+ * while an evictor has other pages to be getting on with.
+ *
+ * A false return means the tree is going away: drop what the descriptor
+ * names and load it again, the way find_page() does when a change count
+ * does not match.  The ownership check after the barrier is part of the
+ * same answer -- a descriptor whose meta page has already been handed to
+ * somebody else must not use it either, and it is the one case where the
+ * slot we just published names a page that was never ours.
+ *
+ * An eviction in progress reaches back into the tree it is evicting --
+ * perform_page_io() allocates disk space, which drains that tree's own
+ * free-extent and punch-holes files -- so the claim this backend already
+ * holds has to count as permission.  It excludes everybody else by itself,
+ * and waiting for it would be waiting for ourselves: the tree stays loaded,
+ * the claim stays ours, and the retry loop never ends.
+ */
+bool
+btree_pin_meta_page(BTreeDescr *desc)
+{
+	ODBProcData *procData = GET_CUR_PROCDATA();
+	BTreeMetaPage *metaPage;
+
+	Assert(!OInMemoryBlknoIsValid((OInMemoryBlkno) pg_atomic_read_u32(&procData->pinnedMetaPageBlkno)));
+
+	if (!OMetaPageIsValid(desc))
+		return false;
+
+	if (claimedMetaPageBlkno == desc->rootInfo.metaPageBlkno)
+		return true;
+
+	pg_atomic_write_u32(&procData->pinnedMetaPageBlkno,
+						(uint32) desc->rootInfo.metaPageBlkno);
+	pg_memory_barrier();
+
+	metaPage = BTREE_GET_META(desc);
+
+	if (pg_atomic_read_u32(&metaPage->evictClaim) != 0 ||
+		!BTREE_META_PAGE_IS_OURS(desc))
+	{
+		btree_unpin_meta_page();
+		return false;
+	}
+
+	return true;
+}
+
+/*
+ * Load the tree into shared memory and pin its meta page, so that what the
+ * descriptor names is still this tree's for as long as the caller looks at
+ * it.  Pair with btree_unpin_meta_page().
+ *
+ * A refused pin means the tree is gone or going, so drop what the descriptor
+ * names and load it again -- the same answer find_page() gives a root whose
+ * change count does not match.  A temporary tree lives in a backend-local
+ * pool and is nobody else's to evict, so it is loaded and left unpinned;
+ * unpinning it afterwards is harmless either way.
+ *
+ * The evictor we may be waiting out can be blocked in RegisterSyncRequest()
+ * waiting for the checkpointer to drain the sync request queue, so when the
+ * checkpointer is the one waiting here it has to keep draining -- the same
+ * invisible deadlock o_tables_rel_lock_extended() spells out, where one side
+ * waits on a latch and the other does not, so nothing sees a cycle.
+ */
+void
+o_btree_load_shmem_pinned(BTreeDescr *desc)
+{
+	bool		first = true;
+
+	if (desc->storageType == BTreeStorageTemporary)
+	{
+		o_btree_load_shmem(desc);
+		return;
+	}
+
+	while (!btree_pin_meta_page(desc))
+	{
+		/*
+		 * The first refusal usually just means the descriptor had gone stale,
+		 * and reloading answers it, so do not make the ordinary case pay for
+		 * a sleep.  Refused twice is somebody else's eviction in progress,
+		 * and then backing off is the right thing.
+		 */
+		if (!first)
+		{
+			if (AmCheckpointerProcess())
+				AbsorbSyncRequests();
+			pg_usleep(1000L);
+		}
+		first = false;
+
+		CHECK_FOR_INTERRUPTS();
+		desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
+		desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
+		desc->rootInfo.rootPageChangeCount = 0;
+		desc->rootInfo.metaPageChangeCount = 0;
+		o_btree_load_shmem(desc);
+	}
+}
+
+void
+btree_unpin_meta_page(void)
+{
+	pg_atomic_write_u32(&GET_CUR_PROCDATA()->pinnedMetaPageBlkno,
+						(uint32) OInvalidInMemoryBlkno);
+}
+
+/*
+ * Claim a tree for eviction, or report that somebody is reading it.
+ *
+ * Claim first and read the slots after, against a reader that publishes its
+ * slot first and reads the claim after: whichever went second sees the other.
+ * Standing down here rather than waiting keeps the evictor moving -- it has
+ * other pages to be getting on with, and this tree will come round again.
+ */
+bool
+btree_claim_meta_page_for_eviction(BTreeDescr *desc)
+{
+	BTreeMetaPage *metaPage = BTREE_GET_META(desc);
+	OInMemoryBlkno metaPageBlkno = desc->rootInfo.metaPageBlkno;
+	uint32		expected = 0;
+	int			i;
+
+	Assert(!OInMemoryBlknoIsValid(claimedMetaPageBlkno));
+
+	if (!pg_atomic_compare_exchange_u32(&metaPage->evictClaim, &expected, 1))
+		return false;
+
+	claimedMetaPageBlkno = metaPageBlkno;
+	pg_memory_barrier();
+
+	for (i = 0; i < max_procs; i++)
+	{
+		if ((OInMemoryBlkno) pg_atomic_read_u32(&oProcData[i].pinnedMetaPageBlkno) ==
+			metaPageBlkno)
+		{
+			btree_release_meta_page_claim();
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/*
+ * Let the claim go with the page, for an eviction that has got as far as
+ * handing the meta page over.  Writing the flag back would be wrong by then:
+ * the page may already belong to another tree, whose claim we would clear.
+ * Nothing is lost by leaving it set -- a page taken for a meta page again is
+ * re-initialised, and a reader that meets the stale flag before that stands
+ * down and reloads the tree, which by now has a different meta page.
+ */
+void
+btree_forget_meta_page_claim(void)
+{
+	claimedMetaPageBlkno = OInvalidInMemoryBlkno;
+}
+
+/*
+ * Drop the claim, if this backend holds one.  Called on the error path too,
+ * where a leaked claim would make the tree unevictable for the life of the
+ * cluster.
+ */
+void
+btree_release_meta_page_claim(void)
+{
+	BTreeMetaPage *metaPage;
+
+	if (!OInMemoryBlknoIsValid(claimedMetaPageBlkno))
+		return;
+
+	metaPage = (BTreeMetaPage *) O_GET_IN_MEMORY_PAGE(claimedMetaPageBlkno);
+	claimedMetaPageBlkno = OInvalidInMemoryBlkno;
+	pg_atomic_write_u32(&metaPage->evictClaim, 0);
 }

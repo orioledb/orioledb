@@ -277,6 +277,21 @@ typedef struct
 	 */
 	pg_atomic_uint64 pendingSkUndoHead;
 	pg_atomic_uint64 pendingSkUndoTail;
+
+	/*
+	 * The meta page this backend is about to read or write directly, or
+	 * OInvalidInMemoryBlkno.
+	 *
+	 * Descending a tree needs nothing of the sort: find_page() validates
+	 * every page it touches by change count and reloads when one does not
+	 * match.  Reaching into a tree's shared state without descending -- its
+	 * ctid counter, its leaf count, the lock in its meta page -- has no such
+	 * check, and nothing otherwise keeps the tree loaded, so the clock sweep
+	 * can hand that page to somebody else mid-access.  Saying so here lets an
+	 * evictor see it: the same bargain PostgreSQL's fast-path locks strike,
+	 * published per backend and read by the one process that cares.
+	 */
+	pg_atomic_uint32 pinnedMetaPageBlkno;
 	UndoStackSharedLocations undoStackLocations[PROC_XID_ARRAY_SIZE][(int) UndoLogsCount];
 	XidVXidMapElement vxids[PROC_XID_ARRAY_SIZE];
 } ODBProcData;

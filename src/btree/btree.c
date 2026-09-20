@@ -298,11 +298,22 @@ btree_ctid_get_and_inc(BTreeDescr *desc)
 void
 btree_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid)
 {
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
+	BTreeMetaPage *metaPageBlkno;
 	uint64		old_ctid,
 				new_ctid;
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc));
+
+	/*
+	 * This writes into the meta page, so the page had better still be this
+	 * tree's.  Nothing else here would notice: a recovery worker fetches its
+	 * descriptor once and applies from it, and during recovery no relation
+	 * lock keeps the clock sweep from evicting the tree underneath, so the
+	 * counter would be raised on whichever tree holds that page now.
+	 */
+	o_btree_load_shmem_pinned(desc);
+
+	metaPageBlkno = BTREE_GET_META(desc);
 	new_ctid = (uint64) ItemPointerGetBlockNumber(&ctid) * (MaxOffsetNumber - FirstOffsetNumber);
 	new_ctid += ctid.ip_posid - FirstOffsetNumber;
 	Assert(new_ctid < (uint64) (MaxOffsetNumber - FirstOffsetNumber) * (uint64) InvalidBlockNumber);
@@ -314,6 +325,8 @@ btree_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid)
 		if (old_ctid >= new_ctid)
 			break;
 	} while (!pg_atomic_compare_exchange_u64(&metaPageBlkno->ctid, &old_ctid, new_ctid));
+
+	btree_unpin_meta_page();
 }
 
 ItemPointerData
