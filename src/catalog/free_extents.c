@@ -601,13 +601,22 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 	uint32		chkp_num;
 	LWLock	   *metaLock;
 
-	o_btree_load_shmem(desc);
+	/*
+	 * Everything below reads and writes the meta page directly, and takes an
+	 * LWLock that lives inside it, so the page must stay this tree's for the
+	 * whole of it -- taking a lock in a page handed to another tree is the
+	 * damage shape of issue #1113.
+	 */
+	o_btree_load_shmem_pinned(desc);
 	metaPage = BTREE_GET_META(desc);
 	metaLock = &metaPage->metaLock;
 
 	chkp_num = metaPage->freeBuf.tag.num + 1;
 	if (!can_use_checkpoint_extents(desc, chkp_num))
+	{
+		btree_unpin_meta_page();
 		return;
+	}
 
 	LWLockAcquire(metaLock, LW_EXCLUSIVE);
 	chkp_num = metaPage->freeBuf.tag.num + 1;
@@ -673,6 +682,7 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 			seq_buf_remove_file(&metaPage->freeBuf.tag);
 	}
 	LWLockRelease(metaLock);
+	btree_unpin_meta_page();
 }
 
 /*

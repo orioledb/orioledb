@@ -1608,6 +1608,8 @@ o_proc_shmem_init(Pointer ptr, bool found)
 			pg_atomic_init_u64(&oProcData[i].xmin, InvalidOXid);
 			pg_atomic_init_u64(&oProcData[i].pendingSkUndoHead, InvalidUndoLocation);
 			pg_atomic_init_u64(&oProcData[i].pendingSkUndoTail, InvalidUndoLocation);
+			pg_atomic_init_u32(&oProcData[i].pinnedMetaPageBlkno,
+							   (uint32) OInvalidInMemoryBlkno);
 			oProcData[i].autonomousNestingLevel = 0;
 			memset(&oProcData[i].vxids, 0, sizeof(oProcData[i].vxids));
 			LWLockInitialize(&oProcData[i].undoStackLocationsFlushLock,
@@ -1697,7 +1699,18 @@ static void
 orioledb_on_shmem_exit(int code, Datum arg)
 {
 	if (MyProc)
+	{
 		pg_atomic_write_u64(&oProcData[MYPROCNUMBER].xmin, InvalidOXid);
+
+		/*
+		 * Both are held only across a few statements, but dying inside one
+		 * of them would leave a page nobody can ever evict again: a slot
+		 * naming a meta page that nothing clears, or a claim on a tree that
+		 * nothing drops.
+		 */
+		btree_unpin_meta_page();
+		btree_release_meta_page_claim();
+	}
 
 	if (orioledb_s3_mode)
 		s3_delete_lock_file();
@@ -2252,6 +2265,8 @@ orioledb_error_cleanup_hook(void)
 
 	GET_CUR_PROCDATA()->waitingForOxid = false;
 	clear_pending_sk_marker();
+	btree_unpin_meta_page();
+	btree_release_meta_page_claim();
 	release_all_page_locks();
 	ppool_release_all_pages();
 	for (i = 0; i < (int) UndoLogsCount; i++)
@@ -2362,11 +2377,12 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 						Assert(IsBinaryUpgrade);
 						continue;
 					}
-					o_btree_load_shmem(&index_descr->desc);
+					o_btree_load_shmem_pinned(&index_descr->desc);
 					rootPageBlkno = index_descr->desc.rootInfo.rootPageBlkno;
 					root_page = O_GET_IN_MEMORY_PAGE(rootPageBlkno);
 					info->tree_height = PAGE_GET_LEVEL(root_page);
 					info->pages = TREE_NUM_LEAF_PAGES(&index_descr->desc);
+					btree_unpin_meta_page();
 				}
 			}
 		}

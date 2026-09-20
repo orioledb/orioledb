@@ -152,7 +152,7 @@ static void rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 static void rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr, ParallelOScanDesc poscan,
 											 Tuplesortstate **sortstates, bool progress, double *heap_tuples,
 											 double *index_tuples[], uint64 *ctid, uint64 *bridge_ctid);
-static int	o_calculate_index_workers(BTreeDescr *primary, bool shmem_loaded, int nindices);
+static int	o_calculate_index_workers(BTreeDescr *primary, int nindices);
 static int	o_estimate_parallel_workers(double table_pages, double index_pages,
 										int max_workers);
 
@@ -1933,7 +1933,7 @@ build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx,
  * Capping is similar to plan_create_index_workers()
  */
 static int
-o_calculate_index_workers(BTreeDescr *primary, bool shmem_loaded, int nindices)
+o_calculate_index_workers(BTreeDescr *primary, int nindices)
 {
 	int			parallel_workers;
 	BlockNumber table_pages;
@@ -1944,10 +1944,9 @@ o_calculate_index_workers(BTreeDescr *primary, bool shmem_loaded, int nindices)
 
 		if (tbl_data_exists(&primary->oids))
 		{
-			if (!shmem_loaded)
-				o_btree_load_shmem(primary);
-
+			o_btree_load_shmem_pinned(primary);
 			table_pages = TREE_NUM_LEAF_PAGES(primary);
+			btree_unpin_meta_page();
 			parallel_workers = o_estimate_parallel_workers(table_pages, -1, max_parallel_maintenance_workers);
 			elog(DEBUG4, "o_calculate_index_workers: %d workers", parallel_workers);
 		}
@@ -2093,7 +2092,7 @@ build_secondary_index(Oid oldTblRelnode, OTable *o_table,
 	if ((in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0)) &&
 		o_table->persistence != RELPERSISTENCE_TEMP)
 	{
-		int			parallel_workers = o_calculate_index_workers(&GET_PRIMARY(descr)->desc, false, 1);
+		int			parallel_workers = o_calculate_index_workers(&GET_PRIMARY(descr)->desc, 1);
 
 		if (parallel_workers > 0)
 		{
@@ -2468,12 +2467,13 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 	ctid = 0;
 	old_td = &GET_PRIMARY(old_descr)->desc;
-	o_btree_load_shmem(old_td);
+	o_btree_load_shmem_pinned(old_td);
 	meta = BTREE_GET_META(old_td);
 	if (descr->bridge && old_descr->bridge)
 		bridge_ctid = pg_atomic_read_u64(&meta->bridge_ctid);
 	else
 		bridge_ctid = 0;
+	btree_unpin_meta_page();
 
 	buildstate.btleader = NULL;
 
@@ -2499,7 +2499,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 		!descr->indices[PrimaryIndexNumber]->primaryIsCtid &&
 		!(descr->bridge && !old_descr->bridge))
 	{
-		int			parallel_workers = o_calculate_index_workers(old_td, true, nallindices + 1);
+		int			parallel_workers = o_calculate_index_workers(old_td, nallindices + 1);
 
 		if (parallel_workers > 0)
 		{

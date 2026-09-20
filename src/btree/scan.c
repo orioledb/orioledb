@@ -2474,7 +2474,19 @@ init_checkpoit_number(BTreeSeqScan *scan)
 	BTreeMetaPage *metaPage;
 	BTreeDescr *desc = scan->desc;
 
-	o_btree_load_shmem(scan->desc);
+	/*
+	 * Register against the tree's current meta page, under a pin that keeps
+	 * it the current one while we do.  Counting a scan into a page that
+	 * belongs to another tree now is issue #1133; counting it into one on its
+	 * way out loses the answer can_use_checkpoint_extents() needs.
+	 *
+	 * A refused pin means the tree is gone or going: drop what the descriptor
+	 * names and load it again, which is what find_page() does when a change
+	 * count does not match.  A temporary tree lives in a backend-local pool
+	 * and is nobody else's to evict.
+	 */
+	o_btree_load_shmem_pinned(desc);
+
 	metaPage = BTREE_GET_META(scan->desc);
 
 	START_CRIT_SECTION();
@@ -2503,6 +2515,13 @@ init_checkpoit_number(BTreeSeqScan *scan)
 		checkpointNumberBefore = checkpointNumberAfter;
 	}
 	END_CRIT_SECTION();
+
+	/*
+	 * The count carries on from here without the pin: a meta page with
+	 * registrations against it is marked toBeFreedOnSeqScanRelease rather
+	 * than freed, so the last scan to leave is the one that frees it.
+	 */
+	btree_unpin_meta_page();
 }
 
 static void

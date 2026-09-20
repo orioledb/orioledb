@@ -1144,8 +1144,9 @@ orioledb_amvacuumcleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 		{
 			BTreeDescr *td = &descr->indices[ixnum]->desc;
 
-			o_btree_load_shmem(td);
+			o_btree_load_shmem_pinned(td);
 			stats->num_pages = TREE_NUM_LEAF_PAGES(td);
+			btree_unpin_meta_page();
 		}
 	}
 	stats->num_index_tuples = info->num_heap_tuples;

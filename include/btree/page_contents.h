@@ -47,6 +47,19 @@ typedef struct
 	pg_atomic_uint32 numSeqScans[NUM_SEQ_SCANS_ARRAY_SIZE];
 
 	/*
+	 * Set while a process is taking this tree out of shared memory.
+	 *
+	 * The other half of ODBProcData.pinnedMetaPageBlkno: an evictor claims
+	 * the tree and then reads every backend's slot, while a backend publishes
+	 * its slot and then reads the claim, so whichever went second sees the
+	 * other and stands down.  The claimer remembers the page it claimed in a
+	 * local, and drops the claim from the error path and at process exit as
+	 * well, because a claim left behind would make the tree unevictable for
+	 * the life of the cluster.
+	 */
+	pg_atomic_uint32 evictClaim;
+
+	/*
 	 * Additional protection: set when btree pages are freed while the
 	 * resource owner hasn't released its seq scans yet (other transactions
 	 * are excluded by locks).  Defers freeing the meta page until the last
@@ -101,6 +114,13 @@ StaticAssertDecl(sizeof(BTreeMetaPage) <= ORIOLEDB_BLCKSZ,
 	(OMetaPageIsValid(desc) && \
 	 O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE((desc)->rootInfo.metaPageBlkno)) == \
 	 (desc)->rootInfo.metaPageChangeCount)
+
+extern bool btree_pin_meta_page(BTreeDescr *desc);
+extern void o_btree_load_shmem_pinned(BTreeDescr *desc);
+extern void btree_unpin_meta_page(void);
+extern bool btree_claim_meta_page_for_eviction(BTreeDescr *desc);
+extern void btree_release_meta_page_claim(void);
+extern void btree_forget_meta_page_claim(void);
 
 typedef struct
 {
