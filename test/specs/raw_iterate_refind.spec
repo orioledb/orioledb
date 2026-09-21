@@ -21,8 +21,12 @@ teardown
 session "s1"
 
 step "s1_setup" { SET orioledb.enable_stopevents = true; }
+# orioledb_index_rows() drains the primary index through exactly the
+# iterator under test -- o_in_progress_snapshot, forward, btree_iterate_raw --
+# and counts a NULL result as a dead row.  A stale result after the refind
+# reads its tuple header from the old image, which is what makes one appear.
 step "s1_iterate" {
-	SELECT array_length(orioledb_test_raw_iterate_refind('o_raw_refind'::regclass), 1); }
+	SELECT total, dead FROM orioledb_index_rows('o_raw_refind_pkey'::regclass); }
 
 session "s2"
 

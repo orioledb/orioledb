@@ -10,7 +10,7 @@ pg_stopevent_set
 (1 row)
 
 step s1_iterate: 
-	SELECT array_length(orioledb_test_raw_iterate_refind('o_raw_refind'::regclass), 1); <waiting ...>
+	SELECT total, dead FROM orioledb_index_rows('o_raw_refind_pkey'::regclass); <waiting ...>
 step s2_bloat: 
 	UPDATE o_raw_refind SET pad = repeat('z', 500) WHERE id <= 30;
 step s2_reset: 
@@ -21,8 +21,8 @@ t
 (1 row)
 
 step s1_iterate: <... completed>
-array_length
-------------
-         200
+total|dead
+-----+----
+  200|   0
 (1 row)
 
