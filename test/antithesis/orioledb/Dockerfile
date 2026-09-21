@@ -190,7 +190,7 @@ RUN set -eux; \
 # Antithesis SDK header plus the single TU that must be linked into the
 # instrumented artifact: it defines __sanitizer_cov_trace_pc_guard(_init)
 # and the runtime loader antithesis_load_libvoidstar.  Deliberately compiled
-# WITHOUT -fsanitize-coverage/-flto: the callbacks must not trace themselves,
+# WITHOUT -fsanitize-coverage: the callbacks must not trace themselves,
 # and a regular object mixes fine into a ThinLTO link.
 # (Kept after the postgres layer so an SDK bump only rebuilds orioledb.)
 ARG ANTITHESIS_SDK_REF=0.4.8
@@ -205,17 +205,24 @@ RUN set -eux; \
 		-o /usr/src/antithesis/antithesis_instrumentation.o \
 		/usr/src/antithesis/antithesis_instrumentation.c
 
+# Do not add -flto=thin to COPT/LDFLAGS_SL.
+# The C++ SDK docs suggest it as a workaround for llvm/llvm-project#107642
+# but that only applies to the C++ SDK and is specific to template-parameter
+# objects not present in the vendored C SDK (include/lib/antithesis_sdk_c.h)
+# LTO re-runs the optimizer over already-instrumented IR, turning guard
+# calls into tail jmps. Antithesis subsequently is unable to construct a full
+# symbol catalog.
 RUN set -eux; \
 	cd /usr/src/postgresql/contrib/orioledb; \
 	make USE_PGXS=1 clean; \
 # COPT reaches every object's CFLAGS (and LDFLAGS) via Makefile.global;
 # the LDFLAGS_SL override reaches the .so link line
 	make -j "$(nproc)" USE_PGXS=1 IS_DEV=1 \
-		COPT="-fsanitize-coverage=trace-pc-guard -flto=thin -g -DUSE_ANTITHESIS_SDK" \
-		LDFLAGS_SL="-flto=thin -fsanitize-coverage=trace-pc-guard -fuse-ld=lld -Wl,--build-id /usr/src/antithesis/antithesis_instrumentation.o"; \
+		COPT="-fsanitize-coverage=trace-pc-guard -g -DUSE_ANTITHESIS_SDK" \
+		LDFLAGS_SL="-fsanitize-coverage=trace-pc-guard -fuse-ld=lld -Wl,--build-id /usr/src/antithesis/antithesis_instrumentation.o"; \
 	make USE_PGXS=1 IS_DEV=1 \
-		COPT="-fsanitize-coverage=trace-pc-guard -flto=thin -g -DUSE_ANTITHESIS_SDK" \
-		LDFLAGS_SL="-flto=thin -fsanitize-coverage=trace-pc-guard -fuse-ld=lld -Wl,--build-id /usr/src/antithesis/antithesis_instrumentation.o" \
+		COPT="-fsanitize-coverage=trace-pc-guard -g -DUSE_ANTITHESIS_SDK" \
+		LDFLAGS_SL="-fsanitize-coverage=trace-pc-guard -fuse-ld=lld -Wl,--build-id /usr/src/antithesis/antithesis_instrumentation.o" \
 		install; \
 	PKGLIB="$(pg_config --pkglibdir)"; \
 # sanity assertions that orioledb.so is instrumented
