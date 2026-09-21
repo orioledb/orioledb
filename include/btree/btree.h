@@ -518,6 +518,8 @@ extern ItemPointerData btree_ctid_get_and_inc(BTreeDescr *desc);
 extern ItemPointerData btree_ctid_from_seq(uint64 ctid);
 extern ItemPointerData btree_bridge_ctid_get_and_inc(BTreeDescr *desc, bool *overflow);
 extern void btree_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid);
+extern void btree_bridge_ctid_update_if_needed(BTreeDescr *desc,
+											   ItemPointerData ctid);
 extern void btree_desc_stopevent_params_internal(BTreeDescr *desc,
 												 JsonbParseState **state);
 extern Jsonb *btree_page_stopevent_params(BTreeDescr *desc, Page p);

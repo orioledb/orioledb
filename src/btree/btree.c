@@ -351,6 +351,42 @@ btree_bridge_ctid_get_and_inc(BTreeDescr *desc, bool *overflow)
 	return result;
 }
 
+/*
+ * Move the bridge ctid counter past a ctid that was already handed out.
+ *
+ * The counter only reaches disk with a checkpoint, so recovery has to learn
+ * about every ctid allocated after the last one from the records that used
+ * it, exactly as btree_ctid_update_if_needed() does for the surrogate primary
+ * ctid.  Left behind, the counter restarts inside the range of ctids that
+ * live rows already hold.
+ *
+ * Under orioledb.debug_max_bridge_ctid_blkno the ctid space wraps, so the
+ * decoded value can be far below the counter; the comparison below then
+ * leaves the counter alone, which is the best that can be said of a ctid that
+ * no longer identifies one position.
+ */
+void
+btree_bridge_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid)
+{
+	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
+	uint64		old_ctid,
+				new_ctid;
+
+	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc));
+
+	new_ctid = (uint64) ItemPointerGetBlockNumber(&ctid) * MaxHeapTuplesPerPage;
+	new_ctid += ItemPointerGetOffsetNumber(&ctid) - FirstOffsetNumber;
+
+	new_ctid++;
+	do
+	{
+		old_ctid = pg_atomic_read_u64(&metaPageBlkno->bridge_ctid);
+		if (old_ctid >= new_ctid)
+			break;
+	} while (!pg_atomic_compare_exchange_u64(&metaPageBlkno->bridge_ctid,
+											 &old_ctid, new_ctid));
+}
+
 static inline OIndexDescr *
 o_get_tree_def(BTreeDescr *desc)
 {
