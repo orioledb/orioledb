@@ -106,6 +106,7 @@ OrioleDBPageDesc *local_ppool_page_descs = NULL;
 /* Custom GUC variables */
 int			orioledb_serializable_mode = O_SERIALIZABLE_TABLE_LOCK;
 bool		orioledb_debug_disable_multi_insert = false;
+bool		orioledb_debug_disable_fastpath = false;
 
 static const struct config_enum_entry serializable_mode_options[] = {
 	{"table_lock", O_SERIALIZABLE_TABLE_LOCK, false},
@@ -834,6 +835,23 @@ _PG_init(void)
 							NULL,
 							NULL,
 							NULL);
+
+	DefineCustomBoolVariable("orioledb.debug_disable_fastpath",
+							 "Disable the fastpath downlink search.",
+							 "Debug switch.  When on, find_page() descends "
+							 "level by level instead of jumping straight to "
+							 "a cached downlink.  A descent that takes the "
+							 "fastpath reads leaves without their hikeys "
+							 "chunk and passes no downlink stop events, so a "
+							 "test that needs either has to turn the "
+							 "fastpath off.",
+							 &orioledb_debug_disable_fastpath,
+							 false,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 
 	DefineCustomBoolVariable("orioledb.enable_stopevents",
 							 "Enable stop events.",
