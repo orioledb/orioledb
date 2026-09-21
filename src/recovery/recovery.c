@@ -5039,15 +5039,25 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			break;
 
 		case WAL_REC_DATABASE_COPY:
-			if (OidIsValid(rec->u.dbcopy.dst_tblspc))
 			{
-				handle_movedb(rec->u.dbcopy.datOid, rec->u.dbcopy.src_tblspc, rec->u.dbcopy.dst_tblspc);
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
+
+				if (!ctx->single)
+					workers_synchronize(xlogPtr, true);
+
+				if (OidIsValid(rec->u.dbcopy.dst_tblspc))
+					handle_movedb(rec->u.dbcopy.datOid,
+							  rec->u.dbcopy.src_tblspc,
+							  rec->u.dbcopy.dst_tblspc);
+				else
+					(void) destroy_tablespace_directories(rec->u.dbcopy.src_tblspc,
+												true);
+
+				if (!ctx->single)
+					workers_synchronize(xlogPtr + 1, true);
+
+				break;
 			}
-			else
-			{
-				(void) destroy_tablespace_directories(rec->u.dbcopy.src_tblspc, true);
-			}
-			break;
 
 		case WAL_REC_DATABASE_TEMPLATE_CHECKPOINT:
 			{
