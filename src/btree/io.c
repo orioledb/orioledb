@@ -862,6 +862,13 @@ btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length)
 }
 
 /*
+ * Set once a filesystem has told us it cannot punch holes.  This is asked of
+ * it for every freed block, so without the flag a filesystem without hole
+ * punching produces one WARNING per 8 kB of reclaimed space.
+ */
+static bool punch_hole_unsupported = false;
+
+/*
  * Punch a hole in a raw OS file descriptor. Logs a WARNING on failure and
  * returns; callers don't need to handle the return value because the data
  * is being discarded either way.
@@ -870,6 +877,9 @@ void
 punch_fd_hole(int fd, off_t offset, off_t length, const char *fileName)
 {
 	int			ret;
+
+	if (punch_hole_unsupported)
+		return;
 
 #ifdef __APPLE__
 	{
@@ -887,6 +897,24 @@ punch_fd_hole(int fd, off_t offset, off_t length, const char *fileName)
 	if (ret < 0)
 	{
 		int			save_errno = errno;
+
+		/*
+		 * The answer will not change for the next block, so say it once and
+		 * stop asking.  Everything keeps working; the space freed by
+		 * copy-on-write simply stays allocated until it is reused.
+		 */
+		if (save_errno == EOPNOTSUPP || save_errno == ENOSYS)
+		{
+			punch_hole_unsupported = true;
+			ereport(WARNING,
+					(errcode_for_file_access(),
+					 errmsg("could not punch hole in file \"%s\": %m", fileName),
+					 errdetail("The filesystem does not support hole punching."),
+					 errhint("Set orioledb.use_sparse_files to off to stop trying. "
+							 "Space freed by copy-on-write will then stay allocated "
+							 "until OrioleDB reuses it.")));
+			return;
+		}
 
 		ereport(WARNING,
 				(errcode_for_file_access(),
