@@ -1910,18 +1910,32 @@ o_perform_checkpoint_guts(int flags)
 	}
 
 	finish_write_xids(cur_chkp_num, (flags & CHECKPOINT_IS_SHUTDOWN) ? true : false);
-	close_xids_file();
-	LWLockRelease(&checkpoint_state->oXidQueueLock);
 
 	/*
-	 * Only now, with oXidQueueLock released, wait for the recovery workers to
-	 * flush their undo positions: that wait depends on the startup process
-	 * making progress, and holding an LWLock across it deadlocks a standby
-	 * against dbase_redo()'s ProcSignalBarrier (see
-	 * wait_recovery_undo_loc_flushed()).
+	 * Wait for the recovery side BEFORE closing the file: the last thing
+	 * finish_write_xids() does is ask the startup process and the recovery
+	 * workers for their in-progress transactions, and those records belong in
+	 * this checkpoint's file.  Closing first leaves a standby's restartpoint
+	 * saying that nothing was in progress, while the primary's file for the
+	 * same checkpoint lists the very same oxids -- and the records, written
+	 * moments later, land past the count nobody reads and are dropped when
+	 * the next checkpoint resets the queue.
+	 *
+	 * Release oXidQueueLock across the wait and take it again for the close.
+	 * Holding it raises InterruptHoldoffCount, and a standby checkpointer
+	 * that cannot absorb the ProcSignalBarrier dbase_redo() emits deadlocks
+	 * against the startup process it is waiting for -- that is why the wait
+	 * was moved out from under the lock in the first place (see
+	 * wait_recovery_undo_loc_flushed()).  Nothing else takes this lock, so
+	 * dropping it here only lets another checkpoint start, which cannot
+	 * happen while this one is running.
 	 */
+	LWLockRelease(&checkpoint_state->oXidQueueLock);
 	wait_recovery_undo_loc_flushed(cur_chkp_num,
 								   (flags & CHECKPOINT_IS_SHUTDOWN) ? true : false);
+	LWLockAcquire(&checkpoint_state->oXidQueueLock, LW_EXCLUSIVE);
+	close_xids_file();
+	LWLockRelease(&checkpoint_state->oXidQueueLock);
 
 	for (i = 0; i < NUM_CHECKPOINTABLE_UNDO_LOGS; i++)
 	{
