@@ -533,7 +533,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 
 	ASAN_UNPOISON_MEMORY_REGION(&fastpathMeta, sizeof(fastpathMeta));
-	if (orioledb_debug_disable_fastpath)
+	if (orioledb_debug_disable_downlink_fastpath)
 		fastpathMeta.enabled = false;
 	else
 		can_fastpath_find_downlink(context, key, keyType, &fastpathMeta);
