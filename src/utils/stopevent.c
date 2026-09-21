@@ -34,6 +34,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/stopevents_data.h"
+#include "workers/interrupt.h"
 #include "varatt.h"
 
 #define QUERY_BUFFER_SIZE 1024
@@ -393,6 +394,20 @@ handle_stopevent(int event_id, Jsonb *params)
 
 				if (!check_stopevent_condition(event, params))
 					break;
+
+				/*
+				 * A parked process still has to be able to stop.  SIGTERM to
+				 * an orioledb worker or to the startup process sets
+				 * ShutdownRequestPending, which CHECK_FOR_INTERRUPTS() knows
+				 * nothing about -- o_worker_handle_interrupts() is what acts
+				 * on it -- so without this a node cannot shut down while
+				 * anything waits here, and pg_ctl waits out its whole
+				 * timeout.  Backends are left alone: a parked backend has
+				 * always ignored cancellation, and tests rely on it.
+				 */
+				if (AmStartupProcess() || MyBackendType == B_BG_WORKER)
+					o_worker_handle_interrupts();
+
 				ConditionVariableTimedSleep(&event->cv, 1000, stop_event_wait_info());
 			}
 			ConditionVariableCancelSleep();
