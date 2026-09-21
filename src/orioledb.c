@@ -1703,10 +1703,10 @@ orioledb_on_shmem_exit(int code, Datum arg)
 		pg_atomic_write_u64(&oProcData[MYPROCNUMBER].xmin, InvalidOXid);
 
 		/*
-		 * Both are held only across a few statements, but dying inside one
-		 * of them would leave a page nobody can ever evict again: a slot
-		 * naming a meta page that nothing clears, or a claim on a tree that
-		 * nothing drops.
+		 * Both are held only across a few statements, but dying inside one of
+		 * them would leave a page nobody can ever evict again: a slot naming
+		 * a meta page that nothing clears, or a claim on a tree that nothing
+		 * drops.
 		 */
 		btree_unpin_meta_page();
 		btree_release_meta_page_claim();
