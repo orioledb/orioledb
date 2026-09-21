@@ -1777,7 +1777,10 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 		{
 			if (STOPEVENTS_ENABLED() && it->curKeySet)
 				STOPEVENT(STOPEVENT_ITERATOR_NEXT,
-						  btree_page_stopevent_params(desc, context->img));
+						  (context->partial.isPartial &&
+						   !context->partial.hikeysChunkIsLoaded)
+						  ? NULL
+						  : btree_page_stopevent_params(desc, context->img));
 
 			/* In FETCH mode the leaf is partial; load this tuple's chunk. */
 			if (BTREE_PAGE_FIND_IS(context, FETCH) &&
@@ -2186,9 +2189,7 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 				else
 					crossing = loc->itemOffset == 0;
 				if (crossing)
-					STOPEVENT(STOPEVENT_RAW_ITERATE_CHUNK_CROSSING,
-							  btree_page_stopevent_params(context->desc,
-														  context->img));
+					STOPEVENT(STOPEVENT_RAW_ITERATE_CHUNK_CROSSING, NULL);
 			}
 
 			if (!iterator_advance_leaf(it, loc))

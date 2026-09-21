@@ -786,7 +786,12 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 		if (!wrongChangeCount && STOPEVENTS_ENABLED())
 		{
-			params = btree_page_stopevent_params(desc, intCxt.pagePtr);
+			if (intCxt.partial &&
+				intCxt.partial->isPartial &&
+				!intCxt.partial->hikeysChunkIsLoaded)
+				params = NULL;
+			else
+				params = btree_page_stopevent_params(desc, intCxt.pagePtr);
 			STOPEVENT(STOPEVENT_PAGE_READ, params);
 		}
 
@@ -876,7 +881,12 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 		if (STOPEVENTS_ENABLED())
 		{
-			params = btree_page_stopevent_params(desc, intCxt.pagePtr);
+			if (intCxt.partial &&
+				intCxt.partial->isPartial &&
+				!intCxt.partial->hikeysChunkIsLoaded)
+				params = NULL;
+			else
+				params = btree_page_stopevent_params(desc, intCxt.pagePtr);
 			STOPEVENT(STOPEVENT_AFTER_FIND_DOWNLINK, params);
 		}
 
@@ -1145,7 +1155,12 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 		if (STOPEVENTS_ENABLED())
 		{
-			params = btree_downlink_stopevent_params(desc, intCxt.pagePtr, &loc);
+			if (intCxt.partial &&
+				intCxt.partial->isPartial &&
+				!intCxt.partial->hikeysChunkIsLoaded)
+				params = NULL;
+			else
+				params = btree_downlink_stopevent_params(desc, intCxt.pagePtr, &loc);
 		}
 
 		if (intCxt.haveLock)
