@@ -1015,6 +1015,33 @@ undo_stack_locations_set_invalid(UndoStackLocations *location)
 }
 
 /*
+ * Complain about a read of the xid file that did not deliver what it was
+ * asked for.
+ *
+ * A short read is not an errno condition: FileRead() returns the byte count
+ * and leaves errno alone, so "%m" prints whatever the last failing syscall
+ * happened to leave behind.  That is how a truncated file came to be
+ * reported three different ways by three recovery workers in one log -- "No
+ * such file or directory", "Resource temporarily unavailable", "Interrupted
+ * system call" -- with the file sitting right there.  Say which it is.
+ */
+static void
+report_short_xid_read(int nbytes, size_t expected, const char *filename,
+					  const char *what)
+{
+	if (nbytes < 0)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not read %s from xid file \"%s\": %m",
+						what, filename)));
+	else
+		ereport(FATAL,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("xid file \"%s\" is too short: reading %s returned %d of %zu bytes",
+						filename, what, nbytes, expected)));
+}
+
+/*
  * Read information about undo locations of in-progress transactions.
  */
 static void
@@ -1025,17 +1052,18 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 	off_t		offset = 0;
 	uint32		count = 0,
 				i;
+	int			nbytes;
 
 	xidFile = PathNameOpenFile(xidFilename, O_RDONLY | PG_BINARY);
 	if (xidFile < 0)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not open xid file %s: %m", xidFilename)));
 
-	if (OFileRead(xidFile, (Pointer) &count,
-				  sizeof(count), offset,
-				  WAIT_EVENT_SLRU_READ) != sizeof(count))
-		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not read xid record from file %s: %m", xidFilename)));
+	nbytes = OFileRead(xidFile, (Pointer) &count, sizeof(count), offset,
+					   WAIT_EVENT_SLRU_READ);
+	if (nbytes != sizeof(count))
+		report_short_xid_read(nbytes, sizeof(count), xidFilename,
+							  "record count");
 	offset += sizeof(count);
 
 	for (i = 0; i < count; i++)
@@ -1044,11 +1072,11 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 		XidFileRec	xidRec = {0};
 		bool		found;
 
-		if (OFileRead(xidFile, (Pointer) &xidRec,
-					  sizeof(xidRec), offset,
-					  WAIT_EVENT_SLRU_READ) != sizeof(xidRec))
-			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not read xid record from file %s: %m", xidFilename)));
+		nbytes = OFileRead(xidFile, (Pointer) &xidRec, sizeof(xidRec), offset,
+						   WAIT_EVENT_SLRU_READ);
+		if (nbytes != sizeof(xidRec))
+			report_short_xid_read(nbytes, sizeof(xidRec), xidFilename,
+								  psprintf("record %u of %u", i + 1, count));
 
 		advance_oxids(xidRec.oxid);
 		state = (RecoveryXidState *) hash_search(recovery_xid_state_hash,
