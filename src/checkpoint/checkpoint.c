@@ -800,6 +800,33 @@ unlink_xids_file(uint32 checkpointnum)
 }
 
 /*
+ * Start this checkpoint's xid file from scratch.
+ *
+ * open_xids_file() opens without O_TRUNC, because every flush reopens the
+ * same file and appends at the position it is up to.  So the file has to be
+ * emptied once, where the numbering restarts -- otherwise a file left by an
+ * earlier life of the same checkpoint number (a crash during checkpoint N
+ * leaves lastCheckpointNumber at N - 1, and the next checkpoint is N again)
+ * keeps its tail past the new count.  read_xids() stops at the count and
+ * never reads it, but the bytes stay on disk for as long as the file does.
+ */
+static void
+truncate_xids_file(uint32 checkpointnum)
+{
+	char	   *xid_filename = psprintf(XID_FILENAME_FORMAT, checkpointnum);
+	File		file;
+
+	file = PathNameOpenFile(xid_filename,
+							O_WRONLY | O_CREAT | O_TRUNC | PG_BINARY);
+	if (file < 0)
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not truncate xid file %s: %m",
+							   xid_filename)));
+	FileClose(file);
+	pfree(xid_filename);
+}
+
+/*
  * Open xids file corresponding to the current checkpoint.
  */
 static void
@@ -1003,6 +1030,7 @@ before_writing_xids_file(int chkpnum)
 	}
 
 	pg_atomic_write_u64(&checkpoint_state->xidRecFlushPos, 0);
+	truncate_xids_file(chkpnum);
 	checkpoint_state->xidQueueCheckpointNum = chkpnum;
 
 	LWLockRelease(&checkpoint_state->oXidQueueFlushLock);
