@@ -73,7 +73,8 @@ class EvictSeqScanRaceTest(BaseTest):
 		dies on its own timeout with nothing to show for it, which is what
 		this test did on its first valgrind outing.
 		"""
-		ctrl.execute("SELECT pg_stopevent_set('%s', '%s');" % (event, condition))
+		ctrl.execute("SELECT pg_stopevent_set('%s', '%s');" %
+		             (event, condition))
 		try:
 			yield
 		finally:
@@ -103,7 +104,8 @@ class EvictSeqScanRaceTest(BaseTest):
 
 		with self.getReplica() as replica:
 			replica.append_conf(
-			    'postgresql.conf', "orioledb.enable_stopevents = true\n"
+			    'postgresql.conf',
+			    "orioledb.enable_stopevents = true\n"
 			    # Small enough that replaying the churn starves it, which is
 			    # what puts the replica's bgwriter on its eviction path.
 			    "orioledb.main_buffers = 8MB\n"
@@ -209,5 +211,5 @@ class EvictSeqScanRaceTest(BaseTest):
 				# than a green tick that means "the eviction never came".
 				self.skipTest(
 				    "no eviction of o_victim's root reached the gap within"
-				    " %d s; presser: %s" % (self.PARK_TIMEOUT,
-				                            press_failed[:1]))
+				    " %d s; presser: %s" %
+				    (self.PARK_TIMEOUT, press_failed[:1]))
