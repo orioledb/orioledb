@@ -22,7 +22,15 @@ RETURNS text
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
-CREATE FUNCTION orioledb_test_deserialize_string(value bytea)
+CREATE FUNCTION orioledb_test_deserialize_string(value bytea,
+												 claimed_length int DEFAULT -1)
+RETURNS bool
+AS 'MODULE_PATHNAME'
+VOLATILE STRICT LANGUAGE C;
+
+CREATE FUNCTION orioledb_test_deserialize_node(value bytea,
+											   pg_version int,
+											   claimed_length int DEFAULT -1)
 RETURNS bool
 AS 'MODULE_PATHNAME'
 VOLATILE STRICT LANGUAGE C;

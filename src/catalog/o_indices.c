@@ -820,6 +820,22 @@ o_deserialize_string_safe(Pointer *ptr, Pointer data, Size length, char **out)
 }
 
 #ifdef IS_DEV
+
+/*
+ * How much of the blob a test wrapper tells the deserializer it may read.
+ *
+ * A wrapper builds a well-formed blob and hands over its real length, which
+ * only ever exercises the terminator check -- the bounds checks cannot fire
+ * on input that is exactly the right size.  A negative claim means "the real
+ * length"; anything else is passed through as the caller wrote it, so a test
+ * can claim a blob is shorter than it is and reach the truncation paths.
+ */
+static Size
+o_test_claimed_length(int32 claimed, int real)
+{
+	return claimed < 0 ? (Size) real : (Size) claimed;
+}
+
 PG_FUNCTION_INFO_V1(orioledb_test_deserialize_string);
 
 /*
@@ -830,6 +846,7 @@ Datum
 orioledb_test_deserialize_string(PG_FUNCTION_ARGS)
 {
 	bytea	   *value = PG_GETARG_BYTEA_PP(0);
+	int32		claimed = PG_GETARG_INT32(1);
 	size_t		str_len = VARSIZE_ANY_EXHDR(value);
 	StringInfoData serialized;
 	Pointer		ptr;
@@ -841,10 +858,52 @@ orioledb_test_deserialize_string(PG_FUNCTION_ARGS)
 	appendBinaryStringInfo(&serialized, VARDATA_ANY(value), str_len);
 	ptr = serialized.data;
 	valid = o_deserialize_string_safe(&ptr, serialized.data,
-									  serialized.len, &out);
+									  o_test_claimed_length(claimed,
+															serialized.len),
+									  &out);
 
 	if (out != NULL)
 		pfree(out);
+	pfree(serialized.data);
+	PG_FREE_IF_COPY(value, 0);
+
+	PG_RETURN_BOOL(valid);
+}
+
+PG_FUNCTION_INFO_V1(orioledb_test_deserialize_node);
+
+/*
+ * Test-only wrapper for o_deserialize_node_safe(), in the same shape.  The
+ * version stamp is a parameter so that a test can ask for the branch that
+ * does not parse the blob: stringToNode() on a deliberately malformed one
+ * would elog before the return value could be examined, while the
+ * incompatible-version branch still reads the string to the terminator and
+ * is therefore just as good at showing an overread.
+ */
+Datum
+orioledb_test_deserialize_node(PG_FUNCTION_ARGS)
+{
+	bytea	   *value = PG_GETARG_BYTEA_PP(0);
+	int32		pg_version = PG_GETARG_INT32(1);
+	int32		claimed = PG_GETARG_INT32(2);
+	size_t		node_str_len = VARSIZE_ANY_EXHDR(value);
+	StringInfoData serialized;
+	Pointer		ptr;
+	Node	   *out = NULL;
+	bool		valid;
+
+	initStringInfo(&serialized);
+	appendBinaryStringInfo(&serialized, (Pointer) &pg_version,
+						   sizeof(pg_version));
+	appendBinaryStringInfo(&serialized, (Pointer) &node_str_len,
+						   sizeof(node_str_len));
+	appendBinaryStringInfo(&serialized, VARDATA_ANY(value), node_str_len);
+	ptr = serialized.data;
+	valid = o_deserialize_node_safe(&ptr, serialized.data,
+									o_test_claimed_length(claimed,
+														  serialized.len),
+									&out);
+
 	pfree(serialized.data);
 	PG_FREE_IF_COPY(value, 0);
 
@@ -934,25 +993,44 @@ o_deserialize_node_safe(Pointer *ptr, Pointer data, Size length, Node **out)
 {
 	size_t		node_str_len;
 	int32		pg_version;
+	Pointer		next = *ptr;
+	Size		used = (Size) (next - data);
 
-	if ((*ptr - data) + (int) (sizeof(pg_version) + sizeof(size_t)) > length)
+	if (used > length ||
+		sizeof(pg_version) + sizeof(size_t) > length - used)
 		return false;
-	memcpy(&pg_version, *ptr, sizeof(pg_version));
-	*ptr += sizeof(pg_version);
-	memcpy(&node_str_len, *ptr, sizeof(size_t));
-	*ptr += sizeof(size_t);
+	memcpy(&pg_version, next, sizeof(pg_version));
+	next += sizeof(pg_version);
+	memcpy(&node_str_len, next, sizeof(size_t));
+	next += sizeof(size_t);
 
-	if ((*ptr - data) + (Size) node_str_len > length)
+	/*
+	 * Both readers below run to a terminator rather than to node_str_len:
+	 * stringToNode() parses until the string ends, and o_node_str_is_empty()
+	 * compares one.  A blob whose last byte is not \0 would take them past
+	 * the end of the data, so the terminator has to be there before either of
+	 * them sees the buffer.  o_serialize_node() writes strlen + 1, so a
+	 * length of zero cannot be ours either.
+	 *
+	 * Do the arithmetic by subtraction in unsigned Size: a corrupted
+	 * node_str_len near SIZE_MAX would wrap a sum and pass the check.
+	 */
+	used = (Size) (next - data);
+	if (node_str_len == 0 || used > length ||
+		node_str_len > length - used ||
+		((char *) next)[node_str_len - 1] != '\0')
 		return false;
+
 	if (o_node_version_compatible(pg_version))
-		*out = stringToNode(*ptr);
+		*out = stringToNode(next);
 	else
 	{
-		if (!o_node_str_is_empty(*ptr))
+		if (!o_node_str_is_empty(next))
 			o_node_deserialize_format_changed = true;
 		*out = NULL;
 	}
-	*ptr += node_str_len;
+
+	*ptr = next + node_str_len;
 	return true;
 }
 
