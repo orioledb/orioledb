@@ -5997,8 +5997,8 @@ worker_queue_flush(int worker_id)
 
 		/*
 		 * Retrying with the same buffer is how shm_mq means a non-waiting
-		 * send to be finished: a partial message is remembered in the
-		 * handle, so state->queue_buf_len must not move until we are done.
+		 * send to be finished: a partial message is remembered in the handle,
+		 * so state->queue_buf_len must not move until we are done.
 		 */
 		result = shm_mq_send(state->queue, state->queue_buf_len,
 							 state->queue_buf, true, true);
