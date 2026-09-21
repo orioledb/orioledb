@@ -527,6 +527,19 @@ orioledb_tuple_complete_modification(Relation rel)
 	clear_pending_sk_marker();
 }
 
+/*
+ * ALTER TABLE ... SET ACCESS METHOD orioledb is the one rewrite where the
+ * copy loop does the work: only the old access method can read the old
+ * relation.  The transient relation is registered as an OrioleDB table for
+ * exactly that reason, so let its rows through.
+ */
+static inline bool
+o_skip_rewrite_insert(Relation relation)
+{
+	return OidIsValid(relation->rd_rel->relrewrite) &&
+		   RelationGetRelid(relation) != o_am_conversion_newrel;
+}
+
 static TupleTableSlot *
 orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 					  CommandId cid, int options, BulkInsertState bistate)
@@ -535,7 +548,7 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 
-	if (OidIsValid(relation->rd_rel->relrewrite))
+	if (o_skip_rewrite_insert(relation))
 		return slot;
 
 	o_serializable_lock_relation(RelationGetRelid(relation));
@@ -1947,7 +1960,7 @@ orioledb_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 	OXid		oxid;
 	int			i;
 
-	if (OidIsValid(relation->rd_rel->relrewrite))
+	if (o_skip_rewrite_insert(relation))
 		return;
 
 	o_serializable_lock_relation(RelationGetRelid(relation));
