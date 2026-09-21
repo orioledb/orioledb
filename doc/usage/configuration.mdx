@@ -226,8 +226,22 @@ Display compression column in orioledb_table_description.
 | ----------- | --- |
 | **Default** | off |
 
-Try to allocate files as `sparse` at filesystem level. Saves occupied space on disk by excluding non-allocated
-regions in file from occupying disk space. It's an experimental option.
+Return space freed by copy-on-write to the filesystem by punching holes in the data files.
+
+OrioleDB writes a modified page to a new location and frees the old one, and a freed block only becomes
+reusable once the checkpoint it was freed in has completed. Between those two points the block occupies
+disk without holding data, so a write-heavy workload can leave the data files several times larger than
+the data in them. Data files are never truncated, so that size is a high-water mark: it does not come back
+down on its own. With this option on, the freed blocks are punched out and the space is returned to the
+filesystem straight away.
+
+The file *length* is unaffected — only the space the filesystem charges for it. After enabling this, `ls -l`
+and `du --apparent-size` keep reporting the high-water mark while `du` and `df` report what is actually
+used, and the two can differ by a large factor. Monitoring that reads the apparent size will look wrong.
+
+Requires a filesystem that supports hole punching (`FALLOC_FL_PUNCH_HOLE`); ext4, XFS and Btrfs do. On one
+that does not, OrioleDB logs a single warning and carries on without punching. Compressed tables are not
+affected by this option, since their space is managed by extent rather than by block.
 
 ### `orioledb.strict_mode`
 
