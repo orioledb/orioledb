@@ -3129,8 +3129,8 @@ search_for_undo_sub_location(UndoLogType undoType,
 					UndoLocation prevSubLocation = item->prevSubLocation;
 
 					/*
-					 * Subxact chains only ever move backwards; a cycle
-					 * means corruption.
+					 * Subxact chains only ever move backwards; a cycle means
+					 * corruption.
 					 */
 					if (UndoLocationIsValid(prevSubLocation) && prevSubLocation >= location)
 						elog(PANIC,
