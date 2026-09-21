@@ -2168,14 +2168,16 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 			it->curKeyLazy = false;
 
 			/*
-			 * Test-only hook for raw_iterate_refind isolation spec: pause at
-			 * a chunk boundary so a concurrent session can modify the page,
-			 * then let iterator_advance_leaf detect the change and exercise
-			 * the refind path.
+			 * Pause at a chunk boundary so that a concurrent session can
+			 * modify the page, and iterator_advance_leaf() below meets the
+			 * change.  The leaf has to have been read without its hikeys
+			 * chunk for that to be detectable, which is what the fastpath
+			 * does -- so a test using this leaves orioledb.debug_disable_
+			 * fastpath off.
 			 */
-#ifdef IS_DEV
 			if (STOPEVENTS_ENABLED() &&
-				BTREE_PAGE_FIND_IS(context, FETCH))
+				BTREE_PAGE_FIND_IS(context, FETCH) &&
+				!context->partial.hikeysChunkIsLoaded)
 			{
 				bool		crossing;
 
@@ -2184,20 +2186,10 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 				else
 					crossing = loc->itemOffset == 0;
 				if (crossing)
-				{
-					/*
-					 * Stopevents disable fastpath, so hikeys are always
-					 * loaded during find_page.  Reset to simulate the
-					 * production fastpath path where hikeys are NOT loaded,
-					 * letting iterator_advance_leaf detect page changes.
-					 */
-					context->partial.hikeysChunkIsLoaded = false;
 					STOPEVENT(STOPEVENT_RAW_ITERATE_CHUNK_CROSSING,
 							  btree_page_stopevent_params(context->desc,
 														  context->img));
-				}
 			}
-#endif
 
 			if (!iterator_advance_leaf(it, loc))
 			{
