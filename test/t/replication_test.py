@@ -289,10 +289,24 @@ class ReplicationTest(BaseTest):
 
 				replica.restart()
 
+				# Still open on the primary, so neither side may show a row
+				# of it -- and the standby has just come back from a
+				# restartpoint, which is where it learns that.
+				self.assertEqual(
+				    master.execute("SELECT count(*) FROM o_test;")[0][0], 0)
+				self.assertEqual(
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0], 0,
+				    "the standby shows rows of a transaction still open on"
+				    " the primary")
+
 				con1.rollback()
 				self.catchup_orioledb(replica)
 
-				replica.safe_psql("SELECT * FROM o_test;")
+				self.assertEqual(
+				    master.execute("SELECT count(*) FROM o_test;")[0][0], 0)
+				self.assertEqual(
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0], 0,
+				    "rolled-back rows are visible on the standby")
 
 	def test_replication_xid_count_race(self):
 		with self.node as master:
