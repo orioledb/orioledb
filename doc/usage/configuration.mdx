@@ -370,6 +370,14 @@ Skip reading of unmodified trees during checkpointing.
 
 Sets maximum value for bridge ctid for its overflow testing.
 
+### `orioledb.debug_disable_downlink_fastpath`
+
+|             |     |
+| ----------- | --- |
+| **Default** | off |
+
+Disable the fastpath downlink search. When on, `find_page()` descends level by level instead of jumping straight to a cached downlink. Useful for tests that need hikeys or downlink stop events.
+
 ### `orioledb.replay_until_lsn`
 
 |             |     |
