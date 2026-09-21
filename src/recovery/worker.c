@@ -818,6 +818,42 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 }
 
 /*
+ * Keep the bridge ctid counter ahead of the ctids the WAL has already handed
+ * out (issue #1179).
+ *
+ * The counter lives in the primary tree's meta page, so it is only as current
+ * as the last checkpoint; everything allocated since has to be recovered from
+ * the records that used it.  Otherwise recovery leaves the counter inside the
+ * range of ctids live rows already hold, and inserts fail against the bridge
+ * index's unique constraint until it has walked past all of them -- or, where
+ * the row it lands on is deleted but not yet vacuumed, succeed and give two
+ * rows one bridge ctid.
+ *
+ * The bridge tree's own records cannot do this: they name the bridge index,
+ * and the counter is not in that tree.  The primary record carries the ctid
+ * as the row's first leaf field, or the second when the primary key is the
+ * surrogate ctid.
+ */
+static void
+recovery_bridge_ctid_update(OIndexDescr *id, OTuple tuple)
+{
+	ItemPointerData bridge_ctid;
+	Datum		value;
+	bool		isnull;
+
+	Assert(id->bridging && id->desc.type == oIndexPrimary);
+
+	value = o_fastgetattr(tuple, id->primaryIsCtid ? 2 : 1,
+						  id->leafTupdesc, &id->leafSpec, &isnull);
+	if (isnull)
+		return;
+	ItemPointerCopy((ItemPointer) DatumGetPointer(value), &bridge_ctid);
+
+	o_btree_load_shmem(&id->desc);
+	btree_bridge_ctid_update_if_needed(&id->desc, bridge_ctid);
+}
+
+/*
  * Apply the modify WAL record.
  */
 void
@@ -827,6 +863,10 @@ apply_modify_record(OTableDescr *descr, OIndexDescr *id, uint16 type,
 	OXid		oxid;
 
 	oxid = get_current_oxid();
+
+	if (id->bridging && id->desc.type == oIndexPrimary &&
+		(type == RecoveryMsgTypeInsert || type == RecoveryMsgTypeUpdate))
+		recovery_bridge_ctid_update(id, p);
 
 	/*
 	 * Don't apply changes to secondary indices before TOAST is consisntent.
@@ -991,15 +1031,6 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 		btree_ctid_update_if_needed(&GET_PRIMARY(descr)->desc,
 									slot->tts_tid);
-	}
-
-	if (descr->bridge)
-	{
-		OTableSlot *oslot = (OTableSlot *) slot;
-
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
-		btree_ctid_update_if_needed(&GET_PRIMARY(descr)->desc,
-									oslot->bridge_ctid);
 	}
 
 	for (i = 0; i < descr->nIndices; i++)

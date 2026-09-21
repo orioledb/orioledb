@@ -353,3 +353,206 @@ class IndexBridgingTest(BaseTest):
 							SET LOCAL enable_seqscan = off;
 							SELECT * FROM o_test ORDER BY j;
 						 """))
+
+	def bridge_ctids(self, node, primary_is_ctid, table='o_test'):
+		"""
+		The bridge ctid of every row still in the primary tree.
+
+		orioledb_tbl_structure() prints a section per tree, and in the primary
+		one a bridged row's first field is the bridge ctid it holds -- the
+		second, when the table has no primary key and the first field is the
+		surrogate ctid.
+		"""
+		struct = node.execute("SELECT orioledb_tbl_structure('%s'::regclass,"
+		                      " 'nue');" % table)[0][0]
+		primary = [
+		    part for part in struct.split('\nIndex ')
+		    if 'ix_type = primary' in part
+		]
+		self.assertEqual(len(primary), 1,
+		                 "no single primary tree in:\n%s" % struct)
+		if primary_is_ctid:
+			return re.findall(r"tuple = \('\(\d+,\d+\)', '(\(\d+,\d+\))'",
+			                  primary[0])
+		return re.findall(r"tuple = \('(\(\d+,\d+\))'", primary[0])
+
+	def check_bridge_ctids_are_sane(self,
+	                                node,
+	                                total,
+	                                live,
+	                                gone,
+	                                primary_is_ctid=False):
+		"""
+		What a rewound bridge ctid counter breaks.
+
+		`total` is how many rows the table holds, `live` the ids left of the
+		ones inserted before the counter rewound, `gone` ids whose rows were
+		deleted before the counter rewound -- their bridge tuples are kept
+		for VACUUM, so an insert that lands on one replaces it instead of
+		failing, and the bridged index entries still pointing at that ctid
+		start resolving to whichever row took it over.
+		"""
+		ctids = self.bridge_ctids(node, primary_is_ctid)
+		self.assertEqual(len(ctids), len(set(ctids)),
+		                 "two rows hold one bridge ctid: %s" % sorted(ctids))
+		# Deleted rows linger in the primary tree until VACUUM, so the dump
+		# holds at least one tuple per live row -- and the tuple of a deleted
+		# row whose ctid was handed out again is right there next to the row
+		# that took it, which is what the distinctness check above sees.
+		self.assertGreaterEqual(len(ctids), total)
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_test;")[0][0], total)
+
+		plan = node.execute("""
+			SET enable_seqscan = off;
+			EXPLAIN (COSTS OFF, FORMAT JSON)
+				SELECT i FROM o_test WHERE doc ? 'k';
+		""")[0][0][0]["Plan"]
+		inner = plan["Plans"][0]
+		self.assertEqual('Bitmap Index Scan', inner["Node Type"],
+		                 "not reading through the bridged index: %s" % plan)
+		self.assertEqual('o_test_gin', inner["Index Name"])
+
+		# The bridged index has to answer like the table itself.  A row that
+		# took over a deleted row's ctid shows up here: the deleted row's GIN
+		# entries have not been vacuumed away, and they now lead to it.
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT array_agg(i ORDER BY i) FROM o_test WHERE doc ? 'k';
+			""")[0][0], live)
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = on;
+				SET enable_bitmapscan = off;
+				SET enable_indexscan = off;
+				SELECT array_agg(i ORDER BY i) FROM o_test WHERE doc ? 'k';
+			""")[0][0], live)
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_test WHERE i = ANY(%s);" %
+		                 ('ARRAY%s' % gone))[0][0], 0)
+
+	def create_bridged_table(self, node, primary_is_ctid=False):
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test (
+				i int NOT NULL,
+				doc jsonb%s
+			) USING orioledb;
+			CREATE INDEX o_test_gin ON o_test USING gin (doc);
+		""" % ('' if primary_is_ctid else ',\n\t\t\t\tPRIMARY KEY (i)'))
+		# Everything the counter hands out after this point reaches disk only
+		# through the WAL, which is what recovery has to read it back from.
+		node.safe_psql("CHECKPOINT;")
+
+	def fill_bridged_table(self, node):
+		node.safe_psql("""
+			INSERT INTO o_test SELECT v, jsonb_build_object('k', v)
+				FROM generate_series(1, 50) v;
+			DELETE FROM o_test WHERE i <= 5;
+		""")
+		# An update of a bridged column gives the row a new bridge ctid, so
+		# the highest ctids in use are these and not the inserts': recovery
+		# has to come back past the update records too.
+		node.safe_psql("""
+			UPDATE o_test SET doc = jsonb_build_object('k', i, 'u', 1)
+				WHERE i BETWEEN 10 AND 20;
+		""")
+
+	def test_bridge_ctid_survives_crash_recovery(self):
+		"""
+		The bridge ctid counter must come back from the WAL, not from zero.
+
+		It lives in the primary tree's meta page, so a crash leaves it at
+		whatever the last checkpoint saved.  Replay used to pass every ctid it
+		saw to btree_ctid_update_if_needed() -- the surrogate primary ctid's
+		counter, not this one -- so the bridge counter stayed where the
+		checkpoint had left it and started handing out ctids that live rows
+		already held:
+
+		    ERROR:  duplicate key value violates unique constraint
+		            "index_bridge"
+		    DETAIL:  Key (index_bridging_ctid)=((0,6)) already exists.
+
+		The rows it reaches before that one are worse off than the error: they
+		land on deleted rows' bridge tuples, which are kept until VACUUM, and
+		take over their ctid.
+		"""
+		node = self.node
+		node.start()
+		self.create_bridged_table(node)
+		self.fill_bridged_table(node)
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+
+		node.safe_psql("""
+			INSERT INTO o_test SELECT v, jsonb_build_object('n', v)
+				FROM generate_series(101, 120) v;
+		""")
+
+		self.check_bridge_ctids_are_sane(node,
+		                                 total=65,
+		                                 live=list(range(6, 51)),
+		                                 gone=list(range(1, 6)))
+
+	def test_bridge_ctid_survives_promote(self):
+		"""
+		The same counter, recovered by a standby rather than by crash
+		recovery: a promoted replica that replayed the inserts has to know
+		which ctids they used.
+
+		The rows have to be inserted after the base backup, or the replica
+		starts from a copy of the primary's meta page and never has to
+		recover the counter at all.
+		"""
+		node = self.node
+		node.start()
+		self.create_bridged_table(node)
+
+		with self.getReplica().start() as replica:
+			self.fill_bridged_table(node)
+			self.catchup_orioledb(replica)
+			node.stop(['-m', 'immediate'])
+			replica.promote()
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery();",
+			                         expected=True)
+
+			replica.safe_psql("""
+				INSERT INTO o_test SELECT v, jsonb_build_object('n', v)
+					FROM generate_series(101, 120) v;
+			""")
+
+			self.check_bridge_ctids_are_sane(replica,
+			                                 total=65,
+			                                 live=list(range(6, 51)),
+			                                 gone=list(range(1, 6)))
+
+	def test_bridge_ctid_survives_crash_recovery_without_pkey(self):
+		"""
+		The same, on a table whose primary key is the surrogate ctid.
+
+		Its rows carry two ctids, the row's own and the bridge one, and only
+		the second is this counter's.  They are also counted differently --
+		2048 rows to a block against MaxHeapTuplesPerPage -- so reading the
+		wrong one puts the counter in the wrong place rather than merely
+		behind.
+		"""
+		node = self.node
+		node.start()
+		self.create_bridged_table(node, primary_is_ctid=True)
+		self.fill_bridged_table(node)
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+
+		node.safe_psql("""
+			INSERT INTO o_test SELECT v, jsonb_build_object('n', v)
+				FROM generate_series(101, 120) v;
+		""")
+
+		self.check_bridge_ctids_are_sane(node,
+		                                 total=65,
+		                                 live=list(range(6, 51)),
+		                                 gone=list(range(1, 6)),
+		                                 primary_is_ctid=True)
