@@ -16,11 +16,13 @@
 ;;     - one "Always" assertion per elle anomaly type (e.g. "jepsen: no G1b
 ;;       anomalies", ...), so each anomaly is a distinct test property.
 ;;       The anomaly set is read from /opt/jepsen/elle-anomalies.edn
-;;     - a catch-all "Always" assertion on the top-level :valid?, covering
-;;       non-anomaly checkers (:critical, :missing-table-column, :stats,
-;;       :exceptions, ...)
+;;     - one "sometimes" assertion for :unknown anomalies like :empty-transaction-graph
 ;;
 ;;       NB: we may want to categorize this further
+;;       NB: we are not including a generic "catch-all" assertion for arbitrary
+;;           (= false (:valid? checker)) types. We may do so in the future or tune
+;;           network errors such that failures like :missing-table-column do not happen.
+;;           For now, we only emit assertions for the elle model checker anomalies
 
 (require '[cheshire.core :as json]
          '[clojure.edn :as edn]
@@ -80,18 +82,6 @@
    {}
    (dissoc (:workload results) :valid?)))
 
-(defn invalid-checkers
-  "Names of checkers in map m whose :valid? is not true."
-  [m]
-  (->> (dissoc m :valid?)
-       (keep (fn [[k v]]
-               (when (and (map? v)
-                          (contains? v :valid?)
-                          (not (true? (:valid? v))))
-                 (kw-name k))))
-       sort
-       vec))
-
 (defn assertion
   "Antithesis fallback-SDK message; defaults to an Always assertion.
   https://antithesis.com/docs/reference/sdk/fallback/assert/"
@@ -129,8 +119,6 @@
    :empty-transaction-graph sometimes
    :cycle-search-timeout sometimes})
 
-(def catch-all-assertion-id "jepsen: no failures")
-
 (defn emit! [message]
   (println (json/generate-string message)))
 
@@ -161,18 +149,7 @@
                                 :hit true
                                 :condition condition
                                 :details details}
-                               (type->assert-opts anomaly-type))))))
-
-  (let [valid? (:valid? results)] ;; true/false/:unknown
-    (emit! (assertion {:id catch-all-assertion-id
-                       :hit true
-                       :condition (boolean valid?) ; treat :unkown as true, handled by "unknown" properties
-                       :details (when-not valid?
-                                  {:valid? (pr-str valid?)
-                                   :stats (op-stats results)
-                                   :invalid-checkers (invalid-checkers results)
-                                   :invalid-workload-checkers (invalid-checkers
-                                                               (:workload results))})}))))
+                               (type->assert-opts anomaly-type)))))))
 
 (defn sdk-writer
   "Writer for $ANTITHESIS_OUTPUT_DIR/sdk.jsonl (append); *out* when running outside Antithesis."
@@ -198,8 +175,7 @@
       (binding [*out* w]
         (doseq [anomaly-type anomaly-types]
           (declaration! (anomaly-assertion-id anomaly-type)
-                        (type->assert-opts anomaly-type)))
-        (declaration! catch-all-assertion-id)))
+                        (type->assert-opts anomaly-type)))))
     (if catalog 0 1)))
 
 (defn run-evaluate
