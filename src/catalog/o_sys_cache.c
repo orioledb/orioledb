@@ -1025,15 +1025,16 @@ o_sys_cache_delete_callback(UndoLogType undoType, UndoLocation location,
 							UndoStackItem *baseItem, OXid oxid,
 							OUndoCallbackStage stage, bool changeCountsValid)
 {
-	bool		res PG_USED_FOR_ASSERTS_ONLY;
 	SysCacheDeleteUndoStackItem *item = (SysCacheDeleteUndoStackItem *) baseItem;
 	OSysCache  *sys_cache = get_o_sys_cache(item->sys_tree_num);
 
 	if (sys_cache == NULL)
-		return;
+		elog(is_recovery_in_progress() ? PANIC : FATAL,
+			 "no sys cache for sys tree %d", item->sys_tree_num);
 
-	res = update_deleted_value(sys_cache, (OSysCacheKey *) &item->key, false);
-	Assert(res);
+	if (!update_deleted_value(sys_cache, (OSysCacheKey *) &item->key, false))
+		elog(is_recovery_in_progress() ? PANIC : FATAL,
+			 "sys cache entry not found for sys tree %d", item->sys_tree_num);
 }
 
 bool
