@@ -89,6 +89,7 @@ static int	o_sys_cache_key_cmp(OSysCache *sys_cache, int nkeys,
 								OSysCacheKey *key1, OSysCacheKey *key2);
 static void o_sys_cache_keys_to_str(StringInfo buf, OSysCache *sys_cache,
 									OSysCacheKey *key);
+static inline OSysCache *get_o_sys_cache(int sys_tree_num);
 
 static BTreeDescr *oSysCacheToastGetBTreeDesc(void *arg);
 static uint32 oSysCacheToastGetMaxChunkSize(void *key, void *arg);
@@ -962,7 +963,7 @@ update_deleted_value(OSysCache *sys_cache, OSysCacheKey *key, bool new_value)
 typedef struct
 {
 	UndoStackItem header;
-	OSysCache  *sys_cache;
+	int			sys_tree_num;
 	OSysCacheKey4 key;
 } SysCacheDeleteUndoStackItem;
 
@@ -988,7 +989,7 @@ o_add_undo_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key)
 	item->header.itemSize = size;
 	item->header.type = SysCacheDeleteUndoItemType;
 	item->header.indexType = oIndexPrimary;
-	item->sys_cache = sys_cache;
+	item->sys_tree_num = sys_cache->sys_tree_num;
 	item->key.common = key->common;
 
 	for (i = 0; i < sys_cache->nkeys; i++)
@@ -1026,10 +1027,12 @@ o_sys_cache_delete_callback(UndoLogType undoType, UndoLocation location,
 {
 	bool		res PG_USED_FOR_ASSERTS_ONLY;
 	SysCacheDeleteUndoStackItem *item = (SysCacheDeleteUndoStackItem *) baseItem;
+	OSysCache  *sys_cache = get_o_sys_cache(item->sys_tree_num);
 
-	Assert(!is_recovery_in_progress());
+	if (sys_cache == NULL)
+		return;
 
-	res = update_deleted_value(item->sys_cache, (OSysCacheKey *) &item->key, false);
+	res = update_deleted_value(sys_cache, (OSysCacheKey *) &item->key, false);
 	Assert(res);
 }
 
