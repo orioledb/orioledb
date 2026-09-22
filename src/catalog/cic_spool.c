@@ -579,6 +579,19 @@ cic_capture_undo_callback(UndoLogType undoType,
 
 	if (stage != OUndoCallbackStageAbort)
 		return;
+
+	/*
+	 * Validate payload sizes to prevent corrupt undo logs from causing
+	 * out-of-bounds reads and leaking memory into the spool file.
+	 * We must PANIC (not ERROR) because throwing an ERROR during
+	 * abort or recovery is unsafe.
+	 */
+	if (item->header.itemSize < sizeof(CICCaptureUndoStackItem) ||
+		(Size) item->keyLength + item->tupleLength >
+		item->header.itemSize - sizeof(CICCaptureUndoStackItem))
+		elog(PANIC, "invalid CIC undo item at location " UINT64_FORMAT,
+			 (uint64) location);
+
 	if (!cic_dir_exists(item->tableOids, item->builderOxid))
 	{
 		/*
