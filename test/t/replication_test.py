@@ -3132,7 +3132,23 @@ class ReplicationTest(BaseTest):
 		# the new standby then asks for a timeline its backup is already past
 		# ("requested timeline N is not a child of this server's history").
 		if master.status() != NodeStatus.Running:
-			master.start()
+			try:
+				master.start()
+			except Exception:  # noqa: BLE001 - handled right below
+				# It was stopped before anyone could promote it out of a
+				# diverged recovery, so it will not start as a standby of a
+				# node it cannot follow.  Cut it loose and bring it up on its
+				# own timeline; the history files it fetched from that peer
+				# have to go too, or the next base backup would advertise a
+				# timeline this data predates.
+				signal_file = os.path.join(master.data_dir, 'standby.signal')
+				if os.path.exists(signal_file):
+					os.remove(signal_file)
+				wal_dir = os.path.join(master.data_dir, 'pg_wal')
+				for name in os.listdir(wal_dir):
+					if name.endswith('.history'):
+						os.remove(os.path.join(wal_dir, name))
+				master.start()
 		if master.execute("SELECT pg_is_in_recovery();")[0][0]:
 			master.promote()
 			master.poll_query_until("SELECT NOT pg_is_in_recovery();",
@@ -3178,6 +3194,20 @@ class ReplicationTest(BaseTest):
 			reached = node.execute(
 			    "SELECT pg_last_wal_replay_lsn()::text;")[0][0]
 			if forked:
+				# Promote it here, while it is still running and in
+				# recovery.  Ending recovery properly forks a timeline whose
+				# history matches its data, and the pair can be rebuilt
+				# around it.  Once the teardown below has stopped it, this
+				# node cannot be started at all: it comes up asking for the
+				# peer's timeline and dies with "requested timeline N is not
+				# a child of this server's history".
+				try:
+					node.promote()
+					node.poll_query_until("SELECT NOT pg_is_in_recovery();",
+					                      expected=True,
+					                      max_attempts=120)
+				except Exception:  # noqa: BLE001 - diagnosed by the caller
+					pass
 				raise StandbyDiverged(forked[-1])
 			self.fail(
 			    "the old primary did not follow the promoted node within %d s"
