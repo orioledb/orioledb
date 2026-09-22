@@ -159,6 +159,7 @@ static Oid	o_rewrite_old_pk_oid = InvalidOid;	/* oldrel's PK index OID */
 static RelFileNumber o_rewrite_primary_relnode = InvalidRelFileNumber;	/* Rnew */
 static bool o_rewrite_bridging = false;	/* oldrel had index_bridging */
 static RelFileNumber o_rewrite_bridge_relnode = InvalidRelFileNumber;	/* Btrans */
+static bool o_rewrite_from_other_am = false;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -1053,6 +1054,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		o_rewrite_primary_relnode = InvalidRelFileNumber;
 		o_rewrite_bridging = false;
 		o_rewrite_bridge_relnode = InvalidRelFileNumber;
+		o_rewrite_from_other_am = false;
 		in_nontransactional_truncate = false;
 		in_cluster_rebuild = false;
 	}
@@ -2292,7 +2294,7 @@ find_primary_index_oid(Relation oldrel)
  * its toast table, and is about to return to the caller (ATRewriteTable / the
  * matview transient receiver) which fills it natively via table_tuple_insert.
  *
- * For an orioledb oldrel we prepare that native fill by:
+ * For an orioledb destination we prepare that native fill by:
  *   - creating the OTable for newrel (nindices = 0);
  *   - wiring its toast;
  *   - building the empty primary index tree on newrel, keyed by the new
@@ -2306,7 +2308,9 @@ find_primary_index_oid(Relation oldrel)
  * table's own relfilenode (oTable->oids.relnode = Rnew), so the same
  * swap-transfer model holds and no primary index needs to be built here.
  *
- * On non-orioledb oldrel this is a no-op (PG's heap fill needs no prep).
+ * When oldrel uses another AM, this is an access-method conversion.  Existing
+ * non-btree indexes make the destination bridged, while btree indexes become
+ * native OrioleDB indexes during PostgreSQL's post-swap reindex.
  */
 void
 orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
@@ -2314,11 +2318,50 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 	ORelOids	old_oids,
 				new_oids;
 	Oid			old_pk_oid;
+	Oid			toast_oid;
 	RelFileNumber primary_relnode;
 	bool		bridging;
+	bool		source_is_orioledb;
 
-	if (!is_orioledb_rel(oldrel))
+	if (!is_orioledb_rel(newrel))
 		return;
+
+	source_is_orioledb = is_orioledb_rel(oldrel);
+	o_rewrite_from_other_am = !source_is_orioledb;
+
+	if (o_rewrite_from_other_am)
+	{
+		List	   *indexlist;
+		ListCell   *lc;
+
+		if (oldrel->rd_rel->relreplident == REPLICA_IDENTITY_NOTHING)
+			elog(ERROR, "replica identity type NOTHING is not supported for OrioleDB tables yet");
+		if (oldrel->rd_rel->relreplident == REPLICA_IDENTITY_INDEX)
+			elog(ERROR, "replica identity type INDEX is not supported for OrioleDB tables yet");
+
+		bridging = false;
+		indexlist = RelationGetIndexList(oldrel);
+		foreach(lc, indexlist)
+		{
+			Relation	index = index_open(lfirst_oid(lc), AccessShareLock);
+
+			if (index->rd_rel->relam != BTREE_AM_OID)
+				bridging = true;
+			index_close(index, AccessShareLock);
+			if (bridging)
+				break;
+		}
+		list_free(indexlist);
+	}
+	else
+	{
+		OTable	   *old_o_tbl;
+
+		ORelOidsSetFromRel(old_oids, oldrel);
+		old_o_tbl = o_tables_get(old_oids);
+		bridging = old_o_tbl ? old_o_tbl->index_bridging : false;
+		o_table_free(old_o_tbl);
+	}
 
 	/* Old heap, pre-swap (relnode = Rold). */
 	ORelOidsSetFromRel(old_oids, oldrel);
@@ -2334,12 +2377,6 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 	 * and PG's post-swap reindex_relation() rebuilds the stock-PG bridged
 	 * indexes against the fresh bridge_ctids.  No separate bridge rebuild.
 	 */
-	{
-		OTable	   *old_o_tbl = o_tables_get(old_oids);
-
-		bridging = old_o_tbl ? old_o_tbl->index_bridging : false;
-		o_table_free(old_o_tbl);
-	}
 	o_rewrite_bridging = bridging;
 	o_rewrite_bridge_relnode = InvalidRelFileNumber;	/* filled after Btrans alloc */
 
@@ -2442,15 +2479,39 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 	}
 
 	/*
-	 * Wire the toast PG already created in make_new_heap().  Done after the
+	 * make_new_heap() only creates a new TOAST relation when the source had
+	 * one.  OrioleDB currently requires TOAST for every stored relation, so an
+	 * AM conversion from a heap without TOAST must create it here, after the
+	 * OTable exists but before the native fill starts.
+	 */
+	toast_oid = newrel->rd_rel->reltoastrelid;
+	if (!OidIsValid(toast_oid))
+	{
+		HeapTuple	reltup;
+
+		NewRelationCreateToastTable(RelationGetRelid(newrel), (Datum) 0);
+		reltup = SearchSysCache1(RELOID,
+							   ObjectIdGetDatum(RelationGetRelid(newrel)));
+		if (!HeapTupleIsValid(reltup))
+			elog(ERROR, "cache lookup failed for relation %u",
+				 RelationGetRelid(newrel));
+		toast_oid = ((Form_pg_class) GETSTRUCT(reltup))->reltoastrelid;
+		ReleaseSysCache(reltup);
+		if (!OidIsValid(toast_oid))
+			elog(ERROR, "could not create TOAST relation for \"%s\"",
+				 RelationGetRelationName(newrel));
+	}
+
+	/*
+	 * Wire the toast PG created in make_new_heap() or above.  Done after the
 	 * primary build so the OTable already has_primary and
 	 * set_toast_oids_and_options() updates the real primary (not a ctid one).
 	 * Pass bridging so a fresh toast tree / bridge is not re-allocated (the
 	 * transient OTable already carries Btrans from the build above).
 	 */
-	if (OidIsValid(newrel->rd_rel->reltoastrelid))
+	if (OidIsValid(toast_oid))
 	{
-		Relation	toast_rel = table_open(newrel->rd_rel->reltoastrelid,
+		Relation	toast_rel = table_open(toast_oid,
 										  AccessShareLock);
 
 		set_toast_oids_and_options(newrel, toast_rel, false, bridging);
@@ -2527,6 +2588,7 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 							   char newrelpersistence)
 {
 	ORelOids	old_oids;
+	bool		from_other_am;
 
 	/* finish_heap_swap's remaining args are owned by PG's heap-oriented path. */
 	(void) newrel;
@@ -2539,6 +2601,7 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 	if (!o_rewrite_in_progress)
 		return false;
 
+	from_other_am = o_rewrite_from_other_am;
 	o_rewrite_in_progress = false;
 
 	/* Post-swap catalog relfilenode: oldrel -> Rnew (the adopted identity). */
@@ -2554,7 +2617,8 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 	 * touched here and so survives.  o_drop_table_ext() takes the meta-lock
 	 * itself, so we must not wrap it.
 	 */
-	o_drop_table_ext(o_rewrite_old_oids, false, false, false);
+	if (!from_other_am)
+		o_drop_table_ext(o_rewrite_old_oids, false, false, false);
 
 	ORelOidsSetInvalid(o_rewrite_old_oids);
 	ORelOidsSetInvalid(o_rewrite_new_oids);
@@ -2562,6 +2626,7 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 	o_rewrite_primary_relnode = InvalidRelFileNumber;
 	o_rewrite_bridging = false;
 	o_rewrite_bridge_relnode = InvalidRelFileNumber;
+	o_rewrite_from_other_am = false;
 
 	/*
 	 * Let PG's reindex_relation() build the secondaries.  The primary must be
@@ -4199,10 +4264,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 				/* This is faster than dependency scan */
 				tbl_oid = pg_strtoint64(strrchr(rel->rd_rel->relname.data,
-												'_') + 1);
+											'_') + 1);
 
 				tbl = try_table_open(tbl_oid, AccessShareLock);
-				if (tbl && is_orioledb_rel(tbl))
+				if (tbl && is_orioledb_rel(tbl) &&
+					!OidIsValid(tbl->rd_rel->relrewrite))
 				{
 					set_toast_oids_and_options(tbl, rel, false, false);
 				}
@@ -5596,6 +5662,7 @@ o_ddl_cleanup(void)
 		o_rewrite_bridge_relnode = InvalidRelFileNumber;
 		o_skip_primary_ambuild = false;
 		o_rewrite_in_progress = false;
+		o_rewrite_from_other_am = false;
 	}
 
 	/*

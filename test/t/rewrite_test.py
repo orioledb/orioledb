@@ -1,4 +1,5 @@
 from .base_test import BaseTest
+from testgres.exceptions import QueryException
 import unittest
 
 
@@ -20,6 +21,133 @@ class RewriteTest(BaseTest):
 	# in both a drop and a create, then btree_relnode_undo_callback skips the
 	# data-destroying cleanup for those carried relnodes.  See .kilo/plan_b.md
 	# "Step 6".
+
+	def test_set_access_method_from_heap(self):
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+
+		node.safe_psql("""
+			CREATE TABLE heap_no_toast (id int, value int);
+			INSERT INTO heap_no_toast
+				SELECT g, g * 10 FROM generate_series(1, 20) g;
+		""")
+		self.assertEqual(
+		    node.execute("""
+				SELECT reltoastrelid = 0
+				FROM pg_class WHERE oid = 'heap_no_toast'::regclass;
+			"""), [(True, )])
+		node.safe_psql("""
+			ALTER TABLE heap_no_toast SET ACCESS METHOD orioledb;
+			INSERT INTO heap_no_toast VALUES (21, 210);
+			UPDATE heap_no_toast SET value = 999 WHERE id = 2;
+			DELETE FROM heap_no_toast WHERE id = 3;
+		""")
+		self.assertEqual(
+		    node.execute("""
+				SELECT am.amname, c.reltoastrelid <> 0, count(*), sum(value)
+				FROM heap_no_toast, pg_class c, pg_am am
+				WHERE c.oid = 'heap_no_toast'::regclass
+					AND am.oid = c.relam
+				GROUP BY am.amname, c.reltoastrelid;
+			"""), [('orioledb', True, 20, 3259)])
+
+		node.safe_psql("""
+			CREATE TABLE heap_indexed (
+				id int PRIMARY KEY,
+				u text NOT NULL UNIQUE,
+				payload text,
+				n int
+			);
+			CREATE INDEX heap_indexed_lower_idx ON heap_indexed (lower(u));
+			CREATE INDEX heap_indexed_partial_idx ON heap_indexed (n)
+				WHERE n > 100;
+			INSERT INTO heap_indexed
+				SELECT g, 'value-' || g, repeat(md5(g::text), 500), g
+				FROM generate_series(1, 500) g;
+			ALTER TABLE heap_indexed SET ACCESS METHOD orioledb;
+		""")
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT id FROM heap_indexed WHERE id = 417;
+			"""), [(417, )])
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT id FROM heap_indexed WHERE u = 'value-271';
+			"""), [(271, )])
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT id FROM heap_indexed WHERE lower(u) = 'value-319';
+			"""), [(319, )])
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT id FROM heap_indexed WHERE n = 223 AND n > 100;
+			"""), [(223, )])
+		self.assertEqual(
+		    node.execute("SELECT length(payload) FROM heap_indexed WHERE id = 500;"),
+		    [(16000, )])
+		with self.assertRaises(QueryException):
+			node.safe_psql("INSERT INTO heap_indexed VALUES (417, 'duplicate');")
+
+		node.safe_psql("""
+			CREATE TABLE heap_bridged (id int, value int NOT NULL);
+			CREATE INDEX heap_bridged_value_idx ON heap_bridged USING hash (value);
+			INSERT INTO heap_bridged SELECT g, g % 10 FROM generate_series(1, 200) g;
+			ALTER TABLE heap_bridged SET ACCESS METHOD orioledb;
+		""")
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT count(*) FROM heap_bridged WHERE value = 7;
+			"""), [(20, )])
+		node.safe_psql("INSERT INTO heap_bridged VALUES (201, 7);")
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT count(*) FROM heap_bridged WHERE value = 7;
+			"""), [(21, )])
+
+		node.safe_psql("""
+			CREATE TABLE heap_rollback (id int, value text);
+			INSERT INTO heap_rollback VALUES (1, 'one'), (2, 'two');
+		""")
+		node.safe_psql("""
+			BEGIN;
+			ALTER TABLE heap_rollback SET ACCESS METHOD orioledb;
+			ROLLBACK;
+		""")
+		self.assertEqual(
+		    node.execute("""
+				SELECT am.amname, count(*)
+				FROM heap_rollback, pg_class c, pg_am am
+				WHERE c.oid = 'heap_rollback'::regclass AND am.oid = c.relam
+				GROUP BY am.amname;
+			"""), [('heap', 2)])
+
+		node.safe_psql("""
+			CREATE TABLE heap_replica_nothing (id int PRIMARY KEY);
+			ALTER TABLE heap_replica_nothing REPLICA IDENTITY NOTHING;
+		""")
+		with self.assertRaises(QueryException) as error:
+			node.safe_psql("""
+				ALTER TABLE heap_replica_nothing SET ACCESS METHOD orioledb;
+			""")
+		self.assertIn("replica identity type NOTHING is not supported",
+		              error.exception.message)
+
+		node.stop()
+		node.start()
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM heap_indexed;"), [(500, )])
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = off;
+				SELECT count(*) FROM heap_bridged WHERE value = 7;
+			"""), [(21, )])
 
 	def test_replication_alter_type_pk(self):
 		"""
