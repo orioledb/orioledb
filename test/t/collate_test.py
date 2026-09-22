@@ -431,7 +431,6 @@ class CollateTest(BaseTest):
 
 	@unittest.skipIf(not BaseTest.pg_with_icu(),
 	                 'postgres built without ICU support')
-	@unittest.skip('lookup_collation_cache() asserts before the syscache hook')
 	def test_all_databases_need_one_encoding(self):
 		node = self.node
 		node.start()
