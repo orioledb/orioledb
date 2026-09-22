@@ -38,7 +38,7 @@ CREATE TABLE o_test_ix_ams (
 	p point,
 	pk1 int,
 	pk2 int
-) USING orioledb;
+) USING orioledb WITH (autovacuum_enabled = false);
 SELECT orioledb_table_description('o_test_ix_ams'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
@@ -61,6 +61,7 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
  p      | point     |           |          |         | plain    |              | 
  pk1    | integer   |           |          |         | plain    |              | 
  pk2    | integer   |           |          |         | plain    |              | 
+Options: autovacuum_enabled=false
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
                 orioledb_tbl_indices                 
@@ -142,7 +143,7 @@ SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
  pk2    | integer   |           |          |         | plain    |              | 
 Indexes:
     "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
-Options: index_bridging=true
+Options: autovacuum_enabled=false, index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
                         orioledb_tbl_indices                         
@@ -841,7 +842,7 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
  k      | integer |           |          |         | plain   |              | 
 Indexes:
     "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
-Options: index_bridging=true
+Options: autovacuum_enabled=false, index_bridging=true
 
 -- Don't update bridge_index when updated column not indexed by any bridged index
 UPDATE o_test_ix_ams SET p = point(i * 40 + 1, i * 5);
@@ -1138,7 +1139,7 @@ CREATE INDEX o_test_ix_ams_hash_ix ON o_test_ix_ams USING hash (k);
 Indexes:
     "o_test_ix_ams_hash_ix" hash (k)
     "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
-Options: index_bridging=true
+Options: autovacuum_enabled=false, index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
                           orioledb_tbl_indices                          
@@ -1332,7 +1333,7 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
 Indexes:
     "o_test_ix_ams_hash_ix" hash (k)
     "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
-Options: index_bridging=true
+Options: autovacuum_enabled=false, index_bridging=true
 
 SELECT *, r IS NULL FROM o_test_ix_ams;
   i   |  j   |      p      | pk1  | pk2  |  k   | r | ?column? 
@@ -1403,7 +1404,7 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
 Indexes:
     "o_test_ix_ams_hash_ix" hash (k)
     "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
-Options: index_bridging=true
+Options: autovacuum_enabled=false, index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
                            orioledb_tbl_indices                            
