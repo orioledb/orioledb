@@ -624,7 +624,6 @@ typedef struct OIndexDescr OIndexDescr;
 
 /* ddl.c */
 extern List *reindex_list;
-extern bool o_in_add_column;
 
 extern void orioledb_setup_ddl_hooks(void);
 extern void o_ddl_cleanup(void);

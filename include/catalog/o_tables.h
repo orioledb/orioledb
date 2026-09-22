@@ -308,7 +308,7 @@ extern Datum o_eval_default(OTable *o_table, Relation rel,
 							bool byval, int16 typlen, bool *isNull);
 extern void o_table_resize_constr(OTable *o_table);
 extern void o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
-								OTableField *old_field, OTableField *field);
+								OTableField *field);
 extern void o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table,
 								  OIndexDescr *descr);
 extern char *o_get_type_name(Oid typid, int32 typmod);
@@ -417,6 +417,10 @@ extern bool destroy_tablespace_directories(Oid tablespaceoid, bool redo);
 extern void orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel);
 extern void orioledb_relation_toast_created(Relation rel, Relation toastrel);
 extern void orioledb_relation_create_finish(Relation rel);
+extern void orioledb_relation_alter_table_cmd(Relation rel,
+											  const struct AlteredTableInfo *tab,
+											  const struct AlterTableCmd *cmd, int pass,
+											  const ObjectAddress *address);
 extern bool orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 										   bool swap_toast_by_content,
 										   bool is_internal,
