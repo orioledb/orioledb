@@ -951,6 +951,9 @@ update_deleted_value(OSysCache *sys_cache, OSysCacheKey *key, bool new_value)
 	Pointer		entry;
 	OSysCacheKey *sys_cache_key;
 
+	/* all callers guarantee non-NULL; assert for static analysis */
+	Assert(sys_cache);
+
 	o_sys_cache_set_datoid_lsn(&key->common.lsn, NULL);
 	entry = o_sys_cache_search(sys_cache, sys_cache->nkeys, key);
 	if (entry == NULL)
