@@ -1816,6 +1816,25 @@ o_perform_checkpoint_guts(int flags)
 		UndoMeta   *undo_meta = get_undo_meta_by_type(undoType);
 
 		checkpoint_start_loc[i] = pg_atomic_read_u64(&undo_meta->minProcTransactionRetainLocation);
+
+		if (undoType == UndoLogSystem)
+		{
+			UndoLocation catalogRetainLocation;
+
+			/*
+			 * Logical decoding reads old o_table versions out of the system
+			 * undo log, and the transaction that wrote them is long gone, so
+			 * minProcTransactionRetainLocation says nothing about them.  The
+			 * retained range recorded here is what survives a restart: leave
+			 * it above what a slot still needs and the walsender PANICs on
+			 * the first record it decodes afterwards.
+			 */
+			catalogRetainLocation = get_current_replication_catalog_retain_undo_location();
+			if (UndoLocationIsValid(catalogRetainLocation))
+				checkpoint_start_loc[i] = Min(checkpoint_start_loc[i],
+											  catalogRetainLocation);
+		}
+
 		pg_atomic_write_u64(&my_proc_info->undoRetainLocations[undoType].snapshotRetainUndoLocation,
 							checkpoint_start_loc[i]);
 	}
