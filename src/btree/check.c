@@ -285,6 +285,8 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 	if (force_file_check)
 	{
 		bool		found;
+		uint32		num;
+		uint32		map_num;
 
 		/*
 		 * Reads free blocks from map file.
@@ -298,6 +300,29 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 
 		get_free_extents_from_file(&chkp_tag, sizeof(CheckpointFileHeader),
 								   free_extents, is_compressed, found);
+
+		/*
+		 * The map file only knows what was free when it was written.  Every
+		 * extent freed since -- by the bgwriter rewriting a page, by a merge,
+		 * by a copy-blkno rewrite -- is in a .tmp file or still buffered in
+		 * the matching desc->tmpBuf[], and without them each of those shows
+		 * up as an "Extent ... is neither free or busy" against a tree that
+		 * is perfectly sound.  The branch below already reads both for the
+		 * non-forced path; do the same here.
+		 */
+		map_num = chkp_tag.num;
+		for (num = map_num; num <= chkp_num; num++)
+		{
+			SeqBufTag	tmp_tag = chkp_tag;
+
+			tmp_tag.num = num + 1;
+			tmp_tag.type = 't';
+			get_free_extents_from_file(&tmp_tag, 0, free_extents,
+									   is_compressed, false);
+			get_free_extents_from_seqbuf_pending(&desc->tmpBuf[(num + 1) % 2],
+												 &tmp_tag, free_extents,
+												 is_compressed);
+		}
 	}
 	else if (!is_compressed)
 	{
