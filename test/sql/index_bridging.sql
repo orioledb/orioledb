@@ -42,7 +42,7 @@ CREATE TABLE o_test_ix_ams (
 	p point,
 	pk1 int,
 	pk2 int
-) USING orioledb;
+) USING orioledb WITH (autovacuum_enabled = false);
 
 SELECT orioledb_table_description('o_test_ix_ams'::regclass);
 \d+ o_test_ix_ams

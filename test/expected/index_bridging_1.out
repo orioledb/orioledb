@@ -38,7 +38,7 @@ CREATE TABLE o_test_ix_ams (
 	p point,
 	pk1 int,
 	pk2 int
-) USING orioledb;
+) USING orioledb WITH (autovacuum_enabled = false);
 SELECT orioledb_table_description('o_test_ix_ams'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
@@ -63,9 +63,10 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
  pk2    | integer   |           |          |         | plain    |              | 
 Not-null constraints:
     "o_test_ix_ams_i_not_null" NOT NULL "i"
+Options: autovacuum_enabled=false
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
-                orioledb_tbl_indices                 
+                orioledb_tbl_indices
 -----------------------------------------------------
  Index ctid_primary                                 +
      Index type: primary, unique, ctid              +
@@ -146,7 +147,7 @@ Indexes:
     "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
 Not-null constraints:
     "o_test_ix_ams_i_not_null" NOT NULL "i"
-Options: index_bridging=true
+Options: autovacuum_enabled=false, index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
                         orioledb_tbl_indices                         
@@ -849,7 +850,7 @@ Not-null constraints:
     "o_test_ix_ams_i_not_null" NOT NULL "i"
     "o_test_ix_ams_pk1_not_null" NOT NULL "pk1"
     "o_test_ix_ams_pk2_not_null" NOT NULL "pk2"
-Options: index_bridging=true
+Options: autovacuum_enabled=false, index_bridging=true
 
 -- Don't update bridge_index when updated column not indexed by any bridged index
 UPDATE o_test_ix_ams SET p = point(i * 40 + 1, i * 5);
@@ -1150,10 +1151,10 @@ Not-null constraints:
     "o_test_ix_ams_i_not_null" NOT NULL "i"
     "o_test_ix_ams_pk1_not_null" NOT NULL "pk1"
     "o_test_ix_ams_pk2_not_null" NOT NULL "pk2"
-Options: index_bridging=true
+Options: autovacuum_enabled=false, index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
-                          orioledb_tbl_indices                          
+                          orioledb_tbl_indices
 ------------------------------------------------------------------------
  Index ctid_primary                                                    +
      Index type: primary, unique, ctid                                 +
@@ -1348,7 +1349,7 @@ Not-null constraints:
     "o_test_ix_ams_i_not_null" NOT NULL "i"
     "o_test_ix_ams_pk1_not_null" NOT NULL "pk1"
     "o_test_ix_ams_pk2_not_null" NOT NULL "pk2"
-Options: index_bridging=true
+Options: autovacuum_enabled=false, index_bridging=true
 
 SELECT *, r IS NULL FROM o_test_ix_ams;
   i   |  j   |      p      | pk1  | pk2  |  k   | r | ?column? 
@@ -1423,10 +1424,10 @@ Not-null constraints:
     "o_test_ix_ams_i_not_null" NOT NULL "i"
     "o_test_ix_ams_pk1_not_null" NOT NULL "pk1"
     "o_test_ix_ams_pk2_not_null" NOT NULL "pk2"
-Options: index_bridging=true
+Options: autovacuum_enabled=false, index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
-                           orioledb_tbl_indices                            
+                           orioledb_tbl_indices
 ---------------------------------------------------------------------------
  Index ctid_primary                                                       +
      Index type: primary, unique, ctid                                    +
