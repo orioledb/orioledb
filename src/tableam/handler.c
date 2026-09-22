@@ -2660,6 +2660,7 @@ static const TableAmRoutine orioledb_am_methods = {
 	.relation_toast_am = orioledb_relation_toast_am,
 	.relation_toast_created = orioledb_relation_toast_created,
 	.relation_create_finish = orioledb_relation_create_finish,
+	.relation_alter_table_cmd = orioledb_relation_alter_table_cmd,
 
 	.relation_begin_heap_rewrite = orioledb_begin_heap_rewrite_body,
 	.relation_finish_heap_swap = orioledb_finish_heap_swap_body,
