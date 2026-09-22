@@ -881,9 +881,9 @@ wait_for_even_write_in_progress_changecount(UndoMeta *meta)
 }
 
 /*
- * Get undoLocation from SYS_TREES_CATALOG_XID_UNDO_LOCATION mapping with
- * xid greater or equal than xmin provided. Delete items with xid
- * less than xmin from the mapping.
+ * Get the least undoLocation among the SYS_TREES_CATALOG_XID_UNDO_LOCATION
+ * entries whose xid is greater or equal than the xmin provided. Delete items
+ * with xid less than xmin from the mapping.
  */
 static UndoLocation
 read_replication_catalog_retain_undo_location(TransactionId xmin, int *ndeleted, bool nocheck)
@@ -892,8 +892,11 @@ read_replication_catalog_retain_undo_location(TransactionId xmin, int *ndeleted,
 	OTuple		keyTuple;
 	OTuple		tuple;
 	OBTreeFindPageContext context;
+	OFixedKey	nextPageKey;
+	bool		have_next_page_key = false;
 	bool		have_page = false;
-	UndoLocation result;
+	UndoLocation result = InvalidUndoLocation;
+	TransactionId output_xid = InvalidTransactionId;
 	TransactionId cached_output_xid;
 	TransactionId cached_queried_xmin;
 	uint32		cached_change_count;
@@ -907,15 +910,18 @@ read_replication_catalog_retain_undo_location(TransactionId xmin, int *ndeleted,
 
 	/*
 	 * Try fast path. Output from cache. Don't cleanup actual system tree. At
-	 * repeated query of some xmin we output the same value of undoLocation
-	 * from the element of mapping with cached_output_xid which is the least
-	 * xid in the mapping greater or equal than xmin.
+	 * repeated query of some xmin we output the same value of undoLocation,
+	 * the one of the element with cached_output_xid, which is the element
+	 * with the least undoLocation among those with xid greater or equal than
+	 * xmin.
 	 */
 	cached_output_xid = cachedReplicationRetainUndoTuple.output_xid;
 	cached_queried_xmin = cachedReplicationRetainUndoTuple.queried_xmin;
 	cached_change_count = cachedReplicationRetainUndoTuple.change_count;
 
-	if (TransactionIdIsValid(cached_queried_xmin) && cached_queried_xmin == xmin && TransactionIdIsValid(cached_output_xid) && cached_output_xid >= xmin)
+	if (TransactionIdIsValid(cached_queried_xmin) && cached_queried_xmin == xmin &&
+		TransactionIdIsValid(cached_output_xid) &&
+		TransactionIdFollowsOrEquals(cached_output_xid, xmin))
 	{
 		LWLockAcquire(&xid_meta->sysXidUndoLocationLock, LW_SHARED);
 
@@ -951,11 +957,20 @@ read_replication_catalog_retain_undo_location(TransactionId xmin, int *ndeleted,
 		{
 			OFindPageResult findResult;
 
-			findResult = find_page(&context, NULL, BTreeKeyNone, 0);
+			/*
+			 * Resume from the hikey of the page we've just drained.  Asking
+			 * for BTreeKeyNone again would land on the leftmost leaf, which
+			 * is the page we are coming from.
+			 */
+			if (have_next_page_key)
+				findResult = find_page(&context, &nextPageKey.tuple,
+									   BTreeKeyNonLeafKey, 0);
+			else
+				findResult = find_page(&context, NULL, BTreeKeyNone, 0);
+
 			if (findResult != OFindPageResultSuccess)
 			{
-				/* Empty mapping */
-				result = InvalidUndoLocation;
+				/* Nothing left to walk */
 				break;
 			}
 			have_page = true;
@@ -968,16 +983,14 @@ read_replication_catalog_retain_undo_location(TransactionId xmin, int *ndeleted,
 		{
 			if (O_PAGE_IS(p, RIGHTMOST))
 			{
-				/*
-				 * End of mapping but still haven't got a xid >= xmin
-				 * condition
-				 */
-				result = InvalidUndoLocation;
+				/* End of mapping */
 				break;
 			}
 			else
 			{
 				/* Next page */
+				copy_fixed_hikey(td, &nextPageKey, p);
+				have_next_page_key = true;
 				unlock_page(context.items[context.index].blkno);
 				have_page = false;
 				continue;
@@ -989,9 +1002,24 @@ read_replication_catalog_retain_undo_location(TransactionId xmin, int *ndeleted,
 						&tuple, BTreeKeyLeafTuple,
 						&keyTuple, BTreeKeyNonLeafKey) >= 0)
 		{
-			/* First occurrence of xid >= xmin condition */
-			result = ((ReplicationRetainUndoTuple *) tuple.data)->undoLocation;
-			break;
+			ReplicationRetainUndoTuple *undoTuple;
+
+			/*
+			 * An entry with xid >= xmin: its undo record is still needed.  We
+			 * can't stop at the first of them, because a transaction takes
+			 * its xid at its first heap write but writes the system undo
+			 * whenever it gets to modify a system tree.  So a higher xid may
+			 * well have written its undo earlier, and it's the least location
+			 * among all of these entries that has to be retained.
+			 */
+			undoTuple = (ReplicationRetainUndoTuple *) tuple.data;
+			if (!UndoLocationIsValid(result) || undoTuple->undoLocation < result)
+			{
+				result = undoTuple->undoLocation;
+				output_xid = undoTuple->xid;
+			}
+			BTREE_PAGE_LOCATOR_NEXT(p, &item->locator);
+			continue;
 		}
 
 		/* Delete tuple with xid < xmin */
@@ -1015,7 +1043,7 @@ read_replication_catalog_retain_undo_location(TransactionId xmin, int *ndeleted,
 	 */
 	if (UndoLocationIsValid(result))
 	{
-		cachedReplicationRetainUndoTuple.output_xid = ((ReplicationRetainUndoTuple *) tuple.data)->xid;
+		cachedReplicationRetainUndoTuple.output_xid = output_xid;
 		cachedReplicationRetainUndoTuple.queried_xmin = xmin;
 	}
 	else
@@ -1084,7 +1112,7 @@ insert_replication_catalog_retain_undo_location(TransactionId xid, UndoLocation 
 		if (((ReplicationRetainUndoTuple *) existing_tuple.data)->undoLocation > undoLocation)
 		{
 			/* Update item if this moves undoLocation backwards */
-			LWLockAcquire(&xid_meta->sysXidUndoLocationLock, LW_SHARED);
+			LWLockAcquire(&xid_meta->sysXidUndoLocationLock, LW_EXCLUSIVE);
 			(xid_meta->sysXidUndoLocationChangeCount)++;
 			LWLockRelease(&xid_meta->sysXidUndoLocationLock);
 			success = o_btree_autonomous_delete(get_sys_tree(SYS_TREES_CATALOG_XID_UNDO_LOCATION),
