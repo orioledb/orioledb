@@ -9,6 +9,119 @@ from .base_test import BaseTest
 
 class IndexBridgingTest(BaseTest):
 
+	def test_create_finish_bridge_and_toast(self):
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION orioledb;")
+
+		def bridge_count(table):
+			indices = node.execute(
+			    "SELECT orioledb_tbl_indices('%s'::regclass, true, false);" %
+			    table)[0][0]
+			return indices.count("Index index_bridge")
+
+		# OrioleDB needs its TOAST metadata even for a fixed-width schema.
+		node.safe_psql("""
+			CREATE TABLE o_fixed (id integer) USING orioledb;
+		""")
+		self.assertEqual(
+		    node.execute("""
+				SELECT reltoastrelid <> 0
+				FROM pg_class WHERE oid = 'o_fixed'::regclass;
+			"""), [(True, )])
+		self.assertIn(
+		    "Index toast",
+		    node.execute("""
+				SELECT orioledb_tbl_indices(
+					'o_fixed'::regclass, true, false);
+			""")[0][0])
+
+		# LIKE-generated indexes are later statements in the transformed CREATE
+		# list.  Both bridged indexes must share one bridge initialized before
+		# the first user tuple is inserted.
+		node.safe_psql("""
+			CREATE TABLE h_source (id integer PRIMARY KEY, value integer,
+			                       tags integer[]);
+			CREATE INDEX h_source_hash_idx ON h_source USING hash (value);
+			CREATE INDEX h_source_gin_idx ON h_source USING gin (tags);
+			CREATE TABLE o_like (LIKE h_source INCLUDING ALL) USING orioledb;
+			INSERT INTO o_like VALUES (1, 10, ARRAY[1, 2]),
+			                          (2, 20, ARRAY[2, 3]);
+		""")
+		self.assertEqual(bridge_count("o_like"), 1)
+		self.assertEqual(
+		    node.execute("SELECT id FROM o_like WHERE tags @> ARRAY[3];"),
+		    [(2, )])
+
+		# A partition index cloned inside DefineRelation is finalized through the
+		# same once-per-logical-CREATE callback.
+		node.safe_psql("""
+			CREATE TABLE o_parent (id integer, tags integer[])
+				PARTITION BY RANGE (id) USING orioledb;
+			CREATE INDEX o_parent_tags_idx ON o_parent USING gin (tags);
+			CREATE TABLE o_child PARTITION OF o_parent
+				FOR VALUES FROM (0) TO (10);
+			INSERT INTO o_parent VALUES (1, ARRAY[4, 5]);
+		""")
+		self.assertEqual(bridge_count("o_child"), 1)
+		self.assertEqual(
+		    node.execute("SELECT id FROM o_parent WHERE tags @> ARRAY[5];"),
+		    [(1, )])
+
+		# A later bridged index on a populated table keeps the rebuild path.
+		node.safe_psql("""
+			CREATE TABLE o_later (id integer PRIMARY KEY, value integer)
+				USING orioledb;
+			INSERT INTO o_later SELECT i, i FROM generate_series(1, 20) i;
+			CREATE INDEX o_later_hash_idx ON o_later USING hash (value);
+		""")
+		self.assertEqual(bridge_count("o_later"), 1)
+		self.assertEqual(
+		    node.execute("SELECT id FROM o_later WHERE value = 17;"), [(17, )])
+
+		# CTAS and materialized views are finalized before their first data fill.
+		node.safe_psql("""
+			CREATE TABLE o_ctas USING orioledb AS
+				SELECT 1 AS id, repeat('x', 10000) AS value;
+			CREATE MATERIALIZED VIEW o_matview USING orioledb AS
+				SELECT 1 AS id, repeat('y', 10000) AS value;
+		""")
+		self.assertEqual(node.execute("SELECT length(value) FROM o_ctas;"),
+		                 [(10000, )])
+		self.assertEqual(node.execute("SELECT length(value) FROM o_matview;"),
+		                 [(10000, )])
+
+		node.safe_psql("""
+			BEGIN;
+			CREATE TABLE o_rolled_back (LIKE h_source INCLUDING ALL)
+				USING orioledb;
+			ROLLBACK;
+		""")
+		self.assertEqual(
+		    node.execute("SELECT to_regclass('o_rolled_back') IS NULL;"),
+		    [(True, )])
+
+		node.safe_psql("""
+			CREATE TABLE o_later_rollback (id integer, value integer)
+				USING orioledb;
+			INSERT INTO o_later_rollback VALUES (1, 1);
+		""")
+		node.safe_psql("""
+			BEGIN;
+			CREATE INDEX o_later_rollback_hash_idx
+				ON o_later_rollback USING hash (value);
+			ROLLBACK;
+		""")
+		self.assertEqual(bridge_count("o_later_rollback"), 0)
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_later_rollback;"), [(1, )])
+
+		node.stop()
+		node.start()
+		self.assertEqual(bridge_count("o_like"), 1)
+		self.assertEqual(bridge_count("o_child"), 1)
+		self.assertEqual(node.execute("SELECT count(*) FROM o_like;"), [(2, )])
+
 	@unittest.skipIf(not BaseTest.extension_installed("pageinspect"),
 	                 "'pageinspect' is not installed")
 	def test_ctid_overflow(self):

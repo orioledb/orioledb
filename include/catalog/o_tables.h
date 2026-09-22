@@ -415,6 +415,8 @@ extern void redefine_pkey_for_rel(Relation rel);
 
 extern bool destroy_tablespace_directories(Oid tablespaceoid, bool redo);
 extern void orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel);
+extern void orioledb_relation_toast_created(Relation rel, Relation toastrel);
+extern void orioledb_relation_create_finish(Relation rel);
 extern bool orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 										   bool swap_toast_by_content,
 										   bool is_internal,
