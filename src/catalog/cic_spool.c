@@ -582,9 +582,9 @@ cic_capture_undo_callback(UndoLogType undoType,
 
 	/*
 	 * Validate payload sizes to prevent corrupt undo logs from causing
-	 * out-of-bounds reads and leaking memory into the spool file.
-	 * We must PANIC (not ERROR) because throwing an ERROR during
-	 * abort or recovery is unsafe.
+	 * out-of-bounds reads and leaking memory into the spool file. We must
+	 * PANIC (not ERROR) because throwing an ERROR during abort or recovery is
+	 * unsafe.
 	 */
 	if (item->header.itemSize < sizeof(CICCaptureUndoStackItem) ||
 		(Size) item->keyLength + item->tupleLength >
