@@ -778,6 +778,7 @@ ANALYZE bitmap_test;
 
 SET enable_seqscan = off;
 SET cpu_tuple_cost = 0.5;
+SET random_page_cost = 1.0;
 
 CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND h < 100 OR j < 100 LIMIT 20);
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
@@ -799,6 +800,7 @@ DROP VIEW bitmap_test_mv;
 
 RESET enable_seqscan;
 RESET cpu_tuple_cost;
+RESET random_page_cost;
 
 CREATE TABLE test_no_bmscan_on_text_pkey (data1 text PRIMARY KEY, data2 text, data3 text, i int) USING orioledb;
 CREATE INDEX ON test_no_bmscan_on_text_pkey USING spgist (data2);
