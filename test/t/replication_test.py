@@ -12,6 +12,18 @@ from testgres import NodeStatus
 from .base_test import BaseTest, ThreadQueryExecutor, wait_checkpointer_stopevent, wait_stopevent
 
 
+class StandbyDiverged(Exception):
+	"""The old primary cannot follow the node that was promoted.
+
+	It was stopped with -m immediate, so it kept WAL the standby never
+	received -- a standby snapshot its own bgwriter wrote after the last
+	catch-up is enough, 74 bytes of it -- and the promotion forked below
+	that point.  PostgreSQL will not rewind, and OrioleDB has no pg_rewind
+	of its own yet, so the pair cannot be repaired: the run has to start
+	over with a fresh one.
+	"""
+
+
 class ReplicationTest(BaseTest):
 
 	def test_replication_simple(self):
@@ -3072,14 +3084,104 @@ class ReplicationTest(BaseTest):
 		"""
 		Repeated promotions must not make a finish record from the new primary
 		carry an xmin below the standby's local globalXmin.
+
+		An attempt can also end without an answer: the pair diverges when the
+		old primary kept WAL the standby never received (see StandbyDiverged),
+		and with no pg_rewind for OrioleDB the only way on is a fresh pair.
+		Those attempts are retried rather than failed, and a run that never
+		gets a clean one skips with what it saw.
 		"""
+		ATTEMPTS = 3
+		diverged = []
+
+		for attempt in range(ATTEMPTS):
+			try:
+				self._promotion_switchover_attempt()
+				return
+			except StandbyDiverged as e:
+				diverged.append(str(e))
+				print("# attempt %d gave up: %s" % (attempt + 1, e),
+				      flush=True)
+				self._reset_switchover_pair()
+
+		self.skipTest("the pair diverged on every attempt; last: %s" %
+		              diverged[-1])
+
+	def _reset_switchover_pair(self):
+		"""Put the master back in charge and build a new standby for it."""
 		master = self.node
-		master.start()
+		if self.replica is not None:
+			try:
+				self.replica.stop(['-m', 'immediate'])
+			except Exception:  # noqa: BLE001 - teardown
+				pass
+			# The harness hands out two ports per test and the next
+			# getReplica() needs one of them back.
+			try:
+				self.replica.free_port()
+			except Exception:  # noqa: BLE001 - teardown
+				pass
+			self.replica = None
+
+		# The master is a standby of the node just thrown away, and stuck if
+		# this is the divergence path.  Promote it rather than strip its
+		# standby.signal: ending recovery properly forks a timeline whose
+		# history is consistent with the data, and the next base backup is
+		# taken from that.  Stripping the signal leaves it on the old
+		# timeline with the promoted peer's history file still in pg_wal, and
+		# the new standby then asks for a timeline its backup is already past
+		# ("requested timeline N is not a child of this server's history").
+		if master.status() != NodeStatus.Running:
+			master.start()
+		if master.execute("SELECT pg_is_in_recovery();")[0][0]:
+			master.promote()
+			master.poll_query_until("SELECT NOT pg_is_in_recovery();",
+			                        expected=True,
+			                        max_attempts=120)
+
+	def _promotion_switchover_attempt(self):
+		master = self.node
+		if master.status() != NodeStatus.Running:
+			master.start()
 		replica = None
 
 		def xid_meta(node):
 			return node.execute("SELECT nextxid, globalxmin "
 			                    "FROM orioledb_get_xid_meta();")[0]
+
+		def rejoin(node, new_primary, seconds=60):
+			"""Follow the new primary, or say why it never will.
+
+			A node stopped with -m immediate keeps whatever WAL it wrote
+			after the standby last received any -- a standby snapshot from
+			its own bgwriter is enough -- and the promotion then forks below
+			that point.  PostgreSQL will not rewind, so the node waits for
+			WAL that will never exist, and an unbounded catchup() waits with
+			it until the CI cell is killed.  Name it instead.
+			"""
+			target = new_primary.execute(
+			    "SELECT pg_current_wal_lsn()::text;")[0][0]
+			deadline = time.time() + seconds
+			while time.time() < deadline:
+				done = node.execute(
+				    "SELECT pg_last_wal_replay_lsn() >= '%s'::pg_lsn;" %
+				    target)[0][0]
+				if done:
+					return
+				time.sleep(0.5)
+
+			with open(node.pg_log_file, errors='replace') as f:
+				forked = [
+				    line.strip() for line in f
+				    if 'forked off current database system timeline' in line
+				]
+			reached = node.execute(
+			    "SELECT pg_last_wal_replay_lsn()::text;")[0][0]
+			if forked:
+				raise StandbyDiverged(forked[-1])
+			self.fail(
+			    "the old primary did not follow the promoted node within %d s"
+			    " (wanted %s, reached %s)" % (seconds, target, reached))
 
 		def switchover(primary, standby, checkpoint_promoted):
 			standby.catchup()
@@ -3108,14 +3210,19 @@ class ReplicationTest(BaseTest):
 			primary._assign_master(standby)
 			primary._create_recovery_conf(username=primary.os_ops.get_user())
 			primary.start()
-			primary.catchup()
+			rejoin(primary, standby)
 			primary.poll_query_until(
-			    "SELECT orioledb_recovery_synchronized();", expected=True)
+			    "SELECT orioledb_recovery_synchronized();",
+			    expected=True,
+			    max_attempts=120)
 			return standby, primary
 
 		try:
+			# Idempotent: a retry starts from whatever the last attempt
+			# left behind.
 			master.safe_psql("""
-				CREATE EXTENSION orioledb;
+				CREATE EXTENSION IF NOT EXISTS orioledb;
+				DROP TABLE IF EXISTS o_promotion_xmin;
 				CREATE TABLE o_promotion_xmin (
 					id integer PRIMARY KEY,
 					value integer NOT NULL
