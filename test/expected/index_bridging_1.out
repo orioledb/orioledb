@@ -66,7 +66,7 @@ Not-null constraints:
 Options: autovacuum_enabled=false
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
-                orioledb_tbl_indices
+                orioledb_tbl_indices                 
 -----------------------------------------------------
  Index ctid_primary                                 +
      Index type: primary, unique, ctid              +
@@ -1154,7 +1154,7 @@ Not-null constraints:
 Options: autovacuum_enabled=false, index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
-                          orioledb_tbl_indices
+                          orioledb_tbl_indices                          
 ------------------------------------------------------------------------
  Index ctid_primary                                                    +
      Index type: primary, unique, ctid                                 +
@@ -1187,11 +1187,14 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_ix_ams WHERE k = 8000;
-                       QUERY PLAN                        
----------------------------------------------------------
- Index Scan using o_test_ix_ams_hash_ix on o_test_ix_ams
-   Index Cond: (k = 8000)
-(2 rows)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Custom Scan (o_scan) on o_test_ix_ams
+   Bitmap heap scan
+   Recheck Cond: (k = 8000)
+   ->  Bitmap Index Scan on o_test_ix_ams_hash_ix
+         Index Cond: (k = 8000)
+(5 rows)
 
 SELECT * FROM o_test_ix_ams WHERE k = 8000;
   i   |  j   |      p      | pk1  | pk2  |  k   
@@ -1427,7 +1430,7 @@ Not-null constraints:
 Options: autovacuum_enabled=false, index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
-                           orioledb_tbl_indices
+                           orioledb_tbl_indices                            
 ---------------------------------------------------------------------------
  Index ctid_primary                                                       +
      Index type: primary, unique, ctid                                    +
