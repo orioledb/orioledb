@@ -19,6 +19,87 @@ class OTablesTest(BaseTest):
 		        'postgres',
 		        'SELECT count(*) FROM orioledb_table_oids();')[0][0])
 
+	def test_reject_malformed_serialized_string(self):
+		"""
+		o_deserialize_string_safe() has to reject a blob that is too short as
+		well as one whose payload does not end in NUL.  The wrapper builds a
+		well-formed blob and can be told to claim it is shorter than it is,
+		which is the only way to reach the length checks: a blob of its own
+		natural size never trips them.
+
+		Layout is sizeof(size_t) for the length, then the payload, so
+		'terminated\0' makes 8 + 11 = 19 bytes.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql('postgres', 'CREATE EXTENSION orioledb;')
+
+		payload = "convert_to('terminated', 'UTF8') || decode('00', 'hex')"
+		cases = [
+		    ("%s" % payload, True, 'well-formed'),
+		    ("%s, 19" % payload, True, 'claiming its exact size'),
+		    ("convert_to('unterminated', 'UTF8')", False, 'no terminator'),
+		    ("%s, 4" % payload, False, 'too short for the length prefix'),
+		    ("%s, 8" % payload, False, 'length prefix only, no payload'),
+		    ("%s, 18" % payload, False, 'payload one byte short'),
+		    ("decode('', 'hex')", True, 'empty string is a NULL result'),
+		]
+
+		for expr, expected, what in cases:
+			with self.subTest(what):
+				self.assertEqual(
+				    node.execute(
+				        'postgres',
+				        'SELECT orioledb_test_deserialize_string(%s);' % expr),
+				    [(expected, )])
+
+		node.stop()
+
+	def test_reject_malformed_serialized_node(self):
+		"""
+		The same for o_deserialize_node_safe(), which needs it more: both of
+		its readers run to a terminator rather than to the recorded length --
+		stringToNode() parses until the string ends, o_node_str_is_empty()
+		compares one -- so a blob without one is read past its end.
+
+		Layout is int32 + sizeof(size_t) before the payload, so '<>\0' makes
+		4 + 8 + 3 = 15 bytes.  The version stamp is deliberately an old major
+		so that the blob is never handed to stringToNode(): that branch would
+		elog on malformed input instead of returning, and it is the length
+		handling under test here, not the parser.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql('postgres', 'CREATE EXTENSION orioledb;')
+
+		empty_node = "convert_to('<>', 'UTF8') || decode('00', 'hex')"
+		old_major = 90600
+
+		cases = [
+		    ("%s, %d" % (empty_node, old_major), True, 'well-formed'),
+		    ("%s, %d, 15" % (empty_node, old_major), True, 'exact size'),
+		    ("convert_to('<>', 'UTF8'), %d" % old_major, False,
+		     'no terminator'),
+		    ("%s, %d, 8" % (empty_node, old_major), False,
+		     'too short for the header'),
+		    ("%s, %d, 12" % (empty_node, old_major), False,
+		     'header only, no payload'),
+		    ("%s, %d, 14" % (empty_node, old_major), False,
+		     'payload one byte short'),
+		    ("decode('', 'hex'), %d" % old_major, False,
+		     'a zero-length node string is never ours'),
+		]
+
+		for expr, expected, what in cases:
+			with self.subTest(what):
+				self.assertEqual(
+				    node.execute(
+				        'postgres',
+				        'SELECT orioledb_test_deserialize_node(%s);' % expr),
+				    [(expected, )])
+
+		node.stop()
+
 	def test_o_tables_wal_commit(self):
 		node = self.node
 		node.start()
