@@ -820,6 +820,13 @@ create_ctas_internal(List *attrList, IntoClause *into)
 		CommandCounterIncrement();
 	}
 
+	{
+		Relation	rel = table_open(intoRelationAddr.objectId, NoLock);
+
+		table_relation_create_finish(rel);
+		table_close(rel, NoLock);
+	}
+
 	return intoRelationAddr;
 }
 
@@ -3443,6 +3450,154 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 }
 
 static void
+initialize_empty_bridge(Relation rel, OTable *o_table)
+{
+	OSnapshot	oSnapshot;
+	OXid		oxid;
+	OIndexKey	bridge_key;
+	bool		is_temp;
+
+	Assert(create_stmt != NULL);
+	Assert(rel->rd_createSubid != InvalidSubTransactionId);
+	Assert(!o_table->index_bridging);
+	Assert(!ORelOidsIsValid(o_table->bridge_oids));
+
+	o_table->index_bridging = true;
+	o_table->bridge_oids.datoid = MyDatabaseId;
+	o_table->bridge_oids.spcoid = OidIsValid(rel->rd_rel->reltablespace) ?
+		rel->rd_rel->reltablespace : MyDatabaseTableSpace;
+	o_table->bridge_oids.relnode = IsBinaryUpgrade ? InvalidOid :
+		o_bridge_new_relnode(o_table->bridge_oids.spcoid,
+							 rel->rd_rel->relpersistence);
+	o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
+	o_table->primary_init_nfields = o_table->nfields + 1;
+
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+	o_tables_rel_meta_lock(rel);
+	o_indices_update(o_table, PrimaryIndexNumber, oxid, oSnapshot.csn);
+	o_tables_update(o_table, oxid, oSnapshot.csn);
+	o_tables_after_update(o_table, oxid, oSnapshot.csn);
+	if (ORelOidsIsValid(o_table->bridge_oids))
+	{
+		bridge_key.oids = o_table->bridge_oids;
+		is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
+		add_undo_create_relnode(o_table->oids, &bridge_key, 1, !is_temp);
+	}
+	o_tables_rel_meta_unlock(rel, InvalidOid);
+
+	if (ORelOidsIsValid(o_table->bridge_oids))
+	{
+		o_invalidate_oids(o_table->bridge_oids);
+		o_add_invalidate_undo_item(o_table->bridge_oids,
+								   O_INVALIDATE_OIDS_ON_ABORT);
+	}
+	change_bridging_option(rel, true, false);
+}
+
+void
+orioledb_relation_toast_created(Relation rel, Relation toastrel)
+{
+	ORelOids	oids;
+	ORelOids	toast_oids;
+	OTable	   *o_table;
+
+	/* Rewrite relations are wired by orioledb_begin_heap_rewrite_body(). */
+	if (OidIsValid(rel->rd_rel->relrewrite))
+		return;
+
+	ORelOidsSetFromRel(oids, rel);
+	ORelOidsSetFromRel(toast_oids, toastrel);
+	o_table = o_tables_get(oids);
+	Assert(o_table != NULL);
+	if (o_table == NULL)
+		return;
+
+	if (!ORelOidsIsEqual(o_table->toast_oids, toast_oids))
+		set_toast_oids_and_options(rel, toastrel, false, false);
+
+	o_table_free(o_table);
+}
+
+void
+orioledb_relation_create_finish(Relation rel)
+{
+	ORelOids	oids;
+	OTable	   *o_table;
+	List	   *indexlist;
+	ListCell   *lc;
+	Relation	bridged_index = NULL;
+
+	Assert(!OidIsValid(rel->rd_rel->relrewrite));
+	ORelOidsSetFromRel(oids, rel);
+	o_table = o_tables_get(oids);
+	Assert(o_table != NULL);
+	if (o_table == NULL || o_table->index_bridging)
+	{
+		o_table_free(o_table);
+		return;
+	}
+
+	indexlist = RelationGetIndexList(rel);
+	foreach(lc, indexlist)
+	{
+		Relation	index = index_open(lfirst_oid(lc), AccessShareLock);
+		bool		bridged = index->rd_rel->relam != BTREE_AM_OID;
+
+		if (!bridged)
+		{
+			OBTOptions *options = (OBTOptions *) index->rd_options;
+
+			bridged = options && !options->orioledb_index;
+		}
+
+		if (bridged)
+		{
+			bridged_index = index;
+			break;
+		}
+		index_close(index, AccessShareLock);
+	}
+
+	if (bridged_index != NULL)
+	{
+		HeapTuple	tuple;
+		Form_pg_am	amform;
+
+		tuple = SearchSysCache1(AMOID,
+								ObjectIdGetDatum(bridged_index->rd_rel->relam));
+		if (!HeapTupleIsValid(tuple))
+			elog(ERROR, "cache lookup failed for access method %u",
+				 bridged_index->rd_rel->relam);
+		amform = (Form_pg_am) GETSTRUCT(tuple);
+		if (bridged_index->rd_rel->relam == BTREE_AM_OID)
+			ereport(NOTICE,
+					(errmsg("index bridging is enabled for orioledb table '%s'",
+							RelationGetRelationName(rel)),
+					 errdetail("index access method '%s' is requested with index bridging for OrioleDB table",
+							   NameStr(amform->amname))));
+		else
+			ereport(NOTICE,
+					(errmsg("index bridging is enabled for orioledb table '%s'",
+							RelationGetRelationName(rel)),
+					 errdetail("index access method '%s' is supported only via index bridging for OrioleDB table",
+							   NameStr(amform->amname))));
+		ReleaseSysCache(tuple);
+
+		if (bridged_index->rd_rel->relam == BTREE_AM_OID)
+			ereport(WARNING,
+					(errcode(ERRCODE_WARNING),
+					 errmsg("using bridged btree index for orioledb"),
+					 errdetail("This feature is intended for testing purposes and is not recommended for normal usage.")));
+
+		initialize_empty_bridge(rel, o_table);
+		index_close(bridged_index, AccessShareLock);
+	}
+
+	list_free(indexlist);
+	o_table_free(o_table);
+}
+
+static void
 drop_bridge_index(Relation tbl, OTable *o_table)
 {
 	OSnapshot	oSnapshot;
@@ -4256,25 +4411,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				if (!OidIsValid(rel->rd_rel->relrewrite))
 					create_o_table_for_rel(rel);
 			}
-			else if ((rel->rd_rel->relkind == RELKIND_TOASTVALUE) &&
-					 (subId == 0) && !OidIsValid(rel->rd_rel->relrewrite))
-			{
-				Oid			tbl_oid;
-				Relation	tbl = NULL;
-
-				/* This is faster than dependency scan */
-				tbl_oid = pg_strtoint64(strrchr(rel->rd_rel->relname.data,
-											'_') + 1);
-
-				tbl = try_table_open(tbl_oid, AccessShareLock);
-				if (tbl && is_orioledb_rel(tbl) &&
-					!OidIsValid(tbl->rd_rel->relrewrite))
-				{
-					set_toast_oids_and_options(tbl, rel, false, false);
-				}
-				if (tbl)
-					table_close(tbl, AccessShareLock);
-			}
 			else if (rel->rd_rel->relkind == RELKIND_INDEX)
 			{
 				/* Checks and adds bridged indexes */
@@ -4362,7 +4498,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							}
 						}
 
-						if (btree_bridging)
+						if (btree_bridging && create_stmt == NULL)
 						{
 							ereport(WARNING,
 									errcode(ERRCODE_WARNING),
@@ -4372,52 +4508,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 						if (add_bridging)
 						{
-							/*
-							 * Ensure the table has a toast relation before
-							 * adding the bridge index.  The bridge rebuild
-							 * path recreates all indices including the toast
-							 * tree, so the toast OIDs must already be set.
-							 * During CREATE TABLE the toast table may not
-							 * exist yet if table inherits indices from parent
-							 * table.
-							 */
-							if (!ORelOidsIsValid(o_table->toast_oids))
-							{
-								Datum		toast_options;
-#if PG_VERSION_NUM < 180000
-								static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
-#else
-								const char *validnsps[] = HEAP_RELOPT_NAMESPACES;
-#endif
-
-								Assert(create_stmt != NULL);
-
-								toast_options = transformRelOptions((Datum) 0,
-																	create_stmt->options,
-																	"toast",
-																	validnsps,
-																	true, false);
-								(void) heap_reloptions(RELKIND_TOASTVALUE,
-													   toast_options,
-													   true);
-
-								relation_close(tbl, AccessShareLock);
-
-								/*
-								 * NewRelationCreateToastTable ends with
-								 * CommandCounterIncrement(), so that the
-								 * TOAST table will be visible for
-								 * add_bridge_index().
-								 */
-								NewRelationCreateToastTable(rel->rd_index->indrelid, toast_options);
-
-								tbl = relation_open(rel->rd_index->indrelid, AccessShareLock);
-
-								ORelOidsSetFromRel(table_oids, tbl);
+							if (create_stmt == NULL)
+								add_bridge_index(tbl, o_table, false,
+												 rel->rd_rel->relam);
+							else
 								o_table_free(o_table);
-								o_table = o_tables_get(table_oids);
-							}
-							add_bridge_index(tbl, o_table, false, rel->rd_rel->relam);
 						}
 						else
 							o_table_free(o_table);
