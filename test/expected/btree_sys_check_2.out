@@ -668,9 +668,9 @@ SELECT regexp_replace(regexp_replace(
 
 -- fail
 SELECT orioledb_sys_tree_structure(9999);
-ERROR:  Value num must be in the range from 1 to 22
+ERROR:  Value num must be in the range from 1 to 23
 SELECT orioledb_sys_tree_check(-1111);
-ERROR:  Value num must be in the range from 1 to 22
+ERROR:  Value num must be in the range from 1 to 23
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA btree_sys_check CASCADE;
 RESET search_path;
