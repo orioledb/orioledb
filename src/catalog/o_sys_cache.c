@@ -2408,15 +2408,10 @@ o_load_domaintype_info_hook(TypeCacheEntry *typentry)
 	 * During recovery (non-transaction state), we can't read pg_constraint
 	 * via table_open() because it asserts IsTransactionState().  Domain
 	 * constraint enforcement isn't needed during recovery because we replay
-	 * already-validated, committed data.  Mark the typecache entry as
-	 * checked with no constraints (domainData stays NULL), which is handled
-	 * gracefully by InitDomainConstraintRef().
-	 *
-	 * TCFLAGS_CHECKED_DOMAIN_CONSTRAINTS (0x080000) is a private #define in
-	 * typcache.c; set it directly so UpdateDomainConstraintRef() skips the
-	 * real load_domaintype_info() call.
+	 * already-validated, committed data.  PostgreSQL releases stale domainData
+	 * before calling this hook, so mark the empty constraint set as checked.
 	 */
-	typentry->flags |= 0x080000;
+	typentry->flags |= TCFLAGS_CHECKED_DOMAIN_CONSTRAINTS;
 }
 
 static int
