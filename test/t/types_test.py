@@ -239,6 +239,40 @@ class TypesTest(BaseTest):
 		    node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
 		node.stop()
 
+	def test_sys_cache_delete_undo_survives_crash(self):
+		enum_amount = 3  # 'happy', 'very happy', 'ecstatic'
+		enumoid_amount = 3
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TYPE o_happiness AS ENUM ('happy', 'very happy');
+			ALTER TYPE o_happiness ADD VALUE 'ecstatic';
+		""")
+
+		# leave the DROP TYPE transaction open: neither committed nor
+		# rolled back by this backend.  A checkpoint durably records it
+		# as still in-progress, so after the crash below, startup
+		# recovery (not this backend) has to replay its
+		# SysCacheDeleteUndoItemType undo record and un-delete the enum
+		# cache entries itself.  No table uses o_happiness, so the DROP
+		# doesn't cascade into any other (toast-backed) sys cache.
+		con = node.connect()
+		con.begin()
+		con.execute("DROP TYPE o_happiness;")
+
+		node.safe_psql("CHECKPOINT;")
+		node.stop(['-m', 'immediate'])
+
+		# recovery must not crash while rolling back the still-open
+		# DROP TYPE transaction
+		node.start()
+
+		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
+		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
+		node.stop()
+
 	def test_enum_cache_namedata_in_key(self):
 		enum_amount = 0
 		enumoid_amount = 0
