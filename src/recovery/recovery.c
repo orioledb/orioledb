@@ -5089,11 +5089,11 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 				if (OidIsValid(rec->u.dbcopy.dst_tblspc))
 					handle_movedb(rec->u.dbcopy.datOid,
-							  rec->u.dbcopy.src_tblspc,
-							  rec->u.dbcopy.dst_tblspc);
+								  rec->u.dbcopy.src_tblspc,
+								  rec->u.dbcopy.dst_tblspc);
 				else
 					(void) destroy_tablespace_directories(rec->u.dbcopy.src_tblspc,
-												true);
+														  true);
 
 				if (!ctx->single)
 					workers_synchronize(xlogPtr + 1, true);

@@ -999,7 +999,8 @@ class TablespaceTest(BaseTest):
 			CREATE INDEX o_move_value_idx ON o_move (value);
 			INSERT INTO o_move VALUES (1, 1);
 			CHECKPOINT;
-		""", dbname='testdb')
+		""",
+		                 dbname='testdb')
 		db_oid = master.execute(
 		    "SELECT oid FROM pg_database WHERE datname = 'testdb'")[0][0]
 		replica_src_path = os.path.join(replica_ts1_path, self.ts_cat_version,
@@ -1013,13 +1014,11 @@ class TablespaceTest(BaseTest):
 			replica.start()
 			self.catchup_orioledb(replica)
 
-			replica.safe_psql(
-			    "SELECT pg_stopevent_set('sk_modify_pending', "
-			    "'$backendType == \"orioledb recovery worker\" "
-			    "&& $.treeName == \"o_move_pkey\"');")
-			replica.safe_psql(
-			    "SELECT pg_stopevent_set('replay_on_record', "
-			    "'$.type == \"DATABASE_COPY\"');")
+			replica.safe_psql("SELECT pg_stopevent_set('sk_modify_pending', "
+			                  "'$backendType == \"orioledb recovery worker\" "
+			                  "&& $.treeName == \"o_move_pkey\"');")
+			replica.safe_psql("SELECT pg_stopevent_set('replay_on_record', "
+			                  "'$.type == \"DATABASE_COPY\"');")
 
 			try:
 				master.safe_psql("UPDATE o_move SET value = 2 WHERE id = 1;",
@@ -1052,8 +1051,8 @@ class TablespaceTest(BaseTest):
 			finally:
 				for event in ('replay_on_record', 'sk_modify_pending'):
 					try:
-						replica.safe_psql(
-						    "SELECT pg_stopevent_reset('%s');" % event)
+						replica.safe_psql("SELECT pg_stopevent_reset('%s');" %
+						                  event)
 					except Exception:
 						pass
 
@@ -1063,7 +1062,8 @@ class TablespaceTest(BaseTest):
 			    "database move replay did not wait for recovery workers")
 			self.assertFalse(
 			    destination_exists_while_worker_parked,
-			    "database move started while a recovery worker was still active")
+			    "database move started while a recovery worker was still active"
+			)
 			self.assertFalse(os.path.exists(replica_src_path))
 			self.assertTrue(os.path.exists(replica_dst_path))
 			self.assertEqual(
