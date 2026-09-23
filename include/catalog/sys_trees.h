@@ -151,7 +151,7 @@ typedef struct
 {
 	TransactionId xid;
 	UndoLocation undoLocation;
-} ReplicationRetainUndoTuple;
+}			ReplicationRetainUndoTuple;
 
 extern Size sys_trees_shmem_needs(void);
 extern void sys_trees_shmem_init(Pointer ptr, bool found);
