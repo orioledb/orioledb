@@ -304,6 +304,15 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	if (o_skip_primary_ambuild && index->rd_index->indisprimary)
 		return (IndexBuildResult *) palloc0(sizeof(IndexBuildResult));
 
+	/*
+	 * A table-AM-owned ALTER TYPE rebuild batch claims this index: the
+	 * catalog entry is recreated (recording the new oid into the batch) but
+	 * the tree build is deferred to the batch completion callback, which
+	 * rebuilds all claimed trees in one pass from the preserved old primary.
+	 */
+	if (o_alter_type_batch_ambuild_skip(heap, index))
+		return (IndexBuildResult *) palloc0(sizeof(IndexBuildResult));
+
 	if (options && !options->orioledb_index)
 	{
 		OTableDescr *descr;

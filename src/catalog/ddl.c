@@ -3818,6 +3818,376 @@ o_promote_primary_index(Relation rel, Oid index_oid, bool rewrite)
 	}
 }
 
+/*
+ * ALTER TYPE index-rebuild batch.
+ *
+ * A non-rewrite ALTER COLUMN TYPE that invalidates the native primary index
+ * also invalidates every native secondary index: OrioleDB secondary trees
+ * carry the primary key fields as an implicit suffix, so a primary change
+ * (type, collation, opclass) changes their key layout even when PostgreSQL
+ * deems their own definition reusable.  Recreating the primary through the
+ * ordinary per-index flow rebuilds those secondaries twice: once against the
+ * intermediate ctid layout inside drop_primary_index() and once against the
+ * new primary inside o_define_index().
+ *
+ * The table-AM relation_alter_type_rebuild_plan callback (fired by
+ * ATPostAlterTypeCleanup after every TryReuseIndex verdict, before the old
+ * catalogs are deleted) claims the whole batch instead: the primary's tree is
+ * preserved as the rebuild source, orioledb_amdrop() and orioledb_ambuild()
+ * skip the claimed indexes, and the relation_alter_type_rebuild_finish
+ * callback (fired after every recreated index catalog entry is visible)
+ * replaces the metadata and rebuilds the final primary plus all native
+ * secondaries in one rebuild_indices() pass.
+ *
+ * Claims are matched by index name: the ALTER TYPE recreate keeps the old
+ * index name, and the OTable still holds the old-named entries until the
+ * completion callback swaps the metadata.
+ */
+typedef struct OAlterTypeRebuildClaim
+{
+	char		name[NAMEDATALEN];
+	Oid			old_oid;
+	Oid			new_oid;	/* InvalidOid until PG recreates the catalog entry */
+} OAlterTypeRebuildClaim;
+
+typedef struct OAlterTypeRebuildBatch
+{
+	List	   *claims;		/* list of OAlterTypeRebuildClaim * */
+} OAlterTypeRebuildBatch;
+
+static OAlterTypeRebuildClaim *
+o_alter_type_batch_find_claim(OAlterTypeRebuildBatch *batch, const char *name)
+{
+	ListCell   *lc;
+
+	if (batch == NULL)
+		return NULL;
+
+	foreach(lc, batch->claims)
+	{
+		OAlterTypeRebuildClaim *claim = (OAlterTypeRebuildClaim *) lfirst(lc);
+
+		if (strcmp(claim->name, name) == 0)
+			return claim;
+	}
+	return NULL;
+}
+
+static OAlterTypeRebuildBatch *
+o_alter_type_batch_lookup(Oid relid)
+{
+	AlteredTableInfo *tab = LookupAlteredTableInfo(relid);
+
+	if (tab == NULL)
+		return NULL;
+	return (OAlterTypeRebuildBatch *) tab->am_rebuild_plan;
+}
+
+void
+orioledb_relation_alter_type_rebuild_plan(Relation rel, AlteredTableInfo *tab)
+{
+	ORelOids	oids;
+	OTable	   *o_table;
+	OAlterTypeRebuildBatch *batch;
+	Oid			primary_oid;
+	bool		flagged = false,
+				reused = false;
+	ListCell   *oid_lc,
+			   *flag_lc;
+	ListCell   *lc;
+	int			i;
+
+	if (tab->rewrite != 0)
+	{
+		/*
+		 * A heap-rewrite ALTER TYPE owns the replacement OTable through the
+		 * begin/finish heap-swap callbacks; nothing to batch here.
+		 */
+		return;
+	}
+	if (!is_orioledb_rel(rel))
+		return;
+
+	ORelOidsSetFromRel(oids, rel);
+	o_table = o_tables_get(oids);
+	if (o_table == NULL || !o_table->has_primary)
+	{
+		/* No native primary: no hidden suffix dependency to propagate. */
+		o_table_free(o_table);
+		return;
+	}
+	primary_oid = o_table->indices[PrimaryIndexNumber].oids.reloid;
+
+	forboth(oid_lc, tab->am_rebuild_index_oids,
+			flag_lc, tab->am_rebuild_index_reused)
+	{
+		if (lfirst_oid(oid_lc) == primary_oid)
+		{
+			flagged = true;
+			reused = lfirst_int(flag_lc) != 0;
+			break;
+		}
+	}
+
+	if (!flagged || reused)
+	{
+		/*
+		 * The primary is either untouched by this ALTER or reusable as-is:
+		 * its tree survives, the primary-key suffix of every secondary is
+		 * unchanged, and PostgreSQL's own per-index verdicts stand.
+		 */
+		o_table_free(o_table);
+		return;
+	}
+
+	/*
+	 * Primary is not reusable.  Claim every native index: the primary is
+	 * rebuilt into its final layout and all native secondaries are rebuilt
+	 * directly against the new primary suffix in one pass.
+	 */
+	batch = (OAlterTypeRebuildBatch *)
+		MemoryContextAllocZero(TopTransactionContext,
+							   sizeof(OAlterTypeRebuildBatch));
+	for (i = 0; i < o_table->nindices; i++)
+	{
+		OAlterTypeRebuildClaim *claim = (OAlterTypeRebuildClaim *)
+			MemoryContextAllocZero(TopTransactionContext,
+								   sizeof(OAlterTypeRebuildClaim));
+
+		strlcpy(claim->name, o_table->indices[i].name.data, NAMEDATALEN);
+		claim->old_oid = o_table->indices[i].oids.reloid;
+		claim->new_oid = InvalidOid;
+		batch->claims = lappend(batch->claims, claim);
+	}
+	tab->am_rebuild_plan = batch;
+
+	/*
+	 * The claimed indexes must not reach o_index_drop() via drop_index_list:
+	 * the old primary tree is the rebuild source and must survive until the
+	 * completion callback.
+	 */
+	foreach(lc, drop_index_list)
+	{
+		char	   *name = strVal(lfirst(lc));
+
+		if (o_alter_type_batch_find_claim(batch, name) != NULL)
+			drop_index_list = foreach_delete_current(drop_index_list, lc);
+	}
+
+	o_table_free(o_table);
+}
+
+/*
+ * Record the PG-assigned new index oid for a claimed (batch-owned) index.
+ * Returns true when the index belongs to the active batch, in which case the
+ * caller must skip the ordinary per-index build/reuse handling.
+ */
+static bool
+o_alter_type_batch_record_new(Relation tbl, const char *ixname, Oid new_oid)
+{
+	OAlterTypeRebuildBatch *batch;
+	OAlterTypeRebuildClaim *claim;
+
+	batch = o_alter_type_batch_lookup(RelationGetRelid(tbl));
+	claim = o_alter_type_batch_find_claim(batch, ixname);
+	if (claim == NULL)
+		return false;
+
+	if (claim->new_oid == InvalidOid)
+		claim->new_oid = new_oid;
+	return true;
+}
+
+/*
+ * Should orioledb_ambuild() skip the ordinary build for this index?  When it
+ * does, the new index oid is recorded into the batch for the completion
+ * callback.
+ */
+bool
+o_alter_type_batch_ambuild_skip(Relation heap, Relation index)
+{
+	OAlterTypeRebuildBatch *batch = o_alter_type_batch_lookup(RelationGetRelid(heap));
+	OAlterTypeRebuildClaim *claim;
+
+	claim = o_alter_type_batch_find_claim(batch, index->rd_rel->relname.data);
+	if (claim == NULL)
+		return false;
+
+	if (claim->new_oid == InvalidOid)
+		claim->new_oid = index->rd_rel->oid;
+	return true;
+}
+
+/*
+ * Should orioledb_amdrop() suppress the o_index_drop() for this index?
+ * Suppressing keeps the old primary tree (the rebuild source) and the old
+ * secondary trees alive until the completion callback swaps the metadata.
+ */
+bool
+o_alter_type_batch_amdrop_skip(Relation tbl, const char *ixname)
+{
+	OAlterTypeRebuildBatch *batch = o_alter_type_batch_lookup(RelationGetRelid(tbl));
+
+	return o_alter_type_batch_find_claim(batch, ixname) != NULL;
+}
+
+void
+orioledb_relation_alter_type_rebuild_finish(Relation rel, AlteredTableInfo *tab)
+{
+	OAlterTypeRebuildBatch *batch;
+	ORelOids	old_oids;
+	OTable	   *old_o_table,
+			   *o_table;
+	OTableDescr *old_descr,
+			   *descr;
+	ListCell   *lc;
+	int			i;
+
+	batch = (OAlterTypeRebuildBatch *) tab->am_rebuild_plan;
+	Assert(batch != NULL);
+	tab->am_rebuild_plan = NULL;
+
+	ORelOidsSetFromRel(old_oids, rel);
+	old_o_table = o_tables_get(old_oids);
+	if (old_o_table == NULL)
+		elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",
+			 (unsigned) old_oids.datoid, (unsigned) old_oids.reloid,
+			 (unsigned) old_oids.relnode);
+	Assert(old_o_table->has_primary);
+
+	/*
+	 * Build the final OTable: fresh copy of the current metadata, claimed
+	 * recreated entries pointed at their new PG oids, then assign_new_oids()
+	 * for the new table relnode plus fresh tree relnodes for every native
+	 * index (the old trees stay alive as the rebuild source and are queued
+	 * for commit-time drop by recreate_o_table()).
+	 */
+	o_table = o_tables_get(old_oids);
+	foreach(lc, batch->claims)
+	{
+		OAlterTypeRebuildClaim *claim = (OAlterTypeRebuildClaim *) lfirst(lc);
+
+		if (!OidIsValid(claim->new_oid))
+			continue;
+
+		/*
+		 * PG recreated this index under a new oid: point the working copy's
+		 * entry at it before assign_new_oids() re-reads the catalogs, so the
+		 * entry adopts the new relfilenode too.
+		 */
+		for (i = 0; i < o_table->nindices; i++)
+		{
+			if (o_table->indices[i].oids.reloid == claim->old_oid)
+			{
+				o_table->indices[i].oids.reloid = claim->new_oid;
+				break;
+			}
+		}
+	}
+
+	assign_new_oids(o_table, rel, false);
+
+	/*
+	 * Refresh the definitions of the recreated entries from their final
+	 * catalog state.  Unaltered secondaries keep their definitions; only
+	 * their tree relnodes changed via assign_new_oids().
+	 */
+	foreach(lc, batch->claims)
+	{
+		OAlterTypeRebuildClaim *claim = (OAlterTypeRebuildClaim *) lfirst(lc);
+		Relation	idx;
+		OTableIndex *table_index;
+		ORelOids	saved_oids;
+
+		if (!OidIsValid(claim->new_oid))
+			continue;
+
+		for (i = 0; i < o_table->nindices; i++)
+		{
+			if (o_table->indices[i].oids.reloid == claim->new_oid)
+				break;
+		}
+		Assert(i < o_table->nindices);
+
+		idx = index_open(claim->new_oid, AccessShareLock);
+		table_index = &o_table->indices[i];
+		saved_oids = table_index->oids;
+
+		if (table_index->index_mctx)
+		{
+			MemoryContextDelete(table_index->index_mctx);
+			table_index->index_mctx = NULL;
+		}
+		memset(table_index, 0, sizeof(OTableIndex));
+
+		table_index->type = o_index_rel_get_ix_type(idx);
+		table_index->nfields = idx->rd_index->indnatts;
+		table_index->nkeyfields = idx->rd_index->indnkeyatts;
+		table_index->version = 0;
+		table_index->nulls_not_distinct = idx->rd_index->indnullsnotdistinct;
+
+		{
+			OBTOptions *options = (OBTOptions *) idx->rd_options;
+			OCompress	compress = InvalidOCompress;
+			uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
+
+			if (options)
+			{
+				if (options->compress_offset > 0)
+				{
+					char	   *str;
+
+					str = (char *) (((Pointer) options) +
+									options->compress_offset);
+					if (str)
+						compress = o_parse_compress(str);
+				}
+				fillfactor = options->bt_options.fillfactor;
+			}
+
+			if (OCompressIsValid(compress))
+				table_index->compress = compress;
+			else if (table_index->type == oIndexPrimary)
+				table_index->compress = o_table->primary_compress;
+			else
+				table_index->compress = o_table->default_compress;
+
+			table_index->fillfactor = fillfactor;
+		}
+
+		memcpy(&table_index->name, &idx->rd_rel->relname, sizeof(NameData));
+		table_index->oids = saved_oids;
+
+		o_table_fill_index(o_table, i, idx);
+		o_cache_index_types(o_table, table_index);
+		index_close(idx, AccessShareLock);
+	}
+
+	/*
+	 * Publish the final OTable generation and rebuild the claimed trees in
+	 * one pass: scan the preserved old primary tree, write the final primary
+	 * and all native secondaries directly against the new layout.
+	 */
+	o_tables_table_meta_lock(NULL);
+	old_descr = o_fetch_table_descr(old_o_table->oids);
+	ResourceOwnerRememberOTableDescr(CurrentResourceOwner, old_descr);
+	recreate_o_table(old_o_table, o_table);
+	descr = o_fetch_table_descr(o_table->oids);
+	ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
+	rebuild_indices_insert_placeholders(descr);
+	o_tables_table_meta_unlock(NULL, InvalidOid);
+
+	rebuild_indices(old_o_table, old_descr, o_table, descr, false, NULL);
+
+	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, old_descr);
+	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
+	o_table_free(old_o_table);
+	o_table_free(o_table);
+
+	list_free_deep(batch->claims);
+	pfree(batch);
+}
+
 void
 orioledb_relation_alter_table_cmd(Relation rel,
 							  const AlteredTableInfo *tab,
@@ -4263,6 +4633,19 @@ orioledb_amdrop(Relation index, int flags)
 
 	relname = makeString(index->rd_rel->relname.data);
 
+	if (o_alter_type_batch_amdrop_skip(tbl, index->rd_rel->relname.data))
+	{
+		/*
+		 * The index belongs to an active table-AM-owned ALTER TYPE rebuild
+		 * batch.  The old primary tree is the rebuild source, so nothing is
+		 * dropped here; the completion callback swaps the metadata and
+		 * queues the old trees for commit-time drop in one pass.
+		 */
+		drop_index_list = list_delete(drop_index_list, relname);
+		relation_close(tbl, AccessShareLock);
+		return;
+	}
+
 	if (list_member_oid(o_reuse_indices, index->rd_rel->oid))
 	{
 		/* Do not drop index if it is set for reuse. */
@@ -4529,8 +4912,16 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								break;
 							}
 						}
-						if (ix_num != InvalidIndexNumber)
+						if (ix_num != InvalidIndexNumber &&
+							!o_alter_type_batch_amdrop_skip(part_tbl,
+								descr->indices[ix_num]->name.data))
 						{
+							/*
+							 * A table-AM ALTER TYPE batch owns claimed child
+							 * indexes.  Dropping one here would rebuild the
+							 * partition first against ctid and then again against
+							 * the final primary key.
+							 */
 							if (descr->indices[ix_num]->primaryIsCtid)
 								ix_num--;
 
@@ -4662,6 +5053,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						int			i;
 						bool		add_bridging = false;
 						bool		btree_bridging = false;
+						bool		batch_claimed;
 
 						for (i = 0; i < o_table->nindices; i++)
 						{
@@ -4674,8 +5066,17 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 						Assert(rel->rd_rel->relkind == RELKIND_INDEX);
 
-						/* In case of index reuse, update the index oid */
-						if (ix_num != InvalidIndexNumber && list_member_oid(o_reuse_indices, o_table->indices[ix_num].oids.reloid))
+						batch_claimed = o_alter_type_batch_record_new(tbl,
+							rel->rd_rel->relname.data, rel->rd_rel->oid);
+
+						/*
+						 * In case of index reuse, update the index oid.
+						 * Batch-claimed indexes keep their old tree until the
+						 * rebuild-finish callback, so skip the adoption here
+						 * (the batch records the new oid instead).
+						 */
+						if (!batch_claimed && ix_num != InvalidIndexNumber &&
+							list_member_oid(o_reuse_indices, o_table->indices[ix_num].oids.reloid))
 						{
 							Oid			old_oid = o_table->indices[ix_num].oids.reloid;
 
