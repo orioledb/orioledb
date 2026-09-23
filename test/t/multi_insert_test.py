@@ -17,9 +17,11 @@ COPY-driven bulk loads.  Gated behind ORIOLEDB_RUN_PERF=1.
 
 import io
 import os
+import random
 import threading
 import time
 import unittest
+import uuid
 
 from .base_test import BaseTest
 
@@ -31,6 +33,11 @@ MAX_ALLOWED_SLOWDOWN = 1.20
 RUNS_PER_MODE = 3
 ROWS_PER_RUN = 200_000
 ROWS_PER_SESSION = 5000
+
+# test_wide_key_copy_keeps_order: enough rows that the batch keeps inserting
+# into interior leaves and those leaves grow several chunks each.
+WIDE_KEY_IDS = 4000
+WIDE_KEY_BATCHES = 3
 
 VALGRIND = os.environ.get('USE_VALGRIND', '') == '1'
 
@@ -185,6 +192,88 @@ class MultiInsertTest(BaseTest):
 			    str(errors[0]).lower() +
 			    " ".join(str(arg) for arg in errors[0].args).lower())
 			self._check_t(node, ROWS_PER_SESSION)
+		finally:
+			node.stop()
+
+	def test_wide_key_copy_keeps_order(self):
+		"""Repeated COPY into a table keyed by (uuid, timestamp).
+
+		A random leading key column sends the batch into interior leaves,
+		and a wide key makes those leaves grow extra chunks mid-batch.  The
+		batch helper gates each item on the leaf hikey, which is a pointer
+		into the page; splitting a chunk memmoves the hikeys area, so a
+		hikey read once per leaf goes stale and the gate starts comparing
+		against unrelated bytes.  Items that belong to the next leaf then
+		land in this one, and an ordered scan comes back unsorted.
+
+		The concurrency cases above cannot see this: a bigint PK fed in
+		ascending order always appends to the rightmost leaf, which has no
+		hikey to gate on.
+		"""
+		node = self.node
+		node.start()
+		try:
+			node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+			node.safe_psql("""
+				CREATE TABLE t_wide (
+					object_id uuid NOT NULL,
+					ts        timestamp NOT NULL,
+					payload   text NOT NULL,
+					PRIMARY KEY (object_id, ts)
+				) USING orioledb;
+			""")
+
+			rnd = random.Random(42)
+			ids = [
+			    str(uuid.UUID(int=rnd.getrandbits(128)))
+			    for _ in range(WIDE_KEY_IDS)
+			]
+
+			con = node.connect()
+			try:
+				c = con.cursor
+				c.execute("SET orioledb.debug_disable_multi_insert = off")
+				for b in range(WIDE_KEY_BATCHES):
+					buf = io.StringIO()
+					for i, u in enumerate(ids):
+						ts = "2026-01-01 00:00:%02d.%06d" % (b, i)
+						buf.write("%s\t%s\t%s\n" % (u, ts, "x" * 64))
+					buf.seek(0)
+					c.copy_expert(
+					    "COPY t_wide (object_id, ts, payload) FROM STDIN", buf)
+					con.connection.commit()
+
+				expected = WIDE_KEY_IDS * WIDE_KEY_BATCHES
+
+				c.execute("SET enable_seqscan = off")
+				c.execute("""
+					SELECT count(*) FROM (
+						SELECT (object_id, ts) <= lag((object_id, ts)) OVER () AS unsorted
+						FROM t_wide
+						WHERE object_id > '00000000-0000-0000-0000-000000000000'
+					) s WHERE unsorted
+				""")
+				(unsorted, ) = c.fetchone()
+				self.assertEqual(
+				    unsorted, 0,
+				    "ordered index scan returned rows out of order: "
+				    "a leaf holds keys above its own hikey")
+
+				c.execute("""
+					SELECT count(*) FROM t_wide
+					WHERE object_id > '00000000-0000-0000-0000-000000000000'
+				""")
+				(idx_count, ) = c.fetchone()
+				self.assertEqual(idx_count, expected)
+
+				c.execute("SET enable_seqscan = on")
+				c.execute("SET enable_indexscan = off")
+				c.execute("SET enable_bitmapscan = off")
+				c.execute("SELECT count(*) FROM t_wide")
+				(seq_count, ) = c.fetchone()
+				self.assertEqual(seq_count, expected)
+			finally:
+				con.close()
 		finally:
 			node.stop()
 

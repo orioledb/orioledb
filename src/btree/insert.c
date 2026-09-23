@@ -1012,6 +1012,10 @@ o_btree_insert_needs_page_undo(BTreeDescr *desc, Page p)
  * key/keyType match how the caller addresses the new item: waiters pass
  * the leaf tuple itself with BTreeKeyLeafTuple, the multi-insert driver
  * passes the precomputed OBTreeKeyBound with BTreeKeyBound.
+ *
+ * hikey points into the page, so a caller that probes repeatedly must
+ * re-read it after anything that can move the hikeys area -- notably
+ * page_split_chunk_if_needed().
  */
 static BTreeLeafProbeResult
 btree_leaf_probe_insert_slot(BTreeDescr *desc, Page p, bool rightmost,
@@ -1122,8 +1126,6 @@ o_btree_multi_insert_item(OBTreeFindPageContext *ctx,
 	Assert(desc->ppool->numPagesReserved[PPOOL_RESERVE_INSERT] >= 2);
 
 	rightmost = O_PAGE_IS(p, RIGHTMOST);
-	if (!rightmost)
-		BTREE_PAGE_GET_HIKEY(hikey, p);
 
 	xactInfo = OXID_GET_XACT_INFO(OXidIsValid(opOxid) ? opOxid : BootstrapTransactionId,
 								  lockMode, false);
@@ -1150,6 +1152,18 @@ o_btree_multi_insert_item(OBTreeFindPageContext *ctx,
 		LocationIndex newItemSize = MAXALIGN(tuplen) + BTreeLeafTuphdrSize;
 		BTreeLeafTuphdr tuphdr;
 		UndoLocation undoLocation = InvalidUndoLocation;
+
+		/*
+		 * The hikey has to be re-read on every iteration: it is a pointer
+		 * into the page, and page_split_chunk_if_needed() below memmoves the
+		 * whole hikeys area to make room for the new chunk's hikey.  A hikey
+		 * hoisted out of the loop would, from the first chunk split onwards,
+		 * read whatever landed at the old offset -- an arbitrary key, which
+		 * roughly half the time compares above the real hikey and lets this
+		 * page swallow items that belong to the next one.
+		 */
+		if (!rightmost)
+			BTREE_PAGE_GET_HIKEY(hikey, p);
 
 		*result = btree_leaf_probe_insert_slot(desc, p, rightmost, &hikey,
 											   keys[k], keyType, newItemSize, &loc);
