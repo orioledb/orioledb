@@ -43,8 +43,8 @@
 #define SYS_TREES_EVICTED_DATA			(20)
 #define SYS_TREES_CHKP_NUM				(21)
 #define SYS_TREES_MULTIRANGE_CACHE		(22)
-
-#define SYS_TREES_NUM					(22)
+#define SYS_TREES_CATALOG_XID_UNDO_LOCATION		(23)
+#define SYS_TREES_NUM					(23)
 
 #define IS_SYS_TREE_OIDS(oids) \
 	((oids).datoid == SYS_TREES_DATOID)
@@ -146,6 +146,12 @@ typedef struct
 	SharedRootInfoKey key;
 	uint32		checkpointNumbers[2];
 } ChkpNumTuple;
+
+typedef struct
+{
+	TransactionId xid;
+	UndoLocation undoLocation;
+} ReplicationRetainUndoTuple;
 
 extern Size sys_trees_shmem_needs(void);
 extern void sys_trees_shmem_init(Pointer ptr, bool found);
