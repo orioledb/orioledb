@@ -97,7 +97,15 @@ o_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
 			char	   *output;
 
 			atti = TupleDescAttr(tupDesc, i);
-			if (!atti->attbyval && atti->attlen && !nulls[i])
+
+			/*
+			 * Only a varlena can be a toast pointer.  attlen is -1 there, and
+			 * every non-zero attlen is true, so testing it as a flag also
+			 * probed fixed-length by-reference types -- printing any uuid,
+			 * macaddr, point, interval, name or tid whose first byte happens
+			 * to be 0x01 as "TOASTed".
+			 */
+			if (!atti->attbyval && atti->attlen < 0 && !nulls[i])
 			{
 				Pointer		p = DatumGetPointer(values[i]);
 
