@@ -113,6 +113,38 @@ class DDLTest(BaseTest):
 				ALTER TABLE o_pkey_collation ALTER COLUMN key
 					TYPE text COLLATE "POSIX";
 
+				CREATE TABLE o_phase2_combined (
+					key text COLLATE "C" PRIMARY KEY,
+					value text COLLATE "C"
+				) USING orioledb;
+				CREATE INDEX o_phase2_combined_value_idx
+					ON o_phase2_combined (value);
+				INSERT INTO o_phase2_combined
+					SELECT i::text, (100 - i)::text
+					FROM generate_series(1, 100) i;
+				ALTER TABLE o_phase2_combined
+					ALTER COLUMN key TYPE text COLLATE "POSIX",
+					ALTER COLUMN value TYPE text COLLATE "POSIX";
+
+				CREATE TABLE o_phase2_part (
+					key text COLLATE "C",
+					part int,
+					value int,
+					PRIMARY KEY (key, part)
+				) PARTITION BY RANGE (part);
+				CREATE TABLE o_phase2_part_1
+					PARTITION OF o_phase2_part
+					FOR VALUES FROM (0) TO (50) USING orioledb;
+				CREATE TABLE o_phase2_part_2
+					PARTITION OF o_phase2_part
+					FOR VALUES FROM (50) TO (101) USING orioledb;
+				CREATE INDEX o_phase2_part_value_idx
+					ON o_phase2_part (value);
+				INSERT INTO o_phase2_part
+					SELECT i::text, i, i FROM generate_series(1, 100) i;
+				ALTER TABLE o_phase2_part ALTER COLUMN key
+					TYPE text COLLATE "POSIX";
+
 				CREATE TABLE o_parent (id int PRIMARY KEY) USING orioledb;
 				CREATE TABLE o_child () INHERITS (o_parent) USING orioledb;
 				INSERT INTO o_parent VALUES (1);
@@ -141,6 +173,22 @@ class DDLTest(BaseTest):
 			self.assertTrue(node.execute("""
 				SELECT orioledb_tbl_check('o_pkey_collation'::regclass);
 			""")[0][0])
+			self.assertEqual([(100, )], node.execute("""
+				SET enable_seqscan = false;
+				SELECT count(*) FROM o_phase2_combined WHERE value >= '0';
+			"""))
+			self.assertTrue(node.execute("""
+				SELECT orioledb_tbl_check('o_phase2_combined'::regclass);
+			""")[0][0])
+			self.assertEqual([(100, )], node.execute("""
+				SET enable_seqscan = false;
+				SELECT count(*) FROM o_phase2_part
+				WHERE value BETWEEN 1 AND 100;
+			"""))
+			self.assertEqual([(True, True)], node.execute("""
+				SELECT orioledb_tbl_check('o_phase2_part_1'::regclass),
+					orioledb_tbl_check('o_phase2_part_2'::regclass);
+			"""))
 			self.assertEqual([(3, 'new', 7, 3, 10, 'again', True)],
 			                 node.execute("""
 					INSERT INTO o_alter (id) VALUES (3)

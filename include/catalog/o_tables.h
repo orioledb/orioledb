@@ -421,6 +421,12 @@ extern void orioledb_relation_alter_table_cmd(Relation rel,
 											  const struct AlteredTableInfo *tab,
 											  const struct AlterTableCmd *cmd, int pass,
 											  const ObjectAddress *address);
+extern void orioledb_relation_alter_type_rebuild_plan(Relation rel,
+													  struct AlteredTableInfo *tab);
+extern void orioledb_relation_alter_type_rebuild_finish(Relation rel,
+														struct AlteredTableInfo *tab);
+extern bool o_alter_type_batch_ambuild_skip(Relation heap, Relation index);
+extern bool o_alter_type_batch_amdrop_skip(Relation tbl, const char *ixname);
 extern bool orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 										   bool swap_toast_by_content,
 										   bool is_internal,
