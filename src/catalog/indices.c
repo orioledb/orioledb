@@ -261,6 +261,23 @@ assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey)
 void
 recreate_o_table(OTable *old_o_table, OTable *o_table)
 {
+	recreate_o_table_ext(old_o_table, o_table, false);
+}
+
+/*
+ * Like recreate_o_table, but when `carry_secondary` is true the secondary
+ * index trees are NOT queued for commit-time drop.  Used by "ALTER TABLE ...
+ * SET TABLESPACE", which relocates only the table's own (primary/toast/ctid/
+ * bridge) storage and leaves the secondary indexes -- referenced by primary
+ * key / ctid, keeping their own tablespace -- untouched.  Queueing a
+ * secondary for drop here while the move's later o_define_index() rebuilds
+ * it under the same (datoid, reloid, relnode, spcoid) key is what made the
+ * commit delete the freshly-built index (issue #906).
+ */
+void
+recreate_o_table_ext(OTable *old_o_table, OTable *o_table,
+					 bool carry_secondary)
+{
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 	int			oldTreesNum,
@@ -278,8 +295,60 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
-	oldTrees = o_table_make_index_keys(old_o_table, &oldTreesNum);
-	newTrees = o_table_make_index_keys(o_table, &newTreesNum);
+	if (carry_secondary)
+	{
+		/*
+		 * Drop only the trees that actually move: primary, toast, ctid and
+		 * bridge.  Secondary index trees stay where they are (their own
+		 * tablespace, unchanged relnode), so omit them from oldTrees.
+		 * newTrees from the freshly-created o_table already excludes
+		 * secondaries (nindices covers only the primary pass here), so the
+		 * two lists match on primary/toast/ctid/bridge while secondaries are
+		 * absent from both -- the undo drop/keep diff leaves them intact.
+		 */
+		int			i,
+					num = 0;
+
+		oldTrees = (OIndexKey *) palloc(sizeof(OIndexKey) *
+									   (old_o_table->nindices + 3));
+		for (i = 0; i < old_o_table->nindices; i++)
+		{
+			OTableIndex *ix = &old_o_table->indices[i];
+
+			if (ix->type == oIndexUnique || ix->type == oIndexRegular ||
+				ix->type == oIndexExclusion)
+				continue;
+			oldTrees[num].oids = ix->oids;
+			oldTrees[num].oids.spcoid = ix->oids.spcoid;
+			num++;
+		}
+		if (ORelOidsIsValid(old_o_table->bridge_oids))
+		{
+			oldTrees[num].oids = old_o_table->bridge_oids;
+			oldTrees[num].oids.spcoid = old_o_table->oids.spcoid;
+			num++;
+		}
+		if (ORelOidsIsValid(old_o_table->toast_oids))
+		{
+			oldTrees[num].oids = old_o_table->toast_oids;
+			oldTrees[num].oids.spcoid = old_o_table->oids.spcoid;
+			num++;
+		}
+		if (old_o_table->nindices == 0 ||
+			old_o_table->indices[PrimaryIndexNumber].type != oIndexPrimary)
+		{
+			oldTrees[num].oids = old_o_table->oids;
+			oldTrees[num].oids.spcoid = old_o_table->oids.spcoid;
+			num++;
+		}
+		oldTreesNum = num;
+		newTrees = o_table_make_index_keys(o_table, &newTreesNum);
+	}
+	else
+	{
+		oldTrees = o_table_make_index_keys(old_o_table, &oldTreesNum);
+		newTrees = o_table_make_index_keys(o_table, &newTreesNum);
+	}
 
 	o_tables_drop_by_oids(old_o_table->oids, oxid, oSnapshot.csn);
 	o_tables_add(o_table, oxid, oSnapshot.csn);
@@ -470,6 +539,16 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	OBTOptions *options;
 	bool		setting_tbl_tablespace = OidIsValid(oldTblRelnode);
+	/*
+	 * For "ALTER TABLE ... SET TABLESPACE" a secondary index keeps its own
+	 * tablespace and its tree is unchanged, so we must NOT build a new tree
+	 * (which would overwrite the existing one in place and corrupt it on
+	 * rollback) nor queue a create-relnode undo for it (which would drop the
+	 * pre-existing tree on abort).  See recreate_o_table_ext() for why the
+	 * old secondary tree is also not queued for drop.  Only non-primary
+	 * indexes are carried; the primary is rebuilt by rewrite_table().
+	 */
+	bool		carry_secondary = setting_tbl_tablespace;
 
 	Assert(index == NULL || !(OidIsValid(indoid)));
 
@@ -501,6 +580,10 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	indnatts = index->rd_index->indnatts;
 	indnkeyatts = index->rd_index->indnkeyatts;
 	tablespace = index->rd_rel->reltablespace;
+
+	/* Only non-primary indexes are carried across a tablespace move. */
+	if (ix_type == oIndexPrimary)
+		carry_secondary = false;
 
 	if (OidIsValid(indoid))
 		index_close(index, AccessShareLock);
@@ -639,7 +722,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	 * the table has data -- the actual build runs later from
 	 * orioledb_index_validate_scan.
 	 */
-	if (!reuse_relnode && is_build && !skip_build)
+	if (!reuse_relnode && is_build && !skip_build && !carry_secondary)
 		o_tables_table_meta_lock(NULL);
 	else
 		o_tables_table_meta_lock(o_table);
@@ -651,7 +734,15 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		old_descr = o_fetch_table_descr(old_o_table->oids);
 		ResourceOwnerRememberOTableDescr(CurrentResourceOwner, old_descr);
 
-		recreate_o_table(old_o_table, o_table);
+		/*
+		 * "ALTER TABLE ... SET TABLESPACE" (setting_tbl_tablespace, i.e.
+		 * oldTblRelnode is valid) relocates only the table's own storage;
+		 * secondary indexes keep their own tablespace and trees, so do not
+		 * queue them for commit-time drop (see recreate_o_table_ext).  Any
+		 * other primary recreate (TRUNCATE, ALTER COLUMN TYPE, etc.) drops
+		 * every old tree as before.
+		 */
+		recreate_o_table_ext(old_o_table, o_table, setting_tbl_tablespace);
 	}
 	else
 	{
@@ -661,7 +752,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 		o_tables_update(o_table, oxid, oSnapshot.csn);
-		if (!reuse_relnode)
+		if (!reuse_relnode && !carry_secondary)
 		{
 			OIndexKey	key = {.oids = table_index->oids};
 
@@ -756,7 +847,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		o_add_invalidate_undo_item(table_index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
 
-	if (!reuse_relnode && is_build && !skip_build)
+	if (!reuse_relnode && is_build && !skip_build && !carry_secondary)
 	{
 		o_tables_table_meta_unlock(NULL, InvalidOid);
 		if (STOPEVENTS_ENABLED())
@@ -794,6 +885,222 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
 	if (old_descr)
 		ResourceOwnerForgetOTableDescr(CurrentResourceOwner, old_descr);
+}
+
+/*
+ * Build a fresh OTable for `heaprel` from its tupdesc, with the real primary
+ * index already attached at `primary_relnode`, and return it (NOT yet inserted
+ * into the sys-tree).  Used by the native-rewrite path:
+ *
+ *   - o_build_primary_for_new_heap() inserts it via o_tables_add() so the
+ *     subsequent native fill writes into the primary tree;
+ *   - orioledb_finish_heap_swap_body() hands it to recreate_o_table_ext(),
+ *     which drops the old heap's OTable and adds this one, adopting the filled
+ *     primary tree.
+ *
+ * The OTable is built with has_primary=true and the real primary in
+ * indices[0] BEFORE any sys-tree insert.  This is critical: o_tables_add() ->
+ * o_tables_oids_indexes(NULL, table) inserts the primary OIndex via
+ * make_primary_o_index() (stamping a matching primary_ixversion on both the
+ * OTable and the OIndex sys-tree row).  If instead the OTable were first
+ * inserted with has_primary=false (as create_o_table_for_rel() does),
+ * o_tables_add() would install a *ctid* primary OIndex keyed by
+ * (datoid, table_oid, relnode); a later o_tables_update() flipping to the real
+ * PK at the same relnode hits o_tables_oids_indexes()'s reuse_relnode path
+ * (same relnode, different reloid) and SKIPS inserting the real PK, leaving
+ * the descr fetch to pair the OTable with a ctid OIndex and trip
+ * o_tupdesc_matches_o_table().
+ *
+ * `index` is a pg_index Relation whose definition (columns, opclasses, name,
+ * indisprimary/immediate/nulls_not_distinct) is copied into the new OTable's
+ * primary slot via o_table_fill_index() (no pointer sharing with any existing
+ * OTableIndex).  `primary_relnode` overrides the tree identity: the primary
+ * tree is keyed by (datoid, primary_reloid, primary_relnode, spcoid) so that
+ * swap_relation_files() -- which swaps the heap relfilenode -- transfers
+ * ownership of the filled tree to the old heap.
+ */
+OTable *
+o_make_table_with_primary(Relation heaprel, Relation index,
+						  RelFileNumber primary_relnode,
+						  bool index_bridging,
+						  RelFileNumber bridge_relnode,
+						  Oid adopt_reloid)
+{
+	ORelOids	oids;
+	OTable	   *o_table;
+	OTableIndex *table_index;
+	Oid			tablespace;
+	Oid			datoid;
+	XLogRecPtr	cur_lsn;
+
+	Assert(index->rd_index->indisprimary);
+
+	ORelOidsSetFromRel(oids, heaprel);
+	if (OidIsValid(adopt_reloid))
+		oids.reloid = adopt_reloid;
+
+	o_table = o_table_tableam_create(oids, RelationGetDescr(heaprel),
+									 heaprel->rd_rel->relpersistence,
+									 RelationGetFillFactor(heaprel,
+															BTREE_DEFAULT_FILLFACTOR),
+									 heaprel->rd_rel->reltablespace,
+									 index_bridging);
+
+	/*
+	 * Cache the builtin opclasses for the (index-less) table's implicit ctid
+	 * machinery first: o_cache_table_types() asserts nindices == 0 because it
+	 * only handles the ctid primary's opclasses.  The real PK is attached
+	 * afterwards and its opclasses are cached via o_cache_index_types().
+	 */
+	o_cache_table_types(o_table);
+
+	/*
+	 * Assign the bridge index's storage oids when bridging is enabled, so the
+	 * native fill (o_tbl_insert) maintains the bridge tree alongside the
+	 * primary.  Mirrors set_toast_oids_and_options() / assign_new_oids().  When
+	 * a `bridge_relnode` is passed in (the native-rewrite adoption reusing the
+	 * transient fill's bridge tree Btrans), reuse it instead of allocating a
+	 * fresh one, mirroring how `primary_relnode` reuses the filled primary tree
+	 * Rnew; otherwise allocate a fresh bridge relnode (the transient fill path
+	 * in begin_heap_rewrite_body).
+	 */
+	if (index_bridging)
+	{
+		Oid			bridge_spcoid = OidIsValid(heaprel->rd_rel->reltablespace) ?
+			heaprel->rd_rel->reltablespace : MyDatabaseTableSpace;
+
+		o_table->bridge_oids.datoid = MyDatabaseId;
+		o_table->bridge_oids.spcoid = bridge_spcoid;
+		if (RelFileNumberIsValid(bridge_relnode))
+		{
+			Assert(!IsBinaryUpgrade);
+			o_table->bridge_oids.relnode = bridge_relnode;
+		}
+		else
+		{
+			o_table->bridge_oids.relnode = IsBinaryUpgrade ? InvalidOid :
+				o_bridge_new_relnode(bridge_spcoid,
+									 heaprel->rd_rel->relpersistence);
+		}
+		o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
+	}
+
+	o_table->has_primary = true;
+	o_table->primary_init_nfields = o_table->nfields;
+
+	/* Place the primary at index 0. */
+	o_table->indices = (OTableIndex *)
+		palloc0(sizeof(OTableIndex));
+	o_table->nindices = 1;
+	table_index = &o_table->indices[0];
+
+	table_index->type = oIndexPrimary;
+	table_index->nfields = index->rd_index->indnatts;
+	table_index->nkeyfields = index->rd_index->indnkeyatts;
+	table_index->version = 0;
+	table_index->compress = o_table->primary_compress;
+	table_index->fillfactor = o_table->fillfactor;
+
+	memcpy(&table_index->name, &index->rd_rel->relname, sizeof(NameData));
+	table_index->nulls_not_distinct = index->rd_index->indnullsnotdistinct;
+	o_table_fill_index(o_table, 0, index);
+
+	tablespace = index->rd_rel->reltablespace;
+	table_index->oids.datoid = MyDatabaseId;
+	table_index->oids.reloid = index->rd_rel->oid;
+	table_index->oids.relnode = primary_relnode;
+	if (tablespace == 0)
+		tablespace = MyDatabaseTableSpace;
+	table_index->oids.spcoid = tablespace;
+	Assert(table_index->oids.spcoid);
+	table_index->immediate = index->rd_index->indimmediate;
+
+	o_cache_index_types(o_table, table_index);
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_database_cache_add_if_needed(datoid, datoid, cur_lsn, NULL);
+
+	return o_table;
+}
+
+/*
+ * Create the OTable for a freshly-created, still-empty rewrite target heap
+ * (the transient new heap produced by make_new_heap()) WITH its primary index
+ * already attached, and build the empty primary tree, so that the subsequent
+ * native fill (ATRewriteTable / REFRESH MATVIEW transient receiver) writes
+ * tuples into the primary index tree via o_tbl_insert() -> GET_PRIMARY(descr).
+ *
+ * Unlike the o_define_index() primary-rebuild path, this does NOT call
+ * assign_new_oids(): the new heap's relfilenode must be preserved (PG fills
+ * exactly the storage swap_relation_files() will swap), and there is no old
+ * data to rebuild from -- the tree is initialized empty and populated by the
+ * native fill.
+ */
+void
+o_build_primary_for_new_heap(Relation newheap, Relation index,
+							 RelFileNumber primary_relnode,
+							 bool index_bridging, Oid adopt_reloid)
+{
+	OTable	   *o_table;
+	OTableIndex *table_index;
+	OSnapshot	oSnapshot;
+	OXid		oxid;
+	bool		is_temp;
+
+	o_table = o_make_table_with_primary(newheap, index, primary_relnode,
+										index_bridging, InvalidRelFileNumber,
+										adopt_reloid);
+	table_index = &o_table->indices[0];
+
+	is_temp = (o_table->persistence == RELPERSISTENCE_TEMP);
+
+	/*
+	 * is_build path: take the NULL meta-lock so the checkpointer does not
+	 * observe a half-built tree, matching o_define_index() for a primary
+	 * build on an empty table.
+	 */
+	o_tables_table_meta_lock(NULL);
+
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+
+	/* Single insert with old_table=NULL: no reuse_relnode, real PK inserted. */
+	o_tables_add(o_table, oxid, oSnapshot.csn);
+
+	if (!is_temp)
+	{
+		OIndexKey	tkey = {.oids = table_index->oids};
+
+		add_undo_create_relnode(o_table->oids, &tkey, 1, true);
+	}
+
+	/*
+	 * Create the tablespace dir (if needed) so the first insert can lay down
+	 * the primary tree.  No shared-root placeholder is inserted here: the
+	 * transient new heap is held under AccessExclusiveLock for the whole
+	 * rewrite, so no other backend can observe a half-built tree, and the
+	 * native fill's first insert creates the SharedRootInfo itself via the
+	 * o_btree_load_shmem_internal() create_shared_root_info() path (the same
+	 * way create_o_table_for_rel()'s ctid primary is created lazily).  A
+	 * placeholder would instead make that first insert return false and trip
+	 * the o_btree_load_shmem() assert, because placeholders are only ever
+	 * converted to real entries by rebuild_indices() during an explicit build.
+	 */
+	if (!is_temp)
+	{
+		char	   *prefix;
+		char	   *db_prefix;
+		Oid			tblspace = o_table->indices[0].oids.spcoid;
+
+		o_get_prefixes_for_tablespace(MyDatabaseId, tblspace,
+									  &prefix, &db_prefix);
+		o_verify_dir_exists_or_create(prefix, NULL, NULL);
+		o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+		pfree(db_prefix);
+	}
+
+	o_tables_table_meta_unlock(NULL, InvalidOid);
+
+	o_table_free(o_table);
 }
 
 /*

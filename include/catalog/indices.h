@@ -136,6 +136,13 @@ extern void o_index_drop(Relation tbl, OIndexNumber ix_num);
 extern OIndexNumber o_find_ix_num_by_name(OTableDescr *descr,
 										  char *ix_name);
 extern OIndexNumber o_find_ix_num_by_reloid(OTableDescr *descr, Oid reloid);
+
+/*
+ * orioledb_amdrop - index AM amdrop callback.  Fired from PG's index_drop()
+ * for every orioledb (native or bridged) index drop, with the real
+ * PERFORM_DELETION_* flags.  Replaces the former OAT_DROP index branch.
+ */
+extern void orioledb_amdrop(Relation index, int flags);
 extern Jsonb *cic_stopevent_params(ORelOids idx_oids, const char *idx_name);
 extern bool is_in_indexes_rebuild(void);
 
@@ -146,6 +153,8 @@ extern void rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 							IndexBuildResult *result);
 extern void assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey);
 extern void recreate_o_table(OTable *old_o_table, OTable *o_table);
+extern void recreate_o_table_ext(OTable *old_o_table, OTable *o_table,
+								bool carry_secondary);
 extern void build_secondary_index(Oid oldTblRelnode, OTable *o_table,
 								  OTableDescr *descr, OIndexNumber ix_num,
 								  bool in_dedicated_recovery_worker,
@@ -154,4 +163,12 @@ PGDLLEXPORT void _o_index_parallel_build_main(dsm_segment *seg, shm_toc *toc);
 extern void _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 										  OTable *recovery_o_table, OTable *recovery_old_o_table);
 extern void drop_primary_index(Relation rel, OTable *o_table);
+extern OTable *o_make_table_with_primary(Relation heaprel, Relation index,
+										 RelFileNumber primary_relnode,
+										 bool index_bridging,
+										 RelFileNumber bridge_relnode,
+										 Oid adopt_reloid);
+extern void o_build_primary_for_new_heap(Relation newheap, Relation index,
+										 RelFileNumber primary_relnode,
+										 bool index_bridging, Oid adopt_reloid);
 #endif							/* __INDICES_H__ */

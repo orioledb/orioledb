@@ -160,6 +160,7 @@ orioledb_btree_handler(void)
 
 	amroutine->ambuild = orioledb_ambuild;
 	amroutine->amreuse = orioledb_amreuse;
+	amroutine->amdrop = orioledb_amdrop;
 	amroutine->ambuildempty = orioledb_ambuildempty;
 	amroutine->aminsert = NULL;
 	amroutine->aminsertextended = orioledb_aminsert;
@@ -245,6 +246,7 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 				bridged->routine.aminsertextended = bridged_aminsert;
 				bridged->routine.ambeginscan = bridged_ambeginscan;
 				bridged->routine.amcanreturn = NULL;
+				bridged->routine.amdrop = orioledb_amdrop;
 				MemoryContextSwitchTo(old_mcxt);
 				amroutine = palloc0(sizeof(IndexAmRoutine));
 				memcpy(amroutine, &bridged->routine, sizeof(IndexAmRoutine));
@@ -293,6 +295,24 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	if (IsBinaryUpgrade)
 		return (IndexBuildResult *) palloc0(sizeof(IndexBuildResult));
 
+	/*
+	 * After the post-swap adoption (orioledb_finish_heap_swap_body), the
+	 * primary tree is already filled and owned by the old heap; PG's
+	 * reindex_relation must not rebuild it.  Let secondaries through so PG's
+	 * standard reindex builds them via o_define_index.
+	 */
+	if (o_skip_primary_ambuild && index->rd_index->indisprimary)
+		return (IndexBuildResult *) palloc0(sizeof(IndexBuildResult));
+
+	/*
+	 * A table-AM-owned ALTER TYPE rebuild batch claims this index: the
+	 * catalog entry is recreated (recording the new oid into the batch) but
+	 * the tree build is deferred to the batch completion callback, which
+	 * rebuilds all claimed trees in one pass from the preserved old primary.
+	 */
+	if (o_alter_type_batch_ambuild_skip(heap, index))
+		return (IndexBuildResult *) palloc0(sizeof(IndexBuildResult));
+
 	if (options && !options->orioledb_index)
 	{
 		OTableDescr *descr;
@@ -332,7 +352,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	result->heap_tuples = 0.0;
 	result->index_tuples = 0.0;
 
-	if (in_nontransactional_truncate || !OidIsValid(o_saved_relrewrite))
+	if (in_nontransactional_truncate || !OidIsValid(heap->rd_rel->relrewrite))
 	{
 		ORelOids	tbl_oids;
 		OTable	   *o_table;
