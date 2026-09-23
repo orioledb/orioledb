@@ -273,6 +273,44 @@ class TypesTest(BaseTest):
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
 		node.stop()
 
+	def test_toast_sys_cache_delete_undo_survives_crash(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TYPE o_crash_comp AS (a int, b text, c float);
+			CREATE TABLE o_crash_comp_tbl (
+				key o_crash_comp NOT NULL,
+				val int NOT NULL,
+				PRIMARY KEY(key)
+			) USING orioledb;
+			INSERT INTO o_crash_comp_tbl
+				SELECT (id, 'row ' || id, id * 1.5)::o_crash_comp, id
+				FROM generate_series(1, 5) id;
+		""")
+
+		class_total = node.execute("""
+			SELECT COUNT(k) FROM orioledb_sys_tree_rows(%d) k;
+		""" % self.sys_tree_name_to_num('CLASS_CACHE'))[0][0]
+
+		con = node.connect()
+		con.begin()
+		con.execute("DROP TABLE o_crash_comp_tbl; DROP TYPE o_crash_comp;")
+
+		node.safe_psql("CHECKPOINT;")
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		node.safe_psql("CHECKPOINT;")
+
+		self.check_total_deleted(node, 'CLASS_CACHE', class_total, 0)
+		self.assertEqual(
+		    node.execute(
+		        "SELECT val FROM o_crash_comp_tbl ORDER BY val LIMIT 1;")[0]
+		    [0], 1)
+		node.stop()
+
 	def test_enum_cache_namedata_in_key(self):
 		enum_amount = 0
 		enumoid_amount = 0
