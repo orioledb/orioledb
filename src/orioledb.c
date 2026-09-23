@@ -658,6 +658,8 @@ _PG_init(void)
 	if (!process_shared_preload_libraries_in_progress)
 		return;
 
+	o_install_slot_retain_hook();
+
 	o_verify_dir_exists_or_create(pstrdup(ORIOLEDB_DATA_DIR), NULL, NULL);
 	o_verify_dir_exists_or_create(pstrdup(ORIOLEDB_UNDO_DIR), NULL, NULL);
 	o_verify_dir_exists_or_create(psprintf("%s/1", ORIOLEDB_DATA_DIR), NULL, NULL);
@@ -1621,6 +1623,7 @@ o_proc_shmem_init(Pointer ptr, bool found)
 				pg_atomic_init_u64(&oProcData[i].undoRetainLocations[j].reservedUndoLocation, InvalidUndoLocation);
 				pg_atomic_init_u64(&oProcData[i].undoRetainLocations[j].snapshotRetainUndoLocation, InvalidUndoLocation);
 				pg_atomic_init_u64(&oProcData[i].undoRetainLocations[j].transactionUndoRetainLocation, InvalidUndoLocation);
+				pg_atomic_init_u64(&oProcData[i].undoRetainLocations[j].logicalWalRetainUndoLocation, InvalidUndoLocation);
 			}
 			pg_atomic_init_u64(&oProcData[i].commitInProgressXlogLocation, OWalInvalidCommitPos);
 			pg_atomic_init_u64(&oProcData[i].xmin, InvalidOXid);

@@ -85,8 +85,8 @@ assert_eq "dev functions: orioledb_parallel_debug_start (orioledb--1.0_dev.sql)"
 result=$(echo "SELECT count(*) FROM pg_proc WHERE proname = 'orioledb_rewind_set_complete';" | psql)
 assert_eq "dev functions: orioledb_rewind_set_complete (orioledb--1.4--1.5_dev.sql)" "1" "$result"
 
-result=$(echo "SELECT count(*) FROM pg_proc WHERE proname = 'orioledb_insert_sys_xid_undo_location';" | psql)
-assert_eq "dev functions: orioledb_insert_sys_xid_undo_location (orioledb--1.5--1.6_dev.sql)" "1" "$result"
+result=$(echo "SELECT count(*) FROM pg_proc WHERE proname = 'orioledb_get_current_logical_xid';" | psql)
+assert_eq "dev functions: orioledb_get_current_logical_xid (orioledb--1.5--1.6_dev.sql)" "1" "$result"
 
 echo ""
 echo "=== Test: Primary key CRUD ==="

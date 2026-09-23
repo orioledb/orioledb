@@ -128,12 +128,6 @@ static void o_chkp_num_print(BTreeDescr *desc, StringInfo buf,
 
 static void o_evicted_data_print(BTreeDescr *desc, StringInfo buf,
 								 OTuple tup, Pointer arg);
-static int	o_sys_xid_undo_location_key_cmp(BTreeDescr *desc,
-											void *p1, BTreeKeyType k1,
-											void *p2, BTreeKeyType k2);
-static void o_sys_xid_undo_location_key_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg);
-static void o_sys_xid_undo_location_tuple_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg);
-static JsonbValue *o_sys_xid_undo_location_key_to_jsonb(BTreeDescr *desc, OTuple tup, JsonbParseState **state);
 
 static SysTreeMeta sysTreesMeta[] =
 {
@@ -407,18 +401,6 @@ static SysTreeMeta sysTreesMeta[] =
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
 		.undoLogType = UndoLogSystem,
-		.storageType = BTreeStoragePersistence,
-		.needs_undo = NULL
-	},
-	{							/* SYS_TREES_CATALOG_XID_UNDO_LOCATION */
-		.keyLength = sizeof(TransactionId),
-		.tupleLength = sizeof(ReplicationRetainUndoTuple),
-		.cmpFunc = o_sys_xid_undo_location_key_cmp,
-		.keyPrint = o_sys_xid_undo_location_key_print,
-		.tupPrint = o_sys_xid_undo_location_tuple_print,
-		.keyToJsonb = o_sys_xid_undo_location_key_to_jsonb,
-		.poolType = OPagePoolCatalog,
-		.undoLogType = UndoLogNone,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -1326,53 +1308,4 @@ o_evicted_data_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
 					 evictedData->key.relnode,
 					 (unsigned long long) evictedData->file_header.rootDownlink,
 					 (unsigned long long) evictedData->file_header.datafileLength);
-}
-
-static int
-o_sys_xid_undo_location_key_cmp(BTreeDescr *desc,
-								void *p1, BTreeKeyType k1,
-								void *p2, BTreeKeyType k2)
-{
-	TransactionId *key1 = (TransactionId *) (((OTuple *) p1)->data);
-	TransactionId *key2 = (TransactionId *) (((OTuple *) p2)->data);
-
-	if (TransactionIdPrecedes(*key1, *key2))
-		return -1;
-	else if (TransactionIdPrecedes(*key2, *key1))
-		return 1;
-
-	return 0;
-}
-
-static void
-o_sys_xid_undo_location_key_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
-{
-	TransactionId *key = (TransactionId *) tup.data;
-
-	appendStringInfo(buf, "(%u)", *key);
-}
-
-static void
-o_sys_xid_undo_location_tuple_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
-{
-	ReplicationRetainUndoTuple *tuple = (ReplicationRetainUndoTuple *) tup.data;
-
-	/*
-	 * The undo location is an absolute offset into the undo log, which shifts
-	 * with any change to undo allocation (e.g. differential page-level undo
-	 * images consume less space).  Mask it so the structure dump stays stable
-	 * across such layout changes; the actual value is verified separately via
-	 * orioledb_read_sys_xid_undo_location().
-	 */
-	appendStringInfo(buf, "(%u, X)", tuple->xid);
-}
-
-static JsonbValue *
-o_sys_xid_undo_location_key_to_jsonb(BTreeDescr *desc, OTuple tup, JsonbParseState **state)
-{
-	TransactionId *key = (TransactionId *) tup.data;
-
-	(void) pushJsonbValue(state, WJB_BEGIN_OBJECT, NULL);
-	jsonb_push_int8_key(state, "xid", (int64) *key);
-	return pushJsonbValue(state, WJB_END_OBJECT, NULL);
 }

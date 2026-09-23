@@ -252,39 +252,6 @@ SELECT regexp_replace(regexp_replace(
 		': NNN',
 		'g');
 
--- SYS_TREES_CATALOG_XID_UNDO_LOCATION
-SELECT orioledb_insert_sys_xid_undo_location(1000, 2000);
-SELECT orioledb_insert_sys_xid_undo_location(1001, 2001);
-SELECT orioledb_insert_sys_xid_undo_location(1002, 2002);
-SELECT orioledb_insert_sys_xid_undo_location(1003, 2003);
-SELECT orioledb_insert_sys_xid_undo_location(1005, 2005);
-SELECT orioledb_insert_sys_xid_undo_location(1006, 2006);
-
-SELECT orioledb_sys_tree_structure(23, 'ne');
-SELECT orioledb_read_sys_xid_undo_location(1004);
-SELECT orioledb_sys_tree_structure(23, 'ne');
--- entries with xid < 1004 are deleted at previous read
-SELECT orioledb_read_sys_xid_undo_location(1000);
-SELECT orioledb_sys_tree_structure(23, 'ne');
--- cache invalidation of last value at insert
-SELECT orioledb_insert_sys_xid_undo_location(1009, 2009);
-SELECT orioledb_sys_tree_structure(23, 'ne');
-SELECT orioledb_read_sys_xid_undo_location(1007);
-SELECT orioledb_insert_sys_xid_undo_location(1008, 2008);
-SELECT orioledb_sys_tree_structure(23, 'ne');
-SELECT orioledb_read_sys_xid_undo_location(1007);
--- the least location has to win even when it belongs to a higher xid: a
--- transaction takes its xid before it writes the system undo, so a higher
--- xid may have written its undo first
-SELECT orioledb_insert_sys_xid_undo_location(1010, 3000);
-SELECT orioledb_insert_sys_xid_undo_location(1011, 2500);
-SELECT orioledb_read_sys_xid_undo_location(1010);
--- and the same once more, with the least location further to the right
-SELECT orioledb_insert_sys_xid_undo_location(1012, 2400);
-SELECT orioledb_read_sys_xid_undo_location(1010);
--- repeated query of the same xmin is answered from the cache
-SELECT orioledb_read_sys_xid_undo_location(1010);
-
 -- fail
 SELECT orioledb_sys_tree_structure(9999);
 SELECT orioledb_sys_tree_check(-1111);
