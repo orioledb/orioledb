@@ -504,5 +504,8 @@ extern void update_command_undo_location(CommandId commandId,
 extern void o_set_current_command(CommandId commandId);
 extern CommandId o_get_current_command(void);
 extern UndoLocation get_current_replication_catalog_retain_undo_location(void);
+extern void set_my_logical_wal_retain_location(void);
+extern void clear_my_logical_wal_retain_location(void);
+extern void o_install_slot_retain_hook(void);
 
 #endif							/* __UNDO_H__ */

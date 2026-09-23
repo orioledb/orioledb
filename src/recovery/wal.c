@@ -588,6 +588,17 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_v
 	runXmin = pg_atomic_read_u64(&xid_meta->runXmin);
 	memcpy(rec->xmin, &runXmin, sizeof(runXmin));
 
+	/*
+	 * Logical decoding will read the system trees at the CSN below, so retain
+	 * the system undo that takes.  Before reading the CSN: the other order
+	 * retains from a location that is already newer than what the CSN needs.
+	 */
+	if (wal_level >= WAL_LEVEL_LOGICAL)
+	{
+		set_my_logical_wal_retain_location();
+		pg_read_barrier();
+	}
+
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
 

@@ -34,3 +34,9 @@ CREATE FUNCTION orioledb_test_deserialize_node(value bytea,
 RETURNS bool
 AS 'MODULE_PATHNAME'
 VOLATILE STRICT LANGUAGE C;
+
+-- What the replication slots retain of the system undo log
+CREATE FUNCTION orioledb_slot_retain_undo_location()
+RETURNS int8
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;

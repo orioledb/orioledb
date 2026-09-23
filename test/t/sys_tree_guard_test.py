@@ -4,7 +4,7 @@
 from test.t.base_test import BaseTest
 
 SYS_TREES_DATOID = 1
-SYS_TREES_NUM = 23
+SYS_TREES_NUM = 22
 
 
 class SysTreeGuardTest(BaseTest):

@@ -99,7 +99,7 @@
  */
 #define ORIOLEDB_VERSION "OrioleDB beta 17"
 #define ORIOLEDB_BINARY_VERSION 10
-#define ORIOLEDB_SYS_TREE_VERSION	1	/* Version of system catalog */
+#define ORIOLEDB_SYS_TREE_VERSION	2	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION		1	/* Version of binary page format */
 #define ORIOLEDB_COMPRESS_VERSION	1	/* Version of page compression (only
 										 * for compressed pages) */
@@ -245,6 +245,13 @@ typedef struct
 	pg_atomic_uint64 reservedUndoLocation;
 	pg_atomic_uint64 transactionUndoRetainLocation;
 	pg_atomic_uint64 snapshotRetainUndoLocation;
+
+	/*
+	 * Held while a WAL record stamped with a CSN sits in the local WAL
+	 * buffer, so that logical decoding can still read the system trees at
+	 * that CSN once the record reaches WAL.  UndoLogSystem only.
+	 */
+	pg_atomic_uint64 logicalWalRetainUndoLocation;
 } UndoRetainSharedLocations;
 
 typedef struct
