@@ -1140,8 +1140,7 @@ o_sys_cache_delete_callback(UndoLogType undoType, UndoLocation location,
 			 "no sys cache for sys tree %d", item->sys_tree_num);
 
 	if (!update_deleted_value(sys_cache, (OSysCacheKey *) &item->key, false))
-		elog(is_recovery_in_progress() ? PANIC : FATAL,
-			 "sys cache entry not found for sys tree %d", item->sys_tree_num);
+		return;
 }
 
 bool
