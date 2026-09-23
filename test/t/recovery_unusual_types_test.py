@@ -2,21 +2,21 @@
 # coding: utf-8
 
 """
-Recovery tests for weird types and weird expression/partial indices.
+Recovery tests for unusual types and expression/partial indices.
 
 These tests exercise code paths that could break comparator or hashing
 logic during crash recovery:
 
-  * Weird types — composite types (nested structs, ranges, multiranges,
+  * Unusual types — composite types (nested structs, ranges, multiranges,
     arrays, domains over composites, composites with range attributes),
     custom types with only btree opclass and no hash function, range
     types with domain subtypes.
 
-  * Weird expression indices — CASE expressions, array subscripts,
+  * Unusual expression indices — CASE expressions, array subscripts,
     CoerceToDomain casts, ArrayCoerceExpr, row-construct casts
     (ConvertRowtypeExpr), whole-row variable references.
 
-  * Weird partial indices — predicates using CASE, boolean expressions
+  * Unusual partial indices — predicates using CASE, boolean expressions
     with IS DISTINCT FROM, etc.
 
 Each test creates a table with an index that uses one of the above,
@@ -31,7 +31,7 @@ import unittest
 from .base_test import BaseTest
 
 
-class RecoveryWeirdTypesTest(BaseTest):
+class RecoveryUnusualTypesTest(BaseTest):
 	"""Crash-recovery tests for unusual data types in PK and index columns."""
 
 	def setUp(self):
@@ -214,7 +214,7 @@ class RecoveryWeirdTypesTest(BaseTest):
 			[(5, )])
 
 
-class RecoveryWeirdExprTest(BaseTest):
+class RecoveryUnusualExprTest(BaseTest):
 	"""Crash-recovery tests for unusual expression and partial indices."""
 
 	def setUp(self):
@@ -443,7 +443,7 @@ class RecoveryWeirdExprTest(BaseTest):
 			[(1, )])
 
 
-class RecoveryWeirdCustomTypeTest(BaseTest):
+class RecoveryUnusualCustomTypeTest(BaseTest):
 	"""Crash-recovery tests for custom types with limited operators."""
 
 	def setUp(self):

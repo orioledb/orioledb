@@ -3892,9 +3892,9 @@ class RecoveryTest(BaseTest):
 		    [0][0])
 		node.stop()
 
-	def test_recovery_weird_types_comparator(self):
+	def test_recovery_unusual_types_comparator(self):
 		"""
-		Secondary indexes on a set of 'weird' types whose comparators have
+		Secondary indexes on a set of unusual types whose comparators have
 		non-trivial byte representations: macaddr, inet, interval, money,
 		bit varying, jsonb, timestamp-with-typmod and an enum.  Updates
 		that move indexed values across comparator ordering boundaries
@@ -3911,8 +3911,8 @@ class RecoveryTest(BaseTest):
 		node.safe_psql(
 		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
-			CREATE TYPE recovery_weird_enum AS ENUM ('a', 'b', 'c', 'd');
-			CREATE TABLE o_weird (
+			CREATE TYPE recovery_unusual_enum AS ENUM ('a', 'b', 'c', 'd');
+			CREATE TABLE o_unusual (
 				id int NOT NULL PRIMARY KEY,
 				mac macaddr NOT NULL,
 				ip inet NOT NULL,
@@ -3921,20 +3921,20 @@ class RecoveryTest(BaseTest):
 				bv bit varying(16) NOT NULL,
 				jb jsonb NOT NULL,
 				ts timestamp(3) NOT NULL,
-				en recovery_weird_enum NOT NULL
+				en recovery_unusual_enum NOT NULL
 			) USING orioledb;
-			CREATE INDEX o_weird_mac_ix ON o_weird (mac);
-			CREATE INDEX o_weird_ip_ix ON o_weird (ip);
-			CREATE INDEX o_weird_iv_ix ON o_weird (iv);
-			CREATE INDEX o_weird_mn_ix ON o_weird (mn);
-			CREATE INDEX o_weird_bv_ix ON o_weird (bv);
-			CREATE INDEX o_weird_jb_ix ON o_weird (jb);
-			CREATE INDEX o_weird_ts_ix ON o_weird (ts);
-			CREATE INDEX o_weird_en_ix ON o_weird (en);
+			CREATE INDEX o_unusual_mac_ix ON o_unusual (mac);
+			CREATE INDEX o_unusual_ip_ix ON o_unusual (ip);
+			CREATE INDEX o_unusual_iv_ix ON o_unusual (iv);
+			CREATE INDEX o_unusual_mn_ix ON o_unusual (mn);
+			CREATE INDEX o_unusual_bv_ix ON o_unusual (bv);
+			CREATE INDEX o_unusual_jb_ix ON o_unusual (jb);
+			CREATE INDEX o_unusual_ts_ix ON o_unusual (ts);
+			CREATE INDEX o_unusual_en_ix ON o_unusual (en);
 		""")
 		node.safe_psql(
 		    'postgres', """
-			INSERT INTO o_weird
+			INSERT INTO o_unusual
 			SELECT i,
 				   macaddr('08:00:2b:' ||
 						   lpad(to_hex((i / 16) % 256), 2, '0') || ':' ||
@@ -3946,10 +3946,10 @@ class RecoveryTest(BaseTest):
 				   to_jsonb(row(i, 'x' || i)),
 				   timestamp '2000-01-01' + (i || ' days')::interval,
 				   CASE i % 4
-					   WHEN 0 THEN 'd'::recovery_weird_enum
-					   WHEN 1 THEN 'a'::recovery_weird_enum
-					   WHEN 2 THEN 'b'::recovery_weird_enum
-					   ELSE 'c'::recovery_weird_enum
+					   WHEN 0 THEN 'd'::recovery_unusual_enum
+					   WHEN 1 THEN 'a'::recovery_unusual_enum
+					   WHEN 2 THEN 'b'::recovery_unusual_enum
+					   ELSE 'c'::recovery_unusual_enum
 				   END
 			FROM generate_series(1, 80) i;
 			CHECKPOINT;
@@ -3959,21 +3959,21 @@ class RecoveryTest(BaseTest):
 		# bit varying inverted (reverses byte order), enum 'a' -> 'd'.
 		node.safe_psql(
 		    'postgres', """
-			UPDATE o_weird
+			UPDATE o_unusual
 				SET ip = ('10.0.1.' || (id % 200))::inet
 				WHERE id <= 30;
-			UPDATE o_weird
+			UPDATE o_unusual
 				SET iv = make_interval(days => 1000 - id)
 				WHERE id <= 30;
-			UPDATE o_weird SET bv = ~ bv WHERE id <= 30;
-			UPDATE o_weird
-				SET en = 'd'::recovery_weird_enum
-				WHERE en = 'a'::recovery_weird_enum;
+			UPDATE o_unusual SET bv = ~ bv WHERE id <= 30;
+			UPDATE o_unusual
+				SET en = 'd'::recovery_unusual_enum
+				WHERE en = 'a'::recovery_unusual_enum;
 		""")
 		self.crash_with_os_buffer_loss()
 
 		node.start()
-		n_pk = node.execute("SELECT count(*) FROM o_weird;")[0][0]
+		n_pk = node.execute("SELECT count(*) FROM o_unusual;")[0][0]
 		# Each secondary index must agree with the heap count when forced
 		# into an index scan over a predicate that matches every row.
 		checks = {
@@ -3990,22 +3990,22 @@ class RecoveryTest(BaseTest):
 			n_sk = node.execute(f"""
 				SET enable_seqscan = off;
 				SET enable_indexonlyscan = off;
-				SELECT count(*) FROM o_weird WHERE {pred};
+				SELECT count(*) FROM o_unusual WHERE {pred};
 			""")[0][0]
 			self.assertEqual(
 			    n_sk, n_pk,
 			    f"secondary index on {col} diverged after recovery: "
 			    f"{n_sk} vs {n_pk}")
 		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_weird'::regclass);")[0]
+		    node.execute("SELECT orioledb_tbl_check('o_unusual'::regclass);")[0]
 		    [0])
 		node.stop()
 
-	def test_recovery_weird_types_comparator_more(self):
+	def test_recovery_unusual_types_comparator_more(self):
 		"""
-		Second batch of 'weird' type secondary indexes exercising the
+		Second batch of unusual-type secondary indexes exercising the
 		recovery-time comparator and the recovery-worker hash distribution
-		for types NOT covered by test_recovery_weird_types_comparator (which
+		for types NOT covered by test_recovery_unusual_types_comparator (which
 		covers macaddr/inet/interval/money/bit varying/jsonb/timestamp/enum)
 		or the per-type tests (numeric/float8/uuid/bytea).
 
@@ -4032,7 +4032,7 @@ class RecoveryTest(BaseTest):
 		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TYPE recovery_comp_t AS (a integer, b text);
-			CREATE TABLE o_weird2 (
+			CREATE TABLE o_unusual2 (
 				id int NOT NULL PRIMARY KEY,
 				tsz timestamptz NOT NULL,
 				tz timetz NOT NULL,
@@ -4046,21 +4046,21 @@ class RecoveryTest(BaseTest):
 				cmp recovery_comp_t NOT NULL,
 				arr text[] NOT NULL
 			) USING orioledb;
-			CREATE INDEX o_weird2_tsz_ix ON o_weird2 (tsz);
-			CREATE INDEX o_weird2_tz_ix ON o_weird2 (tz);
-			CREATE INDEX o_weird2_tm_ix ON o_weird2 (tm);
-			CREATE INDEX o_weird2_dt_ix ON o_weird2 (dt);
-			CREATE INDEX o_weird2_pc_ix ON o_weird2 (pc);
-			CREATE INDEX o_weird2_nm_ix ON o_weird2 (nm);
-			CREATE INDEX o_weird2_cd_ix ON o_weird2 (cd);
-			CREATE INDEX o_weird2_mc8_ix ON o_weird2 (mc8);
-			CREATE INDEX o_weird2_tsv_ix ON o_weird2 (tsv);
-			CREATE INDEX o_weird2_cmp_ix ON o_weird2 (cmp);
-			CREATE INDEX o_weird2_arr_ix ON o_weird2 (arr);
+			CREATE INDEX o_unusual2_tsz_ix ON o_unusual2 (tsz);
+			CREATE INDEX o_unusual2_tz_ix ON o_unusual2 (tz);
+			CREATE INDEX o_unusual2_tm_ix ON o_unusual2 (tm);
+			CREATE INDEX o_unusual2_dt_ix ON o_unusual2 (dt);
+			CREATE INDEX o_unusual2_pc_ix ON o_unusual2 (pc);
+			CREATE INDEX o_unusual2_nm_ix ON o_unusual2 (nm);
+			CREATE INDEX o_unusual2_cd_ix ON o_unusual2 (cd);
+			CREATE INDEX o_unusual2_mc8_ix ON o_unusual2 (mc8);
+			CREATE INDEX o_unusual2_tsv_ix ON o_unusual2 (tsv);
+			CREATE INDEX o_unusual2_cmp_ix ON o_unusual2 (cmp);
+			CREATE INDEX o_unusual2_arr_ix ON o_unusual2 (arr);
 		""")
 		node.safe_psql(
 		    'postgres', """
-			INSERT INTO o_weird2
+			INSERT INTO o_unusual2
 			SELECT i,
 				   timestamp '2000-01-01 00:00:00+00' + (i || ' hours')::interval,
 				   timetz '08:00:00+00' + (i || ' mins')::interval,
@@ -4083,26 +4083,26 @@ class RecoveryTest(BaseTest):
 		# composite field sign flipped, array element changed.
 		node.safe_psql(
 		    'postgres', """
-			UPDATE o_weird2
+			UPDATE o_unusual2
 				SET tsz = timestamp '1980-01-01 00:00:00+00' + (id || ' hours')::interval
 				WHERE id <= 30;
-			UPDATE o_weird2 SET tz = timetz '23:00:00+05' WHERE id <= 30;
-			UPDATE o_weird2 SET tm = tm + '12 hours'::interval WHERE id <= 30;
-			UPDATE o_weird2 SET dt = date '1970-01-01' + (id % 40) WHERE id <= 30;
-			UPDATE o_weird2 SET pc = rpad(id::text, 8)::bpchar(8) WHERE id <= 30;
-			UPDATE o_weird2 SET nm = ('zz' || id::text)::name WHERE id <= 30;
-			UPDATE o_weird2
+			UPDATE o_unusual2 SET tz = timetz '23:00:00+05' WHERE id <= 30;
+			UPDATE o_unusual2 SET tm = tm + '12 hours'::interval WHERE id <= 30;
+			UPDATE o_unusual2 SET dt = date '1970-01-01' + (id % 40) WHERE id <= 30;
+			UPDATE o_unusual2 SET pc = rpad(id::text, 8)::bpchar(8) WHERE id <= 30;
+			UPDATE o_unusual2 SET nm = ('zz' || id::text)::name WHERE id <= 30;
+			UPDATE o_unusual2
 				SET cd = ('11.0.0.0/' || (8 + id % 8))::cidr WHERE id <= 30;
-			UPDATE o_weird2 SET mc8 = ~ mc8 WHERE id <= 30;
-			UPDATE o_weird2 SET tsv = to_tsvector('simple', 'aaa' || id) WHERE id <= 30;
-			UPDATE o_weird2
+			UPDATE o_unusual2 SET mc8 = ~ mc8 WHERE id <= 30;
+			UPDATE o_unusual2 SET tsv = to_tsvector('simple', 'aaa' || id) WHERE id <= 30;
+			UPDATE o_unusual2
 				SET cmp = (id * 100, 'y' || id)::recovery_comp_t WHERE id <= 30;
-			UPDATE o_weird2 SET arr = ARRAY['z' || id] WHERE id <= 30;
+			UPDATE o_unusual2 SET arr = ARRAY['z' || id] WHERE id <= 30;
 		""")
 		self.crash_with_os_buffer_loss()
 
 		node.start()
-		n_pk = node.execute("SELECT count(*) FROM o_weird2;")[0][0]
+		n_pk = node.execute("SELECT count(*) FROM o_unusual2;")[0][0]
 		# Each secondary index must agree with the heap count when forced
 		# into an index scan over a predicate that matches every row.
 		checks = {
@@ -4122,7 +4122,7 @@ class RecoveryTest(BaseTest):
 			n_sk = node.execute(f"""
 				SET enable_seqscan = off;
 				SET enable_indexonlyscan = off;
-				SELECT count(*) FROM o_weird2 WHERE {pred};
+				SELECT count(*) FROM o_unusual2 WHERE {pred};
 			""")[0][0]
 			self.assertEqual(
 			    n_sk, n_pk,
@@ -4139,11 +4139,11 @@ class RecoveryTest(BaseTest):
 		for col in checks.keys():
 			total, dead = node.execute(f"""
 				SELECT * FROM orioledb_index_rows(
-					'o_weird2_{col}_ix'::regclass);
+					'o_unusual2_{col}_ix'::regclass);
 			""")[0]
 			self.assertEqual(
 			    total - dead, n_pk,
-			    f"index o_weird2_{col}_ix has {total - dead} live entries "
+			    f"index o_unusual2_{col}_ix has {total - dead} live entries "
 			    f"after recovery, expected {n_pk} (stale/duplicate SK "
 			    f"entry: replayed delete was skipped)")
 		# Value-based index lookups prove the SK trees actually contain the
@@ -4155,32 +4155,32 @@ class RecoveryTest(BaseTest):
 		    node.execute("""
 				SET enable_seqscan = off;
 				SET enable_indexonlyscan = off;
-				SELECT id FROM o_weird2 WHERE nm = 'zz1'::name;
+				SELECT id FROM o_unusual2 WHERE nm = 'zz1'::name;
 			"""))
 		self.assertEqual(
 		    [(1, )],
 		    node.execute("""
 				SET enable_seqscan = off;
 				SET enable_indexonlyscan = off;
-				SELECT id FROM o_weird2 WHERE pc = '1'::bpchar(8);
+				SELECT id FROM o_unusual2 WHERE pc = '1'::bpchar(8);
 			"""))
 		self.assertEqual(
 		    [(1, )],
 		    node.execute("""
 				SET enable_seqscan = off;
 				SET enable_indexonlyscan = off;
-				SELECT id FROM o_weird2 WHERE dt = date '1970-01-02';
+				SELECT id FROM o_unusual2 WHERE dt = date '1970-01-02';
 			"""))
 		self.assertEqual(
 		    [(1, )],
 		    node.execute("""
 				SET enable_seqscan = off;
 				SET enable_indexonlyscan = off;
-				SELECT id FROM o_weird2
+				SELECT id FROM o_unusual2
 					WHERE cmp = (100, 'y1')::recovery_comp_t;
 			"""))
 		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_weird2'::regclass);")
+		    node.execute("SELECT orioledb_tbl_check('o_unusual2'::regclass);")
 		    [0][0])
 		node.stop()
 
@@ -4278,7 +4278,7 @@ class RecoveryTest(BaseTest):
 		    [0][0])
 		node.stop()
 
-	def test_recovery_expression_index_weird_type_result(self):
+	def test_recovery_expression_index_unusual_type_result(self):
 		"""
 		Expression indexes whose expression yields a type with a
 		non-trivial comparator: bpchar (blank-padded, NO typmod so that
