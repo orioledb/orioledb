@@ -1194,8 +1194,14 @@ o_sys_cache_delete_by_lsn(OSysCache *sys_cache, XLogRecPtr lsn)
 		}
 
 		if (sys_cache->is_toast)
-			sys_cache_key = (OSysCacheKey *)
-				(tup.data + offsetof(OSysCacheToastChunkKey, sys_cache_key));
+		{
+			OSysCacheToastChunkKey *chunk_key;
+
+			chunk_key = (OSysCacheToastChunkKey *) tup.data;
+			if (chunk_key->common.chunknum != 0)
+				continue;
+			sys_cache_key = &chunk_key->sys_cache_key;
+		}
 		else
 			sys_cache_key = (OSysCacheKey *) tup.data;
 		key_tup.formatFlags = 0;
