@@ -1216,6 +1216,7 @@ o_btree_multi_insert_item(OBTreeFindPageContext *ctx,
 		inserted++;
 	}
 
+	O_CHECK_PAGE_KEYS(desc, p);
 	unlock_page(blkno);
 	return inserted;
 }
@@ -1323,6 +1324,7 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 			END_CRIT_SECTION();
 		}
 
+		O_CHECK_PAGE_KEYS(desc, p);
 		unlock_page(blkno);
 		return true;
 	}

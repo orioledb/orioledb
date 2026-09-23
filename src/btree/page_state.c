@@ -37,6 +37,7 @@
 #include "storage/proclist.h"
 #include "storage/s_lock.h"
 #include "utils/memdebug.h"
+#include "utils/memutils.h"
 
 /* Maximum simultaneously locked pages per process */
 #define MAX_PAGES_PER_PROCESS 8
@@ -59,13 +60,18 @@ static int	numberOfMyInProgressSplitPages = 0;
 
 OPageWaiterShmemState *lockerStates = NULL;
 
+#ifdef CHECK_PAGE_STRUCT
+/*
+ * Scratch for o_check_page_struct()'s key comparisons: they call into the
+ * index's comparison and length functions, which allocate.
+ */
+static MemoryContext checkPageCxt = NULL;
+#endif
+
 #ifdef CHECK_PAGE_STATS
 static void o_check_btree_page_statistics(BTreeDescr *desc, Pointer p);
 #endif
 
-#ifdef CHECK_PAGE_STRUCT
-static void o_check_page_struct(BTreeDescr *desc, Page p);
-#endif
 
 Size
 page_state_shmem_needs(void)
@@ -79,6 +85,12 @@ page_state_shmem_init(Pointer buf, bool found)
 	Pointer		ptr = buf;
 
 	lockerStates = (OPageWaiterShmemState *) ptr;
+
+#ifdef CHECK_PAGE_STRUCT
+	checkPageCxt = AllocSetContextCreate(TopMemoryContext,
+										 "orioledb page check",
+										 ALLOCSET_SMALL_SIZES);
+#endif
 }
 
 static int
@@ -1369,8 +1381,13 @@ extern void log_btree(BTreeDescr *desc);
 
 /*
  * Check if page has a consistent structure.
+ *
+ * With desc == NULL only the offset/size bookkeeping is validated.  Pass a
+ * real desc (from a caller that has one) to also validate the keys: item
+ * ordering inside a chunk, every item against its own chunk hikey and against
+ * the previous chunk hikey, and the last item against the page hikey.
  */
-static void
+void
 o_check_page_struct(BTreeDescr *desc, Page p)
 {
 	BTreePageHeader *header = (BTreePageHeader *) p;
@@ -1380,11 +1397,27 @@ o_check_page_struct(BTreeDescr *desc, Page p)
 	LocationIndex endLocation,
 				chunkSize;
 	OTuple		prevChunkHikey;
+	OTuple		prevTuple;
+	BTreeKeyType tupleKeyType = O_PAGE_IS(p, LEAF) ? BTreeKeyLeafTuple : BTreeKeyNonLeafKey;
+	MemoryContext oldcxt = NULL;
+
+	/*
+	 * The key half of the check calls the index's comparison functions, which
+	 * allocate and can even create a memory context -- neither is allowed in
+	 * a critical section.  Callers that write a page inside one therefore get
+	 * the layout checks only.
+	 */
+	bool		checkKeys = (desc != NULL && CritSectionCount == 0 &&
+							 checkPageCxt != NULL);
+
+	if (checkKeys)
+		oldcxt = MemoryContextSwitchTo(checkPageCxt);
 
 	Assert(header->dataSize <= ORIOLEDB_BLCKSZ);
 	Assert(header->hikeysEnd <= header->dataSize);
 
 	O_TUPLE_SET_NULL(prevChunkHikey);
+	O_TUPLE_SET_NULL(prevTuple);
 
 	for (i = 0; i < header->chunksCount; i++)
 	{
@@ -1457,7 +1490,7 @@ o_check_page_struct(BTreeDescr *desc, Page p)
 				Assert(ITEM_GET_OFFSET(chunkData->items[j]) >= ITEM_GET_OFFSET(chunkData->items[j - 1]));
 			if (j < itemsCount - 1 && O_PAGE_IS(p, LEAF) && ITEM_GET_FLAGS(chunkData->items[j]) == 0)
 				Assert(ITEM_GET_OFFSET(chunkData->items[j]) < ITEM_GET_OFFSET(chunkData->items[j + 1]));
-			if (desc)
+			if (checkKeys)
 			{
 				OTuple		tuple;
 				int			len;
@@ -1471,6 +1504,10 @@ o_check_page_struct(BTreeDescr *desc, Page p)
 						Assert(o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple, &chunkHikey, BTreeKeyNonLeafKey) < 0);
 					if (!O_TUPLE_IS_NULL(prevChunkHikey))
 						Assert(o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple, &prevChunkHikey, BTreeKeyNonLeafKey) >= 0);
+					if (!O_TUPLE_IS_NULL(prevTuple))
+						Assert(o_btree_cmp(desc, &prevTuple, tupleKeyType,
+										   &tuple, tupleKeyType) < 0);
+					prevTuple = tuple;
 				}
 				else
 				{
@@ -1490,6 +1527,11 @@ o_check_page_struct(BTreeDescr *desc, Page p)
 						Assert(o_btree_cmp(desc, &tuple, BTreeKeyNonLeafKey, &chunkHikey, BTreeKeyNonLeafKey) < 0);
 					if (!O_TUPLE_IS_NULL(prevChunkHikey) && !O_TUPLE_IS_NULL(tuple))
 						Assert(o_btree_cmp(desc, &tuple, BTreeKeyNonLeafKey, &prevChunkHikey, BTreeKeyNonLeafKey) >= 0);
+					if (!O_TUPLE_IS_NULL(prevTuple) && !O_TUPLE_IS_NULL(tuple))
+						Assert(o_btree_cmp(desc, &prevTuple, tupleKeyType,
+										   &tuple, tupleKeyType) < 0);
+					if (!O_TUPLE_IS_NULL(tuple))
+						prevTuple = tuple;
 				}
 
 				if (j < itemsCount - 1)
@@ -1503,6 +1545,11 @@ o_check_page_struct(BTreeDescr *desc, Page p)
 		prevChunkHikey = chunkHikey;
 	}
 
+	if (oldcxt != NULL)
+	{
+		MemoryContextSwitchTo(oldcxt);
+		MemoryContextReset(checkPageCxt);
+	}
 }
 #endif
 
