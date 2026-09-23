@@ -66,6 +66,8 @@ PG_FUNCTION_INFO_V1(orioledb_undo_size);
 PG_FUNCTION_INFO_V1(orioledb_get_undo_meta);
 PG_FUNCTION_INFO_V1(orioledb_get_proc_retain_undo_locations);
 PG_FUNCTION_INFO_V1(orioledb_slot_retain_undo_location);
+PG_FUNCTION_INFO_V1(orioledb_insert_sys_xid_undo_location);
+PG_FUNCTION_INFO_V1(orioledb_read_sys_xid_undo_location);
 
 #define GET_UNDO_REC(undoType, loc) (o_undo_buffers[(int) (undoType)] + \
 	(loc) % o_undo_circular_sizes[(int) (undoType)])
@@ -944,6 +946,20 @@ orioledb_slot_retain_undo_location(PG_FUNCTION_ARGS)
 		PG_RETURN_NULL();
 
 	PG_RETURN_INT64((int64) location);
+}
+
+Datum
+orioledb_insert_sys_xid_undo_location(PG_FUNCTION_ARGS)
+{
+	elog(ERROR, "orioledb_insert_sys_xid_undo_location is no longer supported");
+	PG_RETURN_VOID();
+}
+
+Datum
+orioledb_read_sys_xid_undo_location(PG_FUNCTION_ARGS)
+{
+	elog(ERROR, "orioledb_read_sys_xid_undo_location is no longer supported");
+	PG_RETURN_INT64(0);
 }
 
 UndoLocation
