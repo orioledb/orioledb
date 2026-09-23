@@ -4473,9 +4473,8 @@ class RecoveryTest(BaseTest):
 		# lookup over index B must still resolve it.  (Parenthesize pred:
 		# AND binds tighter than OR, so `pred AND id = 5` without parens
 		# would only constrain the second OR-arm.)
-		self.assertEqual(
-		    [(5, )],
-		    node.execute(f"""
+		self.assertEqual([(5, )],
+		                 node.execute(f"""
 				SET enable_seqscan = off;
 				SET enable_indexonlyscan = off;
 				SELECT id FROM o_part2 WHERE ({pred}) AND id = 5;
@@ -4498,8 +4497,8 @@ class RecoveryTest(BaseTest):
 			    f"after recovery, expected {expected} (predicate "
 			    f"membership change on a cmp==0 UPDATE was not replayed)")
 		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_part2'::regclass);")
-		    [0][0])
+		    node.execute("SELECT orioledb_tbl_check('o_part2'::regclass);")[0]
+		    [0])
 		node.stop()
 
 	def test_recovery_expression_partial_index_crash(self):
@@ -4586,12 +4585,10 @@ class RecoveryTest(BaseTest):
 				SELECT i, i * 10, 'v' || i FROM generate_series(1, 80) i;
 			CHECKPOINT;
 		""")
-		node.safe_psql(
-		    'postgres',
-		    "ALTER TABLE o_repk DROP CONSTRAINT o_repk_pkey;")
-		node.safe_psql(
-		    'postgres',
-		    "ALTER TABLE o_repk ADD PRIMARY KEY (code);")
+		node.safe_psql('postgres',
+		               "ALTER TABLE o_repk DROP CONSTRAINT o_repk_pkey;")
+		node.safe_psql('postgres',
+		               "ALTER TABLE o_repk ADD PRIMARY KEY (code);")
 		node.safe_psql(
 		    'postgres', """
 			INSERT INTO o_repk
@@ -4601,8 +4598,8 @@ class RecoveryTest(BaseTest):
 		self.crash_with_os_buffer_loss()
 
 		node.start()
-		self.assertEqual(
-		    120, node.execute("SELECT count(*) FROM o_repk;")[0][0])
+		self.assertEqual(120,
+		                 node.execute("SELECT count(*) FROM o_repk;")[0][0])
 		# exactly one PK constraint, on column 'code'
 		pk_cols = node.execute("""
 			SELECT a.attname
@@ -4664,7 +4661,8 @@ class RecoveryTest(BaseTest):
 		node.start()
 		# PK data intact
 		self.assertEqual(
-		    80, node.execute("SELECT count(*) FROM o_drop_bridge;")[0][0])
+		    80,
+		    node.execute("SELECT count(*) FROM o_drop_bridge;")[0][0])
 		# bridge index stayed dropped after recovery
 		self.assertEqual(
 		    0,
@@ -4680,8 +4678,7 @@ class RecoveryTest(BaseTest):
 			""")[0][0])
 		self.assertTrue(
 		    node.execute(
-		        "SELECT orioledb_tbl_check('o_drop_bridge'::regclass);")[0]
-		    [0])
+		        "SELECT orioledb_tbl_check('o_drop_bridge'::regclass);")[0][0])
 		node.stop()
 
 	def test_recovery_tablespace_split_table_and_index_crash(self):
@@ -4724,7 +4721,8 @@ class RecoveryTest(BaseTest):
 
 		node.start()
 		self.assertEqual(
-		    100, node.execute("SELECT count(*) FROM o_ts_split;")[0][0])
+		    100,
+		    node.execute("SELECT count(*) FROM o_ts_split;")[0][0])
 		# secondary index in its own tablespace is usable and consistent
 		n_sk = node.execute("""
 			SET enable_seqscan = off;
@@ -4800,8 +4798,8 @@ class RecoveryTest(BaseTest):
 		self.crash_with_os_buffer_loss()
 
 		node.start()
-		self.assertEqual(
-		    120, node.execute("SELECT count(*) FROM o_mvts;")[0][0])
+		self.assertEqual(120,
+		                 node.execute("SELECT count(*) FROM o_mvts;")[0][0])
 		# data found in the NEW tablespace after recovery
 		(tbl_ts, idx_ts) = node.execute("""
 			SELECT

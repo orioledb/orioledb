@@ -3369,7 +3369,8 @@ class ReplicationTest(BaseTest):
 				self.catchup_orioledb(replica)
 
 				self.assertEqual(
-				    50, replica.execute("SELECT COUNT(*) FROM foo;")[0][0])
+				    50,
+				    replica.execute("SELECT COUNT(*) FROM foo;")[0][0])
 
 				old_datoid = master.execute(
 				    "SELECT oid FROM pg_database "
@@ -3397,9 +3398,11 @@ class ReplicationTest(BaseTest):
 
 				# both batches must be present (the rebuild happened)
 				self.assertEqual(
-				    100, replica.execute("SELECT COUNT(*) FROM foo;")[0][0])
+				    100,
+				    replica.execute("SELECT COUNT(*) FROM foo;")[0][0])
 				self.assertEqual(
-				    1, replica.execute("SELECT d FROM foo WHERE d = 1;")[0][0])
+				    1,
+				    replica.execute("SELECT d FROM foo WHERE d = 1;")[0][0])
 				self.assertEqual(
 				    100,
 				    replica.execute("SELECT d FROM foo WHERE d = 100;")[0][0])
@@ -3414,12 +3417,12 @@ class ReplicationTest(BaseTest):
 				    "replica must use the rebuilt PK index: %r" % (plan, ))
 
 				# old (pre-rebuild) heap relnode file must be reclaimed
-				old_tree_path = os.path.join(replica.data_dir,
-				                            "orioledb_data", str(old_datoid),
-				                            str(old_relnode))
+				old_tree_path = os.path.join(replica.data_dir, "orioledb_data",
+				                             str(old_datoid), str(old_relnode))
 				self.assertFalse(
 				    os.path.exists(old_tree_path),
-				    f"old relnode file {old_tree_path} should be gone on replica")
+				    f"old relnode file {old_tree_path} should be gone on replica"
+				)
 
 	def test_replication_add_bridge_index_crash(self):
 		"""
@@ -3455,7 +3458,8 @@ class ReplicationTest(BaseTest):
 				replica.safe_psql("CHECKPOINT;")
 				self.catchup_orioledb(replica)
 				self.assertEqual(
-				    50, replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				    50,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
 
 				old_datoid = master.execute(
 				    "SELECT oid FROM pg_database "
@@ -3482,15 +3486,16 @@ class ReplicationTest(BaseTest):
 				self.catchup_orioledb(replica)
 
 				self.assertEqual(
-				    100, replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				    100,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
 				self.assertEqual(
 				    'batch1_1',
 				    replica.execute("SELECT val FROM o_test WHERE id = 1;")[0]
 				    [0])
 				self.assertEqual(
 				    'batch2_51',
-				    replica.execute(
-				        "SELECT val FROM o_test WHERE id = 51;")[0][0])
+				    replica.execute("SELECT val FROM o_test WHERE id = 51;")[0]
+				    [0])
 
 				# the bridge index must be usable on the replica after recovery
 				result = replica.execute("""
@@ -3501,12 +3506,12 @@ class ReplicationTest(BaseTest):
 				self.assertEqual(100, result[0][0])
 
 				# old (pre-bridge) heap relnode file must be reclaimed
-				old_tree_path = os.path.join(replica.data_dir,
-				                            "orioledb_data", str(old_datoid),
-				                            str(old_relnode))
+				old_tree_path = os.path.join(replica.data_dir, "orioledb_data",
+				                             str(old_datoid), str(old_relnode))
 				self.assertFalse(
 				    os.path.exists(old_tree_path),
-				    f"old relnode file {old_tree_path} should be gone on replica")
+				    f"old relnode file {old_tree_path} should be gone on replica"
+				)
 
 	def test_recovery_add_bridge_index_all_ams_replicated(self):
 		"""
@@ -3520,32 +3525,28 @@ class ReplicationTest(BaseTest):
 		never half-registered -- across a crash.
 		"""
 		cases = [
-			("gist", "p point",
-			 "USING gist (p)",
-			 "SELECT count(*) FROM o_bridge "
-			 "WHERE p <@ '((0,0),(100,100))'::box;"),
-			("gin", "arr int[]",
-			 "USING gin (arr)",
-			 "SELECT count(*) FROM o_bridge "
-			 "WHERE arr @> ARRAY[1]::int[];"),
-			("brin", "b int",
-			 "USING brin (b)",
-			 "SELECT count(*) FROM o_bridge WHERE b > 0;"),
-			("spgist", "t text",
-			 "USING spgist (t)",
-			 "SELECT count(*) FROM o_bridge "
-			 "WHERE t >= 'key' AND t < 'kez';"),
+		    ("gist", "p point", "USING gist (p)",
+		     "SELECT count(*) FROM o_bridge "
+		     "WHERE p <@ '((0,0),(100,100))'::box;"),
+		    ("gin", "arr int[]", "USING gin (arr)",
+		     "SELECT count(*) FROM o_bridge "
+		     "WHERE arr @> ARRAY[1]::int[];"),
+		    ("brin", "b int", "USING brin (b)",
+		     "SELECT count(*) FROM o_bridge WHERE b > 0;"),
+		    ("spgist", "t text", "USING spgist (t)",
+		     "SELECT count(*) FROM o_bridge "
+		     "WHERE t >= 'key' AND t < 'kez';"),
 		]
 		inserts = {
-			"gist": "point(id, id)",
-			"gin": "ARRAY[1, id]",
-			"brin": "id",
-			"spgist": "'key' || id",
+		    "gist": "point(id, id)",
+		    "gin": "ARRAY[1, id]",
+		    "brin": "id",
+		    "spgist": "'key' || id",
 		}
 		with self.node as master:
-			master.append_conf('postgresql.conf',
-			                   "orioledb.recovery_pool_size = 1\n"
-			                   "checkpoint_timeout = 1d\n")
+			master.append_conf(
+			    'postgresql.conf', "orioledb.recovery_pool_size = 1\n"
+			    "checkpoint_timeout = 1d\n")
 			master.start()
 			master.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
 			with self.getReplica().start() as replica:
@@ -3572,16 +3573,15 @@ class ReplicationTest(BaseTest):
 						master.start()
 						self.catchup_orioledb(replica)
 
-						for node, label in ((master, "master"),
-						                    (replica, "replica")):
+						for node, label in ((master, "master"), (replica,
+						                                         "replica")):
 							self.assertEqual(
 							    100,
 							    node.execute(f"""
 									SET enable_seqscan = off;
 									SET enable_indexonlyscan = off;
 									{check}
-								""")[0][0],
-							    f"{am}: bridge scan on {label} returned wrong count")
+								""")[0][0], f"{am}: bridge scan on {label} returned wrong count")
 							self.assertEqual(
 							    100,
 							    node.execute(
@@ -3636,7 +3636,8 @@ class ReplicationTest(BaseTest):
 				self.catchup_orioledb(replica)
 
 				self.assertEqual(
-				    150, replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				    150,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
 				result = replica.execute("""
 					SET enable_indexonlyscan = off;
 					SELECT count(*) FROM o_test
@@ -3678,9 +3679,8 @@ class ReplicationTest(BaseTest):
 					SELECT id, point(id, id) FROM generate_series(1, 100) id;
 				CREATE INDEX o_test_gist ON o_test USING gist (p) TABLESPACE ts1;
 			""")
-			bridge_ts = master.execute(
-			    "SELECT reltablespace FROM pg_class "
-			    "WHERE relname = 'o_test_gist';")[0][0]
+			bridge_ts = master.execute("SELECT reltablespace FROM pg_class "
+			                           "WHERE relname = 'o_test_gist';")[0][0]
 			with self.getReplica().start() as replica:
 				self.catchup_orioledb(replica)
 				master.safe_psql("CHECKPOINT;")
