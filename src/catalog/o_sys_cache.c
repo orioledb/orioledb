@@ -2389,13 +2389,14 @@ static void
 o_load_typcache_tupdesc_hook(TypeCacheEntry *typentry)
 {
 	typentry->tupDesc = o_class_cache_search_tupdesc(typentry->typrelid);
+
 	/*
 	 * o_class_cache_search_tupdesc() builds the tupdesc via
-	 * CreateTemplateTupleDesc(), which initializes tdtypeid to RECORDOID.
-	 * The real composite type OID must be set here so that datums built
-	 * from this tupdesc carry the correct type id — record_cmp() and
-	 * lookup_rowtype_tupdesc() rely on it to avoid "record type has not
-	 * been registered" errors during recovery.
+	 * CreateTemplateTupleDesc(), which initializes tdtypeid to RECORDOID. The
+	 * real composite type OID must be set here so that datums built from this
+	 * tupdesc carry the correct type id — record_cmp() and
+	 * lookup_rowtype_tupdesc() rely on it to avoid "record type has not been
+	 * registered" errors during recovery.
 	 */
 	typentry->tupDesc->tdtypeid = typentry->type_id;
 	typentry->tupDesc->tdrefcount++;
@@ -2408,8 +2409,9 @@ o_load_domaintype_info_hook(TypeCacheEntry *typentry)
 	 * During recovery (non-transaction state), we can't read pg_constraint
 	 * via table_open() because it asserts IsTransactionState().  Domain
 	 * constraint enforcement isn't needed during recovery because we replay
-	 * already-validated, committed data.  PostgreSQL releases stale domainData
-	 * before calling this hook, so mark the empty constraint set as checked.
+	 * already-validated, committed data.  PostgreSQL releases stale
+	 * domainData before calling this hook, so mark the empty constraint set
+	 * as checked.
 	 */
 	typentry->flags |= TCFLAGS_CHECKED_DOMAIN_CONSTRAINTS;
 }

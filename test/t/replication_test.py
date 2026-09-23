@@ -3699,7 +3699,8 @@ class ReplicationTest(BaseTest):
 				self.catchup_orioledb(replica)
 
 				self.assertEqual(
-				    150, replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				    150,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
 				result = replica.execute("""
 					SET enable_indexonlyscan = off;
 					SELECT count(*) FROM o_test
@@ -3709,6 +3710,5 @@ class ReplicationTest(BaseTest):
 				# bridge index stays in its original tablespace on the replica
 				self.assertEqual(
 				    bridge_ts,
-				    replica.execute(
-				        "SELECT reltablespace FROM pg_class "
-					        "WHERE relname = 'o_test_gist';")[0][0])
+				    replica.execute("SELECT reltablespace FROM pg_class "
+				                    "WHERE relname = 'o_test_gist';")[0][0])

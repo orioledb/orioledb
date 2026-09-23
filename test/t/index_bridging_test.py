@@ -556,9 +556,11 @@ class IndexBridgingTest(BaseTest):
 		                                 live=list(range(6, 51)),
 		                                 gone=list(range(1, 6)),
 		                                 primary_is_ctid=True)
+
 	def _idx_exists(self, node, name):
 		"""True if a relation named `name` exists in the catalogs."""
-		return node.execute("SELECT to_regclass('%s');" % name)[0][0] is not None
+		return node.execute("SELECT to_regclass('%s');" %
+		                    name)[0][0] is not None
 
 	def _used_index(self, node, query):
 		plan = node.execute("""
@@ -593,14 +595,15 @@ class IndexBridgingTest(BaseTest):
 		""")
 		self.assertTrue(self._idx_exists(node, 'o_test_gist'))
 		self.assertEqual(
-		    'o_test_gist', self._used_index(node, """
+		    'o_test_gist',
+		    self._used_index(
+		        node, """
 				SELECT id FROM o_test
 					WHERE p <@ '((0,0),(100,100))'::box;
 			"""))
 
-		datoid = node.execute(
-		    "SELECT oid FROM pg_database "
-		    "WHERE datname = current_database();")[0][0]
+		datoid = node.execute("SELECT oid FROM pg_database "
+		                      "WHERE datname = current_database();")[0][0]
 		relnode_after_first = node.execute(
 		    "SELECT relfilenode FROM pg_class WHERE relname = 'o_test';")[0][0]
 
@@ -637,8 +640,8 @@ class IndexBridgingTest(BaseTest):
 		self.assertNotEqual(relnode_after_first, relnode_after_second)
 
 		# old (pre-second-add) relnode file must be reclaimed
-		old_path = os.path.join(node.data_dir, "orioledb_data",
-		                        str(datoid), str(relnode_after_first))
+		old_path = os.path.join(node.data_dir, "orioledb_data", str(datoid),
+		                        str(relnode_after_first))
 		self.assertFalse(os.path.exists(old_path),
 		                 f"stale relnode {old_path} should be reclaimed")
 
@@ -672,9 +675,11 @@ class IndexBridgingTest(BaseTest):
 		node.start()
 
 		# PK scan still works after recovery
-		self.assertEqual(100, node.execute("SELECT count(*) FROM o_test;")[0][0])
+		self.assertEqual(100,
+		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
 		self.assertEqual(
-		    42, node.execute("SELECT id FROM o_test WHERE id = 42;")[0][0])
+		    42,
+		    node.execute("SELECT id FROM o_test WHERE id = 42;")[0][0])
 		# bridge index stays dropped after recovery
 		self.assertFalse(self._idx_exists(node, 'o_test_gist'))
 		node.stop()
@@ -700,9 +705,8 @@ class IndexBridgingTest(BaseTest):
 				SELECT id, point(id, id) FROM generate_series(1, 100) id;
 			CREATE INDEX o_test_gist ON o_test USING gist (p);
 		""")
-		datoid = node.execute(
-		    "SELECT oid FROM pg_database "
-		    "WHERE datname = current_database();")[0][0]
+		datoid = node.execute("SELECT oid FROM pg_database "
+		                      "WHERE datname = current_database();")[0][0]
 		relnode_before = node.execute(
 		    "SELECT relfilenode FROM pg_class WHERE relname = 'o_test';")[0][0]
 
@@ -724,8 +728,8 @@ class IndexBridgingTest(BaseTest):
 		self.assertTrue(self._idx_exists(node, 'o_test_gist'))
 
 		# old relnode reclaimed
-		old_path = os.path.join(node.data_dir, "orioledb_data",
-		                        str(datoid), str(relnode_before))
+		old_path = os.path.join(node.data_dir, "orioledb_data", str(datoid),
+		                        str(relnode_before))
 		self.assertFalse(os.path.exists(old_path))
 		node.stop()
 
@@ -758,7 +762,8 @@ class IndexBridgingTest(BaseTest):
 		node.start()
 
 		# all rows survive the crash-during-rewrite
-		self.assertEqual(100, node.execute("SELECT count(*) FROM o_test;")[0][0])
+		self.assertEqual(100,
+		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
 		# bridge index usable via the recovered heap
 		result = node.execute("""
 			SET enable_indexonlyscan = off;
@@ -797,9 +802,8 @@ class IndexBridgingTest(BaseTest):
 				SELECT id, point(id, id) FROM generate_series(1, 100) id;
 			CREATE INDEX o_test_gist ON o_test USING gist (p);
 		""")
-		datoid = node.execute(
-		    "SELECT oid FROM pg_database "
-		    "WHERE datname = current_database();")[0][0]
+		datoid = node.execute("SELECT oid FROM pg_database "
+		                      "WHERE datname = current_database();")[0][0]
 		relnode_before = node.execute(
 		    "SELECT relfilenode FROM pg_class WHERE relname = 'o_test';")[0][0]
 
@@ -817,8 +821,8 @@ class IndexBridgingTest(BaseTest):
 		self.assertEqual(100, result[0][0])
 		self.assertTrue(self._idx_exists(node, 'o_test_gist'))
 		# old relnode reclaimed
-		old_path = os.path.join(node.data_dir, "orioledb_data",
-		                        str(datoid), str(relnode_before))
+		old_path = os.path.join(node.data_dir, "orioledb_data", str(datoid),
+		                        str(relnode_before))
 		self.assertFalse(os.path.exists(old_path))
 		node.stop()
 
@@ -846,7 +850,8 @@ class IndexBridgingTest(BaseTest):
 		node.stop(['-m', 'immediate'])
 		node.start()
 
-		self.assertEqual(100, node.execute("SELECT count(*) FROM o_test;")[0][0])
+		self.assertEqual(100,
+		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
 		result = node.execute("""
 			SET enable_indexonlyscan = off;
 			SELECT count(*) FROM o_test
@@ -915,8 +920,8 @@ class IndexBridgingTest(BaseTest):
 		self.assertEqual(
 		    gin_relnode,
 		    node.execute(
-		        "SELECT relfilenode FROM pg_class WHERE relname = 'o_test_gin';")
-		    [0][0])
+		        "SELECT relfilenode FROM pg_class WHERE relname = 'o_test_gin';"
+		    )[0][0])
 		node.stop()
 
 	def test_readd_pk_after_drop_with_bridge(self):
@@ -964,12 +969,11 @@ class IndexBridgingTest(BaseTest):
 		self.assertTrue(self._idx_exists(node, 'o_test_gist'))
 
 		# both intermediate relnodes reclaimed
-		datoid = node.execute(
-		    "SELECT oid FROM pg_database "
-		    "WHERE datname = current_database();")[0][0]
+		datoid = node.execute("SELECT oid FROM pg_database "
+		                      "WHERE datname = current_database();")[0][0]
 		for old in (r0, r1):
 			old_path = os.path.join(node.data_dir, "orioledb_data",
-			                       str(datoid), str(old))
+			                        str(datoid), str(old))
 			self.assertFalse(os.path.exists(old_path),
 			                 f"stale relnode {old_path} should be reclaimed")
 		node.stop()
@@ -1059,14 +1063,15 @@ class IndexBridgingTest(BaseTest):
 		node.stop(['-m', 'immediate'])
 		node.start()
 
-		self.assertEqual(150, node.execute("SELECT count(*) FROM o_test;")[0][0])
+		self.assertEqual(150,
+		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
+		self.assertEqual(150, self._gist_scan_count(node, "((0,0),(250,250))"))
 		self.assertEqual(
-		    150, self._gist_scan_count(node, "((0,0),(250,250))"))
+		    1,
+		    node.execute("SELECT count(*) FROM o_test WHERE id = 1;")[0][0])
 		self.assertEqual(
-		    1, node.execute("SELECT count(*) FROM o_test WHERE id = 1;")[0][0])
-		self.assertEqual(
-		    1, node.execute("SELECT count(*) FROM o_test WHERE id = 201;")[0]
-		    [0])
+		    1,
+		    node.execute("SELECT count(*) FROM o_test WHERE id = 201;")[0][0])
 		node.stop()
 
 	def test_move_bridged_table_mixed_tablespaces_crash(self):
@@ -1108,9 +1113,9 @@ class IndexBridgingTest(BaseTest):
 		node.stop(['-m', 'immediate'])
 		node.start()
 
-		self.assertEqual(150, node.execute("SELECT count(*) FROM o_test;")[0][0])
-		self.assertEqual(
-		    150, self._gist_scan_count(node, "((0,0),(250,250))"))
+		self.assertEqual(150,
+		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
+		self.assertEqual(150, self._gist_scan_count(node, "((0,0),(250,250))"))
 		# bridge index stays in its original tablespace across the move
 		self.assertEqual(
 		    bridge_ts,
@@ -1152,9 +1157,9 @@ class IndexBridgingTest(BaseTest):
 		node.stop(['-m', 'immediate'])
 		node.start()
 
-		self.assertEqual(150, node.execute("SELECT count(*) FROM o_test;")[0][0])
-		self.assertEqual(
-		    150, self._gist_scan_count(node, "((0,0),(250,250))"))
+		self.assertEqual(150,
+		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
+		self.assertEqual(150, self._gist_scan_count(node, "((0,0),(250,250))"))
 		ts2 = node.execute(
 		    "SELECT oid FROM pg_tablespace WHERE spcname = 'ts2';")[0][0]
 		self.assertEqual(
@@ -1202,9 +1207,9 @@ class IndexBridgingTest(BaseTest):
 		node.stop(['-m', 'immediate'])
 		node.start()
 
-		self.assertEqual(150, node.execute("SELECT count(*) FROM o_test;")[0][0])
-		self.assertEqual(
-		    150, self._gist_scan_count(node, "((0,0),(250,250))"))
+		self.assertEqual(150,
+		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
+		self.assertEqual(150, self._gist_scan_count(node, "((0,0),(250,250))"))
 		self.assertTrue(self._idx_exists(node, 'o_test_gist'))
 		node.stop()
 
@@ -1256,16 +1261,15 @@ class IndexBridgingTest(BaseTest):
 		_, _, err = node.psql("VACUUM VERBOSE o_test;")
 		err_text = err.decode("utf-8")
 		self.assertIn("vacuuming bridged indexes", err_text)
-		m = re.search(r'had (\d+) dead item identifiers removed',
-		              err_text)
+		m = re.search(r'had (\d+) dead item identifiers removed', err_text)
 		self.assertIsNotNone(m)
 		self.assertEqual(2000 // 3, int(m.group(1)))
 
 		# bridge scan returns only live rows
-		self.assertEqual(
-		    live, self._gist_scan_count(node, "((0,0),(3000,3000))"))
-		self.assertEqual(
-		    live, node.execute("SELECT count(*) FROM o_test;")[0][0])
+		self.assertEqual(live,
+		                 self._gist_scan_count(node, "((0,0),(3000,3000))"))
+		self.assertEqual(live,
+		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
 		node.stop()
 
 	def test_bridge_tree_split(self):
@@ -1292,8 +1296,8 @@ class IndexBridgingTest(BaseTest):
 		# bridge tree must have split (>1 leaf page)
 		self.assertGreater(self._bridge_tree_page_count(node), 1)
 		# full-range scan returns all rows
-		self.assertEqual(
-		    2000, self._gist_scan_count(node, "((0,0),(3000,3000))"))
+		self.assertEqual(2000,
+		                 self._gist_scan_count(node, "((0,0),(3000,3000))"))
 		# narrow window around a likely split boundary
 		self.assertEqual(
 		    101, self._gist_scan_count(node, "((950,950),(1050,1050))"))
@@ -1304,8 +1308,8 @@ class IndexBridgingTest(BaseTest):
 				SELECT 2000 + i, point(2000 + i, 2000 + i)
 				FROM generate_series(1, 2000) i;
 		""")
-		self.assertEqual(
-		    4000, self._gist_scan_count(node, "((0,0),(5000,5000))"))
+		self.assertEqual(4000,
+		                 self._gist_scan_count(node, "((0,0),(5000,5000))"))
 		self.assertGreater(self._bridge_tree_page_count(node), 1)
 		# scan the newly inserted range
 		self.assertEqual(
@@ -1334,12 +1338,16 @@ class IndexBridgingTest(BaseTest):
 			CREATE INDEX o_test_gin ON o_test USING gin (big gin_trgm_ops);
 		""")
 		# all 100 rows contain 'xxxxx' (from repeat('x', 3000))
-		self.assertEqual(100, node.execute("""
+		self.assertEqual(
+		    100,
+		    node.execute("""
 		SET enable_seqscan = off;
 			SELECT count(*) FROM o_test WHERE big LIKE '%%xxxxx%%';
 		""")[0][0])
 		# detoast through the bridge: max length = 3000 + ':100' = 3004
-		self.assertEqual(3004, node.execute("""
+		self.assertEqual(
+		    3004,
+		    node.execute("""
 		SET enable_seqscan = off;
 			SELECT max(length(big)) FROM o_test WHERE big LIKE '%%xxxxx%%';
 		""")[0][0])
@@ -1374,11 +1382,15 @@ class IndexBridgingTest(BaseTest):
 				FROM generate_series(1, 100) i;
 			CREATE INDEX o_test_gist ON o_test USING gist (big gist_trgm_ops);
 		""")
-		self.assertEqual(100, node.execute("""
+		self.assertEqual(
+		    100,
+		    node.execute("""
 		SET enable_seqscan = off;
 			SELECT count(*) FROM o_test WHERE big LIKE '%%xxxxx%%';
 		""")[0][0])
-		self.assertEqual(3004, node.execute("""
+		self.assertEqual(
+		    3004,
+		    node.execute("""
 		SET enable_seqscan = off;
 			SELECT max(length(big)) FROM o_test WHERE big LIKE '%%xxxxx%%';
 		""")[0][0])
@@ -1430,14 +1442,19 @@ class IndexBridgingTest(BaseTest):
 		node.start()
 
 		self.assertTrue(self._idx_exists(node, 'o_test_gin'))
-		self.assertEqual(150, node.execute("SELECT count(*) FROM o_test;")[0][0])
-		self.assertEqual(150, node.execute("""
+		self.assertEqual(150,
+		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
+		self.assertEqual(
+		    150,
+		    node.execute("""
 		SET enable_seqscan = off;
 			SELECT count(*) FROM o_test WHERE big LIKE '%%xxxxx%%';
 		""")[0][0])
 		# max length: id=100 -> ':100' (4 chars) + 3000 = 3004;
 		# id=150 -> ':150' (4 chars) + 3000 = 3004
-		self.assertEqual(3004, node.execute("""
+		self.assertEqual(
+		    3004,
+		    node.execute("""
 		SET enable_seqscan = off;
 			SELECT max(length(big)) FROM o_test WHERE big LIKE '%%xxxxx%%';
 		""")[0][0])

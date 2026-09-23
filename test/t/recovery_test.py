@@ -3740,9 +3740,9 @@ class RecoveryTest(BaseTest):
 		""")
 		# int -> text is NOT binary compatible: every PK key datum must be
 		# re-materialized, exercising the comparator/key-bound recovery path
-		node.safe_psql('postgres',
-		               "ALTER TABLE o_alt_pk_text "
-		               "ALTER COLUMN id TYPE text USING id::text;")
+		node.safe_psql(
+		    'postgres', "ALTER TABLE o_alt_pk_text "
+		    "ALTER COLUMN id TYPE text USING id::text;")
 		node.safe_psql(
 		    'postgres', """
 			INSERT INTO o_alt_pk_text
@@ -3770,8 +3770,7 @@ class RecoveryTest(BaseTest):
 			""")[0][0])
 		self.assertTrue(
 		    node.execute(
-		        "SELECT orioledb_tbl_check('o_alt_pk_text'::regclass);")[0]
-		    [0])
+		        "SELECT orioledb_tbl_check('o_alt_pk_text'::regclass);")[0][0])
 		node.stop()
 
 	def test_recovery_alter_type_composite_pk(self):
@@ -3807,8 +3806,8 @@ class RecoveryTest(BaseTest):
 		self.crash_with_os_buffer_loss()
 
 		node.start()
-		self.assertEqual(
-		    120, node.execute("SELECT count(*) FROM o_comp_pk;")[0][0])
+		self.assertEqual(120,
+		                 node.execute("SELECT count(*) FROM o_comp_pk;")[0][0])
 		# composite PK index usable for an exact match on both columns
 		self.assertEqual(
 		    'v1',
@@ -3857,8 +3856,7 @@ class RecoveryTest(BaseTest):
 		# text -> varchar: binary-compatible but forces a partial-index
 		# rewrite whose predicate must be re-evaluated with the new type
 		node.safe_psql(
-		    'postgres',
-		    "ALTER TABLE o_alt_pred "
+		    'postgres', "ALTER TABLE o_alt_pred "
 		    "ALTER COLUMN status TYPE varchar USING status::varchar;")
 		# move a previously-'inactive' row into the predicate
 		node.safe_psql(
@@ -3977,14 +3975,14 @@ class RecoveryTest(BaseTest):
 		# Each secondary index must agree with the heap count when forced
 		# into an index scan over a predicate that matches every row.
 		checks = {
-			'mac': "mac IS NOT NULL",
-			'ip': "ip <<= '10.0.0.0/8'",
-			'iv': "iv > '-1 days'::interval",
-			'mn': "mn >= 0::money",
-			'bv': "bv IS NOT NULL",
-			'jb': "jb IS NOT NULL",
-			'ts': "ts >= timestamp '1999-01-01'",
-			'en': "en IS NOT NULL",
+		    'mac': "mac IS NOT NULL",
+		    'ip': "ip <<= '10.0.0.0/8'",
+		    'iv': "iv > '-1 days'::interval",
+		    'mn': "mn >= 0::money",
+		    'bv': "bv IS NOT NULL",
+		    'jb': "jb IS NOT NULL",
+		    'ts': "ts >= timestamp '1999-01-01'",
+		    'en': "en IS NOT NULL",
 		}
 		for col, pred in checks.items():
 			n_sk = node.execute(f"""
@@ -3997,8 +3995,8 @@ class RecoveryTest(BaseTest):
 			    f"secondary index on {col} diverged after recovery: "
 			    f"{n_sk} vs {n_pk}")
 		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_unusual'::regclass);")[0]
-		    [0])
+		    node.execute("SELECT orioledb_tbl_check('o_unusual'::regclass);")
+		    [0][0])
 		node.stop()
 
 	def test_recovery_unusual_types_comparator_more(self):
@@ -4106,17 +4104,17 @@ class RecoveryTest(BaseTest):
 		# Each secondary index must agree with the heap count when forced
 		# into an index scan over a predicate that matches every row.
 		checks = {
-			'tsz': "tsz IS NOT NULL",
-			'tz': "tz IS NOT NULL",
-			'tm': "tm IS NOT NULL",
-			'dt': "dt IS NOT NULL",
-			'pc': "pc IS NOT NULL",
-			'nm': "nm IS NOT NULL",
-			'cd': "cd IS NOT NULL",
-			'mc8': "mc8 IS NOT NULL",
-			'tsv': "tsv IS NOT NULL",
-			'cmp': "cmp IS NOT NULL",
-			'arr': "arr IS NOT NULL",
+		    'tsz': "tsz IS NOT NULL",
+		    'tz': "tz IS NOT NULL",
+		    'tm': "tm IS NOT NULL",
+		    'dt': "dt IS NOT NULL",
+		    'pc': "pc IS NOT NULL",
+		    'nm': "nm IS NOT NULL",
+		    'cd': "cd IS NOT NULL",
+		    'mc8': "mc8 IS NOT NULL",
+		    'tsv': "tsv IS NOT NULL",
+		    'cmp': "cmp IS NOT NULL",
+		    'arr': "arr IS NOT NULL",
 		}
 		for col, pred in checks.items():
 			n_sk = node.execute(f"""
@@ -4150,30 +4148,26 @@ class RecoveryTest(BaseTest):
 		# replayed post-update keys (a bitmap scan that falls back to the
 		# heap could mask a stale index, but a key lookup cannot): each
 		# post-update key must resolve to exactly its owning row.
-		self.assertEqual(
-		    [(1, )],
-		    node.execute("""
+		self.assertEqual([(1, )],
+		                 node.execute("""
 				SET enable_seqscan = off;
 				SET enable_indexonlyscan = off;
 				SELECT id FROM o_unusual2 WHERE nm = 'zz1'::name;
 			"""))
-		self.assertEqual(
-		    [(1, )],
-		    node.execute("""
+		self.assertEqual([(1, )],
+		                 node.execute("""
 				SET enable_seqscan = off;
 				SET enable_indexonlyscan = off;
 				SELECT id FROM o_unusual2 WHERE pc = '1'::bpchar(8);
 			"""))
-		self.assertEqual(
-		    [(1, )],
-		    node.execute("""
+		self.assertEqual([(1, )],
+		                 node.execute("""
 				SET enable_seqscan = off;
 				SET enable_indexonlyscan = off;
 				SELECT id FROM o_unusual2 WHERE dt = date '1970-01-02';
 			"""))
-		self.assertEqual(
-		    [(1, )],
-		    node.execute("""
+		self.assertEqual([(1, )],
+		                 node.execute("""
 				SET enable_seqscan = off;
 				SET enable_indexonlyscan = off;
 				SELECT id FROM o_unusual2
@@ -4248,12 +4242,11 @@ class RecoveryTest(BaseTest):
 		# present): the deleted ids must be gone, and the promoted rows
 		# must carry grp = 1.
 		self.assertEqual(
-		    [],
-		    node.execute("SELECT id FROM o_bpch WHERE id IN (1, 2, 3);"))
-		self.assertEqual(
-		    [(1, ), (1, ), (1, )],
-		    node.execute("SELECT grp FROM o_bpch WHERE id IN (4, 5, 6) "
-		                 "ORDER BY id;"))
+		    [], node.execute("SELECT id FROM o_bpch WHERE id IN (1, 2, 3);"))
+		self.assertEqual([(1, ), (1, ), (1, )],
+		                 node.execute(
+		                     "SELECT grp FROM o_bpch WHERE id IN (4, 5, 6) "
+		                     "ORDER BY id;"))
 		# Unique partial index preserved: a grp = 1 insert whose code is
 		# comparator-equal (but byte-different) to the promoted row must
 		# still be rejected by the recovered index.
@@ -4265,8 +4258,7 @@ class RecoveryTest(BaseTest):
 		# the grp = 1 partition.
 		self.assertEqual(
 		    3,
-		    node.execute(
-		        "SELECT count(*) FROM o_bpch WHERE grp = 1;")[0][0])
+		    node.execute("SELECT count(*) FROM o_bpch WHERE grp = 1;")[0][0])
 		# Direct SK membership: the unique partial index holds exactly the
 		# three grp = 1 rows -- no stale entries from the deleted ids 1-3
 		# (a skipped replayed delete would leave them and inflate live).
@@ -4274,8 +4266,8 @@ class RecoveryTest(BaseTest):
 		    "SELECT * FROM orioledb_index_rows('o_bpch_uix'::regclass);")[0]
 		self.assertEqual(total - dead, 3)
 		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_bpch'::regclass);")
-		    [0][0])
+		    node.execute("SELECT orioledb_tbl_check('o_bpch'::regclass);")[0]
+		    [0])
 		node.stop()
 
 	def test_recovery_expression_index_unusual_type_result(self):
@@ -4362,9 +4354,8 @@ class RecoveryTest(BaseTest):
 		# Prove the boundary-crossing UPDATEs replayed (a stale index could
 		# otherwise let the count checks above pass): id=1 was uppercased,
 		# and the comparator-equal trailing-space append grew id=31.
-		self.assertEqual(
-		    [('V1', )],
-		    node.execute("SELECT s FROM o_exprw WHERE id = 1;"))
+		self.assertEqual([('V1', )],
+		                 node.execute("SELECT s FROM o_exprw WHERE id = 1;"))
 		self.assertEqual(
 		    [(6, )],
 		    node.execute("SELECT length(s) FROM o_exprw WHERE id = 31;"))
@@ -4381,8 +4372,8 @@ class RecoveryTest(BaseTest):
 			    f"index {name} has {total - dead} live entries after "
 			    f"recovery, expected {n_rows}")
 		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_exprw'::regclass);")
-		    [0][0])
+		    node.execute("SELECT orioledb_tbl_check('o_exprw'::regclass);")[0]
+		    [0])
 		node.stop()
 
 	def test_recovery_partial_index_predicate_and_expression_keys(self):
@@ -4475,11 +4466,9 @@ class RecoveryTest(BaseTest):
 		# and id=5 was promoted to grp=7 (entering index B via its second
 		# arm).  Both force the cmp==0 predicate-change path on recovery.
 		self.assertEqual(
-		    [(0, )],
-		    node.execute("SELECT grp FROM o_part2 WHERE id = 40;"))
-		self.assertEqual(
-		    [(7, )],
-		    node.execute("SELECT grp FROM o_part2 WHERE id = 5;"))
+		    [(0, )], node.execute("SELECT grp FROM o_part2 WHERE id = 40;"))
+		self.assertEqual([(7, )],
+		                 node.execute("SELECT grp FROM o_part2 WHERE id = 5;"))
 		# id=5 now matches index B only because of grp=7: a seqscan-off
 		# lookup over index B must still resolve it.  (Parenthesize pred:
 		# AND binds tighter than OR, so `pred AND id = 5` without parens
