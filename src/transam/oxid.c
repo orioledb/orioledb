@@ -440,6 +440,8 @@ oxid_init_shmem(Pointer ptr, bool found)
 		LWLockInitialize(&xid_meta->sysXidUndoLocationLock,
 						 xid_meta->sysXidUndoLocationTrancheId);
 		xid_meta->sysXidUndoLocationChangeCount = 0;
+		xid_meta->exitedLogicalRetainLocation = InvalidUndoLocation;
+		xid_meta->exitedLogicalRetainLsn = InvalidXLogRecPtr;
 
 		for (i = 0; i < logical_xid_buffers_guc * (BLCKSZ / sizeof(pg_atomic_uint32)); i++)
 			pg_atomic_init_u32(&logicalXidsShmemMap[i], 0);

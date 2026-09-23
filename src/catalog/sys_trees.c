@@ -1364,7 +1364,7 @@ o_sys_xid_undo_location_tuple_print(BTreeDescr *desc, StringInfo buf, OTuple tup
 	 * across such layout changes; the actual value is verified separately via
 	 * orioledb_read_sys_xid_undo_location().
 	 */
-	appendStringInfo(buf, "(%u, X)", tuple->xid);
+	appendStringInfo(buf, "(%u, X, X)", tuple->xid);
 }
 
 static JsonbValue *

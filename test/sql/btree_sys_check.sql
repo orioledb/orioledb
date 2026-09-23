@@ -253,37 +253,48 @@ SELECT regexp_replace(regexp_replace(
 		'g');
 
 -- SYS_TREES_CATALOG_XID_UNDO_LOCATION
-SELECT orioledb_insert_sys_xid_undo_location(1000, 2000);
-SELECT orioledb_insert_sys_xid_undo_location(1001, 2001);
-SELECT orioledb_insert_sys_xid_undo_location(1002, 2002);
-SELECT orioledb_insert_sys_xid_undo_location(1003, 2003);
-SELECT orioledb_insert_sys_xid_undo_location(1005, 2005);
-SELECT orioledb_insert_sys_xid_undo_location(1006, 2006);
+-- Drop whatever this session's own catalog changes left in the mapping, so
+-- that the dumps below show our entries alone.  How many there are to drop
+-- depends on what ran before, hence the silence.
+SET client_min_messages = warning;
+SELECT orioledb_read_sys_xid_undo_location('FFFFFFFF/FFFFFFFF'::pg_lsn);
+RESET client_min_messages;
+-- An entry per catalog change: the xid, the undo location it retains, and
+-- where in WAL the change ended up.  The positions are past anything this
+-- instance will reach, so that a concurrent read of the mapping keeps them.
+SELECT orioledb_insert_sys_xid_undo_location(1000, 2000, 'F000/1000'::pg_lsn);
+SELECT orioledb_insert_sys_xid_undo_location(1001, 2001, 'F000/1100'::pg_lsn);
+SELECT orioledb_insert_sys_xid_undo_location(1002, 2002, 'F000/1200'::pg_lsn);
+SELECT orioledb_insert_sys_xid_undo_location(1003, 2003, 'F000/1300'::pg_lsn);
+SELECT orioledb_insert_sys_xid_undo_location(1005, 2005, 'F000/1500'::pg_lsn);
+SELECT orioledb_insert_sys_xid_undo_location(1006, 2006, 'F000/1600'::pg_lsn);
 
 SELECT orioledb_sys_tree_structure(23, 'ne');
-SELECT orioledb_read_sys_xid_undo_location(1004);
+-- what a slot at F000/1400 may still ask for, and nothing else survives
+SELECT orioledb_read_sys_xid_undo_location('F000/1400'::pg_lsn);
 SELECT orioledb_sys_tree_structure(23, 'ne');
--- entries with xid < 1004 are deleted at previous read
-SELECT orioledb_read_sys_xid_undo_location(1000);
+-- the ones below it are gone, so a lower boundary answers the same
+SELECT orioledb_read_sys_xid_undo_location('F000/1000'::pg_lsn);
 SELECT orioledb_sys_tree_structure(23, 'ne');
 -- cache invalidation of last value at insert
-SELECT orioledb_insert_sys_xid_undo_location(1009, 2009);
+SELECT orioledb_insert_sys_xid_undo_location(1009, 2009, 'F000/1900'::pg_lsn);
 SELECT orioledb_sys_tree_structure(23, 'ne');
-SELECT orioledb_read_sys_xid_undo_location(1007);
-SELECT orioledb_insert_sys_xid_undo_location(1008, 2008);
+SELECT orioledb_read_sys_xid_undo_location('F000/1700'::pg_lsn);
+SELECT orioledb_insert_sys_xid_undo_location(1008, 2008, 'F000/1800'::pg_lsn);
 SELECT orioledb_sys_tree_structure(23, 'ne');
-SELECT orioledb_read_sys_xid_undo_location(1007);
--- the least location has to win even when it belongs to a higher xid: a
--- transaction takes its xid before it writes the system undo, so a higher
--- xid may have written its undo first
-SELECT orioledb_insert_sys_xid_undo_location(1010, 3000);
-SELECT orioledb_insert_sys_xid_undo_location(1011, 2500);
-SELECT orioledb_read_sys_xid_undo_location(1010);
--- and the same once more, with the least location further to the right
-SELECT orioledb_insert_sys_xid_undo_location(1012, 2400);
-SELECT orioledb_read_sys_xid_undo_location(1010);
--- repeated query of the same xmin is answered from the cache
-SELECT orioledb_read_sys_xid_undo_location(1010);
+SELECT orioledb_read_sys_xid_undo_location('F000/1700'::pg_lsn);
+-- The least location wins even when it belongs to a later change: a
+-- transaction takes its undo position before it writes, so the entries are
+-- not sorted by location.
+SELECT orioledb_insert_sys_xid_undo_location(1010, 3000, 'F000/2000'::pg_lsn);
+SELECT orioledb_insert_sys_xid_undo_location(1011, 2500, 'F000/2100'::pg_lsn);
+SELECT orioledb_read_sys_xid_undo_location('F000/2000'::pg_lsn);
+-- A retain held at 2400 keeps the entries above it, wherever they are in WAL
+SELECT orioledb_read_sys_xid_undo_location('FFFFFFFF/FFFFFFFF'::pg_lsn, 2400);
+SELECT orioledb_sys_tree_structure(23, 'ne');
+-- and with nothing holding them, they go
+SELECT orioledb_read_sys_xid_undo_location('FFFFFFFF/FFFFFFFF'::pg_lsn);
+SELECT orioledb_sys_tree_structure(23, 'ne');
 
 -- fail
 SELECT orioledb_sys_tree_structure(9999);

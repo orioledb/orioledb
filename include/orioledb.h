@@ -99,7 +99,7 @@
  */
 #define ORIOLEDB_VERSION "OrioleDB beta 17"
 #define ORIOLEDB_BINARY_VERSION 10
-#define ORIOLEDB_SYS_TREE_VERSION	1	/* Version of system catalog */
+#define ORIOLEDB_SYS_TREE_VERSION	2	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION		1	/* Version of binary page format */
 #define ORIOLEDB_COMPRESS_VERSION	1	/* Version of page compression (only
 										 * for compressed pages) */
@@ -245,11 +245,32 @@ typedef struct
 	pg_atomic_uint64 reservedUndoLocation;
 	pg_atomic_uint64 transactionUndoRetainLocation;
 	pg_atomic_uint64 snapshotRetainUndoLocation;
+
+	/*
+	 * Taken when a WAL record is stamped with a CommitSeqNo and held until
+	 * the transaction ends, so that logical decoding can still read the
+	 * system trees at that CSN.  UndoLogSystem only.
+	 */
+	pg_atomic_uint64 logicalWalRetainUndoLocation;
 } UndoRetainSharedLocations;
+
+/*
+ * What a process leaves behind for the records it has already written: they
+ * are in WAL and carry CommitSeqNos from before the transaction ended, and
+ * nothing speaks for them until a slot has decoded past lsn.  Published at
+ * the end of the transaction, before the in-memory retain above is released,
+ * and ignored once every slot has passed that position.
+ */
+typedef struct
+{
+	pg_atomic_uint64 undoLocation;
+	pg_atomic_uint64 lsn;
+} PendingLogicalRetain;
 
 typedef struct
 {
 	UndoRetainSharedLocations undoRetainLocations[(int) UndoLogsCount];
+	PendingLogicalRetain pendingLogicalRetain;
 	pg_atomic_uint64 commitInProgressXlogLocation;
 
 	int			autonomousNestingLevel;

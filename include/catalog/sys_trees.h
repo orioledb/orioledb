@@ -151,6 +151,15 @@ typedef struct
 {
 	TransactionId xid;
 	UndoLocation undoLocation;
+
+	/*
+	 * Where in WAL the catalog change this entry belongs to became visible.
+	 * The entry is needed while a slot may still read a record written before
+	 * that, which is a question about WAL positions -- xids can't answer it,
+	 * because an OrioleDB transaction whose record the decoder will read need
+	 * not have a heap xid at all.
+	 */
+	XLogRecPtr	lsn;
 } ReplicationRetainUndoTuple;
 
 extern Size sys_trees_shmem_needs(void);

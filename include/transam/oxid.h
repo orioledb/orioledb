@@ -57,6 +57,14 @@ typedef struct
 	LWLock		sysXidUndoLocationLock;
 	uint32		sysXidUndoLocationChangeCount;
 
+	/*
+	 * What processes that have exited left retained on behalf of records that
+	 * may still be decoded, merged into one conservative pair.  Read and
+	 * written under xminMutex.
+	 */
+	UndoLocation exitedLogicalRetainLocation;
+	XLogRecPtr	exitedLogicalRetainLsn;
+
 } XidMeta;
 
 extern XidMeta *xid_meta;

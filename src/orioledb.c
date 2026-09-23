@@ -1621,7 +1621,10 @@ o_proc_shmem_init(Pointer ptr, bool found)
 				pg_atomic_init_u64(&oProcData[i].undoRetainLocations[j].reservedUndoLocation, InvalidUndoLocation);
 				pg_atomic_init_u64(&oProcData[i].undoRetainLocations[j].snapshotRetainUndoLocation, InvalidUndoLocation);
 				pg_atomic_init_u64(&oProcData[i].undoRetainLocations[j].transactionUndoRetainLocation, InvalidUndoLocation);
+				pg_atomic_init_u64(&oProcData[i].undoRetainLocations[j].logicalWalRetainUndoLocation, InvalidUndoLocation);
 			}
+			pg_atomic_init_u64(&oProcData[i].pendingLogicalRetain.undoLocation, InvalidUndoLocation);
+			pg_atomic_init_u64(&oProcData[i].pendingLogicalRetain.lsn, InvalidXLogRecPtr);
 			pg_atomic_init_u64(&oProcData[i].commitInProgressXlogLocation, OWalInvalidCommitPos);
 			pg_atomic_init_u64(&oProcData[i].xmin, InvalidOXid);
 			pg_atomic_init_u64(&oProcData[i].pendingSkUndoHead, InvalidUndoLocation);
@@ -1719,6 +1722,8 @@ orioledb_on_shmem_exit(int code, Datum arg)
 	if (MyProc)
 	{
 		pg_atomic_write_u64(&oProcData[MYPROCNUMBER].xmin, InvalidOXid);
+
+		merge_my_logical_wal_retain_on_exit();
 
 		/*
 		 * Both are held only across a few statements, but dying inside one of

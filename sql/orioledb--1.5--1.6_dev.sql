@@ -15,12 +15,12 @@ RETURNS int8
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
-CREATE FUNCTION orioledb_insert_sys_xid_undo_location(xid int, undoLocation bigint)
+CREATE FUNCTION orioledb_insert_sys_xid_undo_location(xid int, undoLocation bigint, lsn pg_lsn)
 RETURNS void
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
-CREATE FUNCTION orioledb_read_sys_xid_undo_location(xid int)
+CREATE FUNCTION orioledb_read_sys_xid_undo_location(boundary pg_lsn, pin bigint DEFAULT NULL)
 RETURNS bigint
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
