@@ -1037,6 +1037,17 @@ set_deleted_in_place(OSysCache *sys_cache, Pointer entry, bool new_value)
 	START_CRIT_SECTION();
 	page_block_reads(item->blkno);
 	*(bool *) flag = new_value;
+
+	if (sys_cache->is_toast)
+	{
+		Pointer		chunk_flag;
+
+		chunk_flag = pageTuple.data +
+			offsetof(OSysCacheToastChunkKey, sys_cache_key) +
+			offsetof(OSysCacheKeyCommon, deleted);
+		*(bool *) chunk_flag = new_value;
+	}
+
 	MARK_DIRTY(desc, item->blkno);
 	END_CRIT_SECTION();
 
