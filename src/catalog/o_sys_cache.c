@@ -18,6 +18,8 @@
 
 #include "btree/btree.h"
 #include "btree/iterator.h"
+#include "btree/find.h"
+#include "btree/page_contents.h"
 #include "btree/modify.h"
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
@@ -25,6 +27,7 @@
 #include "recovery/wal.h"
 #include "transam/oxid.h"
 #include "tuple/toast.h"
+#include "utils/page_pool.h"
 #include "utils/planner.h"
 
 #include "access/hash.h"
@@ -945,6 +948,103 @@ o_sys_cache_update_if_needed(OSysCache *sys_cache, OSysCacheKey *key,
 	o_sys_cache_unlock(sys_cache, key, AccessExclusiveLock);
 }
 
+/*
+ * Set the deleted flag of an entry straight on the page it lives on.
+ *
+ * update_deleted_value() would normally write the entry back through
+ * o_btree_modify(), which needs a transaction of its own -- and the startup
+ * process, which is the one rolling back a transaction a checkpoint caught
+ * in progress, has none.  It does not need one either: the flag is not part
+ * of the key (o_sys_cache_cmp() never looks at it), so the entry does not
+ * move, and it is a bool at a fixed offset, so nothing on the page changes
+ * size.  Flipping it in place needs no undo record and no WAL: replaying the
+ * same undo record after another crash sets it to the same value again.
+ *
+ * Returns false when the entry is not in the tree, which the caller has to
+ * be ready for -- it may have been cleaned up by LSN in the meantime.
+ */
+static bool
+set_deleted_in_place(OSysCache *sys_cache, Pointer entry, bool new_value)
+{
+	BTreeDescr *desc = get_sys_tree(sys_cache->sys_tree_num);
+	OBTreeFindPageContext context;
+	OBtreePageFindItem *item;
+	OSysCacheToastKeyBound toast_key = {0};
+	OTuple		keyTuple;
+	OTuple		pageTuple;
+	BTreeKeyType keyType;
+	Pointer		flag;
+	Page		p;
+
+	Assert(is_recovery_process());
+
+	if (!sys_cache->is_toast)
+	{
+		/*
+		 * The entry is the leaf tuple itself, so use it as the key: unlike a
+		 * bound, that pins the version by lsn as well.
+		 */
+		keyTuple.formatFlags = 0;
+		keyTuple.data = entry;
+		keyType = BTreeKeyLeafTuple;
+	}
+	else
+	{
+		/* The flag is at the head of the entry, hence in its first chunk */
+		toast_key.common.chunknum = 0;
+		toast_key.key = (OSysCacheKey *) entry;
+		toast_key.lsn_cmp = true;
+		keyTuple.formatFlags = 0;
+		keyTuple.data = (Pointer) &toast_key;
+		keyType = BTreeKeyBound;
+	}
+
+	init_page_find_context(&context, desc, COMMITSEQNO_INPROGRESS,
+						   BTREE_PAGE_FIND_MODIFY);
+	if (find_page(&context, keyType == BTreeKeyBound ?
+				  (Pointer) &toast_key : (Pointer) &keyTuple,
+				  keyType, 0) != OFindPageResultSuccess)
+		return false;
+
+	item = &context.items[context.index];
+	p = O_GET_IN_MEMORY_PAGE(item->blkno);
+
+	if (!BTREE_PAGE_LOCATOR_IS_VALID(p, &item->locator))
+	{
+		unlock_page(item->blkno);
+		return false;
+	}
+
+	BTREE_PAGE_READ_TUPLE(pageTuple, p, &item->locator);
+
+	/* find_page() lands on the first item at or after the key */
+	if (o_btree_cmp(desc, &pageTuple, BTreeKeyLeafTuple,
+					keyType == BTreeKeyBound ?
+					(Pointer) &toast_key : (Pointer) &keyTuple,
+					keyType) != 0)
+	{
+		unlock_page(item->blkno);
+		return false;
+	}
+
+	if (!sys_cache->is_toast)
+		flag = pageTuple.data;
+	else
+		flag = oSysCacheToastGetTupleData(pageTuple, desc);
+
+	flag += offsetof(OSysCacheKeyCommon, deleted);
+
+	START_CRIT_SECTION();
+	page_block_reads(item->blkno);
+	*(bool *) flag = new_value;
+	MARK_DIRTY(desc, item->blkno);
+	END_CRIT_SECTION();
+
+	unlock_page(item->blkno);
+
+	return true;
+}
+
 static bool
 update_deleted_value(OSysCache *sys_cache, OSysCacheKey *key, bool new_value)
 {
@@ -960,6 +1060,10 @@ update_deleted_value(OSysCache *sys_cache, OSysCacheKey *key, bool new_value)
 		return false;
 	sys_cache_key = (OSysCacheKey *) entry;
 	sys_cache_key->common.deleted = new_value;
+
+	if (is_recovery_process())
+		return set_deleted_in_place(sys_cache, entry, new_value);
+
 	return o_sys_cache_update(sys_cache, entry);
 }
 
