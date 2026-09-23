@@ -56,6 +56,18 @@ typedef enum
  */
 /* #define CHECK_PAGE_STRUCT */
 
+/*
+ * Validate a page the caller is about to release, including the key order --
+ * unlock_check_page() has no BTreeDescr and can only check the bookkeeping.
+ * Only useful outside a critical section; see o_check_page_struct().
+ */
+#ifdef CHECK_PAGE_STRUCT
+extern void o_check_page_struct(BTreeDescr *desc, Page p);
+#define O_CHECK_PAGE_KEYS(desc, p) o_check_page_struct((desc), (p))
+#else
+#define O_CHECK_PAGE_KEYS(desc, p) ((void) true)
+#endif
+
 extern Size page_state_shmem_needs(void);
 extern void page_state_shmem_init(Pointer buf, bool found);
 extern bool have_locked_pages(void);
