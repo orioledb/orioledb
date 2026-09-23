@@ -940,6 +940,7 @@ class TablespaceTest(BaseTest):
 
 			master.stop()
 			replica.stop()
+
 			self.assertFalse(
 			    os.path.exists(
 			        os.path.join(master.data_dir, "pg_tblspc", str(ts_oid))))
@@ -972,3 +973,99 @@ class TablespaceTest(BaseTest):
 			    )[0][0])
 			master.stop()
 			replica.stop()
+
+	def test_replication_database_move_waits_for_recovery_workers(self):
+		master = self.node
+		master_ts1_path = os.path.dirname(self.user_ts1_path)
+		master_ts2_path = os.path.dirname(self.user_ts2_path)
+		replica_ts1_path = create_and_clear_directory(self.ts_tmpdir,
+		                                              'replica_user_ts1')
+		replica_ts2_path = create_and_clear_directory(self.ts_tmpdir,
+		                                              'replica_user_ts2')
+		ts_mapping = [
+		    '-T', f"{master_ts1_path}={replica_ts1_path}", '-T',
+		    f"{master_ts2_path}={replica_ts2_path}"
+		]
+
+		master.start()
+		master.safe_psql("CREATE EXTENSION orioledb;")
+		master.safe_psql("CREATE DATABASE testdb TABLESPACE user_ts1;")
+		master.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_move (
+				id int PRIMARY KEY,
+				value int NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_move_value_idx ON o_move (value);
+			INSERT INTO o_move VALUES (1, 1);
+			CHECKPOINT;
+		""", dbname='testdb')
+		db_oid = master.execute(
+		    "SELECT oid FROM pg_database WHERE datname = 'testdb'")[0][0]
+		replica_src_path = os.path.join(replica_ts1_path, self.ts_cat_version,
+		                                'orioledb_data', str(db_oid))
+		replica_dst_path = os.path.join(replica_ts2_path, self.ts_cat_version,
+		                                'orioledb_data', str(db_oid))
+
+		with self.getReplica(ts_mapping) as replica:
+			replica.append_conf('postgresql.conf',
+			                    "orioledb.enable_stopevents = true\n")
+			replica.start()
+			self.catchup_orioledb(replica)
+
+			replica.safe_psql(
+			    "SELECT pg_stopevent_set('sk_modify_pending', "
+			    "'$backendType == \"orioledb recovery worker\" "
+			    "&& $.treeName == \"o_move_pkey\"');")
+			replica.safe_psql(
+			    "SELECT pg_stopevent_set('replay_on_record', "
+			    "'$.type == \"DATABASE_COPY\"');")
+
+			try:
+				master.safe_psql("UPDATE o_move SET value = 2 WHERE id = 1;",
+				                 dbname='testdb')
+				replica.poll_query_until(
+				    "SELECT coalesce(array_length(waiter_pids, 1), 0) > 0 "
+				    "FROM pg_stopevents() "
+				    "WHERE stopevent = 'sk_modify_pending'",
+				    expected=True,
+				    sleep_time=0.1,
+				    max_attempts=300)
+
+				master.safe_psql(
+				    "ALTER DATABASE testdb SET TABLESPACE user_ts2;")
+				replica.poll_query_until(
+				    "SELECT coalesce(array_length(waiter_pids, 1), 0) > 0 "
+				    "FROM pg_stopevents() "
+				    "WHERE stopevent = 'replay_on_record'",
+				    expected=True,
+				    sleep_time=0.1,
+				    max_attempts=300)
+
+				replica.safe_psql(
+				    "SELECT pg_stopevent_reset('replay_on_record');")
+				time.sleep(1)
+				source_exists_while_worker_parked = os.path.exists(
+				    replica_src_path)
+				destination_exists_while_worker_parked = os.path.exists(
+				    replica_dst_path)
+			finally:
+				for event in ('replay_on_record', 'sk_modify_pending'):
+					try:
+						replica.safe_psql(
+						    "SELECT pg_stopevent_reset('%s');" % event)
+					except Exception:
+						pass
+
+			self.catchup_orioledb(replica)
+			self.assertTrue(
+			    source_exists_while_worker_parked,
+			    "database move replay did not wait for recovery workers")
+			self.assertFalse(
+			    destination_exists_while_worker_parked,
+			    "database move started while a recovery worker was still active")
+			self.assertFalse(os.path.exists(replica_src_path))
+			self.assertTrue(os.path.exists(replica_dst_path))
+			self.assertEqual(
+			    replica.execute("SELECT value FROM o_move WHERE id = 1",
+			                    dbname='testdb')[0][0], 2)
