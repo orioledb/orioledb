@@ -293,6 +293,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 								   checkpoint_number);
 	}
 
+	O_CHECK_PAGE_KEYS(desc, O_GET_IN_MEMORY_PAGE(left_blkno));
 	unlock_page(left_blkno);
 
 	return true;
