@@ -122,15 +122,15 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 		numKeys = id->nonLeafSpec.natts;
 
 	/*
-	 * Can't happen: numKeys never exceeds nonLeafTupdesc->natts, checked above.
-	 * Compiler can't prove it, so after function-inline it may warn about
-	 * overflow.
+	 * Can't happen: numKeys never exceeds nonLeafTupdesc->natts, checked
+	 * above. Compiler can't prove it, so after function-inline it may warn
+	 * about overflow.
 	 */
 	if (numKeys > FASTPATH_FIND_DOWNLINK_MAX_KEYS)
 	{
 		/*
-		 * Trigger the Assert if it happens (it means the invariant is broken).
-		 * Just return from the function if it is a release version.
+		 * Trigger the Assert if it happens (it means the invariant is
+		 * broken). Just return from the function if it is a release version.
 		 */
 		Assert(false);
 		meta->enabled = false;
