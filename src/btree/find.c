@@ -976,9 +976,10 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			 * FETCH mode).  The offset check and the lokey read below both
 			 * touch parentImg -- the offset needs the hikeys chunk (chunk
 			 * descriptors) and the read needs the chunk holding `loc` -- so
-			 * materialize them.  This is a no-op when the parent was read
-			 * whole (IMAGE/MODIFY disable the fastpath) or the chunk is
-			 * already loaded; a lost race re-descends from the top.
+			 * materialize them.  This is a no-op when the slowpath located
+			 * the downlink, which loads both; a lost race re-descends from
+			 * the top.  (A plain MODIFY descent, the one mode that keeps its
+			 * parents in context->img, never asks for a lokey.)
 			 */
 			if (context->parentPartial.isPartial &&
 				intCxt.pagePtr == context->parentImg &&
