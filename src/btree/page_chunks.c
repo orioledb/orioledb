@@ -227,7 +227,7 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 	int			freeSpace = BTREE_PAGE_FREE_SPACE(p);
 	int			spaceNeeded = size;
 	int			compactedFreeSpace;
-	int			oldItemSize;
+	int			oldItemSize = 0;
 
 	Assert(spaceNeeded == MAXALIGN(spaceNeeded));
 

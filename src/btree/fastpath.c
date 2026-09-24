@@ -85,6 +85,7 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 	Oid			types[FASTPATH_FIND_DOWNLINK_MAX_KEYS] = {InvalidOid};
 	int			i;
 	int			offset;
+	int			numKeys;
 
 	ASAN_UNPOISON_MEMORY_REGION(meta, sizeof(*meta));
 
@@ -97,7 +98,7 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 
 	id = (OIndexDescr *) desc->arg;
 
-	if (id->nonLeafTupdesc->natts >= FASTPATH_FIND_DOWNLINK_MAX_KEYS ||
+	if (id->nonLeafTupdesc->natts > FASTPATH_FIND_DOWNLINK_MAX_KEYS ||
 		id->nonLeafSpec.natts != id->nonLeafTupdesc->natts)
 	{
 		meta->enabled = false;
@@ -106,7 +107,7 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 
 	if (keyType == BTreeKeyUniqueLowerBound ||
 		keyType == BTreeKeyUniqueUpperBound)
-		meta->numKeys = id->nUniqueFields;
+		numKeys = id->nUniqueFields;
 	else if (id->desc.type != oIndexToast && id->desc.type != oIndexBridge)
 
 		/*
@@ -116,12 +117,29 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 		 * would treat duplicate user-key values as an ambiguous prefix and
 		 * could descend into the wrong child (skipping earlier duplicates).
 		 */
-		meta->numKeys = id->nUniqueFields;
+		numKeys = id->nUniqueFields;
 	else
-		meta->numKeys = id->nonLeafSpec.natts;
+		numKeys = id->nonLeafSpec.natts;
+
+	/*
+	 * Can't happen: numKeys never exceeds nonLeafTupdesc->natts, checked above.
+	 * Compiler can't prove it, so after function-inline it may warn about
+	 * overflow.
+	 */
+	if (numKeys > FASTPATH_FIND_DOWNLINK_MAX_KEYS)
+	{
+		/*
+		 * Trigger the Assert if it happens (it means the invariant is broken).
+		 * Just return from the function if it is a release version.
+		 */
+		Assert(false);
+		meta->enabled = false;
+		return;
+	}
+	meta->numKeys = numKeys;
 
 	offset = 0;
-	for (i = 0; i < meta->numKeys; i++)
+	for (i = 0; i < numKeys; i++)
 	{
 		ArraySearchDesc *searchDesc = find_array_search_desc_by_typeid(
 																	   TupleDescAttr(id->nonLeafTupdesc, i)->atttypid);
@@ -151,7 +169,7 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 	}
 
 	if (!find_downlink_get_keys(context->desc, key, keyType,
-								&meta->inclusive, meta->numKeys, types,
+								&meta->inclusive, numKeys, types,
 								meta->values, meta->flags))
 	{
 		meta->enabled = false;
