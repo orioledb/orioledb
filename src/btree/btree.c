@@ -368,12 +368,16 @@ btree_bridge_ctid_get_and_inc(BTreeDescr *desc, bool *overflow)
 void
 btree_bridge_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid)
 {
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
+	BTreeMetaPage *metaPageBlkno;
 	uint64		old_ctid,
 				new_ctid;
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc));
 
+	/* Same hazard as btree_ctid_update_if_needed(): see there. */
+	o_btree_load_shmem_pinned(desc);
+
+	metaPageBlkno = BTREE_GET_META(desc);
 	new_ctid = (uint64) ItemPointerGetBlockNumber(&ctid) * MaxHeapTuplesPerPage;
 	new_ctid += ItemPointerGetOffsetNumber(&ctid) - FirstOffsetNumber;
 
@@ -385,6 +389,8 @@ btree_bridge_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid)
 			break;
 	} while (!pg_atomic_compare_exchange_u64(&metaPageBlkno->bridge_ctid,
 											 &old_ctid, new_ctid));
+
+	btree_unpin_meta_page();
 }
 
 static inline OIndexDescr *
