@@ -608,6 +608,27 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		fastpath = fastpathMeta.enabled && !needLock;
 		fastpath = fastpath && (keyType != BTreeKeyPageHiKey || level > 0);
 
+		/*
+		 * The fastpath searches the shared page and leaves `loc` on it, which
+		 * suits a partial read -- and every mode reads the pages above the
+		 * target partially.  What limits it is who reads a locator after the
+		 * descent:
+		 *
+		 * - FETCH reads the target partially too, and knows how to move a
+		 * shared-page locator onto its images (the parentImgDeferred and
+		 * convert_fastpath_*_to_img() paths), so any level qualifies. -
+		 * MODIFY locks the target and reads it in place, and never looks at
+		 * the parent's locator again (a downlink insert refinds the parent
+		 * under its lock), so every level above the target qualifies. -
+		 * IMAGE, including MODIFY | IMAGE, reads the target whole and hands
+		 * back the immediate parent's locator bound to parentImg, which the
+		 * caller navigates siblings through (ASSERT_PARENT_LOCATOR_LOCAL), so
+		 * only the levels above the immediate parent qualify.
+		 */
+		if (!fetchFlag)
+			fastpath = fastpath &&
+				level > targetLevel + (imageFlag ? 1 : 0);
+
 		intCxt.partial = NULL;
 
 		/*
@@ -970,16 +991,14 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			OTuple		lokey;
 
 			/*
-			 * A FETCH-mode descent locates the downlink via the fastpath,
-			 * which does not materialize parentImg
-			 * (can_fastpath_find_downlink() only enables the fastpath in
-			 * FETCH mode).  The offset check and the lokey read below both
-			 * touch parentImg -- the offset needs the hikeys chunk (chunk
-			 * descriptors) and the read needs the chunk holding `loc` -- so
-			 * materialize them.  This is a no-op when the slowpath located
-			 * the downlink, which loads both; a lost race re-descends from
-			 * the top.  (A plain MODIFY descent, the one mode that keeps its
-			 * parents in context->img, never asks for a lokey.)
+			 * A downlink located via the fastpath leaves parentImg without
+			 * the hikeys chunk and possibly without the chunk holding `loc`.
+			 * The offset check below needs the former (chunk descriptors) and
+			 * the lokey read the latter, so materialize both.  This is a
+			 * no-op when the slowpath already loaded them; a lost race
+			 * re-descends from the top.  (A plain MODIFY descent, the one
+			 * mode that keeps its parents in context->img, never asks for a
+			 * lokey.)
 			 */
 			if (context->parentPartial.isPartial &&
 				intCxt.pagePtr == context->parentImg &&
