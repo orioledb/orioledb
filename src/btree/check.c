@@ -287,81 +287,102 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 		bool		found;
 		uint32		num;
 		uint32		map_num;
+		uint32		consumed_num = 0;
+		SeqBufTag	free_tag = {0};
+		off_t		free_off = 0;
 
-		/*
-		 * Reads free blocks from map file.
-		 */
 		chkp_tag.type = 'm';
 		chkp_tag.num = o_get_latest_chkp_num(desc->oids.datoid,
 											 desc->oids.relnode,
 											 desc->oids.spcoid,
 											 chkp_num,
 											 &found);
-
-		get_free_extents_from_file(&chkp_tag, sizeof(CheckpointFileHeader),
-								   free_extents, is_compressed, found);
+		map_num = chkp_tag.num;
 
 		/*
-		 * The map file only knows what was free when it was written.  Every
-		 * extent freed since -- by the bgwriter rewriting a page, by a merge,
-		 * by a copy-blkno rewrite -- is in a .tmp file or still buffered in
-		 * the matching desc->tmpBuf[], and without them each of those shows
-		 * up as an "Extent ... is neither free or busy" against a tree that
-		 * is perfectly sound.  The branch below already reads both for the
-		 * non-forced path; do the same here.
-		 *
-		 * The allocator consumes these same .tmp files via desc->freeBuf
-		 * (uncompressed) or the in-memory free-extent trees (compressed),
-		 * reusing the blocks for new pages.  Entries before the consumption
-		 * point are allocated, so including them produces false "Excess busy
-		 * extent" reports.  Skip consumed .tmp entries, mirroring the
-		 * non-forced path.
+		 * Snapshot the allocator's consumption position.  The allocator reads
+		 * free blocks from desc->freeBuf, starting with the map file and
+		 * continuing through .tmp files in num order.  The .tmp file with the
+		 * same num as the map file contains identical data (both are written
+		 * by free_extent_for_checkpoint), so consumption of either one means
+		 * the corresponding entries are allocated, not free.  We must skip
+		 * consumed entries in both the map file and the .tmp files to avoid
+		 * false "Excess busy extent" reports.
 		 */
-		map_num = chkp_tag.num;
+		if (is_compressed)
 		{
-			uint32		consumed_num = 0;
-			SeqBufTag	free_tag = {0};
-			off_t		free_off = 0;
+			BTreeMetaPage *metaPage = BTREE_GET_META(desc);
+
+			consumed_num = metaPage->freeBuf.tag.num;
+		}
+		else
+		{
+			free_tag = desc->freeBuf.shared->tag;
+			free_off = seq_buf_get_offset(&desc->freeBuf);
+		}
+
+		/*
+		 * Read free extents from the map file, skipping entries already
+		 * consumed by the allocator.
+		 */
+		{
+			off_t		map_start = sizeof(CheckpointFileHeader);
+			bool		skip_map = false;
 
 			if (is_compressed)
 			{
-				BTreeMetaPage *metaPage = BTREE_GET_META(desc);
+				if (consumed_num > map_num)
+					skip_map = true;
+			}
+			else if (free_tag.type == 'm' && free_tag.num == map_num)
+			{
+				map_start = free_off;
+			}
+			else if (free_tag.type == 't' && free_tag.num == map_num)
+			{
+				map_start = free_off + sizeof(CheckpointFileHeader);
+			}
+			else if (free_tag.num > map_num)
+			{
+				skip_map = true;
+			}
 
-				consumed_num = metaPage->freeBuf.tag.num;
+			if (!skip_map)
+				get_free_extents_from_file(&chkp_tag, map_start,
+										   free_extents, is_compressed,
+										   found);
+		}
+
+		/*
+		 * Read .tmp files for extents freed after the map file was written,
+		 * again skipping consumed entries.
+		 */
+		for (num = map_num; num <= chkp_num; num++)
+		{
+			SeqBufTag	tmp_tag = chkp_tag;
+			off_t		start_off = 0;
+
+			tmp_tag.num = num + 1;
+			tmp_tag.type = 't';
+
+			if (is_compressed)
+			{
+				if (tmp_tag.num <= consumed_num)
+					continue;
 			}
 			else
 			{
-				free_tag = desc->freeBuf.shared->tag;
-				free_off = seq_buf_get_offset(&desc->freeBuf);
+				if (free_tag.type == 't' && tmp_tag.num < free_tag.num)
+					continue;
+				if (free_tag.type == 't' && tmp_tag.num == free_tag.num)
+					start_off = free_off;
 			}
 
-			for (num = map_num; num <= chkp_num; num++)
-			{
-				SeqBufTag	tmp_tag = chkp_tag;
-				off_t		start_off = 0;
-
-				tmp_tag.num = num + 1;
-				tmp_tag.type = 't';
-
-				if (is_compressed)
-				{
-					if (tmp_tag.num <= consumed_num)
-						continue;
-				}
-				else
-				{
-					if (free_tag.type == 't' && tmp_tag.num < free_tag.num)
-						continue;
-					if (free_tag.type == 't' && tmp_tag.num == free_tag.num)
-						start_off = free_off;
-				}
-
-				get_free_extents_from_file(&tmp_tag, start_off, free_extents,
-										   is_compressed, false);
-				get_free_extents_from_seqbuf_pending(&desc->tmpBuf[(num + 1) % 2],
-													 &tmp_tag, free_extents,
-													 is_compressed);
-			}
+			get_free_extents_from_file(&tmp_tag, start_off, free_extents,
+									   is_compressed, false);
+			get_free_extents_from_seqbuf_pending(&desc->tmpBuf[(num + 1) % 2],
+												 &tmp_tag, free_extents,
+												 is_compressed);
 		}
 	}
 	else if (!is_compressed)
