@@ -309,19 +309,59 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 		 * up as an "Extent ... is neither free or busy" against a tree that
 		 * is perfectly sound.  The branch below already reads both for the
 		 * non-forced path; do the same here.
+		 *
+		 * The allocator consumes these same .tmp files via desc->freeBuf
+		 * (uncompressed) or the in-memory free-extent trees (compressed),
+		 * reusing the blocks for new pages.  Entries before the consumption
+		 * point are allocated, so including them produces false "Excess busy
+		 * extent" reports.  Skip consumed .tmp entries, mirroring the
+		 * non-forced path.
 		 */
 		map_num = chkp_tag.num;
-		for (num = map_num; num <= chkp_num; num++)
 		{
-			SeqBufTag	tmp_tag = chkp_tag;
+			uint32		consumed_num = 0;
+			SeqBufTag	free_tag = {0};
+			off_t		free_off = 0;
 
-			tmp_tag.num = num + 1;
-			tmp_tag.type = 't';
-			get_free_extents_from_file(&tmp_tag, 0, free_extents,
-									   is_compressed, false);
-			get_free_extents_from_seqbuf_pending(&desc->tmpBuf[(num + 1) % 2],
-												 &tmp_tag, free_extents,
-												 is_compressed);
+			if (is_compressed)
+			{
+				BTreeMetaPage *metaPage = BTREE_GET_META(desc);
+
+				consumed_num = metaPage->freeBuf.tag.num;
+			}
+			else
+			{
+				free_tag = desc->freeBuf.shared->tag;
+				free_off = seq_buf_get_offset(&desc->freeBuf);
+			}
+
+			for (num = map_num; num <= chkp_num; num++)
+			{
+				SeqBufTag	tmp_tag = chkp_tag;
+				off_t		start_off = 0;
+
+				tmp_tag.num = num + 1;
+				tmp_tag.type = 't';
+
+				if (is_compressed)
+				{
+					if (tmp_tag.num <= consumed_num)
+						continue;
+				}
+				else
+				{
+					if (free_tag.type == 't' && tmp_tag.num < free_tag.num)
+						continue;
+					if (free_tag.type == 't' && tmp_tag.num == free_tag.num)
+						start_off = free_off;
+				}
+
+				get_free_extents_from_file(&tmp_tag, start_off, free_extents,
+										   is_compressed, false);
+				get_free_extents_from_seqbuf_pending(&desc->tmpBuf[(num + 1) % 2],
+													 &tmp_tag, free_extents,
+													 is_compressed);
+			}
 		}
 	}
 	else if (!is_compressed)
