@@ -2087,6 +2087,9 @@ o_perform_checkpoint_guts(int flags)
 	checkpoint_state->relnode = InvalidOid;
 	checkpoint_state->tablespace = InvalidOid;
 	checkpoint_state->completed = false;
+	checkpoint_state->evictBlockTreeType = oIndexInvalid;
+	checkpoint_state->evictBlockDatoid = InvalidOid;
+	checkpoint_state->evictBlockRelnode = InvalidOid;
 	chkp_inc_changecount_after(checkpoint_state);
 
 	/* Every tree has rotated now, so a failure below is retryable again */
@@ -2917,6 +2920,55 @@ page_is_under_checkpoint(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 		return result;
 	}
+}
+
+/*
+ * Announce that the checkpointer holds this tree; see evictBlock* in
+ * CheckpointState.
+ */
+static void
+checkpoint_block_tree_eviction(BTreeDescr *desc)
+{
+	chkp_inc_changecount_before(checkpoint_state);
+	checkpoint_state->evictBlockTreeType = desc->type;
+	checkpoint_state->evictBlockDatoid = desc->oids.datoid;
+	checkpoint_state->evictBlockRelnode = desc->oids.relnode;
+	chkp_inc_changecount_after(checkpoint_state);
+}
+
+/*
+ * May an evictor take this tree apart?  Not while the checkpointer works on
+ * it, nor once it has announced that it is about to load it.
+ */
+bool
+tree_is_held_by_checkpoint(BTreeDescr *desc)
+{
+	OIndexType	type;
+	Oid			datoid,
+				relnode;
+	int			before_changecount,
+				after_changecount;
+
+	if (tree_is_under_checkpoint(desc))
+		return true;
+
+	while (true)
+	{
+		chkp_save_changecount_before(checkpoint_state, before_changecount);
+		if (before_changecount & 1)
+			continue;
+
+		type = checkpoint_state->evictBlockTreeType;
+		datoid = checkpoint_state->evictBlockDatoid;
+		relnode = checkpoint_state->evictBlockRelnode;
+
+		chkp_save_changecount_after(checkpoint_state, after_changecount);
+		if (before_changecount == after_changecount)
+			break;
+	}
+
+	return desc->oids.datoid == datoid && desc->oids.relnode == relnode &&
+		desc->type == type;
 }
 
 /*
@@ -5603,7 +5655,7 @@ check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids)
 	SharedRootInfoKey key;
 	OTuple		keyTuple;
 	OTuple		resultTuple;
-	int			lockNo;
+	LWLock	   *insertLock;
 
 	if (!skip_unmodified_trees)
 		return true;
@@ -5616,9 +5668,7 @@ check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids)
 	key.relnode = treeOids.relnode;
 	key.tablespace = treeOids.spcoid;
 
-	lockNo = tag_hash(&key, sizeof(key)) % SHARED_ROOT_INFO_INSERT_NUM_LOCKS;
-	LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo],
-				  LW_EXCLUSIVE);
+	insertLock = acquire_shared_root_info_insert_lock(&key);
 
 	keyTuple.formatFlags = 0;
 	keyTuple.data = (Pointer) &key;
@@ -5648,11 +5698,11 @@ check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids)
 			checkpoint_state->completed = true;
 			checkpoint_state->curKeyType = CurKeyFinished;
 			chkp_inc_changecount_after(checkpoint_state);
-			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo]);
+			LWLockRelease(insertLock);
 			return false;
 		}
 	}
-	LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo]);
+	LWLockRelease(insertLock);
 
 	elog(DEBUG1, "check_tree_needs_checkpointing: checkpoint (%u, %u) "
 		 "has_evicted=%d",
@@ -5703,7 +5753,15 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 			MemoryContextResetOnly(chkp_tree_context);
 			return;
 		}
-		loaded = o_btree_load_shmem_checkpoint(&descr->desc);
+
+		/*
+		 * Announce the tree before touching it.  Eviction takes no relation
+		 * lock, so this announcement is all that keeps an evictor from taking
+		 * the tree apart while we load and checkpoint it; see
+		 * o_btree_load_shmem_checkpoint_start() and evict_btree().
+		 */
+		checkpoint_block_tree_eviction(&descr->desc);
+		loaded = o_btree_load_shmem_checkpoint_start(&descr->desc);
 	}
 	if (loaded)
 	{

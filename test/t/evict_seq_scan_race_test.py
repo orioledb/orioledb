@@ -31,16 +31,14 @@ class EvictSeqScanRaceTest(BaseTest):
 	nobody appeared meanwhile.  Between the two it writes the root page and
 	frees it, with the page unlocked for the whole of that.
 
-	On a primary nobody can appear: get_evict_btree_locks() holds an
-	ordinary AccessExclusiveLock on the relation, so a reader does not get
-	past relation_open().  On a standby that lock is not taken --
-
-	    if (!recovery && !(state->indexRegularLock = ...))
-
-	-- and the scan side asks for nothing in its place: relation_get_descr()
-	answers out of rel->rd_amcache, and init_checkpoit_number() counts the
-	scan into the meta page under no lock at all.  So a read-only query on a
-	standby walks straight into the gap, which is issue #1133:
+	Tree eviction used to hold an ordinary AccessExclusiveLock on the
+	relation on a primary, which kept readers out; it takes no relation lock
+	at all now, and on a standby it never took that one.  The scan side asks
+	for nothing in its place: relation_get_descr() answers out of
+	rel->rd_amcache, and init_checkpoit_number() counts the scan into the
+	meta page under no lock at all.  So a read-only query on a standby --
+	where the gap first showed -- walks straight into it, which is issue
+	#1133:
 
 	    TRAP: meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0
 	          src/btree/io.c, in the standby's bgwriter

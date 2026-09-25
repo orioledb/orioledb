@@ -372,6 +372,8 @@ is_explain_analyze(PlanState *ps)
 
 extern void o_btree_load_shmem(BTreeDescr *desc);
 extern bool o_btree_load_shmem_checkpoint(BTreeDescr *desc);
+extern bool o_btree_load_shmem_checkpoint_start(BTreeDescr *desc);
+extern LWLock *acquire_shared_root_info_insert_lock(SharedRootInfoKey *key);
 extern bool o_btree_try_use_shmem(BTreeDescr *desc);
 
 extern SharedRootInfo *o_find_shared_root_info(SharedRootInfoKey *key);

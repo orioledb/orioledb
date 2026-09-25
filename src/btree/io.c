@@ -50,6 +50,7 @@
 #include "storage/checksum.h"
 #include "storage/checksum_impl.h"
 #include "utils/memutils.h"
+#include "utils/inval.h"
 #include "utils/syscache.h"
 #include "funcapi.h"
 
@@ -2812,6 +2813,21 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	}
 
 	/*
+	 * Ask again, now under the insert lock, whether the checkpointer has this
+	 * tree.  The answers walk_page_evict_root() got came without it, and
+	 * nothing else keeps the checkpointer out: it announces a tree in
+	 * checkpoint_state and then waits out whoever holds this lock before it
+	 * loads the tree (checkpoint_tables_callback()), so from here on either
+	 * we see its announcement or it waits for us to finish.
+	 */
+	if (tree_is_held_by_checkpoint(desc))
+	{
+		LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[evict_lockNo]);
+		unlock_page(root_blkno);
+		return false;
+	}
+
+	/*
 	 * Claim the tree, and give up if a backend is reaching into its meta
 	 * page.  Descending readers need nothing from us -- every page they touch
 	 * is checked by change count -- but a process holding the page itself has
@@ -3040,40 +3056,43 @@ index_oids_get_btree_descr_cached(ORelOids oids)
 	return desc;
 }
 
-typedef struct
-{
-	bool		indexRegularLock;
-	bool		indexCheckpointerLock;
-	bool		tableRegularLock;
-	bool		tableCheckpointerLock;
-	ORelOids	tableOids;
-} EvictBtreeLocksState;
-
 /*
- * Acquire all the locks required to completely evict the tree.  We need to
- * take both regular and checkpointer locks.  Also, for PK we need to lock
- * the table as well, because a concurrent seq scan can lock only the table.
+ * Find the descriptor of a tree whose root page is to be evicted, or say that
+ * this tree is not to be evicted now.
+ *
+ * Eviction takes no relation lock.  Other processes are kept safe without
+ * one: a descent checks every page by change count, whoever reaches into the
+ * tree's shared state directly pins its meta page (which the claim in
+ * evict_btree() respects), the checkpointer announces the tree in
+ * checkpoint_state before it loads it, and cleanup_btree() takes the same
+ * insert lock evict_btree() holds throughout.  A heavyweight lock would add
+ * nothing to that but a way to block eviction: every transaction that has so
+ * much as read a table holds one on it until it ends.
+ *
+ * What is left is this process, and transactions that have written.  This
+ * process may be evicting from inside an operation on the very tree -- page
+ * reservation runs the clock sweep -- with state a descent would not
+ * revalidate for it, so decline a tree whose relation it has locked at all.
+ * A transaction that has written to a tree (or locked rows in it, or is
+ * altering it) needs the tree for its abort, which must not have to load it
+ * back: an abort that runs out of pages fails again and again until the
+ * error stack overflows.  So decline a tree whose relation somebody holds
+ * more than AccessShareLock on -- looking, not locking.  A transaction that
+ * has only read keeps nothing loaded.  For a primary index the table counts
+ * too: a sequential scan locks only the table.
  */
 static BTreeDescr *
-get_evict_btree_locks(OInMemoryBlkno blkno, ORelOids oids,
-					  OIndexType type, EvictBtreeLocksState *state)
+get_evict_btree_descr(OInMemoryBlkno blkno, ORelOids oids, OIndexType type)
 {
 	BTreeDescr *desc;
 	OIndexDescr *id;
-	bool		recovery = is_recovery_in_progress();
-	bool		nested = false;
 
-	if (!recovery && !(state->indexRegularLock = o_tables_rel_try_lock_extended(&oids, AccessExclusiveLock, &nested, false)))
+	if (o_tables_rel_is_locked_by_me(&oids))
+		return NULL;
+	if (!is_recovery_in_progress() && o_tables_rel_has_nonread_lockers(&oids))
 		return NULL;
 
-	if (nested)
-		return NULL;
-
-	if (!(state->indexCheckpointerLock = o_tables_rel_try_lock_extended(&oids, AccessExclusiveLock, &nested, true)))
-		return NULL;
-
-	if (nested)
-		return NULL;
+	AcceptInvalidationMessages();
 
 	desc = index_oids_get_btree_descr(oids, type);
 
@@ -3084,48 +3103,15 @@ get_evict_btree_locks(OInMemoryBlkno blkno, ORelOids oids,
 	if (desc->type != oIndexPrimary)
 		return desc;
 
+	/* A ctid primary index is the table itself. */
 	id = (OIndexDescr *) desc->arg;
-	state->tableOids = id->tableOids;
-
-	/*
-	 * if primary index is ctid, then we don't need to lock the table, because
-	 * ctid is the table itself
-	 */
-	if (id->primaryIsCtid)
-		return desc;
-
-	if (!recovery && !(state->tableRegularLock = o_tables_rel_try_lock_extended(&state->tableOids, AccessExclusiveLock, &nested, false)))
-		return NULL;
-
-	if (nested)
-		return NULL;
-
-	if (!(state->tableCheckpointerLock = o_tables_rel_try_lock_extended(&state->tableOids, AccessExclusiveLock, &nested, true)))
-		return NULL;
-
-	if (nested)
-		return NULL;
-
-	desc = index_oids_get_btree_descr(oids, type);
-
-	if (desc == NULL ||
-		desc->rootInfo.rootPageBlkno != blkno)
+	if (!id->primaryIsCtid &&
+		(o_tables_rel_is_locked_by_me(&id->tableOids) ||
+		 (!is_recovery_in_progress() &&
+		  o_tables_rel_has_nonread_lockers(&id->tableOids))))
 		return NULL;
 
 	return desc;
-}
-
-static void
-release_evict_btree_locks(ORelOids oids, EvictBtreeLocksState *state)
-{
-	if (state->indexRegularLock)
-		o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, false);
-	if (state->indexCheckpointerLock)
-		o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, true);
-	if (state->tableRegularLock)
-		o_tables_rel_unlock_extended(&state->tableOids, AccessExclusiveLock, false);
-	if (state->tableCheckpointerLock)
-		o_tables_rel_unlock_extended(&state->tableOids, AccessExclusiveLock, true);
 }
 
 /*
@@ -3274,82 +3260,62 @@ walk_page_check_locked(OInMemoryBlkno blkno, bool evict,
 /*
  * Handle root page eviction in walk_page().  Called with the page lock held.
  * Manages all lock/unlock internally, including the two-pass protocol:
- * release page lock, acquire evict btree locks, re-lock and re-validate.
- * Guarantees release_evict_btree_locks() is called after get_evict_btree_locks().
+ * release page lock, look the descriptor up, re-lock and re-validate.
  */
 static OWalkPageResult
 walk_page_evict_root(BTreeDescr *desc, OInMemoryBlkno blkno,
 					 OrioleDBPageDesc *page_desc, Page p,
 					 ORelOids oids)
 {
-	EvictBtreeLocksState locksState;
 	uint32		checkpoint_number;
 	bool		copy_blkno;
 	bool		result = false;
 	int			ionum;
 
-	if (tree_is_under_checkpoint(desc))
+	if (tree_is_held_by_checkpoint(desc))
 	{
 		unlock_page(blkno);
-		return OWalkPageSkipped;
-	}
-
-	/* Release page lock before acquiring evict btree locks */
-	unlock_page(blkno);
-
-	memset(&locksState, 0, sizeof(locksState));
-
-	desc = get_evict_btree_locks(blkno, oids,
-								 page_desc->type, &locksState);
-
-	if (!desc)
-	{
-		release_evict_btree_locks(oids, &locksState);
 		return OWalkPageSkipped;
 	}
 
 	/*
-	 * Re-lock the page and re-validate all checks after acquiring evict btree
-	 * locks.
+	 * Release the page lock before accepting invalidations and looking the
+	 * descriptor up, which may read the catalog.
 	 */
-	if (!try_lock_page(blkno))
-	{
-		release_evict_btree_locks(oids, &locksState);
+	unlock_page(blkno);
+
+	desc = get_evict_btree_descr(blkno, oids, page_desc->type);
+	if (!desc)
 		return OWalkPageSkipped;
-	}
+
+	/* Re-lock the page and re-validate all checks. */
+	if (!try_lock_page(blkno))
+		return OWalkPageSkipped;
 
 	if (walk_page_check_locked(blkno, true, page_desc, p,
 							   oids, NULL, &ionum) != WalkPageCheckPassed)
-	{
-		release_evict_btree_locks(oids, &locksState);
 		return OWalkPageSkipped;
-	}
 
-	if (tree_is_under_checkpoint(desc))
+	if (tree_is_held_by_checkpoint(desc))
 	{
 		unlock_page(blkno);
-		release_evict_btree_locks(oids, &locksState);
 		return OWalkPageSkipped;
 	}
 
 	if (desc->rootInfo.rootPageBlkno != blkno)
 	{
 		unlock_page(blkno);
-		release_evict_btree_locks(oids, &locksState);
 		return OWalkPageSkipped;
 	}
 
 	if (!get_checkpoint_number(desc, blkno, &checkpoint_number, &copy_blkno))
 	{
 		unlock_page(blkno);
-		release_evict_btree_locks(oids, &locksState);
 		return OWalkPageSkipped;
 	}
 
 	result = evict_btree(desc, checkpoint_number);
 	o_invalidate_oids(oids);
-
-	release_evict_btree_locks(oids, &locksState);
 
 	/*
 	 * The tree is gone from shared memory and its pages are back in the pool,

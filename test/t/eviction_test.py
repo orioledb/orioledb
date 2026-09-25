@@ -2,7 +2,10 @@
 # coding: utf-8
 
 import re
+import time
 import unittest
+
+from threading import Thread
 
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
@@ -147,6 +150,336 @@ class EvictionTest(BaseTest):
 		con1.commit()
 
 		con1.close()
+		node.stop()
+
+	def _press_until(self, node, done, timeout):
+		"""Churn a table bigger than the pool until done() says so."""
+		con = node.connect()
+		try:
+			deadline = time.time() + timeout
+			while time.time() < deadline:
+				if done():
+					return True
+				con.execute(
+				    "UPDATE o_churn SET v = v || 'x' WHERE id <= 18000;")
+				con.commit()
+			return done()
+		finally:
+			con.close()
+
+	def _victim_and_churn(self, node):
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_victim (id int NOT NULL, v text NOT NULL,\n"
+		    "	PRIMARY KEY (id)) USING orioledb;\n"
+		    "INSERT INTO o_victim SELECT g, repeat('v', 100)\n"
+		    "	FROM generate_series(1, 20) g;\n"
+		    "CREATE TABLE o_churn (id int NOT NULL, v text NOT NULL,\n"
+		    "	PRIMARY KEY (id)) USING orioledb;\n"
+		    "INSERT INTO o_churn SELECT g, repeat('c', 400)\n"
+		    "	FROM generate_series(1, 20000) g;\n"
+		    "CHECKPOINT;")
+
+	def _victim_resident(self, node):
+		return node.execute(
+		    "SELECT count(*) FROM orioledb_table_pages('o_victim'::regclass);"
+		)[0][0] > 0
+
+	def test_eviction_ignores_open_transactions(self):
+		"""
+		A transaction that has read a table must not keep its trees loaded.
+
+		Every transaction that touches a table holds a lock on it until it
+		ends.  Tree eviction used to try-lock the relation, so an idle
+		transaction was enough to pin its tree in the pool for good -- and
+		enough of them could fill it.  Eviction now takes no relation lock.
+		"""
+		node = self.node
+		node.append_conf('postgresql.conf', "orioledb.main_buffers = 8MB\n")
+		node.start()
+		self._victim_and_churn(node)
+
+		holder = node.connect()
+		try:
+			holder.begin()
+			# A point read through the primary key loads the tree; a
+			# sequential scan of an evicted tree need not.  The pressure below
+			# has to find it resident, or the test proves nothing.
+			holder.execute("SET enable_seqscan = off;")
+			self.assertEqual(
+			    holder.execute("SELECT v FROM o_victim WHERE id = 1;")[0][0],
+			    'v' * 100)
+			self.assertTrue(self._victim_resident(node))
+
+			evicted = self._press_until(
+			    node, lambda: not self._victim_resident(node), 120)
+			self.assertTrue(
+			    evicted, "o_victim stayed loaded behind an open transaction")
+
+			# The holder still reads its table: the tree comes back from disk.
+			self.assertEqual(
+			    holder.execute("SELECT count(*), sum(id) FROM o_victim"
+			                   " WHERE id > 0;")[0], (20, 210))
+			holder.commit()
+		finally:
+			holder.close()
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_victim'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def test_eviction_keeps_trees_of_writers(self):
+		"""
+		A transaction that has written to a table keeps its tree loaded.
+
+		Its abort needs the tree, and must not have to load it back: an abort
+		that runs out of pages fails again and again until the error stack
+		overflows.  Eviction declines a tree whose relation somebody holds
+		more than AccessShareLock on.
+		"""
+		node = self.node
+		node.append_conf('postgresql.conf', "orioledb.main_buffers = 8MB\n")
+		node.start()
+		self._victim_and_churn(node)
+
+		writer = node.connect()
+		try:
+			writer.begin()
+			writer.execute("INSERT INTO o_victim VALUES (100, 'w');")
+			self.assertTrue(self._victim_resident(node))
+
+			evicted = self._press_until(
+			    node, lambda: not self._victim_resident(node), 20)
+			self.assertFalse(evicted,
+			                 "o_victim evicted under a writing transaction")
+			writer.rollback()
+		finally:
+			writer.close()
+		self.assertEqual(
+		    node.execute("SELECT count(*), sum(id) FROM o_victim"
+		                 " WHERE id > 0;")[0], (20, 210))
+		node.stop()
+
+	# How long to keep the pool under pressure waiting for an eviction to
+	# reach a stop event.  A valgrind cell is twenty times slower; an attempt
+	# that never parks is skipped, since it tested nothing.
+	PARK_TIMEOUT = 300
+
+	def _start_pressure(self, node):
+		"""Churn on a thread of its own: it may be the one that parks."""
+		stop = []
+		failed = []
+
+		def press():
+			con = node.connect()
+			try:
+				while not stop:
+					con.execute("UPDATE o_churn SET v = v || 'x'"
+					            " WHERE id <= 18000;")
+					con.commit()
+			except Exception as e:  # noqa: BLE001 - reported by the caller
+				failed.append(e)
+			finally:
+				try:
+					con.close()
+				except Exception:  # noqa: BLE001 - teardown
+					pass
+
+		thread = Thread(target=press)
+		thread.start()
+		return thread, stop, failed
+
+	def _waiters(self, con, event):
+		rows = con.execute("SELECT waiter_pids FROM pg_stopevents()"
+		                   " WHERE stopevent = '%s';" % event)
+		return rows[0][0] if rows and rows[0][0] else None
+
+	def _wait_parked(self, con, event, failed):
+		deadline = time.time() + self.PARK_TIMEOUT
+		while time.time() < deadline and not failed:
+			if self._waiters(con, event):
+				return True
+			time.sleep(0.05)
+		return False
+
+	def _eviction_node(self):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.main_buffers = 8MB\n"
+		    "orioledb.enable_stopevents = true\n"
+		    "checkpoint_timeout = 1h\n")
+		node.start()
+		self._victim_and_churn(node)
+		# Resident, so that it is its root the pressure evicts.
+		node.execute("SET enable_seqscan = off;"
+		             " SELECT v FROM o_victim WHERE id = 1;")
+		return node
+
+	def test_eviction_waits_for_checkpointer(self):
+		"""
+		A tree the checkpointer works on must stay loaded.
+
+		Eviction takes no relation lock, so the checkpointer's own lock no
+		longer keeps an evictor away: the announcement in checkpoint_state
+		does.  Park the checkpointer inside the victim and press the pool.
+		"""
+		node = self._eviction_node()
+		ctrl = node.connect()
+		ctrl.execute("SELECT pg_stopevent_set('checkpoint_index_start',"
+		             " '$.treeName == \"o_victim_pkey\"');")
+		chkp = None
+		presser = None
+		stop = []
+		try:
+			chkp = Thread(target=lambda: node.safe_psql('CHECKPOINT;'))
+			chkp.start()
+			self.assertTrue(
+			    self._wait_parked(ctrl, 'checkpoint_index_start', []),
+			    "checkpointer never reached the victim")
+
+			presser, stop, failed = self._start_pressure(node)
+			deadline = time.time() + 20
+			while time.time() < deadline and not failed:
+				self.assertTrue(self._victim_resident(node),
+				                "o_victim evicted under the checkpointer")
+				time.sleep(0.2)
+			self.assertEqual(failed, [])
+		finally:
+			stop.append(True)
+			ctrl.execute(
+			    "SELECT pg_stopevent_reset('checkpoint_index_start');")
+			if presser is not None:
+				presser.join(timeout=self.PARK_TIMEOUT)
+			if chkp is not None:
+				chkp.join(timeout=self.PARK_TIMEOUT)
+			ctrl.close()
+
+		self.assertEqual(
+		    node.execute("SELECT count(*), sum(id) FROM o_victim"
+		                 " WHERE id > 0;")[0], (20, 210))
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_victim'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def _park_victim_eviction(self, node, ctrl):
+		"""Press the pool until an eviction of the victim's root parks."""
+		ctrl.execute("SELECT pg_stopevent_set('after_tree_root_page_write',"
+		             " '$.treeName == \"o_victim_pkey\"');")
+		presser, stop, failed = self._start_pressure(node)
+		parked = self._wait_parked(ctrl, 'after_tree_root_page_write', failed)
+		stop.append(True)
+		return presser, parked, failed
+
+	def test_checkpoint_waits_for_eviction(self):
+		"""
+		The checkpointer must not load a tree an eviction is taking apart.
+
+		An eviction that asked whether the checkpointer holds the tree before
+		the checkpointer announced it goes ahead.  So once it has announced
+		the tree, the checkpointer waits out whoever holds the tree's shared
+		root info insert lock -- evict_btree() holds it from start to finish --
+		before it loads the tree; otherwise it would checkpoint pages the
+		eviction is about to hand back.
+
+		Park the checkpointer where it has picked the victim but not announced
+		it yet, park an eviction of the victim past its checks, then let the
+		checkpointer go: it has to wait for the eviction.
+		"""
+		node = self._eviction_node()
+		ctrl = node.connect()
+		presser = None
+		chkp = None
+		done = []
+		armed = []
+		try:
+			pkey = ctrl.execute("SELECT 'o_victim_pkey'::regclass::oid;")[0][0]
+			ctrl.execute("SELECT pg_stopevent_set('checkpoint_table_start',"
+			             " '$.tree.reloid == %d');" % pkey)
+			armed.append('checkpoint_table_start')
+
+			def checkpoint():
+				node.safe_psql('CHECKPOINT;')
+				done.append(True)
+
+			chkp = Thread(target=checkpoint)
+			chkp.start()
+			self.assertTrue(
+			    self._wait_parked(ctrl, 'checkpoint_table_start', []),
+			    "checkpointer never reached the victim")
+
+			armed.append('after_tree_root_page_write')
+			presser, parked, failed = self._park_victim_eviction(node, ctrl)
+			if not parked:
+				self.skipTest("no eviction of the victim parked: %s" %
+				              failed[:1])
+
+			ctrl.execute(
+			    "SELECT pg_stopevent_reset('checkpoint_table_start');")
+			armed.remove('checkpoint_table_start')
+			time.sleep(3)
+			self.assertEqual(done, [], "checkpoint went past the eviction")
+		finally:
+			for event in armed:
+				ctrl.execute("SELECT pg_stopevent_reset('%s');" % event)
+			if presser is not None:
+				presser.join(timeout=self.PARK_TIMEOUT)
+			if chkp is not None:
+				chkp.join(timeout=self.PARK_TIMEOUT)
+			ctrl.close()
+
+		self.assertEqual(done, [True])
+		self.assertEqual(
+		    node.execute("SELECT count(*), sum(id) FROM o_victim"
+		                 " WHERE id > 0;")[0], (20, 210))
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_victim'::regclass);")[0]
+		    [0])
+		node.stop()
+
+	def test_drop_waits_for_eviction(self):
+		"""
+		Dropping a tree while it is being evicted must not free it twice.
+
+		cleanup_btree() takes the insert lock evict_btree() holds, so the drop
+		waits and then finds the tree already evicted.
+		"""
+		node = self._eviction_node()
+		ctrl = node.connect()
+		presser = None
+		dropper = None
+		done = []
+		try:
+			presser, parked, failed = self._park_victim_eviction(node, ctrl)
+			if not parked:
+				self.skipTest("no eviction of the victim parked: %s" %
+				              failed[:1])
+
+			def drop():
+				node.safe_psql('DROP TABLE o_victim;')
+				done.append(True)
+
+			dropper = Thread(target=drop)
+			dropper.start()
+			time.sleep(3)
+			self.assertEqual(done, [], "drop went past the eviction")
+		finally:
+			ctrl.execute(
+			    "SELECT pg_stopevent_reset('after_tree_root_page_write');")
+			if presser is not None:
+				presser.join(timeout=self.PARK_TIMEOUT)
+			if dropper is not None:
+				dropper.join(timeout=self.PARK_TIMEOUT)
+			ctrl.close()
+
+		self.assertEqual(done, [True])
+		# The pool is whole: new trees get pages and keep their rows.
+		node.safe_psql(
+		    "CREATE TABLE o_after (id int PRIMARY KEY) USING orioledb;"
+		    "INSERT INTO o_after SELECT generate_series(1, 1000);"
+		    "CHECKPOINT;")
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_after;")[0][0], 1000)
 		node.stop()
 
 	def test_eviction_tree(self):
