@@ -36,6 +36,7 @@
 #include "access/hash.h"
 #include "access/heapam.h"
 #include "access/transam.h"
+#include "access/xlogutils.h"
 #include "catalog/heap.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_am.h"
@@ -1834,6 +1835,43 @@ o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 								   O_INVALIDATE_OIDS_ON_ABORT);
 		o_invalidate_oids(o_table->toast_oids);
 	}
+}
+
+/*
+ * Does this backend hold a lock on the relation, of either flavour?  Only
+ * looks at the local lock table, so it says nothing about other backends and
+ * never waits.  (A lock taken with NO_LOG_LOCKMETHOD is recorded under
+ * DEFAULT_LOCKMETHOD: LockAcquireExtended() rewrites the tag.)
+ */
+bool
+o_tables_rel_is_locked_by_me(ORelOids *oids)
+{
+	LOCKTAG		locktag;
+
+	o_tables_rel_fill_locktag(&locktag, oids, AccessShareLock, false);
+	if (DoLocalLockExist(&locktag))
+		return true;
+	o_tables_rel_fill_locktag(&locktag, oids, AccessShareLock, true);
+	return DoLocalLockExist(&locktag);
+}
+
+/*
+ * Does some other backend hold a lock on the relation stronger than
+ * AccessShareLock -- that is, is anybody but a plain reader in it?  Takes no
+ * lock itself, only looks at who holds one.
+ */
+bool
+o_tables_rel_has_nonread_lockers(ORelOids *oids)
+{
+	LOCKTAG		locktag;
+	VirtualTransactionId *vxids;
+	int			count;
+
+	o_tables_rel_fill_locktag(&locktag, oids, AccessShareLock, false);
+	vxids = GetLockConflicts(&locktag, ExclusiveLock, &count);
+	if (!InHotStandby)
+		pfree(vxids);
+	return count > 0;
 }
 
 /*
