@@ -44,6 +44,7 @@
 #include "executor/functions.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "postmaster/bgwriter.h"
 #include "parser/parse_coerce.h"
 #include "utils/builtins.h"
 #include "utils/fmgrtab.h"
@@ -577,6 +578,76 @@ bool
 o_btree_load_shmem_checkpoint(BTreeDescr *desc)
 {
 	return o_btree_load_shmem_internal(desc, true);
+}
+
+/*
+ * Take the insert lock of a tree's shared root info entry.  evict_btree()
+ * holds it from start to finish, so taking it also waits out an eviction of
+ * the tree in progress.
+ *
+ * That eviction may be blocked in RegisterSyncRequest(), waiting for the
+ * checkpointer to drain its request queue, so the checkpointer must not sleep
+ * on the lock: it keeps draining instead, the same invisible deadlock
+ * o_tables_rel_lock_extended() spells out.
+ */
+LWLock *
+acquire_shared_root_info_insert_lock(SharedRootInfoKey *key)
+{
+	LWLock	   *lock;
+
+	/*
+	 * Initializing a system tree takes one of these locks itself
+	 * (sys_tree_init_if_needed()), so set up the ones used under it -- the
+	 * shared root info and evicted data trees -- before taking it, or a
+	 * process meeting them for the first time here, like the startup process
+	 * replaying a drop, waits for itself.
+	 */
+	(void) get_sys_tree(SYS_TREES_SHARED_ROOT_INFO);
+	(void) get_sys_tree(SYS_TREES_EVICTED_DATA);
+
+	lock = &checkpoint_state->oSharedRootInfoInsertLocks[tag_hash(key, sizeof(*key)) %
+														 SHARED_ROOT_INFO_INSERT_NUM_LOCKS];
+
+	if (!AmCheckpointerProcess())
+	{
+		LWLockAcquire(lock, LW_EXCLUSIVE);
+		return lock;
+	}
+
+	while (!LWLockConditionalAcquire(lock, LW_EXCLUSIVE))
+	{
+		AbsorbSyncRequests();
+		pg_usleep(1000L);
+		CHECK_FOR_INTERRUPTS();
+	}
+	return lock;
+}
+
+/*
+ * Load a tree the checkpointer is about to checkpoint.  The caller has
+ * already announced the tree in checkpoint_state, and holds its checkpointer
+ * lock, so the tree cannot be dropped meanwhile.
+ *
+ * An eviction of the tree that started before the announcement may still be
+ * running, so wait it out first: evict_btree() rechecks the announcement
+ * under the insert lock, so once we have had that lock nobody else starts
+ * one.  Then load it the ordinary way -- a tree that is not in shared memory
+ * now has been evicted, not dropped, and has to be read back.
+ */
+bool
+o_btree_load_shmem_checkpoint_start(BTreeDescr *desc)
+{
+	SharedRootInfoKey key;
+
+	Assert(tree_is_held_by_checkpoint(desc));
+
+	memset(&key, 0, sizeof(SharedRootInfoKey));
+	key.datoid = desc->oids.datoid;
+	key.relnode = desc->oids.relnode;
+	key.tablespace = desc->oids.spcoid;
+	LWLockRelease(acquire_shared_root_info_insert_lock(&key));
+
+	return o_btree_load_shmem_internal(desc, false);
 }
 
 /*
@@ -1528,10 +1599,21 @@ cleanup_btree(OIndexKey ix_key, bool files, bool fsync)
 {
 	SharedRootInfoKey key;
 	SharedRootInfo *shared = NULL;
+	LWLock	   *insertLock;
 
+	memset(&key, 0, sizeof(SharedRootInfoKey));
 	key.datoid = ix_key.oids.datoid;
 	key.relnode = ix_key.oids.relnode;
 	key.tablespace = ix_key.oids.spcoid;
+
+	/*
+	 * Keep the evictor out while the tree's pages go back to the pool, or
+	 * both of us would free them.  Eviction takes no relation lock, but it
+	 * holds this insert lock throughout, so one of us waits for the other.
+	 * Let it go before removing the files, which may wait for the
+	 * checkpointer.
+	 */
+	insertLock = acquire_shared_root_info_insert_lock(&key);
 
 	shared = o_find_shared_root_info(&key);
 
@@ -1548,6 +1630,8 @@ cleanup_btree(OIndexKey ix_key, bool files, bool fsync)
 								  shared->rootInfo.rootPageChangeCount);
 		pfree(shared);
 	}
+	LWLockRelease(insertLock);
+
 	if (files)
 		cleanup_btree_files(ix_key, fsync);
 }

@@ -281,6 +281,8 @@ OTable	   *deserialize_o_table(Pointer data, Size length);
  * TableAM handler functions are already protected by top-level, there are no
  * need on this locks nested TableAM handler functions.
  */
+extern bool o_tables_rel_is_locked_by_me(ORelOids *oids);
+extern bool o_tables_rel_has_nonread_lockers(ORelOids *oids);
 extern bool o_tables_rel_try_lock_extended(ORelOids *oids, int lockmode, bool *nested, bool checkpoint);
 extern void o_tables_rel_lock_extended(ORelOids *oids, int lockmode, bool checkpoint);
 extern void o_tables_rel_lock_extended_no_inval(ORelOids *oids, int lockmode,
