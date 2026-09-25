@@ -2295,6 +2295,9 @@ iterate_internal_page(BTreeSeqScan *scan)
 
 				if (result == ReadPageResultOK)
 				{
+					/* The leaf is at the memory => hit.  */
+					o_btree_count_page_hit(scan->desc);
+
 					check_in_memory_leaf_page(scan, scan->keyRangeLow.tuple, scan->keyRangeHigh.tuple);
 					if (scan->iter)
 						return true;

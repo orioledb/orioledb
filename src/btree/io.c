@@ -1458,6 +1458,11 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 	Assert(FileExtentOffIsValid(offset));
 	Assert(FileExtentLenIsValid(len));
 
+	/*
+	 * Every page heere provokes a read (not just a hit).
+	 */
+	o_btree_count_page_read(desc);
+
 	extent->off = offset;
 	extent->len = len;
 
