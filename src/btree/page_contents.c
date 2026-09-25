@@ -964,6 +964,38 @@ btree_page_update_max_key_len(BTreeDescr *desc, Page p)
 static OInMemoryBlkno claimedMetaPageBlkno = OInvalidInMemoryBlkno;
 
 /*
+ * This backend's pins, innermost last.  A pin of a tree already pinned only
+ * deepens the stack; the first pin of a tree takes one of the slots in
+ * ODBProcData, and the last unpin of it frees the slot.  Pins are strictly
+ * nested -- each is dropped in the function that took it -- so the stack
+ * tells btree_unpin_meta_page() which one it drops.
+ */
+#define META_PAGE_PIN_STACK_SIZE 16
+static OInMemoryBlkno pinStack[META_PAGE_PIN_STACK_SIZE];
+static bool pinStackPublished[META_PAGE_PIN_STACK_SIZE];
+static int	pinStackLen = 0;
+
+static void
+push_unpublished_pin(OInMemoryBlkno blkno)
+{
+	if (pinStackLen >= META_PAGE_PIN_STACK_SIZE)
+		elog(ERROR, "too many nested meta page pins");
+	pinStack[pinStackLen] = blkno;
+	pinStackPublished[pinStackLen++] = false;
+}
+
+static int
+pinned_slot_of(ODBProcData *procData, OInMemoryBlkno blkno)
+{
+	int			i;
+
+	for (i = 0; i < ORIOLEDB_META_PAGE_PIN_SLOTS; i++)
+		if ((OInMemoryBlkno) pg_atomic_read_u32(&procData->pinnedMetaPageBlkno[i]) == blkno)
+			return i;
+	return -1;
+}
+
+/*
  * Say that this backend is about to reach into a tree's shared state, and
  * report whether it may.
  *
@@ -991,17 +1023,38 @@ btree_pin_meta_page(BTreeDescr *desc)
 {
 	ODBProcData *procData = GET_CUR_PROCDATA();
 	BTreeMetaPage *metaPage;
-
-	Assert(!OInMemoryBlknoIsValid((OInMemoryBlkno) pg_atomic_read_u32(&procData->pinnedMetaPageBlkno)));
+	OInMemoryBlkno blkno;
+	int			slot;
+	int			i;
 
 	if (!OMetaPageIsValid(desc))
 		return false;
 
-	if (claimedMetaPageBlkno == desc->rootInfo.metaPageBlkno)
-		return true;
+	blkno = desc->rootInfo.metaPageBlkno;
 
-	pg_atomic_write_u32(&procData->pinnedMetaPageBlkno,
-						(uint32) desc->rootInfo.metaPageBlkno);
+	if (pinStackLen >= META_PAGE_PIN_STACK_SIZE)
+		elog(ERROR, "too many nested meta page pins");
+
+	/* The claim this backend holds, or a pin it already has, suffices. */
+	if (claimedMetaPageBlkno == blkno)
+	{
+		push_unpublished_pin(blkno);
+		return true;
+	}
+	for (i = 0; i < pinStackLen; i++)
+	{
+		if (pinStack[i] == blkno && pinStackPublished[i])
+		{
+			push_unpublished_pin(blkno);
+			return true;
+		}
+	}
+
+	slot = pinned_slot_of(procData, OInvalidInMemoryBlkno);
+	if (slot < 0)
+		elog(ERROR, "no free meta page pin slot");
+
+	pg_atomic_write_u32(&procData->pinnedMetaPageBlkno[slot], (uint32) blkno);
 	pg_memory_barrier();
 
 	metaPage = BTREE_GET_META(desc);
@@ -1009,10 +1062,13 @@ btree_pin_meta_page(BTreeDescr *desc)
 	if (pg_atomic_read_u32(&metaPage->evictClaim) != 0 ||
 		!BTREE_META_PAGE_IS_OURS(desc))
 	{
-		btree_unpin_meta_page();
+		pg_atomic_write_u32(&procData->pinnedMetaPageBlkno[slot],
+							(uint32) OInvalidInMemoryBlkno);
 		return false;
 	}
 
+	pinStack[pinStackLen] = blkno;
+	pinStackPublished[pinStackLen++] = true;
 	return true;
 }
 
@@ -1024,8 +1080,9 @@ btree_pin_meta_page(BTreeDescr *desc)
  * A refused pin means the tree is gone or going, so drop what the descriptor
  * names and load it again -- the same answer find_page() gives a root whose
  * change count does not match.  A temporary tree lives in a backend-local
- * pool and is nobody else's to evict, so it is loaded and left unpinned;
- * unpinning it afterwards is harmless either way.
+ * pool and is nobody else's to evict, so it is loaded and left unpinned --
+ * though it still goes on the stack, so that the caller's unpin drops it and
+ * not an outer pin.
  *
  * The evictor we may be waiting out can be blocked in RegisterSyncRequest()
  * waiting for the checkpointer to drain the sync request queue, so when the
@@ -1041,6 +1098,7 @@ o_btree_load_shmem_pinned(BTreeDescr *desc)
 	if (desc->storageType == BTreeStorageTemporary)
 	{
 		o_btree_load_shmem(desc);
+		push_unpublished_pin(desc->rootInfo.metaPageBlkno);
 		return;
 	}
 
@@ -1072,8 +1130,37 @@ o_btree_load_shmem_pinned(BTreeDescr *desc)
 void
 btree_unpin_meta_page(void)
 {
-	pg_atomic_write_u32(&GET_CUR_PROCDATA()->pinnedMetaPageBlkno,
+	ODBProcData *procData = GET_CUR_PROCDATA();
+	int			slot;
+
+	/* The error path may have dropped them all already. */
+	if (pinStackLen == 0)
+		return;
+
+	pinStackLen--;
+	if (!pinStackPublished[pinStackLen])
+		return;
+
+	slot = pinned_slot_of(procData, pinStack[pinStackLen]);
+	Assert(slot >= 0);
+	pg_atomic_write_u32(&procData->pinnedMetaPageBlkno[slot],
 						(uint32) OInvalidInMemoryBlkno);
+}
+
+/*
+ * Drop every pin, for the error path and process exit, where the functions
+ * that took them are gone.
+ */
+void
+btree_unpin_all_meta_pages(void)
+{
+	ODBProcData *procData = GET_CUR_PROCDATA();
+	int			i;
+
+	pinStackLen = 0;
+	for (i = 0; i < ORIOLEDB_META_PAGE_PIN_SLOTS; i++)
+		pg_atomic_write_u32(&procData->pinnedMetaPageBlkno[i],
+							(uint32) OInvalidInMemoryBlkno);
 }
 
 /*
@@ -1102,8 +1189,7 @@ btree_claim_meta_page_for_eviction(BTreeDescr *desc)
 
 	for (i = 0; i < max_procs; i++)
 	{
-		if ((OInMemoryBlkno) pg_atomic_read_u32(&oProcData[i].pinnedMetaPageBlkno) ==
-			metaPageBlkno)
+		if (pinned_slot_of(&oProcData[i], metaPageBlkno) >= 0)
 		{
 			btree_release_meta_page_claim();
 			return false;

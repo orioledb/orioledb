@@ -3444,6 +3444,15 @@ btree_seq_scans_reregister(BTreeDescr *desc)
 	if (!OMetaPageIsValid(desc))
 		return;
 
+	/*
+	 * Counting a scan into the meta page writes to it, and nothing keeps the
+	 * tree loaded meanwhile.  A refusal means the tree is being evicted:
+	 * leave the scans where they are, and the reload that follows the
+	 * eviction lands here again with the next meta page.
+	 */
+	if (!btree_pin_meta_page(desc))
+		return;
+
 	dlist_foreach(iter, &listOfScans)
 	{
 		BTreeSeqScan *scan = dlist_container(BTreeSeqScan, listNode, iter.cur);
@@ -3460,6 +3469,8 @@ btree_seq_scans_reregister(BTreeDescr *desc)
 		scan->registeredMetaPageBlkno = desc->rootInfo.metaPageBlkno;
 		scan->registeredMetaPageChangeCount = desc->rootInfo.metaPageChangeCount;
 	}
+
+	btree_unpin_meta_page();
 }
 
 /*

@@ -192,6 +192,17 @@ typedef struct
 	bool		completed;
 	CurKeyType	curKeyType;
 	OFixedShmemKey curKeyValue;
+
+	/*
+	 * The tree the checkpointer holds apart from the one above: announced
+	 * before it loads a tree, so that no eviction takes it apart meanwhile,
+	 * and kept until the next tree or the end of the checkpoint.  It is not
+	 * part of the checkpoint position -- get_cur_checkpoint_number() must not
+	 * see a tree the checkpointer has not started as one it is working on.
+	 */
+	OIndexType	evictBlockTreeType;
+	Oid			evictBlockDatoid;
+	Oid			evictBlockRelnode;
 	CheckpointPageInfo stack[ORIOLEDB_MAX_DEPTH];
 	/* pid of the worker */
 	pid_t		pid;
@@ -287,6 +298,7 @@ extern void o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo,
 extern bool page_is_under_checkpoint(BTreeDescr *desc, OInMemoryBlkno blkno,
 									 bool includingHikeyBlkno);
 extern bool tree_is_under_checkpoint(BTreeDescr *desc);
+extern bool tree_is_held_by_checkpoint(BTreeDescr *desc);
 extern bool get_checkpoint_number(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 *checkpoint_number, bool *copy_blkno);
 extern uint32 get_cur_checkpoint_number(ORelOids *oids, OIndexType type, bool *checkpoint_concurrent);
 extern bool can_use_checkpoint_extents(BTreeDescr *desc, uint32 chkp_num);

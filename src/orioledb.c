@@ -1629,8 +1629,9 @@ o_proc_shmem_init(Pointer ptr, bool found)
 			pg_atomic_init_u64(&oProcData[i].xmin, InvalidOXid);
 			pg_atomic_init_u64(&oProcData[i].pendingSkUndoHead, InvalidUndoLocation);
 			pg_atomic_init_u64(&oProcData[i].pendingSkUndoTail, InvalidUndoLocation);
-			pg_atomic_init_u32(&oProcData[i].pinnedMetaPageBlkno,
-							   (uint32) OInvalidInMemoryBlkno);
+			for (j = 0; j < ORIOLEDB_META_PAGE_PIN_SLOTS; j++)
+				pg_atomic_init_u32(&oProcData[i].pinnedMetaPageBlkno[j],
+								   (uint32) OInvalidInMemoryBlkno);
 			oProcData[i].autonomousNestingLevel = 0;
 			memset(&oProcData[i].vxids, 0, sizeof(oProcData[i].vxids));
 			LWLockInitialize(&oProcData[i].undoStackLocationsFlushLock,
@@ -1729,7 +1730,7 @@ orioledb_on_shmem_exit(int code, Datum arg)
 		 * a meta page that nothing clears, or a claim on a tree that nothing
 		 * drops.
 		 */
-		btree_unpin_meta_page();
+		btree_unpin_all_meta_pages();
 		btree_release_meta_page_claim();
 	}
 
@@ -2286,7 +2287,7 @@ orioledb_error_cleanup_hook(void)
 
 	GET_CUR_PROCDATA()->waitingForOxid = false;
 	clear_pending_sk_marker();
-	btree_unpin_meta_page();
+	btree_unpin_all_meta_pages();
 	btree_release_meta_page_claim();
 	release_all_page_locks();
 	ppool_release_all_pages();
