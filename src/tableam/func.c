@@ -1333,8 +1333,8 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 	orioledb_check_shmem();
 
 	/*
-	 * ExclusiveLock helps to avoid changes in map/tmp files and concurrent
-	 * eviction by bgwriter
+	 * ExclusiveLock helps to avoid changes in map/tmp files; the pin taken
+	 * for each tree below keeps it from being evicted.
 	 */
 	rel = relation_open(relid, AccessExclusiveLock);
 	descr = relation_get_descr(rel);
@@ -1349,8 +1349,9 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 		OIndexDescr *idx = descr->indices[i];
 
 		o_tables_rel_lock_extended(&idx->oids, AccessExclusiveLock, true);
-		o_btree_load_shmem(&idx->desc);
+		o_btree_load_shmem_pinned(&idx->desc);
 		result = check_btree(&idx->desc, force_map_check, false);
+		btree_unpin_meta_page();
 		o_tables_rel_unlock_extended(&idx->oids, AccessExclusiveLock, true);
 
 		if (result == false)
@@ -1395,8 +1396,9 @@ verify_orioledb(PG_FUNCTION_ARGS)
 		bool		success;
 
 		o_tables_rel_lock_extended(&idx->oids, AccessExclusiveLock, true);
-		o_btree_load_shmem(&idx->desc);
+		o_btree_load_shmem_pinned(&idx->desc);
 		success = check_btree(&idx->desc, thorough_check, true);
+		btree_unpin_meta_page();
 		o_tables_rel_unlock_extended(&idx->oids, AccessExclusiveLock, true);
 
 		if (!success)

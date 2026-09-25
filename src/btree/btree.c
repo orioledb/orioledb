@@ -287,10 +287,16 @@ btree_ctid_from_seq(uint64 ctid)
 ItemPointerData
 btree_ctid_get_and_inc(BTreeDescr *desc)
 {
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
-	uint64		ctid = pg_atomic_fetch_add_u64(&metaPageBlkno->ctid, 1);
+	uint64		ctid;
 
-	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc));
+	/*
+	 * Nothing keeps the tree loaded while a backend inserts into it -- tree
+	 * eviction takes no relation lock -- so pin the page the counter lives
+	 * in.
+	 */
+	o_btree_load_shmem_pinned(desc);
+	ctid = pg_atomic_fetch_add_u64(&BTREE_GET_META(desc)->ctid, 1);
+	btree_unpin_meta_page();
 
 	return btree_ctid_from_seq(ctid);
 }
@@ -332,13 +338,14 @@ btree_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid)
 ItemPointerData
 btree_bridge_ctid_get_and_inc(BTreeDescr *desc, bool *overflow)
 {
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
 	ItemPointerData result;
-	uint64		ctid = pg_atomic_fetch_add_u64(&metaPageBlkno->bridge_ctid, 1);
-
+	uint64		ctid;
 	BlockNumber max_block_number = MaxBlockNumber;
 
-	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc));
+	/* See btree_ctid_get_and_inc(). */
+	o_btree_load_shmem_pinned(desc);
+	ctid = pg_atomic_fetch_add_u64(&BTREE_GET_META(desc)->bridge_ctid, 1);
+	btree_unpin_meta_page();
 
 	if (BlockNumberIsValid(max_bridge_ctid_blkno))
 		max_block_number = max_bridge_ctid_blkno;
