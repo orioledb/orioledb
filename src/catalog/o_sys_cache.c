@@ -960,100 +960,143 @@ o_sys_cache_update_if_needed(OSysCache *sys_cache, OSysCacheKey *key,
  * size.  Flipping it in place needs no undo record and no WAL: replaying the
  * same undo record after another crash sets it to the same value again.
  *
- * Returns false when the entry is not in the tree, which the caller has to
- * be ready for -- it may have been cleaned up by LSN in the meantime.
+ * When clearing deleted (new_value=false), the entry may have been
+ * B-tree-deleted by o_sys_cache_delete_by_lsn during a checkpoint before
+ * the crash.  In that case tupHdr->deleted is also cleared and, for toast
+ * caches, all subsequent chunks are un-B-tree-deleted as well.
+ *
+ * exact_lsn: when true, the entry pointer carries the B-tree entry's
+ * actual LSN and the search is pinned to that version.  When false (the
+ * undo fallback path), the LSN may differ from the B-tree entry's, so
+ * the search uses a bound that ignores LSN.
+ *
+ * Returns false when the entry is not in the tree at all, i.e. it has been
+ * compacted away after B-tree deletion.
  */
 static bool
-set_deleted_in_place(OSysCache *sys_cache, Pointer entry, bool new_value)
+set_deleted_in_place(OSysCache *sys_cache, Pointer entry, bool new_value,
+					 bool exact_lsn)
 {
 	BTreeDescr *desc = get_sys_tree(sys_cache->sys_tree_num);
 	OBTreeFindPageContext context;
 	OBtreePageFindItem *item;
 	OSysCacheToastKeyBound toast_key = {0};
+	OSysCacheBound bound = {0};
 	OTuple		keyTuple;
 	OTuple		pageTuple;
+	Pointer		keyPtr;
 	BTreeKeyType keyType;
-	Pointer		flag;
 	Page		p;
+	uint32		chunknum = 0;
+	bool		first_was_btree_deleted = false;
 
 	Assert(is_recovery_process());
 
 	if (!sys_cache->is_toast)
 	{
-		/*
-		 * The entry is the leaf tuple itself, so use it as the key: unlike a
-		 * bound, that pins the version by lsn as well.
-		 */
-		keyTuple.formatFlags = 0;
-		keyTuple.data = entry;
-		keyType = BTreeKeyLeafTuple;
+		if (exact_lsn)
+		{
+			keyTuple.formatFlags = 0;
+			keyTuple.data = entry;
+			keyPtr = (Pointer) &keyTuple;
+			keyType = BTreeKeyLeafTuple;
+		}
+		else
+		{
+			bound.key = (OSysCacheKey *) entry;
+			bound.nkeys = sys_cache->nkeys;
+			keyPtr = (Pointer) &bound;
+			keyType = BTreeKeyBound;
+		}
 	}
 	else
 	{
-		/* The flag is at the head of the entry, hence in its first chunk */
 		toast_key.common.chunknum = 0;
 		toast_key.key = (OSysCacheKey *) entry;
-		toast_key.lsn_cmp = true;
-		keyTuple.formatFlags = 0;
-		keyTuple.data = (Pointer) &toast_key;
+		toast_key.lsn_cmp = exact_lsn;
+		keyPtr = (Pointer) &toast_key;
 		keyType = BTreeKeyBound;
 	}
 
-	init_page_find_context(&context, desc, COMMITSEQNO_INPROGRESS,
-						   BTREE_PAGE_FIND_MODIFY);
-	if (find_page(&context, keyType == BTreeKeyBound ?
-				  (Pointer) &toast_key : (Pointer) &keyTuple,
-				  keyType, 0) != OFindPageResultSuccess)
-		return false;
-
-	item = &context.items[context.index];
-	p = O_GET_IN_MEMORY_PAGE(item->blkno);
-
-	if (!BTREE_PAGE_LOCATOR_IS_VALID(p, &item->locator))
+	for (;;)
 	{
+		BTreeLeafTuphdr *tupHdr;
+		Pointer		flag;
+
+		init_page_find_context(&context, desc, COMMITSEQNO_INPROGRESS,
+							   BTREE_PAGE_FIND_MODIFY);
+		if (find_page(&context, keyPtr, keyType, 0) != OFindPageResultSuccess)
+			return chunknum > 0;
+
+		item = &context.items[context.index];
+		p = O_GET_IN_MEMORY_PAGE(item->blkno);
+
+		if (!BTREE_PAGE_LOCATOR_IS_VALID(p, &item->locator))
+		{
+			unlock_page(item->blkno);
+			return chunknum > 0;
+		}
+
+		BTREE_PAGE_READ_LEAF_ITEM(tupHdr, pageTuple, p, &item->locator);
+
+		/* find_page() lands on the first item at or after the key */
+		if (o_btree_cmp(desc, &pageTuple, BTreeKeyLeafTuple,
+						keyPtr, keyType) != 0)
+		{
+			unlock_page(item->blkno);
+			return chunknum > 0;
+		}
+
+		START_CRIT_SECTION();
+		page_block_reads(item->blkno);
+
+		/* Clear B-tree-level deletion if the tuple was physically deleted */
+		if (!new_value && tupHdr->deleted != BTreeLeafTupleNonDeleted)
+		{
+			if (chunknum == 0)
+				first_was_btree_deleted = true;
+			tupHdr->deleted = BTreeLeafTupleNonDeleted;
+			PAGE_SUB_N_VACATED(p,
+							   BTreeLeafTuphdrSize +
+							   MAXALIGN(o_btree_len(desc, pageTuple,
+													OTupleLength)));
+		}
+
+		/* Flip common.deleted (only in chunk 0 for toast, or non-toast) */
+		if (chunknum == 0)
+		{
+			if (!sys_cache->is_toast)
+				flag = pageTuple.data;
+			else
+				flag = oSysCacheToastGetTupleData(pageTuple, desc);
+			flag += offsetof(OSysCacheKeyCommon, deleted);
+			*(bool *) flag = new_value;
+
+			if (sys_cache->is_toast)
+			{
+				Pointer		chunk_flag;
+
+				chunk_flag = pageTuple.data +
+					offsetof(OSysCacheToastChunkKey, sys_cache_key) +
+					offsetof(OSysCacheKeyCommon, deleted);
+				*(bool *) chunk_flag = new_value;
+			}
+		}
+
+		MARK_DIRTY(desc, item->blkno);
+		END_CRIT_SECTION();
 		unlock_page(item->blkno);
-		return false;
+
+		if (!sys_cache->is_toast)
+			return true;
+
+		/* Only iterate remaining chunks when un-B-tree-deleting */
+		if (!first_was_btree_deleted)
+			return true;
+
+		chunknum++;
+		toast_key.common.chunknum = chunknum;
 	}
-
-	BTREE_PAGE_READ_TUPLE(pageTuple, p, &item->locator);
-
-	/* find_page() lands on the first item at or after the key */
-	if (o_btree_cmp(desc, &pageTuple, BTreeKeyLeafTuple,
-					keyType == BTreeKeyBound ?
-					(Pointer) &toast_key : (Pointer) &keyTuple,
-					keyType) != 0)
-	{
-		unlock_page(item->blkno);
-		return false;
-	}
-
-	if (!sys_cache->is_toast)
-		flag = pageTuple.data;
-	else
-		flag = oSysCacheToastGetTupleData(pageTuple, desc);
-
-	flag += offsetof(OSysCacheKeyCommon, deleted);
-
-	START_CRIT_SECTION();
-	page_block_reads(item->blkno);
-	*(bool *) flag = new_value;
-
-	if (sys_cache->is_toast)
-	{
-		Pointer		chunk_flag;
-
-		chunk_flag = pageTuple.data +
-			offsetof(OSysCacheToastChunkKey, sys_cache_key) +
-			offsetof(OSysCacheKeyCommon, deleted);
-		*(bool *) chunk_flag = new_value;
-	}
-
-	MARK_DIRTY(desc, item->blkno);
-	END_CRIT_SECTION();
-
-	unlock_page(item->blkno);
-
-	return true;
 }
 
 static bool
@@ -1061,6 +1104,7 @@ update_deleted_value(OSysCache *sys_cache, OSysCacheKey *key, bool new_value)
 {
 	Pointer		entry;
 	OSysCacheKey *sys_cache_key;
+	XLogRecPtr	orig_lsn = key->common.lsn;
 
 	/* all callers guarantee non-NULL; assert for static analysis */
 	Assert(sys_cache);
@@ -1068,12 +1112,28 @@ update_deleted_value(OSysCache *sys_cache, OSysCacheKey *key, bool new_value)
 	o_sys_cache_set_datoid_lsn(&key->common.lsn, NULL);
 	entry = o_sys_cache_search(sys_cache, sys_cache->nkeys, key);
 	if (entry == NULL)
+	{
+		/*
+		 * During recovery the entry may have been B-tree-deleted by
+		 * o_sys_cache_delete_by_lsn in the checkpoint before the crash,
+		 * making it invisible to o_sys_cache_search.  Fall back to
+		 * set_deleted_in_place with exact_lsn=false because the undo record's
+		 * LSN (set by o_sys_cache_set_datoid_lsn at DROP time) differs from
+		 * the B-tree entry's actual LSN.
+		 */
+		if (is_recovery_process())
+		{
+			key->common.lsn = orig_lsn;
+			return set_deleted_in_place(sys_cache, (Pointer) key,
+										new_value, false);
+		}
 		return false;
+	}
 	sys_cache_key = (OSysCacheKey *) entry;
 	sys_cache_key->common.deleted = new_value;
 
 	if (is_recovery_process())
-		return set_deleted_in_place(sys_cache, entry, new_value);
+		return set_deleted_in_place(sys_cache, entry, new_value, true);
 
 	return o_sys_cache_update(sys_cache, entry);
 }
