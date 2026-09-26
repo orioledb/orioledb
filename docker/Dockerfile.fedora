@@ -1,0 +1,289 @@
+# Experimental only for testing!
+#
+# Fedora-based multi-stage image for OrioleDB + PostgreSQL
+
+# Parameterized base (defaults keep original behavior)
+ARG BASE_IMAGE=fedora
+ARG BASE_VERSION=42
+ARG BASE_OS=${BASE_IMAGE}:${BASE_VERSION}
+
+########################
+# Base updated stage
+########################
+FROM ${BASE_OS} AS base-updated
+
+# System update and base setup (shared by builder and runtime)
+RUN set -eux; \
+    # System update with size optimizations
+    dnf -y update; \
+    # Aggressive cleanup for size optimization
+    dnf clean all; \
+    rm -rf /var/cache/dnf /var/lib/dnf/history.* /var/log/dnf.*
+
+########################
+# Builder stage
+########################
+FROM base-updated AS builder
+
+# Record build information (metadata)
+ARG BASE_OS
+ENV BASE_OS="${BASE_OS}"
+
+# Build-time settings
+ARG PG_MAJOR=17
+ENV PG_MAJOR=${PG_MAJOR}
+
+# set compiler: [ clang gcc ]
+ARG BUILD_CC_COMPILER=gcc
+ENV BUILD_CC_COMPILER=${BUILD_CC_COMPILER}
+
+# Define build dependencies for LLVM (default system toolchain)
+# Note: On Fedora, llvm-config is provided by llvm-devel (not llvm).
+ARG DOCKER_PG_LLVM_DEPS="llvm-devel clang"
+ENV DOCKER_PG_LLVM_DEPS=${DOCKER_PG_LLVM_DEPS}
+
+# Enable to keep toolchain and sources around for debugging (larger image)
+ARG DEBUG_MODE=false
+ENV DEBUG_MODE=${DEBUG_MODE}
+
+# Install build-specific packages (build toolchain)
+RUN set -eux; \
+    # Install build essentials and development packages
+    dnf -y install --setopt=install_weak_deps=False --setopt=tsflags=nodocs \
+      ca-certificates curl wget gnupg2 tzdata \
+      make pkgconf-pkg-config \
+      gcc gcc-c++ bison flex \
+      libxml2-devel libxslt-devel \
+      libicu-devel krb5-devel \
+      lz4-devel libzstd-devel \
+      openldap-devel openssl-devel readline-devel \
+      libcurl-devel \
+      libuuid-devel \
+      tcl-devel perl perl-IPC-Run perl-Test-Harness \
+      python3 python3-devel python3-pip \
+      ${DOCKER_PG_LLVM_DEPS} \
+    ; \
+    # Cleanup build packages cache
+    dnf clean all; \
+    rm -rf /var/cache/dnf /var/lib/dnf/history.* /var/log/dnf.*
+
+# Install gosu in builder
+ENV GOSU_VERSION=1.17
+RUN set -eux; \
+    dpkgArch="$(uname -m)"; \
+    case "$dpkgArch" in \
+      x86_64) dpkgArch=amd64 ;; \
+      aarch64) dpkgArch=arm64 ;; \
+      armv7l|armv7) dpkgArch=armhf ;; \
+      ppc64le) dpkgArch=ppc64el ;; \
+      s390x) dpkgArch=s390x ;; \
+      *) echo "Unsupported arch: $dpkgArch" >&2; exit 1 ;; \
+    esac; \
+    wget -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch"; \
+    wget -O /usr/local/bin/gosu.asc "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch.asc"; \
+    export GNUPGHOME="$(mktemp -d)"; \
+    gpg --batch --keyserver hkps://keys.openpgp.org --recv-keys B42F6819007F00F88E364FD4036A9C25BF357DD4; \
+    gpg --batch --verify /usr/local/bin/gosu.asc /usr/local/bin/gosu; \
+    gpgconf --kill all; \
+    rm -rf "$GNUPGHOME" /usr/local/bin/gosu.asc; \
+    chmod +x /usr/local/bin/gosu; \
+    gosu --version; \
+    gosu nobody true
+
+# Prepare source tree and build
+RUN mkdir -p /usr/src/postgresql/contrib/orioledb
+COPY . /usr/src/postgresql/contrib/orioledb
+
+RUN set -eux; \
+    PGTAG=$(grep "^$PG_MAJOR: " /usr/src/postgresql/contrib/orioledb/.pgtags | cut -d' ' -f2-) ; \
+    ORIOLEDB_VERSION=$(grep "^#define ORIOLEDB_VERSION" /usr/src/postgresql/contrib/orioledb/include/orioledb.h | cut -d'"' -f2) ; \
+    ORIOLEDB_BUILDTIME=$(date -Iseconds) ; \
+    echo "PG_MAJOR=$PG_MAJOR" ; \
+    echo "PGTAG=$PGTAG" ; \
+    echo "BUILD_CC_COMPILER=$BUILD_CC_COMPILER" ; \
+    echo "ORIOLEDB_VERSION=$ORIOLEDB_VERSION" ; \
+    echo "ORIOLEDB_BUILDTIME=$ORIOLEDB_BUILDTIME" ; \
+    echo "DOCKER_PG_LLVM_DEPS=$DOCKER_PG_LLVM_DEPS" ; \
+    echo "DEBUG_MODE=$DEBUG_MODE" ; \
+    CC_BIN="$(command -v "${BUILD_CC_COMPILER}" || true)"; \
+    COMPILER_VER="unknown"; \
+    if [ -n "$CC_BIN" ]; then \
+      if "$CC_BIN" --version 2>/dev/null | head -n1 | grep -qi 'clang'; then \
+        v=$("$CC_BIN" --version 2>/dev/null | head -n1 | sed -E 's/.*clang version ([0-9]+(\.[0-9]+){1,2}).*/\1/'); \
+        [ -n "$v" ] || v=$("$CC_BIN" --version 2>/dev/null | head -n1 | grep -oE '[0-9]+(\.[0-9]+){1,2}'); \
+        COMPILER_VER="clang${v}"; \
+      else \
+        v=$("$CC_BIN" -dumpfullversion 2>/dev/null || "$CC_BIN" -dumpversion 2>/dev/null || true); \
+        [ -n "$v" ] || v=$("$CC_BIN" --version 2>/dev/null | head -n1 | grep -oE '[0-9]+(\.[0-9]+){1,2}'); \
+        COMPILER_VER="gcc${v}"; \
+      fi; \
+    fi; \
+    ZSTD_VER=$(pkg-config --modversion libzstd 2>/dev/null || true); \
+    PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")'); \
+    { echo "ORIOLEINFO: compiler=${COMPILER_VER}"; echo "ORIOLEINFO: zstd=${ZSTD_VER:-unknown}"; echo "ORIOLEINFO: python=${PY_VER:-unknown}"; } | tee -a "/_oriole_build_versions.txt"; \
+    \
+    curl -o postgresql.tar.gz \
+      --header "Accept: application/vnd.github.v3.raw" \
+      --location https://github.com/orioledb/postgres/tarball/$PGTAG; \
+    mkdir -p /usr/src/postgresql; \
+    tar --extract --file postgresql.tar.gz --directory /usr/src/postgresql --strip-components 1; \
+    rm -f postgresql.tar.gz; \
+    \
+    cd /usr/src/postgresql; \
+    POSTGRESQL_VERSION=$(grep "PACKAGE_VERSION=" ./configure | cut -d"'" -f2) ; \
+    echo "POSTGRESQL_VERSION=$POSTGRESQL_VERSION" ; \
+    awk '$1 == "#define" && $2 == "DEFAULT_PGSOCKET_DIR" && $3 == "\"/tmp\"" { $3 = "\"/var/run/postgresql\""; print; next } { print }' src/include/pg_config_manual.h > src/include/pg_config_manual.h.new; \
+    grep '/var/run/postgresql' src/include/pg_config_manual.h.new; \
+    mv src/include/pg_config_manual.h.new src/include/pg_config_manual.h; \
+    cp /usr/src/postgresql/contrib/orioledb/docker/config.guess config/config.guess; \
+    cp /usr/src/postgresql/contrib/orioledb/docker/config.sub   config/config.sub; \
+    gnuArch="$(sh config/config.guess)"; \
+    ( CC=${BUILD_CC_COMPILER} ./configure \
+        --build="$gnuArch" \
+        --enable-integer-datetimes \
+        --enable-tap-tests \
+        --disable-rpath \
+        --with-uuid=e2fs \
+        --with-pgport=5432 \
+        --with-system-tzdata=/usr/share/zoneinfo \
+        --prefix=/usr/local \
+        --with-gssapi \
+        --with-ldap \
+        --with-tcl \
+        --with-perl \
+        --with-python \
+        --with-openssl \
+        --with-libxml \
+        --with-libxslt \
+        --with-icu \
+        --with-llvm \
+        --with-lz4 \
+        --with-zstd \
+        --with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ${BASE_OS}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
+      || cat config.log ); \
+    echo "ORIOLEDB_PATCHSET_VERSION = $(echo "$PGTAG" | cut -d'_' -f2)" >> src/Makefile.global; \
+    make -j "$(nproc)"; \
+    make -C contrib -j "$(nproc)"; \
+    make install-strip; \
+    make -C contrib install; \
+    # Build and install OrioleDB extension first (needs headers)
+    cd /usr/src/postgresql/contrib/orioledb; \
+    make USE_PGXS=1 IS_DEV=1 -j "$(nproc)"; \
+    make USE_PGXS=1 IS_DEV=1 install; \
+    # Now remove static libs but keep headers for runtime Python package builds
+    rm -rf /usr/local/lib/*.a /usr/local/lib/*.la; \
+    # Strip all shared libraries
+    strip /usr/local/lib/postgresql/*.so || true; \
+    find /usr/local/lib -type f -name "*.so*" -exec strip --strip-unneeded {} + || true; \
+    # Stash PGXS to a neutral path for later copy (path can be lib or lib64)
+    PGXS_MK="$(pg_config --pgxs 2>/dev/null || true)"; \
+    if [ -n "$PGXS_MK" ] && [ -f "$PGXS_MK" ]; then \
+      PGXS_DIR="$(dirname "$(dirname "$(dirname "$PGXS_MK")")")"; \
+      mkdir -p /_pgxs; \
+      cp -a "$PGXS_DIR/." /_pgxs/; \
+    fi
+
+########################
+# Runtime stage
+########################
+FROM base-updated AS runtime
+
+ARG BASE_OS
+ENV BASE_OS="${BASE_OS}"
+
+# Build-time settings needed by check_docker.sh script
+ARG PG_MAJOR=17
+ENV PG_MAJOR=${PG_MAJOR}
+
+ARG DOCKER_PG_LLVM_DEPS="llvm-devel clang"
+ENV DOCKER_PG_LLVM_DEPS=${DOCKER_PG_LLVM_DEPS}
+
+ENV LANG=en_US.utf8
+
+# Set PATH to include PostgreSQL binaries (bin and sbin)
+ENV PATH=$PATH:/usr/local/bin:/usr/local/sbin
+
+
+# Copy only runtime essentials from builder
+# - Binaries (postgres, initdb, psql, gosu, etc.)
+# - Server modules and extensions under lib/postgresql
+# - Client library libpq (for psql and tooling)
+# - PostgreSQL shared data (BKI, timezone, extension SQL/control)
+# - Development bits (headers + pgxs) are required by our CI runner
+#   (ci/check_docker.sh) to build/test the extension via PGXS inside the
+#   container. If you need a slimmer pure-runtime image, consider adding an
+#   ARG to delete these after copy.
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /usr/local/sbin /usr/local/sbin
+COPY --from=builder /usr/local/lib/postgresql /usr/local/lib/postgresql
+COPY --from=builder /usr/local/lib/libpq.so* /usr/local/lib/
+COPY --from=builder /usr/local/include /usr/local/include
+COPY --from=builder /_pgxs /_pgxs
+COPY --from=builder /usr/local/share/postgresql /usr/local/share/postgresql
+COPY --from=builder /_oriole_build_versions.txt /_oriole_build_versions.txt
+
+# Setup runtime environment: user, packages, and initial directories
+RUN set -eux; \
+    # Create postgres user/group (uid/gid 999 similar to Debian-based image)
+    groupadd -r postgres --gid=999 || groupadd -r postgres; \
+    useradd  -r -g postgres --uid=999 --home-dir=/var/lib/postgresql --shell=/bin/bash postgres || \
+      useradd -r -g postgres --home-dir=/var/lib/postgresql --shell=/bin/bash postgres; \
+    mkdir -p /var/lib/postgresql; \
+    chown -R postgres:postgres /var/lib/postgresql; \
+    \
+    # Install runtime dependencies only (no toolchain, no -devel) - optimized for size
+    # System already updated in base-updated layer
+    dnf -y install --setopt=install_weak_deps=False --setopt=tsflags=nodocs \
+      ca-certificates tzdata glibc-langpack-en \
+      libicu lz4-libs libzstd libxml2 libxslt \
+      openssl-libs openldap \
+      readline libuuid \
+      util-linux \
+      which \
+      llvm-libs \
+    ; \
+    # Aggressive cleanup for size optimization
+    dnf clean all; \
+    rm -rf /var/cache/dnf /var/lib/dnf/history.* /var/log/dnf.*
+
+# Configure libraries, directories and entrypoint
+RUN set -eux; \
+    # Ensure dynamic linker can find /usr/local/lib
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/postgresql.conf; \
+    ldconfig; \
+    # If PGXS was staged, install it under the path expected by pg_config
+    if [ -d /_pgxs ]; then \
+      PGXS_TARGET="$(dirname "$(dirname "$(dirname "$(pg_config --pgxs)")")")"; \
+      mkdir -p "${PGXS_TARGET}"; \
+      cp -a /_pgxs/. "${PGXS_TARGET}/"; \
+      rm -rf /_pgxs; \
+    fi; \
+    # Debug: Check library dependencies
+    echo "=== Checking PostgreSQL binary dependencies ==="; \
+    ldd $(which postgres) || true; \
+    echo "=== Checking initdb binary dependencies ==="; \
+    ldd $(which initdb) || true; \
+    echo "=== Library check complete ==="; \
+    \
+    # Create runtime directories
+    mkdir /docker-entrypoint-initdb.d /docker-default-initdb.d; \
+    mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 2777 /var/run/postgresql; \
+    mkdir -p /var/lib/postgresql/data && chown -R postgres:postgres /var/lib/postgresql/data && chmod 777 /var/lib/postgresql/data; \
+    mkdir -p /etc/postgresql && chown -R postgres:postgres /etc/postgresql && chmod 700 /etc/postgresql
+
+ENV PGDATA=/var/lib/postgresql/data
+VOLUME /var/lib/postgresql/data
+COPY docker/init/postgresql.docker.conf /etc/postgresql/postgresql.conf
+ENV PG_CONF=/etc/postgresql/postgresql.conf
+
+ENV POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en"
+
+COPY docker/init/docker-entrypoint.sh /usr/local/bin/
+COPY docker/init/default-orioledb.sh /docker-default-initdb.d/
+RUN sed -i -e 's/su-exec/gosu/g' "/usr/local/bin/docker-entrypoint.sh"
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+STOPSIGNAL SIGINT
+
+EXPOSE 5432
+CMD ["postgres", "-D", "/etc/postgresql"]
