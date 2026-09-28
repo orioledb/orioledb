@@ -27,6 +27,7 @@ FROM
 	generate_series(1, 4) as c;
 SET enable_seqscan = off;
 SET enable_memoize = off;
+SET enable_incremental_sort = off;
 SET enable_hashjoin = off;
 SET enable_mergejoin = off;
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
@@ -40,7 +41,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
          Conds: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
 (6 rows)
 
-SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 | id2 
 -----+-----
 (0 rows)
@@ -52,7 +53,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
    Forward index only scan of: o_joins2_pkey
 (2 rows)
 
-SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxy
@@ -128,7 +129,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
    Forward index only scan of: o_joins1_pkey
 (2 rows)
 
-SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxz
@@ -197,6 +198,7 @@ SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
    4 | xzzzz
 (64 rows)
 
+SET enable_mergejoin = on;
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 FULL JOIN o_joins1 USING(id1, id2);
                                    QUERY PLAN                                    
 ---------------------------------------------------------------------------------
@@ -208,7 +210,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 FULL JOIN o_joins1 USING(id1, id2);
          Forward index only scan of: o_joins1_pkey
 (6 rows)
 
-SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+SET enable_mergejoin = off;
+SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxz
@@ -291,7 +294,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
                Forward index only scan of: o_joins1_pkey
 (7 rows)
 
-SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 | id2 
 -----+-----
 (0 rows)
@@ -303,7 +306,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
    Forward index only scan of: o_joins2_pkey
 (2 rows)
 
-SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxy
@@ -379,7 +382,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
    Forward index only scan of: o_joins1_pkey
 (2 rows)
 
-SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxz
@@ -460,7 +463,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 FULL JOIN o_joins1 USING(id1, id2);
                Forward index only scan of: o_joins1_pkey
 (7 rows)
 
-SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxz
@@ -542,7 +545,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
          Forward index only scan of: o_joins1_pkey
 (6 rows)
 
-SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 | id2 
 -----+-----
 (0 rows)
@@ -554,7 +557,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
    Forward index only scan of: o_joins2_pkey
 (2 rows)
 
-SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxy
@@ -630,7 +633,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
    Forward index only scan of: o_joins1_pkey
 (2 rows)
 
-SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxz
@@ -710,7 +713,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 FULL JOIN o_joins1 USING(id1, id2);
          Forward index only scan of: o_joins1_pkey
 (6 rows)
 
-SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxz
@@ -802,7 +805,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
          Conds: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
 (6 rows)
 
-SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxy
@@ -885,7 +888,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
                Forward index only scan of: o_joins1_pkey
 (7 rows)
 
-SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxy
@@ -967,7 +970,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
          Forward index only scan of: o_joins1_pkey
 (6 rows)
 
-SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxy
@@ -1059,7 +1062,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
          Conds: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
 (6 rows)
 
-SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxy
@@ -1142,7 +1145,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
                Forward index only scan of: o_joins1_idx
 (7 rows)
 
-SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxy
@@ -1212,6 +1215,7 @@ SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
 (64 rows)
 
 SET enable_hashjoin = off;
+SET enable_material = off;
 RESET enable_mergejoin;
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
                                    QUERY PLAN                                    
@@ -1226,7 +1230,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
                Forward index only scan of: o_joins1_idx
 (8 rows)
 
-SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxy
@@ -1295,6 +1299,7 @@ SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
    4 | xyyyy
 (64 rows)
 
+RESET enable_material;
 RESET enable_nestloop;
 RESET enable_hashjoin;
 DROP TABLE o_joins1;
@@ -1318,7 +1323,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
          Conds: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
 (6 rows)
 
-SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxy
@@ -1401,7 +1406,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
                Backward index only scan of: o_joins1_idx
 (7 rows)
 
-SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxy
@@ -1483,7 +1488,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
          Backward index only scan of: o_joins1_idx
 (6 rows)
 
-SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
  id1 |   id2    
 -----+----------
    1 | xxxxy
