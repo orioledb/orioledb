@@ -835,6 +835,21 @@ SELECT * FROM ib_deferred_excl;
   2 |  2
 (2 rows)
 
+CREATE TABLE test_table_excl (room int, order_date date, EXCLUDE USING btree (room WITH =, order_date WITH =)) PARTITION BY RANGE (order_date);
+CREATE TABLE test_table_excl_dec2024 PARTITION OF test_table_excl FOR VALUES FROM ('2024-12-01') TO ('2025-01-01') USING orioledb;
+CREATE TABLE test_table_excl_jan2025 PARTITION OF test_table_excl FOR VALUES FROM ('2025-01-01') TO ('2025-02-01') USING orioledb;
+INSERT INTO test_table_excl VALUES (1, '2024-12-30'), (1, '2024-12-31'), (1, '2025-01-01'), (1, '2025-01-02'), (2, '2024-12-31'), (2, '2025-01-01');
+INSERT INTO test_table_excl VALUES (2, '2024-12-30');
+INSERT INTO test_table_excl VALUES (3, '2024-12-29');
+INSERT INTO test_table_excl VALUES (2, '2024-12-29');
+SELECT room FROM test_table_excl WHERE order_date = '2024-12-29' ORDER BY room;
+ room 
+------
+    2
+    3
+(2 rows)
+
+DROP TABLE test_table_excl;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to table o_test_is_null_assert
