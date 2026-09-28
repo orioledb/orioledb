@@ -121,6 +121,8 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 
 	for (i = 0; i < resultNKeys; i++)
 	{
+		memset(&res->low.keys[i], 0, sizeof(OBTreeValueBound));
+		memset(&res->high.keys[i], 0, sizeof(OBTreeValueBound));
 		res->low.keys[i].flags = O_VALUE_BOUND_MINUS_INFINITY;
 		res->high.keys[i].flags = O_VALUE_BOUND_PLUS_INFINITY;
 	}
