@@ -292,7 +292,7 @@ OrioleDB is currently in the development stage. Therefore it has the following t
 5.  OrioleDB supports bitmap scan only for int4, int8 and ctid primary keys.
 6.  Row-level concurrency in OrioleDB has some [differences](../architecture/row-level-concurrency.mdx).
 7.  OrioleDB doesn't support `CLUSTER` and `VACUUM FULL` commands yet, because we don't implement rewrite of the tables for these commands. And also `CLUSTER` doesn't really makes much sense for index-organized tables.
-8.  `REINDEX CONCURRENTLY` now is not supported.
+8.  `CREATE INDEX/REINDEX CONCURRENTLY` are supported with [limitations](../architecture/concurrent-index.mdx).
 9.  OrioleDB tables don't support `Sample Scans` yet.
 10. OrioleDB does not implement true SERIALIZABLE Snapshot Isolation. The `orioledb.serializable` GUC controls how SERIALIZABLE transactions are handled:
     - `table_lock` (default): every relation a SERIALIZABLE transaction touches is protected by a coarse heavyweight `ExclusiveLock`. Correct, but pessimistic — concurrent non-conflicting workloads degrade to serial execution.
