@@ -843,6 +843,9 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 							attnum = i + 1;
 							value = o_fastgetattr(tup, attnum, tupdesc, spec, &isnull);
 
+							if (!key->exclusion_fn)
+								continue;
+
 							cmp = o_call_exclusion_fn(key->exclusion_fn, key->value, value, indexDescr->fields[i].collation);
 
 							if (cmp != 0)
