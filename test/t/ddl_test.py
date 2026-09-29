@@ -4,6 +4,7 @@
 import subprocess
 
 from .base_test import BaseTest
+from testgres.connection import DatabaseError
 from testgres.exceptions import QueryException
 
 
@@ -196,6 +197,178 @@ class DDLTest(BaseTest):
 						generated_col, nullable_col, identity_col IS NOT NULL
 				"""))
 			node.stop()
+
+	def test_alter_type_rebuild_abort(self):
+		with self.node as node:
+			node.append_conf("orioledb.enable_stopevents = true\n")
+			node.start()
+			node.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_rebuild_abort (
+					key text COLLATE "C" PRIMARY KEY,
+					group_id int,
+					payload text
+				) USING orioledb;
+				CREATE INDEX o_rebuild_abort_group_idx
+					ON o_rebuild_abort (group_id);
+				INSERT INTO o_rebuild_abort
+					SELECT i::text, i % 4, 'value-' || i
+					FROM generate_series(1, 40) i;
+			""")
+
+			metadata_sql = """
+				SELECT atttypid, attcollation
+				FROM pg_attribute
+				WHERE attrelid = 'o_rebuild_abort'::regclass AND attname = 'key';
+			"""
+			indexes_sql = """
+				SELECT indexrelid::regclass::text, indexrelid
+				FROM pg_index
+				WHERE indrelid = 'o_rebuild_abort'::regclass
+				ORDER BY indexrelid::regclass::text;
+			"""
+			old_metadata = node.execute(metadata_sql)
+			old_indexes = node.execute(indexes_sql)
+
+			with node.connect() as con, node.connect() as control:
+				con.begin()
+				con.execute("SAVEPOINT before_rebuild;")
+				control.execute(
+				    "SELECT pg_stopevent_set('alter_type_rebuild_fail', 'true');"
+				)
+				try:
+					with self.assertRaises(DatabaseError) as error:
+						con.execute("""
+							ALTER TABLE o_rebuild_abort ALTER COLUMN key
+								TYPE text COLLATE "POSIX";
+						""")
+					self.assertIn(
+					    "Debug condition: ALTER TYPE index rebuild failed.",
+					    str(error.exception))
+				finally:
+					control.execute(
+					    "SELECT pg_stopevent_reset('alter_type_rebuild_fail');"
+					)
+
+				con.execute("ROLLBACK TO SAVEPOINT before_rebuild;")
+				self.assertEqual(old_metadata, con.execute(metadata_sql))
+				self.assertEqual(old_indexes, con.execute(indexes_sql))
+				self.assertEqual([(10, )],
+				                 con.execute("""
+					SET LOCAL enable_seqscan = false;
+					SET LOCAL enable_bitmapscan = false;
+					SELECT count(*) FROM o_rebuild_abort WHERE group_id = 0;
+				"""))
+				self.assertTrue(
+				    con.execute("""
+					SELECT orioledb_tbl_check('o_rebuild_abort'::regclass);
+				""")[0][0])
+				con.commit()
+
+			node.stop(['-m', 'immediate'])
+			node.start()
+			self.assertEqual(old_metadata, node.execute(metadata_sql))
+			self.assertEqual(old_indexes, node.execute(indexes_sql))
+			self.assertEqual([(10, )],
+			                 node.execute("""
+				SET enable_seqscan = false;
+				SET enable_bitmapscan = false;
+				SELECT count(*) FROM o_rebuild_abort WHERE group_id = 0;
+			"""))
+			self.assertTrue(
+			    node.execute("""
+				SELECT orioledb_tbl_check('o_rebuild_abort'::regclass);
+			""")[0][0])
+
+			node.safe_psql("""
+				ALTER TABLE o_rebuild_abort ALTER COLUMN key
+					TYPE text COLLATE "POSIX";
+			""")
+			self.assertEqual([(40, )],
+			                 node.execute("""
+				SET enable_seqscan = false;
+				SET enable_bitmapscan = false;
+				SELECT count(*) FROM o_rebuild_abort WHERE group_id >= 0;
+			"""))
+			self.assertTrue(
+			    node.execute("""
+				SELECT orioledb_tbl_check('o_rebuild_abort'::regclass);
+			""")[0][0])
+
+	def test_alter_type_rebuild_cross_relation_fk(self):
+		with self.node as node:
+			node.start()
+			node.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_fk_parent (
+					key text COLLATE "C" PRIMARY KEY,
+					group_id int,
+					payload text
+				) USING orioledb;
+				CREATE INDEX o_fk_parent_group_idx ON o_fk_parent (group_id);
+				CREATE TABLE h_fk_child (
+					id int PRIMARY KEY,
+					parent_key text REFERENCES o_fk_parent (key)
+				) USING heap;
+				INSERT INTO o_fk_parent
+					SELECT i::text, i % 4, 'value-' || i
+					FROM generate_series(1, 40) i;
+				INSERT INTO h_fk_child
+					SELECT i, i::text FROM generate_series(1, 40) i;
+
+				ALTER TABLE o_fk_parent ALTER COLUMN key
+					TYPE text COLLATE "POSIX";
+			""")
+
+			self.assertEqual([(True, )],
+			                 node.execute("""
+				SELECT convalidated FROM pg_constraint
+				WHERE conrelid = 'h_fk_child'::regclass AND contype = 'f';
+			"""))
+			self.assertEqual([(40, )],
+			                 node.execute("""
+				SELECT count(*) FROM o_fk_parent p
+				JOIN h_fk_child c ON c.parent_key = p.key;
+			"""))
+			self.assertEqual([(10, )],
+			                 node.execute("""
+				SET enable_seqscan = false;
+				SET enable_bitmapscan = false;
+				SELECT count(*) FROM o_fk_parent WHERE group_id = 0;
+			"""))
+			self.assertTrue(
+			    node.execute("""
+				SELECT orioledb_tbl_check('o_fk_parent'::regclass);
+			""")[0][0])
+
+			with node.connect(autocommit=True) as con:
+				with self.assertRaises(DatabaseError):
+					con.execute(
+					    "INSERT INTO h_fk_child VALUES (41, 'missing');")
+				with self.assertRaises(DatabaseError):
+					con.execute("DELETE FROM o_fk_parent WHERE key = '1';")
+
+			node.stop(['-m', 'immediate'])
+			node.start()
+			self.assertEqual([(40, )],
+			                 node.execute("""
+				SELECT count(*) FROM o_fk_parent p
+				JOIN h_fk_child c ON c.parent_key = p.key;
+			"""))
+			self.assertEqual([(10, )],
+			                 node.execute("""
+				SET enable_seqscan = false;
+				SET enable_bitmapscan = false;
+				SELECT count(*) FROM o_fk_parent WHERE group_id = 0;
+			"""))
+			self.assertTrue(
+			    node.execute("""
+				SELECT orioledb_tbl_check('o_fk_parent'::regclass);
+			""")[0][0])
+			with node.connect(autocommit=True) as con:
+				with self.assertRaises(DatabaseError):
+					con.execute(
+					    "INSERT INTO h_fk_child VALUES (41, 'missing');")
 
 	def test_cached_custom_path(self):
 		with self.node as node:

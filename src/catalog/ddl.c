@@ -104,6 +104,7 @@
 #include "utils/fmgroids.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
+#include "utils/memutils.h"
 #include "utils/resowner.h"
 #include "utils/rls.h"
 #include "utils/syscache.h"
@@ -3889,6 +3890,8 @@ orioledb_relation_alter_type_rebuild_plan(Relation rel, AlteredTableInfo *tab)
 	ORelOids	oids;
 	OTable	   *o_table;
 	OAlterTypeRebuildBatch *batch;
+	MemoryContext batch_context;
+	MemoryContext old_context;
 	Oid			primary_oid;
 	bool		flagged = false,
 				reused = false;
@@ -3945,20 +3948,19 @@ orioledb_relation_alter_type_rebuild_plan(Relation rel, AlteredTableInfo *tab)
 	 * rebuilt into its final layout and all native secondaries are rebuilt
 	 * directly against the new primary suffix in one pass.
 	 */
-	batch = (OAlterTypeRebuildBatch *)
-		MemoryContextAllocZero(TopTransactionContext,
-							   sizeof(OAlterTypeRebuildBatch));
+	batch_context = GetMemoryChunkContext(tab);
+	old_context = MemoryContextSwitchTo(batch_context);
+	batch = palloc0(sizeof(OAlterTypeRebuildBatch));
 	for (i = 0; i < o_table->nindices; i++)
 	{
-		OAlterTypeRebuildClaim *claim = (OAlterTypeRebuildClaim *)
-			MemoryContextAllocZero(TopTransactionContext,
-								   sizeof(OAlterTypeRebuildClaim));
+		OAlterTypeRebuildClaim *claim = palloc0(sizeof(OAlterTypeRebuildClaim));
 
 		strlcpy(claim->name, o_table->indices[i].name.data, NAMEDATALEN);
 		claim->old_oid = o_table->indices[i].oids.reloid;
 		claim->new_oid = InvalidOid;
 		batch->claims = lappend(batch->claims, claim);
 	}
+	MemoryContextSwitchTo(old_context);
 	tab->am_rebuild_plan = batch;
 
 	/*
@@ -4176,6 +4178,9 @@ orioledb_relation_alter_type_rebuild_finish(Relation rel, AlteredTableInfo *tab)
 	ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
+
+	if (STOPEVENT_CONDITION(STOPEVENT_ALTER_TYPE_REBUILD_FAIL, NULL))
+		elog(ERROR, "Debug condition: ALTER TYPE index rebuild failed.");
 
 	rebuild_indices(old_o_table, old_descr, o_table, descr, false, NULL);
 
