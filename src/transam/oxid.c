@@ -581,22 +581,32 @@ acquire_logical_xid_wrapper(bool *isValidHeapXid)
 }
 
 /*
- * Make sure the current transaction has a logical xid of its own.
+ * Name the top-level transaction for the savepoint WAL record of a starting
+ * subtransaction.
  *
- * A subtransaction start needs to name its parent in the savepoint WAL record.
- * Asking GetTopTransactionId() for that name *assigns* a heap xid to the whole
- * transaction, which is a far bigger step than naming it: it puts the
+ * The decoder hands this name to ReorderBufferAssignChild(), which takes a
+ * top-level transaction only: naming the parent subtransaction of a nested
+ * savepoint makes the reorder buffer keep a known subtransaction among the
+ * top-level ones.
+ *
+ * Asking GetTopTransactionId() for that name *assigns* a heap xid to the
+ * whole transaction, which is a far bigger step than naming it: it puts the
  * transaction's CSN under the heap's control, and the heap assigns that CSN
- * outside OrioleDB's precommit/commit pair.  A logical xid of our own names the
- * parent just as well and costs nothing else.
+ * outside OrioleDB's precommit/commit pair.  So the heap xid is used only if
+ * the transaction already has one.  Otherwise the top-level transaction is
+ * named by its own logical xid: the one saved by the outermost pushed
+ * subtransaction, or the current one if nothing is pushed.  The current
+ * transaction is given a logical xid if it has none.
  *
  * acquire_logical_xid_wrapper() records the heap -> oriole switch itself when a
  * heap xid does happen to exist already, so recovery keeps following the same
  * chain as before in that case.
  */
 TransactionId
-ensure_current_logical_xid(void)
+get_savepoint_parent_xid(void)
 {
+	TransactionId heapXid;
+
 	if (!TransactionIdIsValid(logicalXidContext.xid))
 	{
 		bool		isValidHeapXid = false;
@@ -605,6 +615,19 @@ ensure_current_logical_xid(void)
 		logicalXidContext.useHeap = isValidHeapXid;
 		elog(DEBUG4, "ENSURE logical xid %u useHeap %d",
 			 logicalXidContext.xid, logicalXidContext.useHeap);
+	}
+
+	heapXid = GetTopTransactionIdIfAny();
+	if (TransactionIdIsValid(heapXid))
+		return heapXid;
+
+	if (prevLogicalXids != NIL)
+	{
+		PrevLogicalXidEntry *entry;
+
+		entry = (PrevLogicalXidEntry *) linitial(prevLogicalXids);
+		Assert(TransactionIdIsValid(entry->ctx.xid));
+		return entry->ctx.xid;
 	}
 
 	return logicalXidContext.xid;
@@ -715,6 +738,16 @@ oxid_subxact_callback(
 						if (!RecoveryInProgress())
 						{
 							setup_prev_logical_xid_ctx(mySubid);
+
+							/*
+							 * The subtransaction's savepoint record switched
+							 * the decoder to its logical xid.  Without a heap
+							 * xid there was no joint commit to flush that, so
+							 * switch back explicitly, or the top-level commit
+							 * record is taken for the released
+							 * subtransaction.
+							 */
+							wal_reset_xid_record();
 						}
 					}
 				}

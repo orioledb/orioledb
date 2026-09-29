@@ -744,6 +744,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_ROLLBACK:
 			{
 				dlist_iter	cur_txn_i;
+				dlist_mutable_iter cur_txn_m;
 				ReorderBufferTXN *txn = NULL;
 				CSNSnapshotData *csnSnapshot = NULL;
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
@@ -816,11 +817,11 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 							elog(DEBUG4, "FORGET record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
 								 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
-							dlist_foreach(cur_txn_i, &txn->subtxns)
+							dlist_foreach_modify(cur_txn_m, &txn->subtxns)
 							{
 								ReorderBufferTXN *cur_txn;
 
-								cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+								cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_m.cur);
 								ReorderBufferForget(ctx->decodeCtx->reorder, cur_txn->xid,
 													ctx->xlogRecPtr);
 							}
@@ -875,11 +876,11 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 								 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 						}
 
-						dlist_foreach(cur_txn_i, &txn->subtxns)
+						dlist_foreach_modify(cur_txn_m, &txn->subtxns)
 						{
 							ReorderBufferTXN *cur_txn;
 
-							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_m.cur);
 							ReorderBufferAbort(ctx->decodeCtx->reorder, cur_txn->xid, ctx->xlogRecPtr, 0);
 						}
 						elog(DEBUG4, "ABORT record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
@@ -1125,7 +1126,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 
 		case WAL_REC_ROLLBACK_TO_SAVEPOINT:
 			{
-				dlist_iter	cur_txn_i;
+				dlist_mutable_iter cur_txn_m;
 				ReorderBufferTXN *txn = NULL;
 				CSNSnapshotData *csnSnapshot = NULL;
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
@@ -1195,11 +1196,11 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				{
 					Assert(TransactionIdIsValid(rec->logicalXid));
 
-					dlist_foreach(cur_txn_i, &txn->subtxns)
+					dlist_foreach_modify(cur_txn_m, &txn->subtxns)
 					{
 						ReorderBufferTXN *cur_txn;
 
-						cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+						cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_m.cur);
 						ReorderBufferAbort(ctx->decodeCtx->reorder, cur_txn->xid, ctx->xlogRecPtr, 0);
 					}
 					elog(DEBUG4,

@@ -819,6 +819,20 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 	local_wal.contains_xid = false;
 }
 
+/*
+ * Make the next change carry a fresh xid record.
+ *
+ * The decoder attributes every record of a container, the commit record
+ * included, to the logical xid of the last xid or savepoint record before it.
+ * After a subtransaction ends and the parent's logical xid is restored, the
+ * records that follow must name the parent again.
+ */
+void
+wal_reset_xid_record(void)
+{
+	local_wal.contains_xid = false;
+}
+
 bool
 local_wal_is_empty(void)
 {
