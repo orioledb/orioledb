@@ -264,6 +264,7 @@ class DDLTest(BaseTest):
 
 			# Nobody reads the table anymore, so the drop goes through.
 			reader.rollback()
+			dropper.execute("SET statement_timeout = 0;")
 			dropper.execute("""
 				DROP INDEX CONCURRENTLY o_test_drop_index_ix;
 			""")
