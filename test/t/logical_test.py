@@ -169,6 +169,86 @@ class LogicalTest(BaseTest):
 		    "table public.data: INSERT: id[integer]:5 data[text]:'5'\n"
 		    "COMMIT\n")
 
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_savepoint_release_after_first_change(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE data(id int primary key) USING orioledb;\n"
+		    "CREATE TABLE log(id int primary key) USING orioledb;\n"
+		    "CREATE FUNCTION trg() RETURNS trigger LANGUAGE plpgsql AS $$\n"
+		    "BEGIN\n"
+		    "  BEGIN\n"
+		    "    INSERT INTO log VALUES (NEW.id);\n"
+		    "  EXCEPTION WHEN others THEN NULL;\n"
+		    "  END;\n"
+		    "  RETURN NULL;\n"
+		    "END $$;\n")
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		# A savepoint released after the transaction's first OrioleDB
+		# modification: the commit record must belong to the top
+		# transaction, not to the released subtransaction.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO data VALUES (1);\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data VALUES (2);\n"
+		    "RELEASE SAVEPOINT s1;\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:1\n"
+		    "table public.data: INSERT: id[integer]:2\n"
+		    "COMMIT\n")
+
+		# Nested savepoints, released one by one, with changes in between.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO data VALUES (3);\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data VALUES (4);\n"
+		    "SAVEPOINT s2;\n"
+		    "INSERT INTO data VALUES (5);\n"
+		    "RELEASE SAVEPOINT s2;\n"
+		    "INSERT INTO data VALUES (6);\n"
+		    "RELEASE SAVEPOINT s1;\n"
+		    "INSERT INTO data VALUES (7);\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:3\n"
+		    "table public.data: INSERT: id[integer]:4\n"
+		    "table public.data: INSERT: id[integer]:5\n"
+		    "table public.data: INSERT: id[integer]:6\n"
+		    "table public.data: INSERT: id[integer]:7\n"
+		    "COMMIT\n")
+
+		# The same through a PL/pgSQL EXCEPTION block in a trigger, in an
+		# implicit transaction (issue #1251).
+		node.safe_psql(
+		    'postgres',
+		    "CREATE TRIGGER t AFTER INSERT ON data FOR EACH ROW EXECUTE FUNCTION trg();\n"
+		)
+		self.assertEqual(self.retrieve_logical_changes(), "BEGIN\nCOMMIT\n")
+		node.safe_psql('postgres', "INSERT INTO data VALUES (8);\n")
+		node.safe_psql('postgres', "INSERT INTO data VALUES (9);\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:8\n"
+		    "table public.log: INSERT: id[integer]:8\n"
+		    "COMMIT\n"
+		    "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:9\n"
+		    "table public.log: INSERT: id[integer]:9\n"
+		    "COMMIT\n")
+
 	def test_simple_replident(self):
 		node = self.node
 		node.start()  # start PostgreSQL
