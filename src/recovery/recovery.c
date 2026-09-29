@@ -1416,7 +1416,7 @@ orioledb_redo(XLogReaderState *record)
 		/* Short circuit: once the flag is set no further work is required */
 		if (skip_all_future_records)
 		{
-			elog(WARNING, "OrioleDB recovery skips WAL container [%X/%X-%X/%X]",
+			elog(DEBUG4, "OrioleDB recovery skips WAL container [%X/%X-%X/%X]",
 				 LSN_FORMAT_ARGS(record->ReadRecPtr),
 				 LSN_FORMAT_ARGS(record->ReadRecPtr + msg_len));
 			return;
@@ -1826,13 +1826,10 @@ recovery_map_oxid_csn(OXid oxid, bool *found)
 	state = hash_search(recovery_xid_state_hash, &oxid, HASH_FIND, found);
 	if (*found)
 	{
-	    elog(WARNING, "recovery_map_oxid_csn: oxid=%lu wal_xid=%d csn=%lu",
-	         oxid, state->wal_xid, state->csn);
-	    if (!state->wal_xid)
-	        return COMMITSEQNO_ABORTED;
-	    return state->csn;
+		if (!state->wal_xid)
+			return COMMITSEQNO_ABORTED;
+		return state->csn;
 	}
-	elog(WARNING, "recovery_map_oxid_csn: oxid=%lu NOT FOUND", oxid);
 	return 0;
 }
 
@@ -2647,9 +2644,6 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			else
 				cur_state->used_by = NULL;
 		}
-		elog(WARNING, "recovery_switch_to_oxid: oxid=%lu found=%d wal_xid=%d csn=%lu",
-		     oxid, found, cur_state->wal_xid, cur_state->csn);
-
 		cur_recovery_xid_state = cur_state;
 		update_proc_retain_undo_location(worker_id);
 	}
@@ -2734,7 +2728,6 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 
 	delay_if_queued_for_idxbuild();
 
-	elog(WARNING, "recovery_finish_current_oxid: %lu", csn);
 	if (!COMMITSEQNO_IS_ABORTED(csn) && sync)
 	{
 		Assert(worker_id < 0);
@@ -3258,7 +3251,6 @@ update_run_xmin(void)
 {
 	OXid		xmin;
 	int			i;
-	elog(WARNING, "update_run_xmin");
 	bool		found;
 
 	/* Leader-only: xmin_queue is allocated only when worker_id < 0. */
@@ -3361,7 +3353,6 @@ update_run_xmin(void)
 		Assert(found);
 	}
 
-	elog(WARNING, "pairingheap_is_empty(xmin_queue): %c", pairingheap_is_empty(xmin_queue) ? 'Y' : 'N');
 	if (!pairingheap_is_empty(xmin_queue))
 	{
 		RecoveryXidState *state;
@@ -3374,9 +3365,7 @@ update_run_xmin(void)
 	{
 		xmin = pg_atomic_read_u64(&xid_meta->nextXid);
 	}
-	elog(WARNING, "SET runXmin 2: xmin = Min(%lu, %lu)", xmin, recovery_xmin);
 	xmin = Min(xmin, recovery_xmin);
-	elog(WARNING, "SET runXmin 2: %lu", xmin);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
 
 	/*
@@ -3387,7 +3376,6 @@ update_run_xmin(void)
 	 * so any later downward move would be a regression we must never publish.
 	 * Make monotonicity an explicit invariant instead.
 	 */
-	elog(WARNING, "xmin(%lu) >= pg_atomic_read_u64(&xid_meta->globalXmin)(%lu)", xmin, pg_atomic_read_u64(&xid_meta->globalXmin));
 	Assert(xmin >= pg_atomic_read_u64(&xid_meta->globalXmin));
 }
 
@@ -3397,7 +3385,6 @@ free_run_xmin(void)
 	OXid		xmin;
 
 	xmin = pg_atomic_read_u64(&xid_meta->nextXid);
-	elog(WARNING, "SET runXmin 3: %lu", xmin);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
 
 	/*
@@ -5065,7 +5052,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 	Assert(rec);
 
-	elog(WARNING, "[%s] GET RTYPE %d `%s`", __func__, rec->type, wal_type_name(rec->type));
+	elog(DEBUG4, "[%s] GET RTYPE %d `%s`", __func__, rec->type, wal_type_name(rec->type));
 
 	/*
 	 * Stall hook for the
@@ -5187,7 +5174,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 				recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
 											 xlogPtr, -1, sync);
-				elog(WARNING, "OrioleDB recovery %s transaction with oxid=" UINT64_FORMAT ". "
+				elog(DEBUG1, "OrioleDB recovery %s transaction with oxid=" UINT64_FORMAT ". "
 					 "Next WAL record starts at LSN %X/%X",
 					 commit ? "committed" : "aborted", rec->oxid,
 					 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
@@ -5207,7 +5194,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			}
 
 			cur_recovery_xid_state->xid = rec->u.joint_commit.xid;
-			elog(WARNING, "OrioleDB recovery committed transaction (xid, oxid)="
+			elog(DEBUG1, "OrioleDB recovery committed transaction (xid, oxid)="
 				 "(%u, " UINT64_FORMAT "). Next WAL record starts at LSN %X/%X",
 				 cur_recovery_xid_state->xid, rec->oxid,
 				 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
@@ -5249,13 +5236,6 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				}
 				else
 					ctx->sys_tree_num = -1;
-
-				elog(WARNING, "REPLAY WAL_REC_RELATION: %u %u %u %d",
-					 rec->oids.datoid,
-					 rec->oids.reloid,
-					 rec->oids.relnode,
-					 ix_type
-					 );
 
 				if (ctx->sys_tree_num > 0)
 				{
@@ -5324,7 +5304,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			 * handle_o_tables_meta_unlock()'s own guard.
 			 */
 			cur_recovery_xid_state->o_tables_meta_locked = true;
-			elog(WARNING, "[%s] META_LOCK for [ %u %u %u ] ctx->sys_tree_num %d", __func__,
+			elog(DEBUG3, "[%s] META_LOCK for [ %u %u %u ] ctx->sys_tree_num %d", __func__,
 				 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode, ctx->sys_tree_num);
 			break;
 
@@ -5383,7 +5363,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			{
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 
-				elog(WARNING, "[%s] META_UNLOCK for [ %u %u %u; old: %u ] ctx->sys_tree_num %d", __func__,
+				elog(DEBUG3, "[%s] META_UNLOCK for [ %u %u %u; old: %u ] ctx->sys_tree_num %d", __func__,
 					 rec->u.unlock.oids.datoid, rec->u.unlock.oids.reloid, rec->u.unlock.oids.relnode, rec->u.unlock.oldRelnode, ctx->sys_tree_num);
 
 				if (!ctx->single)
@@ -5591,7 +5571,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 				if (ctx->indexDescr->desc.type == oIndexBridge)
 				{
-					elog(WARNING, "WAL change for bridge index");
+					elog(DEBUG3, "WAL change for bridge index");
 				}
 
 				Assert(!O_TUPLE_IS_NULL(tuple1.tuple));

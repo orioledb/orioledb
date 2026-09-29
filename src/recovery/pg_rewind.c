@@ -213,7 +213,6 @@ create_key_array(uint32 nkeys, size_t extension_size, char **ptr)
 
 		keyLength += extension_size;
 
-		elog(WARNING, "create_key_array: key_array[%d]: %u", i, keyLength);
 		key_array[i] = palloc0(offsetof(KeyArrayElement, data) +
 							   keyLength);
 		key_array[i]->tupleFormatFlags = tupleFormatFlags;
@@ -278,11 +277,6 @@ orioledb_pg_rewind_sorted_keys(PG_FUNCTION_ARGS)
 		sys_tree_num = fill_descrs(row->oids, row->ix_type,
 								   &descr, &indexDescr);
 
-		elog(WARNING, "orioledb_pg_rewind_sorted_keys: (%u %u %u): nkeys: %d",
-					  row->oids.datoid,
-					  row->oids.reloid,
-					  row->oids.relnode,
-					  row->nkeys);
 		if ((indexDescr) || (sys_tree_num > 0))
 		{
 			int			i;
@@ -477,8 +471,6 @@ process_key(StringInfo str, TableRow *row, KeyArrayElement *old_key,
 	}
 	found = cmp == 0;
 
-	elog(WARNING, "process_key: found: %c",
-		 found ? 'Y' : 'N');
 	if (found)
 	{
 		int			tup_len = o_btree_len(td, it->new_tup, OTupleLength);
@@ -524,8 +516,6 @@ process_tree(StringInfo str, TableRow *row)
 	OIndexDescr *indexDescr = NULL;
 	int			sys_tree_num = -1;
 
-	elog(WARNING, "process_tree: %u %u %u",
-		 row->oids.datoid, row->oids.reloid, row->oids.relnode);
 	sys_tree_num = fill_descrs(row->oids, row->ix_type,
 							   &descr, &indexDescr);
 
@@ -618,9 +608,6 @@ apply_rewind_row(OTableDescr *descr, OIndexDescr *indexDescr,
 	advance_oxids(temp_oxid);
 	recovery_switch_to_oxid(temp_oxid, -1);
 
-	elog(WARNING, "apply_rewind_row: sys_tree_num: %d; deleted: %c",
-		 sys_tree_num,
-		 deleted ? 'Y' : 'N');
 	if (sys_tree_num < 0)
 		apply_modify_record(descr, indexDescr,
 							deleted ? RecoveryMsgTypeDelete : RecoveryMsgTypeInsert,
@@ -911,7 +898,6 @@ replay_rewind(uint32 chkp_num, bool single)
 	checkpoint_state->controlToastConsistentPtr = startpoint;
 	checkpoint_state->controlReplayStartPtr = startpoint;
 	checkpoint_state->controlSysTreesStartPtr = startpoint;
-	elog(WARNING, "lastXid: %lu", lastXid);
 	Assert(OXidIsValid(lastXid));
 
 	/*
@@ -933,7 +919,6 @@ replay_rewind(uint32 chkp_num, bool single)
 	 * advance_oxids() as WAL_REC_XID arrives.
 	 */
 	pg_atomic_init_u64(&xid_meta->nextXid, lastXid);
-	elog(WARNING, "SET runXmin after rewind: %lu", lastXid);
 	pg_atomic_init_u64(&xid_meta->runXmin, lastXid);
 	pg_atomic_init_u64(&xid_meta->globalXmin, lastXid);
 	pg_atomic_init_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, lastXid);
