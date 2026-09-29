@@ -49,25 +49,25 @@ SAVEPOINT s4;
 UPDATE o_subtrans SET value = value || 'asdf';
 SAVEPOINT s5;
 DELETE FROM o_subtrans WHERE id % 4 = 3;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 ROLLBACK TO s5;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 ROLLBACK TO s4;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 ROLLBACK TO s3;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 ROLLBACK TO s2;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 ROLLBACK TO s1;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 COMMIT;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 
 TRUNCATE o_subtrans;
@@ -88,25 +88,25 @@ SAVEPOINT s4;
 UPDATE o_subtrans SET value = value || 'asdf';
 SAVEPOINT s5;
 DELETE FROM o_subtrans WHERE id % 4 = 3;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 ROLLBACK TO s5;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 ROLLBACK TO s4;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 ROLLBACK TO s3;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 ROLLBACK TO s2;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 ROLLBACK TO s1;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 ROLLBACK;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 
 TRUNCATE o_subtrans;
@@ -127,25 +127,25 @@ SAVEPOINT s4;
 UPDATE o_subtrans SET value = value || 'asdf';
 SAVEPOINT s5;
 DELETE FROM o_subtrans WHERE id % 4 = 3;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 RELEASE s5;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 RELEASE s4;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 RELEASE s3;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 RELEASE s2;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 RELEASE s1;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 COMMIT;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
 
 
