@@ -323,7 +323,7 @@ extern Datum o_eval_default(OTable *o_table, Relation rel,
 							bool byval, int16 typlen, bool *isNull);
 extern void o_table_resize_constr(OTable *o_table);
 extern void o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
-								OTableField *old_field, OTableField *field);
+								OTableField *field);
 extern void o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table,
 								  OIndexDescr *descr);
 extern char *o_get_type_name(Oid typid, int32 typmod);
@@ -382,6 +382,17 @@ o_tables_rel_meta_unlock(Relation rel, Oid oldRelnode)
 		ORelOids	oids;
 
 		ORelOidsSetFromRel(oids, rel);
+		/*
+		 * During a native heap rewrite the catalog maps the transient new
+		 * heap's OID (rel->oid) to a freshly allocated relfilenode Rnew, but
+		 * the OTable that owns the fill lives at the adopted permanent
+		 * identity (oldrel_oid, Rnew).  Redirect the META_UNLOCK WAL record's
+		 * oids to that identity so standby reconciliation (which looks up the
+		 * OTable by these oids) finds the surviving table rather than the
+		 * transient heap that is dropped after the swap.
+		 */
+		if (OidIsValid(rel->rd_rel->relrewrite))
+			oids.reloid = rel->rd_rel->relrewrite;
 		o_tables_meta_unlock(oids, oldRelnode);
 	}
 	else
@@ -406,11 +417,51 @@ o_tables_table_meta_unlock(OTable *o_table, Oid oldRelnode)
 		o_tables_meta_unlock_no_wal();
 }
 
-extern Oid	o_saved_relrewrite;
 extern List *o_reuse_indices;
+
+/*
+ * Set by orioledb_finish_heap_swap_body around the post-swap reindex so that
+ * orioledb_ambuild no-ops the already-adopted primary while PG's
+ * reindex_relation builds the secondaries.
+ */
+extern bool o_skip_primary_ambuild;
 
 extern void redefine_pkey_for_rel(Relation rel);
 
 extern bool destroy_tablespace_directories(Oid tablespaceoid, bool redo);
+extern void orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel);
+extern void orioledb_relation_toast_created(Relation rel, Relation toastrel);
+extern void orioledb_relation_create_finish(Relation rel);
+extern void orioledb_relation_alter_table_cmd(Relation rel,
+											  const struct AlteredTableInfo *tab,
+											  const struct AlterTableCmd *cmd, int pass,
+											  const ObjectAddress *address);
+extern void orioledb_relation_alter_type_rebuild_plan(Relation rel,
+													  struct AlteredTableInfo *tab);
+extern void orioledb_relation_alter_type_rebuild_finish(Relation rel,
+														struct AlteredTableInfo *tab);
+extern bool o_alter_type_batch_ambuild_skip(Relation heap, Relation index);
+extern bool o_alter_type_batch_amdrop_skip(Relation tbl, const char *ixname);
+extern bool orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
+										   bool swap_toast_by_content,
+										   bool is_internal,
+										   TransactionId frozenXid,
+										   MultiXactId cutoffMulti,
+										   char newrelpersistence);
+
+/*
+ * SET TABLESPACE move state.  orioledb_relation_copy_data() (the tableam
+ * relation_copy_data hook) arms these for the table relation while pg_class
+ * still carries the OLD relfilenode/tablespace; orioledb_relation_set_tablespace_finish()
+ * (the relation_set_tablespace_finish hook) consumes them after PG has moved
+ * the table, its toast table and all toast indexes (so every new relnode is
+ * in pg_class) to perform the orioledb tree move.  See Step 7 Path A.
+ */
+extern ORelOids o_tablemove_old_oids;
+extern bool o_tablemove_active;
+
+extern void orioledb_relation_set_tablespace_finish(Relation rel,
+													const RelFileNode *newrlocator,
+													Oid newTableSpace);
 
 #endif							/* __O_TABLES_H__ */

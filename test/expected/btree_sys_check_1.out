@@ -100,14 +100,14 @@ SELECT regexp_replace(
    Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ((NNN, NNN, NNN), 0, 1)            +
      Item 0: deleted, offset = 264, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 302)  +
    Chunk 1: offset = 1, location = 616, hikey location = 104, hikey = ((NNN, NNN, NNN), 0, 0)           +
-     Item 1: deleted, offset = 624, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 2132) +
+     Item 1: deleted, offset = 624, tuple = (((NNN, NNN, NNN), chunknum 0, version 2), dataLength 2132) +
    Chunk 2: offset = 2, location = 2800, hikey location = 128, hikey = ((NNN, NNN, NNN), 0, 0)          +
      Item 2: deleted, offset = 2808, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 302) +
-     Item 3: deleted, offset = 3160, tuple = (((NNN, NNN, NNN), chunknum 0, version 0), dataLength 1217)+
+     Item 3: deleted, offset = 3160, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 1217)+
    Chunk 3: offset = 4, location = 4424, hikey location = 152, hikey = ((NNN, NNN, NNN), 0, 0)          +
      Item 4: deleted, offset = 4432, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 496) +
    Chunk 4: offset = 5, location = 4976, hikey location = 176, hikey = ((NNN, NNN, NNN), 0, 0)          +
-     Item 5: deleted, offset = 4984, tuple = (((NNN, NNN, NNN), chunknum 0, version 0), dataLength 1411)+
+     Item 5: deleted, offset = 4984, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 1411)+
    Chunk 5: offset = 6, location = 6440, hikey location = 200                                           +
      Item 6: deleted, offset = 6448, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 496) +
                                                                                                         +

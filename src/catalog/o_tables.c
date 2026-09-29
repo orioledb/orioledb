@@ -802,63 +802,27 @@ o_eval_default(OTable *o_table, Relation rel, Node *expr, TupleTableSlot *scantu
 
 void
 o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
-					OTableField *old_field, OTableField *field)
+					OTableField *field)
 {
 	MemoryContext oldcxt;
 	MemoryContext tbl_cxt = OGetTableContext(o_table);
-	AttrMissing attrmiss_temp;
-	Node	   *defaultexpr;
 	AttrMissing *attrmiss = NULL;
-	bool		missingIsNull = true;
-	bool		has_domain_constraints = false;
 
-	if (field->hasdef || get_typtype(field->typid) == TYPTYPE_DOMAIN)
-		defaultexpr = build_column_default(rel, fieldnum + 1);
-	else
-		defaultexpr = NULL;
-
-	has_domain_constraints = DomainHasConstraints(field->typid);
-	if (o_in_add_column &&
-		!field->generated &&
-		!has_domain_constraints &&
-		!contain_volatile_functions((Node *) defaultexpr))
-	{
-		attrmiss_temp.am_value = o_eval_default(o_table, rel, defaultexpr, NULL,
-												field->byval, field->typlen,
-												&missingIsNull);
-		attrmiss_temp.am_present = true;
-
-		if (!old_field || (!old_field->hasmissing && !missingIsNull))
-		{
-			attrmiss = &attrmiss_temp;
-
-			/*
-			 * A missing value exists only when the evaluated default is
-			 * non-null.  For ADD COLUMN (!old_field) the guard above is
-			 * short-circuited, so gate hasmissing on missingIsNull here too;
-			 * otherwise a null default (e.g. adding a domain column with no
-			 * default) would mark the missing value present and datumCopy() a
-			 * NULL varlena below -> crash.  attrmiss stays set so the new
-			 * column's missing slot is still initialized (am_present =
-			 * false).
-			 */
-			field->hasmissing = !missingIsNull;
-		}
-	}
-	o_in_add_column = false;
+	if (rel->rd_att->constr && rel->rd_att->constr->missing)
+		attrmiss = &rel->rd_att->constr->missing[fieldnum];
 
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
 
-	if (attrmiss)
+	if (attrmiss && attrmiss->am_present)
 	{
-		o_table->missing[fieldnum].am_present = field->hasmissing &&
-			attrmiss->am_present;
-		if (o_table->missing[fieldnum].am_present)
-			o_table->missing[fieldnum].am_value = datumCopy(attrmiss->am_value,
-															field->byval,
-															field->typlen);
-		else
-			o_table->missing[fieldnum].am_value = 0;
+		o_table->missing[fieldnum].am_present = true;
+		o_table->missing[fieldnum].am_value = datumCopy(attrmiss->am_value,
+													field->byval, field->typlen);
+	}
+	else
+	{
+		o_table->missing[fieldnum].am_present = false;
+		o_table->missing[fieldnum].am_value = 0;
 	}
 	MemoryContextSwitchTo(oldcxt);
 }

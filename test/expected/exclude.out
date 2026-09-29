@@ -458,10 +458,10 @@ CREATE TABLE o_test_ib_ioc1
 	id2 int8 NOT NULL PRIMARY KEY,
 	UNIQUE (id1) WITH (orioledb_index=false, deduplicate_items=false)
 ) USING orioledb;
-WARNING:  using bridged btree index for orioledb
-DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'o_test_ib_ioc1'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 \d+ o_test_ib_ioc1
                              Table "exclude.o_test_ib_ioc1"
  Column |  Type  | Collation | Nullable | Default | Storage | Stats target | Description 
@@ -685,10 +685,10 @@ CREATE TABLE ib_unique_tbl (
 	t text,
 	UNIQUE (i) WITH (orioledb_index=false) DEFERRABLE
 ) USING orioledb;
-WARNING:  using bridged btree index for orioledb
-DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'ib_unique_tbl'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 INSERT INTO ib_unique_tbl VALUES (0, 'one');
 INSERT INTO ib_unique_tbl VALUES (1, 'two');
 INSERT INTO ib_unique_tbl VALUES (2, 'tree');
@@ -797,10 +797,10 @@ CREATE TABLE ib_deferred_excl (
   f2 int,
   CONSTRAINT ib_deferred_excl_con EXCLUDE (f1 WITH =) WITH (orioledb_index=false) INITIALLY DEFERRED
 ) USING orioledb;
-WARNING:  using bridged btree index for orioledb
-DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'ib_deferred_excl'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 INSERT INTO ib_deferred_excl VALUES(1);
 INSERT INTO ib_deferred_excl VALUES(2);
 INSERT INTO ib_deferred_excl VALUES(1); -- fail

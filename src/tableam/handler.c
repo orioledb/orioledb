@@ -535,9 +535,6 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 
-	if (OidIsValid(relation->rd_rel->relrewrite))
-		return slot;
-
 	o_serializable_lock_relation(RelationGetRelid(relation));
 
 	o_set_current_command(cid);
@@ -1091,6 +1088,14 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 		add_truncate_wal_record(oids);
 }
 
+/*
+ * SET TABLESPACE move state.  Defined here (the copy_data producer) and
+ * consumed by orioledb_relation_set_tablespace_finish() in ddl.c.  See
+ * o_tables.h and Step 7 Path A.
+ */
+ORelOids o_tablemove_old_oids;
+bool		o_tablemove_active = false;
+
 static void
 orioledb_relation_copy_data(Relation rel, const RelFileNode *new_relfilenode)
 {
@@ -1104,6 +1109,26 @@ orioledb_relation_copy_data(Relation rel, const RelFileNode *new_relfilenode)
 	dstrel = RelationCreateStorage(*new_relfilenode, rel->rd_rel->relpersistence, true);
 	RelationDropStorage(rel);
 	smgrclose(dstrel);
+
+	/*
+	 * For an orioledb relation this copy_data hook fires BEFORE PG writes the
+	 * new relfilenode/tablespace to pg_class (SetRelationTableSpace runs later
+	 * in ATExecSetTableSpace), so ORelOidsSetFromRel still yields the OLD
+	 * identity.  Save it: orioledb_relation_set_tablespace_finish() (which PG
+	 * calls after the table, its toast and all toast indexes have been moved)
+	 * recovers the old OTable from it.  The actual orioledb tree move runs
+	 * there, not here -- the toast table uses HEAP AM (orioledb_relation_toast_am
+	 * returns HEAP_TABLE_AM_OID), so this hook never fires for the toast
+	 * relation and we cannot learn the new toast relnode until the toast
+	 * recursion completes.
+	 */
+	if ((rel->rd_rel->relkind == RELKIND_RELATION ||
+		 rel->rd_rel->relkind == RELKIND_MATVIEW) &&
+		is_orioledb_rel(rel))
+	{
+		ORelOidsSetFromRel(o_tablemove_old_oids, rel);
+		o_tablemove_active = true;
+	}
 }
 
 static void
@@ -1905,7 +1930,14 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 	OTableDescr *descr;
 	bool		result;
 
-	if (OidIsValid(o_saved_relrewrite))
+	/*
+	 * The transient new heap produced by make_new_heap() carries relrewrite;
+	 * nothing should meaningfully scan it (the native fill writes to it, and
+	 * the real data transfer scans the old heap).  Returning false here keeps
+	 * any incidental scan of the transient heap a no-op.  The old heap is
+	 * scanned normally by ATRewriteTable to drive the native fill.
+	 */
+	if (OidIsValid(sscan->rs_rd->rd_rel->relrewrite))
 		return false;
 
 	do
@@ -2615,6 +2647,7 @@ static const TableAmRoutine orioledb_am_methods = {
 	.relation_set_new_filelocator = orioledb_relation_set_new_filenode,
 	.relation_nontransactional_truncate = orioledb_relation_nontransactional_truncate,
 	.relation_copy_data = orioledb_relation_copy_data,
+	.relation_set_tablespace_finish = orioledb_relation_set_tablespace_finish,
 	.relation_copy_for_cluster = orioledb_relation_copy_for_cluster,
 	.relation_vacuum = orioledb_vacuum_rel,
 	.scan_analyze_next_block = orioledb_scan_analyze_next_block,
@@ -2625,6 +2658,14 @@ static const TableAmRoutine orioledb_am_methods = {
 	.relation_size = orioledb_calculate_relation_size,
 	.relation_needs_toast_table = orioledb_relation_needs_toast_table,
 	.relation_toast_am = orioledb_relation_toast_am,
+	.relation_toast_created = orioledb_relation_toast_created,
+	.relation_create_finish = orioledb_relation_create_finish,
+	.relation_alter_table_cmd = orioledb_relation_alter_table_cmd,
+	.relation_alter_type_rebuild_plan = orioledb_relation_alter_type_rebuild_plan,
+	.relation_alter_type_rebuild_finish = orioledb_relation_alter_type_rebuild_finish,
+
+	.relation_begin_heap_rewrite = orioledb_begin_heap_rewrite_body,
+	.relation_finish_heap_swap = orioledb_finish_heap_swap_body,
 
 	.relation_estimate_size = orioledb_estimate_rel_size,
 #if PG_VERSION_NUM < 180000
@@ -2671,6 +2712,17 @@ relation_get_descr(Relation rel)
 	Assert(rel != NULL);
 
 	ORelOidsSetFromRel(oids, rel);
+	/*
+	 * During a native heap rewrite (ALTER TABLE/CLUSTER/REFRESH MATVIEW),
+	 * PG fills the transient new heap whose pg_class.relfilenode is the
+	 * post-swap relnode Rnew but whose pg_class.oid is the transient heap
+	 * (dropped after swap).  The adopted OTable is created at the final
+	 * identity (oldrel_oid, Rnew) by begin_heap_rewrite_body so the fill's
+	 * WAL records carry the surviving identity for logical decoding and
+	 * physical replication.  Redirect the descr lookup there.
+	 */
+	if (OidIsValid(rel->rd_rel->relrewrite))
+		oids.reloid = rel->rd_rel->relrewrite;
 	if (!is_orioledb_rel(rel))
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
