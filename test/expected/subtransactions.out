@@ -51,7 +51,7 @@ SAVEPOINT s4;
 UPDATE o_subtrans SET value = value || 'asdf';
 SAVEPOINT s5;
 DELETE FROM o_subtrans WHERE id % 4 = 3;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |       value       
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------
@@ -61,7 +61,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (3 rows)
 
 ROLLBACK TO s5;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |       value       
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------
@@ -71,7 +71,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (3 rows)
 
 ROLLBACK TO s4;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |     value     
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------
@@ -81,7 +81,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (3 rows)
 
 ROLLBACK TO s3;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        | value 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------
@@ -90,7 +90,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (2 rows)
 
 ROLLBACK TO s2;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        | value 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------
@@ -98,7 +98,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (1 row)
 
 ROLLBACK TO s1;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                                                                                                                                   array_agg                                                                                                                                                                                                                  | value 
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------
@@ -106,7 +106,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (1 row)
 
 COMMIT;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                                                                                                                                   array_agg                                                                                                                                                                                                                  | value 
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------
@@ -131,7 +131,7 @@ SAVEPOINT s4;
 UPDATE o_subtrans SET value = value || 'asdf';
 SAVEPOINT s5;
 DELETE FROM o_subtrans WHERE id % 4 = 3;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |       value       
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------
@@ -141,7 +141,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (3 rows)
 
 ROLLBACK TO s5;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |       value       
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------
@@ -151,7 +151,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (3 rows)
 
 ROLLBACK TO s4;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |     value     
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------
@@ -161,7 +161,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (3 rows)
 
 ROLLBACK TO s3;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        | value 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------
@@ -170,7 +170,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (2 rows)
 
 ROLLBACK TO s2;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        | value 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------
@@ -178,7 +178,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (1 row)
 
 ROLLBACK TO s1;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                                                                                                                                   array_agg                                                                                                                                                                                                                  | value 
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------
@@ -186,7 +186,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (1 row)
 
 ROLLBACK;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
  array_agg | value 
 -----------+-------
@@ -210,7 +210,7 @@ SAVEPOINT s4;
 UPDATE o_subtrans SET value = value || 'asdf';
 SAVEPOINT s5;
 DELETE FROM o_subtrans WHERE id % 4 = 3;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |       value       
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------
@@ -220,7 +220,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (3 rows)
 
 RELEASE s5;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |       value       
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------
@@ -230,7 +230,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (3 rows)
 
 RELEASE s4;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |       value       
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------
@@ -240,7 +240,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (3 rows)
 
 RELEASE s3;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |       value       
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------
@@ -250,7 +250,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (3 rows)
 
 RELEASE s2;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |       value       
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------
@@ -260,7 +260,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (3 rows)
 
 RELEASE s1;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |       value       
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------
@@ -270,7 +270,7 @@ FROM o_subtrans GROUP BY value ORDER BY value;
 (3 rows)
 
 COMMIT;
-SELECT array_agg(id), value
+SELECT array_agg(id ORDER BY id), value
 FROM o_subtrans GROUP BY value ORDER BY value;
                                                                                                        array_agg                                                                                                        |       value       
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------
