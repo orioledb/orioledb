@@ -374,6 +374,11 @@ class LogicalUndoRetainTest(BaseTest):
 			# A slot is synchronised as temporary until it has a confirmed
 			# position to be synchronised to, so give it one.
 			self.decoded(node)
+			# Ensure the standby has replayed up to the primary's
+			# current WAL position so the slotsync worker can persist
+			# the slot without waiting for catchup across multiple
+			# sync cycles with exponential backoff.
+			self.catchup_orioledb(replica)
 			replica.poll_query_until(
 			    f"SELECT EXISTS (SELECT 1 FROM pg_replication_slots "
 			    f"WHERE slot_name = '{SLOT}' AND synced AND NOT temporary);",
