@@ -3175,21 +3175,30 @@ class ReplicationTest(BaseTest):
 			WAL that will never exist, and an unbounded catchup() waits with
 			it until the CI cell is killed.  Name it instead.
 			"""
-			target = new_primary.execute(
-			    "SELECT pg_current_wal_lsn()::text;")[0][0]
+			target, tli = new_primary.execute(
+			    "SELECT pg_current_wal_lsn()::text, "
+			    "('x' || substr(pg_walfile_name(pg_current_wal_lsn()), "
+			    "1, 8))::bit(32)::int;")[0]
 			deadline = time.time() + seconds
 			while time.time() < deadline:
+				# The position alone does not tell: a node that diverged
+				# stays ahead on the old timeline, past the target.  It has
+				# to be streaming the new primary's timeline too.
 				done = node.execute(
-				    "SELECT pg_last_wal_replay_lsn() >= '%s'::pg_lsn;" %
-				    target)[0][0]
+				    "SELECT pg_last_wal_replay_lsn() >= '%s'::pg_lsn AND "
+				    "EXISTS (SELECT FROM pg_stat_wal_receiver "
+				    "WHERE received_tli = %d);" % (target, tli))[0][0]
 				if done:
 					return
 				time.sleep(0.5)
 
+			# PostgreSQL names the divergence at the fork itself, or later,
+			# once the peer is on a timeline forked off below this node
 			with open(node.pg_log_file, errors='replace') as f:
 				forked = [
 				    line.strip() for line in f
 				    if 'forked off current database system timeline' in line
+				    or 'is not a child of database system timeline' in line
 				]
 			reached = node.execute(
 			    "SELECT pg_last_wal_replay_lsn()::text;")[0][0]
