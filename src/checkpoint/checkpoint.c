@@ -6175,6 +6175,36 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 				file_header.bridgeCtid = 0;
 			}
 		}
+
+		/*
+		 * The tree's data is present as long as its first data file is (see
+		 * unlink_callback()): dropping a tree durably deletes that file
+		 * first, and a crash before its map files are gone too leaves maps
+		 * naming pages of a file that is not there.  btree_open_smgr() has
+		 * already re-created it empty by now.  The drop is in the WAL ahead
+		 * of us, so recovery replays it again; until then the tree has no
+		 * data, as tbl_data_exists() says too.
+		 */
+		if (!orioledb_s3_mode && DiskDownlinkIsValid(file_header.rootDownlink))
+		{
+			char	   *data_fname = btree_smgr_filename(desc, 0, chkp_num);
+			struct stat st;
+			int			rc = lstat(data_fname, &st);
+
+			if ((rc != 0 && errno == ENOENT) || (rc == 0 && st.st_size == 0))
+			{
+				elog(LOG, "evictable_tree_init_meta: %s names pages of an "
+					 "empty data file %s, loading the tree empty",
+					 prev_chkp_fname, data_fname);
+				file_header.rootDownlink = InvalidDiskDownlink;
+				file_header.datafileLength = 0;
+				file_header.numFreeBlocks = 0;
+				file_header.leafPagesNum = 1;
+				file_header.ctid = 0;
+				file_header.bridgeCtid = 0;
+			}
+			pfree(data_fname);
+		}
 		pfree(prev_chkp_fname);
 		result = prev_chkp_file_exist;
 	}
