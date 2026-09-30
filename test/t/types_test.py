@@ -1108,29 +1108,44 @@ class TypesTest(BaseTest):
 		node.stop()
 
 	def test_enum_index_create_database_template(self):
+		"""
+		The enum cache stores the label of its key inline, and copying it to
+		a database created from a template has to turn it back into a key.
+		The copy must then serve the new database alone, also for a crash
+		recovery replaying rows ordered by the enum.
+		"""
 		node = self.node
 		node.start()
+		long_label = 'l' * 63
+		# In the enum's sort order: 'sad' renamed, 'ok' added before 'happy'
+		labels = ['blue', 'ok', 'happy', long_label]
+
 		node.safe_psql("CREATE DATABASE src;")
 		node.safe_psql(
 		    "src", """
 			CREATE EXTENSION orioledb;
-			CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');
-
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+		""")
+		node.safe_psql("src", "ALTER TYPE mood ADD VALUE 'ok' BEFORE 'happy';")
+		node.safe_psql("src", "ALTER TYPE mood ADD VALUE '%s';" % long_label)
+		node.safe_psql("src", "ALTER TYPE mood RENAME VALUE 'sad' TO 'blue';")
+		node.safe_psql(
+		    "src", """
 			-- enum primary key
 			CREATE TABLE o_enum_pk (
 				id integer NOT NULL,
 				val mood NOT NULL,
+				tag integer NOT NULL,
 				PRIMARY KEY (val)
 			) USING orioledb;
-			INSERT INTO o_enum_pk VALUES (1, 'sad'), (2, 'ok'), (3, 'happy');
 
 			-- secondary index on enum column
 			CREATE TABLE o_enum_sec (
 				id integer PRIMARY KEY,
-				val mood NOT NULL
+				val mood NOT NULL,
+				tag integer NOT NULL
 			) USING orioledb;
 			CREATE INDEX o_enum_sec_idx ON o_enum_sec (val);
-			INSERT INTO o_enum_sec VALUES (1, 'sad'), (2, 'ok'), (3, 'happy');
 
 			-- multi-column unique index including enum
 			CREATE TABLE o_enum_multi (
@@ -1139,58 +1154,54 @@ class TypesTest(BaseTest):
 				tag integer NOT NULL
 			) USING orioledb;
 			CREATE UNIQUE INDEX o_enum_multi_idx ON o_enum_multi (val, tag);
-			INSERT INTO o_enum_multi VALUES (1, 'sad', 10), (2, 'ok', 20),
-											(3, 'happy', 30);
 		""")
+		tables = ['o_enum_pk', 'o_enum_sec', 'o_enum_multi']
+		insert = """
+			INSERT INTO %s
+				SELECT i, (ARRAY['blue', 'ok', 'happy', '%s'])[i %% 4 + 1]::mood,
+					   i * 10
+				FROM generate_series(%d, %d) i;
+		"""
+		for table in tables:
+			node.safe_psql("src", insert % (table, long_label, 0, 3))
+
 		node.safe_psql("CREATE DATABASE dst TEMPLATE src;")
+		# What dst needs must be its own copy
+		node.safe_psql("DROP DATABASE src;")
 
-		self.assertEqual([(1, 'sad'), (2, 'ok'), (3, 'happy')],
-		                 node.execute(
-		                     "dst", """
-				SELECT id, val::text FROM o_enum_pk ORDER BY id;
-			"""))
-		self.assertEqual([(1, 'sad'), (2, 'ok'), (3, 'happy')],
-		                 node.execute(
-		                     "dst", """
-				SELECT id, val::text FROM o_enum_sec ORDER BY id;
-			"""))
-		self.assertEqual([(1, 'sad', 10), (2, 'ok', 20), (3, 'happy', 30)],
-		                 node.execute(
-		                     "dst", """
-				SELECT id, val::text, tag FROM o_enum_multi ORDER BY id;
-			"""))
+		def rows(ids):
+			return [(i, labels[i % 4], i * 10) for i in ids]
 
-		with node.connect("dst") as con:
-			con.execute("SET enable_seqscan = off;")
-			self.assertEqual(
-			    [(2, 'ok')],
-			    con.execute(
-			        "SELECT id, val::text FROM o_enum_pk WHERE val = 'ok';"))
-			self.assertEqual(
-			    [(2, 'ok')],
-			    con.execute(
-			        "SELECT id, val::text FROM o_enum_sec WHERE val = 'ok';"))
-			self.assertEqual(
-			    [(2, 'ok', 20)],
-			    con.execute(
-			        "SELECT id, val::text, tag FROM o_enum_multi WHERE val = 'ok' AND tag = 20;"
-			    ))
+		def check(table, ids):
+			with node.connect("dst") as con:
+				self.assertEqual(
+				    con.execute("SELECT id, val::text, tag FROM %s "
+				                "ORDER BY id;" % table), rows(ids))
+				con.execute("SET enable_seqscan = off;")
+				# The index order is the enum's sort order
+				self.assertEqual(
+				    con.execute("SELECT t.val::text, t.id FROM %s t "
+				                "ORDER BY t.val, t.id;" % table),
+				    sorted([(labels[i % 4], i) for i in ids],
+				           key=lambda r: (labels.index(r[0]), r[1])))
+				for label in labels:
+					self.assertEqual(
+					    con.execute(
+					        "SELECT count(*) FROM %s WHERE val = %%s;" % table,
+					        (label, ))[0][0],
+					    len([i for i in ids if labels[i % 4] == label]))
 
+		for table in tables:
+			check(table, range(4))
+
+		# Rows of dst only, for the crash recovery to replay through the
+		# copied caches
+		for table in tables[1:]:
+			node.safe_psql("dst", insert % (table, long_label, 4, 999))
 		node.stop(['-m', 'immediate'])
 		node.start()
-		self.assertEqual([(1, 'sad'), (2, 'ok'), (3, 'happy')],
-		                 node.execute(
-		                     "dst", """
-				SELECT id, val::text FROM o_enum_pk ORDER BY id;
-			"""))
-		self.assertEqual([(1, 'sad'), (2, 'ok'), (3, 'happy')],
-		                 node.execute(
-		                     "dst", """
-				SELECT id, val::text FROM o_enum_sec ORDER BY id;
-			"""))
-		self.assertEqual([(1, 'sad', 10), (2, 'ok', 20), (3, 'happy', 30)],
-		                 node.execute(
-		                     "dst", """
-				SELECT id, val::text, tag FROM o_enum_multi ORDER BY id;
-			"""))
+
+		check('o_enum_pk', range(4))
+		for table in tables[1:]:
+			check(table, range(1000))
 		node.stop()
