@@ -23,6 +23,7 @@
 #include "btree/modify.h"
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
+#include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
 #include "transam/oxid.h"
@@ -807,6 +808,72 @@ static BTreeModifyCallbackInfo callbackInfo =
 	.arg = NULL
 };
 
+/*
+ * Write the entry of the transaction: its undo puts the previous version back
+ * if the transaction rolls back, in a backend and in recovery alike.
+ */
+static bool
+o_sys_cache_update_transactional(OSysCache *sys_cache, Pointer updated_entry)
+{
+	bool		result;
+	OSysCacheKey *sys_cache_key;
+	BTreeDescr *desc = get_sys_tree(sys_cache->sys_tree_num);
+	OSysCacheBound bound = {.nkeys = sys_cache->nkeys};
+	OXid		oxid = get_current_oxid();
+
+	sys_cache_key = (OSysCacheKey *) updated_entry;
+	bound.key = sys_cache_key;
+
+	systrees_modify_start();
+	if (!sys_cache->is_toast)
+	{
+		OTuple		tup;
+
+		tup.formatFlags = 0;
+		tup.data = updated_entry;
+
+		result = o_btree_modify(desc, BTreeOperationUpdate,
+								tup, BTreeKeyLeafTuple,
+								(Pointer) &bound, BTreeKeyBound,
+								oxid, COMMITSEQNO_INPROGRESS,
+								RowLockNoKeyUpdate, NULL,
+								&callbackInfo) ==
+			OBTreeModifyResultUpdated;
+
+		if (result)
+		{
+			OTuple		nulltup;
+
+			O_TUPLE_SET_NULL(nulltup);
+			Assert(IS_SYS_TREE_OIDS(desc->oids));
+			o_wal_update(desc, tup, nulltup, REPLICA_IDENTITY_DEFAULT,
+						 O_TABLE_INVALID_VERSION);
+		}
+	}
+	else
+	{
+		Pointer		data;
+		int			len;
+		OSysCacheToastKeyBound toast_key = {0};
+
+		toast_key.key = sys_cache_key;
+		toast_key.common.chunknum = 0;
+		toast_key.lsn_cmp = true;
+
+		data = sys_cache->funcs->toast_serialize_entry(updated_entry, &len);
+		result = generic_toast_update(&oSysCacheToastAPI,
+									  (Pointer) &toast_key,
+									  data, len,
+									  oxid,
+									  COMMITSEQNO_INPROGRESS,
+									  desc);
+		pfree(data);
+	}
+	systrees_modify_end(true);
+
+	return result;
+}
+
 static bool
 o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 {
@@ -1057,13 +1124,15 @@ set_deleted_in_place(OSysCache *sys_cache, Pointer entry, bool new_value)
 }
 
 static bool
-update_deleted_value(OSysCache *sys_cache, OSysCacheKey *key, bool new_value)
+update_deleted_value(OSysCache *sys_cache, OSysCacheKey *key, bool new_value,
+					 bool transactional)
 {
 	Pointer		entry;
 	OSysCacheKey *sys_cache_key;
 
 	/* all callers guarantee non-NULL; assert for static analysis */
 	Assert(sys_cache);
+	Assert(!transactional || !is_recovery_process());
 
 	o_sys_cache_set_datoid_lsn(&key->common.lsn, NULL);
 	entry = o_sys_cache_search(sys_cache, sys_cache->nkeys, key);
@@ -1074,6 +1143,9 @@ update_deleted_value(OSysCache *sys_cache, OSysCacheKey *key, bool new_value)
 
 	if (is_recovery_process())
 		return set_deleted_in_place(sys_cache, entry, new_value);
+
+	if (transactional)
+		return o_sys_cache_update_transactional(sys_cache, entry);
 
 	return o_sys_cache_update(sys_cache, entry);
 }
@@ -1150,16 +1222,43 @@ o_sys_cache_delete_callback(UndoLogType undoType, UndoLocation location,
 		elog(is_recovery_in_progress() ? PANIC : FATAL,
 			 "no sys cache for sys tree %d", item->sys_tree_num);
 
-	if (!update_deleted_value(sys_cache, (OSysCacheKey *) &item->key, false))
+	if (!update_deleted_value(sys_cache, (OSysCacheKey *) &item->key, false,
+							  false))
 		return;
 }
 
+/*
+ * Mark the entry deleted as a change of the current transaction.
+ *
+ * The flag is what o_sys_cache_delete_by_lsn() removes entries by, and it
+ * only removes them once the transaction that set the flag is finished for
+ * everybody.  A transaction that rolls back takes the flag back with its own
+ * undo, so there is no undo item of ours to run and nothing a checkpoint in
+ * between can remove too early.
+ */
 bool
 o_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key)
 {
+	return update_deleted_value(sys_cache, key, true, true);
+}
+
+/*
+ * Mark the entry deleted in an autonomous transaction, the way
+ * o_sys_cache_delete() did before it became transactional: the flag is
+ * committed at once, and the undo item takes it back if the current
+ * transaction rolls back.
+ *
+ * For a caller outside DDL, which should not take an oxid and the sys trees
+ * lock just to replace a cache entry.  A checkpoint may remove the entry
+ * before that rollback, which is harmless for a caller that adds a new
+ * version of the entry right away.
+ */
+bool
+o_sys_cache_delete_autonomous(OSysCache *sys_cache, OSysCacheKey *key)
+{
 	bool		res;
 
-	res = update_deleted_value(sys_cache, key, true);
+	res = update_deleted_value(sys_cache, key, true, false);
 
 	if (res)
 		o_add_undo_sys_cache_delete(sys_cache, key);
@@ -1180,8 +1279,9 @@ o_sys_cache_delete_by_lsn(OSysCache *sys_cache, XLogRecPtr lsn)
 	{
 		bool		end;
 		BTreeLocationHint hint;
-		OTuple		tup = btree_iterate_raw(it, NULL, BTreeKeyNone,
-											false, &end, &hint);
+		BTreeLeafTuphdr *tupHdr;
+		OTuple		tup = btree_iterate_all(it, NULL, BTreeKeyNone,
+											false, &end, &hint, &tupHdr);
 		OSysCacheKey *sys_cache_key;
 		OTuple		key_tup;
 
@@ -1192,6 +1292,22 @@ o_sys_cache_delete_by_lsn(OSysCache *sys_cache, XLogRecPtr lsn)
 			else
 				continue;
 		}
+
+		/* Already removed */
+		if (tupHdr->deleted != BTreeLeafTupleNonDeleted)
+			continue;
+
+		/*
+		 * The deleted flag is set by the transaction that drops the object,
+		 * and its rollback clears it again.  Only remove the entry once that
+		 * transaction is finished for everybody: an aborted one has put the
+		 * previous version back on the page by then, so a deleted flag on the
+		 * page is a committed one.  A lock-only header names a locker, not
+		 * the writer of the flag, so leave such an entry for later.
+		 */
+		if (XACT_INFO_IS_LOCK_ONLY(tupHdr->xactInfo) ||
+			!XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo))
+			continue;
 
 		if (sys_cache->is_toast)
 		{
