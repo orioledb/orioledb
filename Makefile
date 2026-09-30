@@ -219,6 +219,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/replication_test.py \
 						test/t/fuzzy_checkpoint_test.py \
 						test/t/types_test.py \
+						test/t/sys_cache_delete_test.py \
 						test/t/undo_eviction_test.py \
 						test/t/undo_ring_keep_checkpoint_test.py \
 						test/t/rewind_xid_test.py \

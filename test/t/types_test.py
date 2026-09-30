@@ -299,6 +299,8 @@ class TypesTest(BaseTest):
 		con.execute("DROP TABLE o_crash_comp_tbl; DROP TYPE o_crash_comp;")
 
 		node.safe_psql("CHECKPOINT;")
+		# Make whatever the checkpoint wrote after itself reach the disk
+		node.safe_psql("SELECT pg_switch_wal();")
 		node.stop(['-m', 'immediate'])
 
 		node.start()

@@ -259,6 +259,8 @@ extern void o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key,
 extern void o_sys_cache_update_if_needed(OSysCache *sys_cache,
 										 OSysCacheKey *key, Pointer arg);
 extern bool o_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key);
+extern bool o_sys_cache_delete_autonomous(OSysCache *sys_cache,
+										  OSysCacheKey *key);
 
 extern void o_cache_table_types(OTable *o_table);
 extern void o_cache_index_types(OTable *o_table, OTableIndex *o_table_index);

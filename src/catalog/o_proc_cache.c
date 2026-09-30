@@ -2083,13 +2083,20 @@ o_proc_cache_delete_if_stale(Oid datoid, Oid procoid)
 {
 	XLogRecPtr	cur_lsn;
 	OProc	   *o_proc;
+	OSysCacheKey1 key = {0};
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, datoid == InvalidOid ? &datoid : NULL);
 	o_proc = o_proc_cache_search(datoid, procoid, cur_lsn, proc_cache->nkeys);
 	if (o_proc == NULL || !o_proc->node_format_stale)
 		return false;
 
-	o_proc_cache_delete(datoid, procoid);
+	/*
+	 * Called from the planner of any query, and the caller adds the entry
+	 * anew right away: no need to make the query a writer of the sys trees.
+	 */
+	key.common.datoid = datoid;
+	key.keys[0] = ObjectIdGetDatum(procoid);
+	o_sys_cache_delete_autonomous(proc_cache, (OSysCacheKey *) &key);
 	return true;
 }
 
