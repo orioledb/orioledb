@@ -1115,18 +1115,49 @@ class TypesTest(BaseTest):
 		    "src", """
 			CREATE EXTENSION orioledb;
 			CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');
-			CREATE TABLE o_enum_tbl (
+
+			-- enum primary key
+			CREATE TABLE o_enum_pk (
 				id integer NOT NULL,
 				val mood NOT NULL,
 				PRIMARY KEY (val)
 			) USING orioledb;
-			INSERT INTO o_enum_tbl VALUES (1, 'sad'), (2, 'ok'), (3, 'happy');
+			INSERT INTO o_enum_pk VALUES (1, 'sad'), (2, 'ok'), (3, 'happy');
+
+			-- secondary index on enum column
+			CREATE TABLE o_enum_sec (
+				id integer PRIMARY KEY,
+				val mood NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_enum_sec_idx ON o_enum_sec (val);
+			INSERT INTO o_enum_sec VALUES (1, 'sad'), (2, 'ok'), (3, 'happy');
+
+			-- multi-column unique index including enum
+			CREATE TABLE o_enum_multi (
+				id integer NOT NULL,
+				val mood NOT NULL,
+				tag integer NOT NULL
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_enum_multi_idx ON o_enum_multi (val, tag);
+			INSERT INTO o_enum_multi VALUES (1, 'sad', 10), (2, 'ok', 20),
+											(3, 'happy', 30);
 		""")
 		node.safe_psql("CREATE DATABASE dst TEMPLATE src;")
+
 		self.assertEqual([(1, 'sad'), (2, 'ok'), (3, 'happy')],
 		                 node.execute(
 		                     "dst", """
-				SELECT id, val::text FROM o_enum_tbl ORDER BY id;
+				SELECT id, val::text FROM o_enum_pk ORDER BY id;
+			"""))
+		self.assertEqual([(1, 'sad'), (2, 'ok'), (3, 'happy')],
+		                 node.execute(
+		                     "dst", """
+				SELECT id, val::text FROM o_enum_sec ORDER BY id;
+			"""))
+		self.assertEqual([(1, 'sad', 10), (2, 'ok', 20), (3, 'happy', 30)],
+		                 node.execute(
+		                     "dst", """
+				SELECT id, val::text, tag FROM o_enum_multi ORDER BY id;
 			"""))
 
 		with node.connect("dst") as con:
@@ -1134,13 +1165,32 @@ class TypesTest(BaseTest):
 			self.assertEqual(
 			    [(2, 'ok')],
 			    con.execute(
-			        "SELECT id, val::text FROM o_enum_tbl WHERE val = 'ok';"))
+			        "SELECT id, val::text FROM o_enum_pk WHERE val = 'ok';"))
+			self.assertEqual(
+			    [(2, 'ok')],
+			    con.execute(
+			        "SELECT id, val::text FROM o_enum_sec WHERE val = 'ok';"))
+			self.assertEqual(
+			    [(2, 'ok', 20)],
+			    con.execute(
+			        "SELECT id, val::text, tag FROM o_enum_multi WHERE val = 'ok' AND tag = 20;"
+			    ))
 
 		node.stop(['-m', 'immediate'])
 		node.start()
 		self.assertEqual([(1, 'sad'), (2, 'ok'), (3, 'happy')],
 		                 node.execute(
 		                     "dst", """
-				SELECT id, val::text FROM o_enum_tbl ORDER BY id;
+				SELECT id, val::text FROM o_enum_pk ORDER BY id;
+			"""))
+		self.assertEqual([(1, 'sad'), (2, 'ok'), (3, 'happy')],
+		                 node.execute(
+		                     "dst", """
+				SELECT id, val::text FROM o_enum_sec ORDER BY id;
+			"""))
+		self.assertEqual([(1, 'sad', 10), (2, 'ok', 20), (3, 'happy', 30)],
+		                 node.execute(
+		                     "dst", """
+				SELECT id, val::text, tag FROM o_enum_multi ORDER BY id;
 			"""))
 		node.stop()
