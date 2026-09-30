@@ -291,23 +291,30 @@ class SysCacheDeleteTest(BaseTest):
 					DROP TYPE o_comp;
 					DROP TYPE o_range;
 					DROP TYPE o_enum;
-					PERFORM pg_catalog.pg_sleep(3);
+					-- Hold on here, with all the drops done, until the test
+					-- has looked and let go of the lock
+					PERFORM pg_catalog.pg_advisory_xact_lock(1);
 					RAISE EXCEPTION 'undo the drop';
 				EXCEPTION WHEN raise_exception THEN
 					NULL;
 				END;
 			END $$;
 		""")
+		holder = node.connect()
+		holder.begin()
+		holder.execute("SELECT pg_advisory_xact_lock(1);")
 		con = node.connect()
 		con.begin()
 		t = ThreadQueryExecutor(con, "SELECT o_drop_and_fail();")
 		t.start()
 		node.poll_query_until(
-		    "SELECT count(*) > 0 FROM orioledb_sys_tree_rows(%d) k "
-		    "WHERE (k->'key'->>'deleted')::bool;" % CACHE_TREES['TYPE_CACHE'])
+		    "SELECT count(*) > 0 FROM pg_stat_activity "
+		    "WHERE wait_event_type = 'Lock' AND wait_event = 'advisory';")
 		self.assertMarked(node)
 		node.safe_psql("CHECKPOINT;")
 		self.assertMarked(node)
+		holder.rollback()
+		holder.close()
 		t.join()
 		con.commit()
 		con.close()
