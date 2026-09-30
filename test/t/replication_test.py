@@ -3513,6 +3513,61 @@ class ReplicationTest(BaseTest):
 				    f"old relnode file {old_tree_path} should be gone on replica"
 				)
 
+	def test_replication_add_bridge_index_crash_after_drop(self):
+		"""
+		The replica deletes the old relnode's files when it replays the
+		commit of a rewrite.  Once they are gone there is no going back, so
+		the minimum recovery point has to cover that commit before, as
+		xact_redo_commit() does for the relations it drops itself.
+		Otherwise a crash right after the deletion restarts recovery with an
+		earlier consistency point: the rewrite's META_UNLOCK is replayed
+		after it, the table is rebuilt from the old tree -- which is now
+		empty but for the changes replayed into it since the restartpoint --
+		and the rebuild replaces the complete new tree.  The rows from
+		before the restartpoint were lost.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_test (id int PRIMARY KEY, val int, p point)
+				USING orioledb;
+			INSERT INTO o_test SELECT g, g, point(g, g)
+				FROM generate_series(1, 50) g;
+		""")
+		replica = self.getReplica()
+		replica.append_conf("orioledb.enable_stopevents = true\n")
+		with replica.start() as replica:
+			self.catchup_orioledb(replica)
+			node.safe_psql("CHECKPOINT;")
+			self.catchup_orioledb(replica)
+			# The restartpoint the replica recovers from after its crash
+			replica.safe_psql("CHECKPOINT;")
+			replica.safe_psql(
+			    "SELECT pg_stopevent_set('relnode_files_dropped', 'true');")
+			startup_pid = replica.execute(
+			    "SELECT pid FROM pg_stat_activity "
+			    "WHERE backend_type = 'startup';")[0][0]
+
+			# The bridge index rewrites the table into a new relnode, and its
+			# commit drops the old one
+			node.safe_psql("""
+				INSERT INTO o_test SELECT g, g, point(g, g)
+					FROM generate_series(51, 100) g;
+				CREATE INDEX o_test_gist ON o_test USING gist (p);
+			""")
+			wait_stopevent(replica, startup_pid)
+			replica.stop(['-m', 'immediate'])
+
+			replica.start()
+			self.catchup_orioledb(replica)
+			replica.poll_query_until(
+			    "SELECT orioledb_recovery_synchronized();", expected=True)
+			self.assertEqual(
+			    replica.execute("SELECT count(*), sum(val) FROM o_test;")[0],
+			    (100, 5050))
+		node.stop()
+
 	def test_recovery_add_bridge_index_all_ams_replicated(self):
 		"""
 		For each built-in bridged AM (gist, gin, brin, spgist) crash the
