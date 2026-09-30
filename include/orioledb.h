@@ -254,6 +254,13 @@ typedef struct
 	pg_atomic_uint64 logicalWalRetainUndoLocation;
 } UndoRetainSharedLocations;
 
+/*
+ * Meta pages one backend can pin at once.  Pins of one tree nest freely; a
+ * second tree gets its own slot -- loading a tree re-registers this backend's
+ * sequential scans on it, and that can happen under the pin of another.
+ */
+#define ORIOLEDB_META_PAGE_PIN_SLOTS 2
+
 typedef struct
 {
 	UndoRetainSharedLocations undoRetainLocations[(int) UndoLogsCount];
@@ -298,7 +305,7 @@ typedef struct
 	 * evictor see it: the same bargain PostgreSQL's fast-path locks strike,
 	 * published per backend and read by the one process that cares.
 	 */
-	pg_atomic_uint32 pinnedMetaPageBlkno;
+	pg_atomic_uint32 pinnedMetaPageBlkno[ORIOLEDB_META_PAGE_PIN_SLOTS];
 	UndoStackSharedLocations undoStackLocations[PROC_XID_ARRAY_SIZE][(int) UndoLogsCount];
 	XidVXidMapElement vxids[PROC_XID_ARRAY_SIZE];
 } ODBProcData;

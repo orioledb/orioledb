@@ -827,10 +827,11 @@ check_btree_compression(BTreeDescr *desc, BTreeCompressStats *stats, OCompress l
 	bool		recovery = is_recovery_in_progress();
 
 	o_tables_rel_lock_extended(&desc->oids, AccessShareLock, recovery);
-	o_btree_load_shmem(desc);
+	o_btree_load_shmem_pinned(desc);
 	init_page_find_context(&context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
 
 	btree_check_compression_recursive(desc, stats, lvl, &context, desc->rootInfo.rootPageBlkno);
 
+	btree_unpin_meta_page();
 	o_tables_rel_unlock_extended(&desc->oids, AccessShareLock, recovery);
 }

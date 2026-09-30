@@ -118,6 +118,7 @@ StaticAssertDecl(sizeof(BTreeMetaPage) <= ORIOLEDB_BLCKSZ,
 extern bool btree_pin_meta_page(BTreeDescr *desc);
 extern void o_btree_load_shmem_pinned(BTreeDescr *desc);
 extern void btree_unpin_meta_page(void);
+extern void btree_unpin_all_meta_pages(void);
 extern bool btree_claim_meta_page_for_eviction(BTreeDescr *desc);
 extern void btree_release_meta_page_claim(void);
 extern void btree_forget_meta_page_claim(void);
