@@ -3097,14 +3097,39 @@ o_sys_cache_copy_tree(OSysCache *sys_cache, Oid src_datoid, Oid dst_datoid)
 			if (key->common.datoid == src_datoid && !key->common.deleted)
 			{
 				int			tup_len = o_btree_len(td, tup, OTupleLength);
-				Pointer		copy = palloc(tup_len);
+				int			data_len = key->common.dataLength;
+				int			base_len = tup_len - data_len;
+				Pointer		entry = palloc(base_len);
+				int			key_len = offsetof(OSysCacheKey, keys) +
+					sizeof(Datum) * sys_cache->nkeys;
+				OSysCacheKey *dst_key;
+				int			i;
 
-				memcpy(copy, tup.data, tup_len);
-				((OSysCacheKey *) copy)->common.datoid = dst_datoid;
-				((OSysCacheKey *) copy)->common.lsn = cur_lsn;
-				((OSysCacheKey *) copy)->common.deleted = false;
-				(void) o_sys_cache_add(sys_cache, (OSysCacheKey *) copy, copy);
-				pfree(copy);
+				/*
+				 * Build an entry without inline NameData, and a key with real
+				 * Name pointers, so o_sys_cache_add can process them
+				 * normally.
+				 */
+				memcpy(entry, tup.data, key_len);
+				memcpy(entry + key_len,
+					   tup.data + key_len + data_len,
+					   base_len - key_len);
+
+				dst_key = (OSysCacheKey *) entry;
+				dst_key->common.datoid = dst_datoid;
+				dst_key->common.lsn = cur_lsn;
+				dst_key->common.deleted = false;
+				dst_key->common.dataLength = 0;
+
+				for (i = 0; i < sys_cache->nkeys; i++)
+				{
+					if (sys_cache->keytypes[i] == NAMEOID)
+						dst_key->keys[i] =
+							PointerGetDatum(O_KEY_GET_NAME(key, i));
+				}
+
+				(void) o_sys_cache_add(sys_cache, dst_key, entry);
+				pfree(entry);
 			}
 		}
 	} while (true);

@@ -1108,3 +1108,41 @@ class TypesTest(BaseTest):
 			SELECT * FROM t WHERE ((phone)::text !~ '^[+]') ORDER BY instance_id DESC, lower((email)::text);
 		"""), expected)
 		node.stop()
+
+	def test_enum_index_create_database_template(self):
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE DATABASE src;")
+		node.safe_psql(
+		    "src", """
+			CREATE EXTENSION orioledb;
+			CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');
+			CREATE TABLE o_enum_tbl (
+				id integer NOT NULL,
+				val mood NOT NULL,
+				PRIMARY KEY (val)
+			) USING orioledb;
+			INSERT INTO o_enum_tbl VALUES (1, 'sad'), (2, 'ok'), (3, 'happy');
+		""")
+		node.safe_psql("CREATE DATABASE dst TEMPLATE src;")
+		self.assertEqual([(1, 'sad'), (2, 'ok'), (3, 'happy')],
+		                 node.execute(
+		                     "dst", """
+				SELECT id, val::text FROM o_enum_tbl ORDER BY id;
+			"""))
+
+		with node.connect("dst") as con:
+			con.execute("SET enable_seqscan = off;")
+			self.assertEqual(
+			    [(2, 'ok')],
+			    con.execute(
+			        "SELECT id, val::text FROM o_enum_tbl WHERE val = 'ok';"))
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual([(1, 'sad'), (2, 'ok'), (3, 'happy')],
+		                 node.execute(
+		                     "dst", """
+				SELECT id, val::text FROM o_enum_tbl ORDER BY id;
+			"""))
+		node.stop()
