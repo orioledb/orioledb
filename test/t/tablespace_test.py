@@ -11,6 +11,7 @@ default and the backend died with
 "could not open data file orioledb_data/<db>/<relnode>: No such file or directory".
 """
 
+import os
 import shutil
 import tempfile
 
@@ -165,4 +166,50 @@ class TablespaceTest(BaseTest):
 		self.assertEqual(
 		    node.execute('postgres', "SELECT count(*) FROM t_split;")[0][0],
 		    500)
+		node.stop()
+
+	def test_startup_skips_tablespace_without_version_directory(self):
+		"""
+		Replaying a DROP TABLESPACE can leave its pg_tblspc entry behind
+		without the version directory inside (PostgreSQL's
+		033_replay_tsp_drops does it on a standby).  PostgreSQL itself only
+		logs that and goes on; the startup cleanup of old OrioleDB files
+		must skip such a tablespace too instead of failing the startup
+		process with "could not stat file".
+		"""
+		ext_dir = tempfile.mkdtemp(prefix='oriole_ts_ext_')
+		self.addCleanup(shutil.rmtree, ext_dir, ignore_errors=True)
+
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "allow_in_place_tablespaces = on\n")
+		node.start()
+		node.safe_psql('postgres', "CREATE EXTENSION orioledb;")
+		node.safe_psql('postgres', "CREATE TABLESPACE in_place LOCATION '';")
+		node.safe_psql('postgres',
+		               f"CREATE TABLESPACE external LOCATION '{ext_dir}';")
+		node.safe_psql(
+		    'postgres', """
+			CREATE TABLE o_test (id int PRIMARY KEY) USING orioledb;
+			INSERT INTO o_test SELECT generate_series(1, 100);
+		""")
+		version_dir = node.execute(
+		    'postgres',
+		    "SELECT 'PG_' || current_setting('server_version_num')::int / 10000"
+		    " || '_' || catalog_version_no FROM pg_control_system();")[0][0]
+		oids = node.execute(
+		    'postgres', "SELECT oid FROM pg_tablespace "
+		    "WHERE spcname IN ('in_place', 'external');")
+		node.safe_psql('postgres', "CHECKPOINT;")
+		node.stop(['-m', 'immediate'])
+
+		for (oid, ) in oids:
+			shutil.rmtree(
+			    os.path.join(node.data_dir, 'pg_tblspc', str(oid),
+			                 version_dir))
+
+		node.start()
+		self.assertEqual(
+		    node.execute('postgres', "SELECT count(*) FROM o_test;")[0][0],
+		    100)
 		node.stop()
