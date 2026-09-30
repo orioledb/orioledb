@@ -214,6 +214,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/recovery_stop_midrecord_test.py \
 						test/t/recovery_unusual_types_test.py \
 						test/t/recovery_worker_test.py \
+						test/t/recovery_partial_drop_test.py \
 						test/t/concurrent_index_test.py \
 						test/t/concurrent_index_stopevents_test.py \
 						test/t/replication_test.py \
