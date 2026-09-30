@@ -2500,6 +2500,19 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 
 	delay_if_queued_for_idxbuild();
 
+	/*
+	 * The callbacks below drop the relnodes this transaction left behind, and
+	 * once their files are gone there is no going back.  Update the minimum
+	 * recovery point to cover this record first, as xact_redo_commit() does
+	 * before it drops relation files itself -- and which it does only after
+	 * calling us.  Otherwise a crash right after the drop restarts recovery
+	 * with an earlier consistency point, and the table rewrite before this
+	 * record is rebuilt from the dropped tree. Only a transaction that
+	 * changed the system trees drops relnodes.
+	 */
+	if (worker_id < 0 && cur_recovery_xid_state->systree_modified)
+		XLogFlush(ptr);
+
 	if (!COMMITSEQNO_IS_ABORTED(csn) && sync)
 	{
 		Assert(worker_id < 0);

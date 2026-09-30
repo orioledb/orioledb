@@ -1133,6 +1133,21 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 											 dropTrees[i].oids.spcoid,
 											 dropTrees[i].oids.relnode);
 		}
+
+		if (recovery && doCleanup && cleanupFiles && STOPEVENTS_ENABLED())
+		{
+			JsonbParseState *state = NULL;
+			Jsonb	   *params;
+			MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+			pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+			jsonb_push_int8_key(&state, "datoid", datoid);
+			jsonb_push_int8_key(&state, "relnode", dropRelnode);
+			params = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+			MemoryContextSwitchTo(mctx);
+
+			STOPEVENT(STOPEVENT_RELNODE_FILES_DROPPED, params);
+		}
 	}
 
 	if (OidIsValid(remainRelnode))
