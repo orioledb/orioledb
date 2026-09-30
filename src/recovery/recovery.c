@@ -3968,6 +3968,14 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 					file->d_name);
 		if (lstat(path, &st) < 0)
 		{
+			/*
+			 * Replaying a DROP TABLESPACE can leave the pg_tblspc entry
+			 * without its version directory.  PostgreSQL only logs that, and
+			 * there is nothing of ours to clean up there either.
+			 */
+			if (errno == ENOENT)
+				continue;
+
 			ereport(ERROR,
 					(errcode_for_file_access(),
 					 errmsg("could not stat file \"%s\": %m",
