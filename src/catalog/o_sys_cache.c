@@ -592,12 +592,15 @@ o_sys_cache_get_from_tree(OSysCache *sys_cache, int nkeys, OSysCacheKey *key)
 		if (O_TUPLE_IS_NULL(tup))
 			break;
 
-		if (!O_TUPLE_IS_NULL(last_tup))
-			pfree(last_tup.data);
-
 		sys_cache_key = (OSysCacheKey *) tup.data;
 		if (sys_cache_key->common.lsn > key->common.lsn)
+		{
+			pfree(tup.data);
 			break;
+		}
+
+		if (!O_TUPLE_IS_NULL(last_tup))
+			pfree(last_tup.data);
 		last_tup = tup;
 	} while (true);
 
