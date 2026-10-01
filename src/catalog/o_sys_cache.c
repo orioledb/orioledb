@@ -2303,7 +2303,7 @@ o_SearchCatCacheInternal_hook(CatCache *cache, int nkeys, Datum v1, Datum v2,
 				Name		enumlabel;
 
 				enumtypid = DatumGetObjectId(v1);
-				enumlabel = DatumGetName(v1);
+				enumlabel = DatumGetName(v2);
 
 				Assert(tupdesc);
 
