@@ -1626,8 +1626,11 @@ class IndexBridgingTest(BaseTest):
 				FROM generate_series(2, 300000) g;
 		""")
 		with node.connect() as con:
-			# 291 bridge ctids to a block: 300000 rows span over 1000
-			# blocks, more exact pages than 64kB of bitmap holds
+			# Bridge ctids wrap every MaxHeapTuplesPerPage (291) offsets,
+			# so 300000 rows span 1031 blocks.  At work_mem = 64kB the
+			# TID bitmap holds at most 65536 / (sizeof(PagetableEntry) +
+			# 2 * sizeof(Pointer)) = 1024 exact pages, so 1031 > 1024
+			# forces lossy mode.  The margin is only 7 entries.
 			con.execute("SET work_mem = '64kB';")
 			con.execute("SET enable_seqscan = off;")
 			con.execute(STALE_UPDATE)
