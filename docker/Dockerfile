@@ -122,6 +122,7 @@ RUN set -eux; \
 		icu-dev \
 # https://www.postgresql.org/docs/14/release-14.html#id-1.11.6.5.5.3.7
 		lz4-dev \
+		patch \
 	; \
 	\
 	curl -o postgresql.tar.gz \
@@ -136,6 +137,15 @@ RUN set -eux; \
 		--strip-components 1 \
 	; \
 	rm postgresql.tar.gz; \
+	\
+# Patches to the PostgreSQL fork that this tree carries until they land in
+# orioledb/postgres (docker/patches/postgres/*.patch, applied in name order).
+	cd /usr/src/postgresql; \
+	for p in contrib/orioledb/docker/patches/postgres/*.patch; do \
+		[ -e "$p" ] || continue; \
+		echo "applying $p"; \
+		patch -p1 --forward < "$p"; \
+	done; \
 	\
 	cd /usr/src/postgresql; \
 	\

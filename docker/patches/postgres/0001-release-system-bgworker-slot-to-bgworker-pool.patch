@@ -1,0 +1,41 @@
+From 247ebe4bc6451e00b778e5f2e9b7bbf1cc01c46d Mon Sep 17 00:00:00 2001
+From: haruband <haruband@gmail.com>
+Date: Thu, 1 Oct 2026 23:20:13 +0900
+Subject: [PATCH] Release a system bgworker's child slot to the bgworker pool
+ it came from
+
+do_start_bgworker() takes the slot from pmchild_pools[B_BG_WORKER] and only
+then retypes a BGWORKER_CLASS_SYSTEM worker to B_SYSTEM_BG_WORKER.
+ReleasePostmasterChildSlot() returned the slot to the B_SYSTEM_BG_WORKER pool,
+whose range check failed, and the postmaster exited with 'pmchild freelist
+for backend type 6 is corrupt' whenever an orioledb S3 worker exited (and on
+every crash reinitialisation, since all children are released then).
+Map the type back to the pool it was allocated from, as B_WAL_SENDER already
+is.
+---
+ src/backend/postmaster/pmchild.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/backend/postmaster/pmchild.c b/src/backend/postmaster/pmchild.c
+index b2720d7..2ffee1f 100644
+--- a/src/backend/postmaster/pmchild.c
++++ b/src/backend/postmaster/pmchild.c
+@@ -252,6 +252,15 @@ ReleasePostmasterChildSlot(PMChild *pmchild)
+ 		/* WAL senders start out as regular backends, and share the pool */
+ 		if (pmchild->bkend_type == B_WAL_SENDER)
+ 			pool = &pmchild_pools[B_BACKEND];
++		/*
++		 * System background workers (BGWORKER_CLASS_SYSTEM) are started by
++		 * do_start_bgworker() from the regular bgworker pool and retyped
++		 * afterwards, so their slot belongs to that pool too.  Returning it
++		 * to the B_SYSTEM_BG_WORKER pool failed the range check below and
++		 * took the postmaster down whenever such a worker exited.
++		 */
++		else if (pmchild->bkend_type == B_SYSTEM_BG_WORKER)
++			pool = &pmchild_pools[B_BG_WORKER];
+ 		else
+ 			pool = &pmchild_pools[pmchild->bkend_type];
+ 
+-- 
+2.54.0 (Apple Git-157)
+
