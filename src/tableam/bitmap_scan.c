@@ -2262,9 +2262,14 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 			bridge_bound.n_row_keys = 0;
 			bridge_bound.row_keys = NULL;
 
+			/*
+			 * With the query's snapshot, as orioledb_index_fetch_tuple()
+			 * does: an entry left under the ctid a row had before an update
+			 * of a bridged column must not lead to the row's current version.
+			 */
 			bridge_tup = o_btree_find_tuple_by_key(&bridge->desc,
 												   (Pointer) &bridge_bound, BTreeKeyBound,
-												   &o_non_deleted_snapshot, &tupleCsn,
+												   &scan->oSnapshot, &tupleCsn,
 												   CurrentMemoryContext, NULL);
 
 			if (!O_TUPLE_IS_NULL(bridge_tup))
@@ -2336,7 +2341,7 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 		end_bound.row_keys = NULL;
 
 		it = o_btree_iterator_create(&bridge->desc, (Pointer) &start_bound, BTreeKeyBound,
-									 &o_non_deleted_snapshot, ForwardScanDirection);
+									 &scan->oSnapshot, ForwardScanDirection);
 		primarySlot = MakeSingleTupleTableSlot(tbl_descr->tupdesc, &TTSOpsOrioleDB);
 
 		do
