@@ -479,7 +479,7 @@ class OrioledbS3ObjectLoader:
 		# Not all files were restored, check the previous checkpoint recursively
 		if files_restored < len(file_checksums):
 			prev_file_checksums = {}
-			for filename, checkpoint in file_checksums:
+			for filename, checkpoint in file_checksums.items():
 				if int(checkpoint) < prev_chkp_num:
 					prev_file_checksums[filename] = checkpoint
 

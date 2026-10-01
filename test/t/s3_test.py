@@ -514,6 +514,71 @@ class S3Test(S3BaseTest):
 			new_node.stop()
 			new_node.cleanup()
 
+	def test_s3_data_dir_load_two_checkpoints(self):
+		"""A data directory loaded from a bucket that holds more than one
+		checkpoint: files unchanged since an earlier checkpoint are found by
+		walking back from the latest one (download_unchanged_small_files),
+		which used to iterate the checksum dict without .items() and fail
+		before the undo and WAL files were fetched."""
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+			orioledb.s3_num_workers = 3
+
+			archive_mode = on
+			archive_library = 'orioledb'
+		""")
+		node.append_conf(f"""
+			orioledb.recovery_pool_size = 1
+			orioledb.recovery_idx_pool_size = 1
+		""")
+		node.start()
+		archiver_pid = node.execute("""
+			SELECT pid FROM pg_stat_activity WHERE backend_type = 'archiver';
+		""")[0][0]
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_test_1 (
+				val_1 int
+			) USING orioledb;
+			INSERT INTO o_test_1 SELECT * FROM generate_series(1, 5);
+		""")
+		node.safe_psql("CHECKPOINT;")
+		# A second checkpoint that leaves o_test_1 untouched: its files stay
+		# at checkpoint 1 and the loader has to walk back for them.
+		node.safe_psql("""
+			CREATE TABLE o_test_2 (
+				val_1 int
+			) USING orioledb;
+			INSERT INTO o_test_2 SELECT * FROM generate_series(6, 10);
+		""")
+		node.safe_psql("CHECKPOINT;")
+		node.stop(['--no-wait'])
+
+		while self.client.list_objects(Bucket=self.bucket_name,
+		                               Prefix='wal/') == []:
+			pass
+		os.kill(archiver_pid, signal.SIGUSR2)
+		while node.status() == NodeStatus.Running:
+			pass
+
+		with self.initNode(self.getBasePort() + 1, 'tgsb') as new_node:
+			self.loader.download(new_node.data_dir)
+			new_node.append_conf(port=new_node.port)
+
+			new_node.start()
+			self.assertEqual([(1, ), (2, ), (3, ), (4, ), (5, )],
+			                 new_node.execute("SELECT * FROM o_test_1"))
+			self.assertEqual([(6, ), (7, ), (8, ), (9, ), (10, )],
+			                 new_node.execute("SELECT * FROM o_test_2"))
+			new_node.stop()
+			new_node.cleanup()
+
 	@s3_test_attrs(
 	    http=True,
 	    prefix=f'{S3BaseTest.bucket_name}/{S3BaseTest.optional_prefix}')
