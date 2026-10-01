@@ -192,6 +192,21 @@ RETURNS SETOF record
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
+CREATE FUNCTION orioledb_pg_rewind_sorted_keys(old_rows_table oid)
+RETURNS bytea
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_pg_rewind_new_row_versions(old_rows_table oid)
+RETURNS bytea
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_flush_local_wal()
+RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
 CREATE VIEW orioledb_table AS
   SELECT t.*,
          orioledb_table_description(t.datoid, t.reloid, t.relnode) AS description

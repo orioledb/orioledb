@@ -39,6 +39,7 @@ typedef enum
 typedef TupleFetchCallbackResult (*TupleFetchCallback) (OTuple tuple,
 														OXid tupOxid,
 														OSnapshot *oSnapshot,
+														bool deleted,
 														void *arg,
 														bool oxidIsFinished);
 
