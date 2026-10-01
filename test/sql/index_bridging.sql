@@ -776,24 +776,46 @@ CREATE INDEX bitmap_test_ix3 ON bitmap_test (k) WITH (orioledb_index=false);
 CREATE INDEX bitmap_test_ix4 ON bitmap_test (h);
 ANALYZE bitmap_test;
 
+-- DEBUG: page counts right after ANALYZE
+SELECT pg_relation_size('bitmap_test') / 8192 AS tbl_pages,
+       pg_relation_size('bitmap_test_ix1') / 8192 AS ix1_pages,
+       pg_relation_size('bitmap_test_ix2') / 8192 AS ix2_pages,
+       pg_relation_size('bitmap_test_ix3') / 8192 AS ix3_pages,
+       pg_relation_size('bitmap_test_ix4') / 8192 AS ix4_pages,
+       c.relpages AS pg_class_relpages,
+       c.reltuples AS pg_class_reltuples
+  FROM pg_class c WHERE c.relname = 'bitmap_test';
+-- DEBUG: index pg_class stats
+SELECT c.relname, c.relpages, c.reltuples
+  FROM pg_class c
+  WHERE c.relname IN ('bitmap_test_ix1','bitmap_test_ix2','bitmap_test_ix3','bitmap_test_ix4')
+  ORDER BY c.relname;
+
 SET enable_seqscan = off;
 SET cpu_tuple_cost = 0.5;
 SET random_page_cost = 1.0;
 
 CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND h < 100 OR j < 100 LIMIT 20);
-EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
+EXPLAIN (COSTS ON) SELECT count(*) FROM bitmap_test_mv;
 SELECT count(*) FROM bitmap_test_mv;
 SELECT * FROM bitmap_test_mv;
 DROP VIEW bitmap_test_mv;
 
 CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND j < 100 OR h < 100 LIMIT 20);
-EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
+EXPLAIN (COSTS ON) SELECT count(*) FROM bitmap_test_mv;
 SELECT count(*) FROM bitmap_test_mv;
 SELECT * FROM bitmap_test_mv;
 DROP VIEW bitmap_test_mv;
 
+-- DEBUG: page counts right before the flaky third query
+SELECT pg_relation_size('bitmap_test') / 8192 AS tbl_pages,
+       pg_relation_size('bitmap_test_ix1') / 8192 AS ix1_pages,
+       pg_relation_size('bitmap_test_ix2') / 8192 AS ix2_pages,
+       pg_relation_size('bitmap_test_ix3') / 8192 AS ix3_pages,
+       pg_relation_size('bitmap_test_ix4') / 8192 AS ix4_pages;
+
 CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND j < 100 AND k < 200 OR h < 100 LIMIT 20);
-EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
+EXPLAIN (COSTS ON) SELECT count(*) FROM bitmap_test_mv;
 SELECT count(*) FROM bitmap_test_mv;
 SELECT * FROM bitmap_test_mv;
 DROP VIEW bitmap_test_mv;
