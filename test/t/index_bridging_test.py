@@ -1721,3 +1721,37 @@ class IndexBridgingTest(BaseTest):
 		finally:
 			rr.close()
 		node.stop()
+	def test_bridge_vacuum_keeps_entries_of_old_snapshot(self):
+		"""
+		VACUUM removes a dead bridge entry together with the bridged
+		indexes' entries for its ctid, and lets the ctid be reused.  None of
+		that has undo, so it must wait until no snapshot can see the row: a
+		delete that is merely finished is not old enough.
+		"""
+		node = self.node
+		node.start()
+		rr = self._bridge_rr_setup(node)
+		try:
+			self.assertEqual(self._bridge_rr_count(rr, ["w7", "w150"]), 2)
+			node.safe_psql("DELETE FROM o_test WHERE id <= 100;")
+			node.safe_psql("VACUUM o_test;")
+			# New rows, which may take the ctids of the deleted ones
+			node.safe_psql("""
+				INSERT INTO o_test
+					SELECT g, to_tsvector('simple', 'n' || g)
+					FROM generate_series(1001, 1100) g;
+			""")
+			self.assertEqual(self._bridge_rr_count(rr, ["w7", "w50", "w150"]),
+			                 3)
+			self.assertEqual(self._bridge_rr_count(rr, ["n1007"]), 0)
+			rr.commit()
+
+			# Once the old snapshot is gone, VACUUM does remove them
+			node.safe_psql("VACUUM o_test;")
+			with node.connect() as con:
+				con.execute("SET enable_seqscan = off;")
+				self.assertEqual(
+				    self._bridge_rr_count(con, ["w7", "w150", "n1007"]), 2)
+		finally:
+			rr.close()
+		node.stop()
