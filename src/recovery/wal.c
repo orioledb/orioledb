@@ -947,6 +947,12 @@ flush_local_wal_buffer(void)
 	if (local_wal.buffer_offset == 0)
 		return;
 
+	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH, NULL))
+  		elog(ERROR, "stop event \"wal_flush\" fired");
+   	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH_GUARDED, NULL)
+  		&& !wal_in_rollback)
+  		elog(ERROR, "stop event \"wal_flush_guarded\" fired");
+
 	START_CRIT_SECTION();
 	log_logical_wal_container(local_wal.buffer, local_wal.buffer_offset, false);
 	reset_local_wal_buffer();
@@ -959,15 +965,7 @@ flush_local_wal_if_needed(int required_length)
 {
 	Assert(!is_recovery_process());
 	if (local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH > LOCAL_WAL_BUFFER_SIZE)
-	{
-    	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH, NULL))
-    		elog(ERROR, "stop event \"wal_flush\" fired");
-    	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH_GUARDED, NULL)
-    		&& !wal_in_rollback)
-    		elog(ERROR, "stop event \"wal_flush_guarded\" fired");
-
 		flush_local_wal_buffer();
-	}
 }
 
 /*
