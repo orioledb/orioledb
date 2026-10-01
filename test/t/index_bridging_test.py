@@ -1680,3 +1680,44 @@ class IndexBridgingTest(BaseTest):
 		finally:
 			rr.close()
 		node.stop()
+
+	def _bridge_rr_setup(self, node):
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test (id int PRIMARY KEY, terms tsvector)
+				USING orioledb;
+			CREATE INDEX o_test_terms ON o_test USING gin (terms);
+			INSERT INTO o_test
+				SELECT g, to_tsvector('simple', 'w' || g)
+				FROM generate_series(1, 200) g;
+		""")
+		rr = node.connect()
+		rr.execute("BEGIN ISOLATION LEVEL REPEATABLE READ;")
+		rr.execute("SET enable_seqscan = off;")
+		return rr
+
+	def _bridge_rr_count(self, con, words):
+		return con.execute(
+		    "SELECT count(*) FROM o_test WHERE terms @@ to_tsquery("
+		    "'simple', '%s');" % " | ".join(words))[0][0]
+
+	def test_bridge_stale_entry_deleted_row_old_snapshot(self):
+		"""
+		A delete removes the row's bridge entry.  A snapshot from before the
+		delete still sees the row, so it has to still see the entry: a
+		bridge read that skips deleted entries regardless of the snapshot
+		lost the row.
+		"""
+		node = self.node
+		node.start()
+		rr = self._bridge_rr_setup(node)
+		try:
+			self.assertEqual(self._bridge_rr_count(rr, ["w7", "w150"]), 2)
+			node.safe_psql("DELETE FROM o_test WHERE id <= 100;")
+			self.assertEqual(self._bridge_rr_count(rr, ["w7", "w150"]), 2)
+			rr.commit()
+			rr.execute("SET enable_seqscan = off;")
+			self.assertEqual(self._bridge_rr_count(rr, ["w7", "w150"]), 1)
+		finally:
+			rr.close()
+		node.stop()
