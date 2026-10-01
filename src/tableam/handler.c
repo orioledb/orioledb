@@ -252,11 +252,6 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 		}
 		else
 		{
-			bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
-												   (Pointer) &bridge_bound, BTreeKeyBound,
-												   &o_non_deleted_snapshot, &tupleCsn,
-												   slot->tts_mcxt, NULL);
-
 			/*
 			 * A non-MVCC snapshot (e.g. SnapshotNonVacuumable, used by the
 			 * planner's get_actual_variable_range() index-endpoint probe) has
@@ -268,6 +263,22 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 				oSnapshot = o_non_deleted_snapshot;
 			else
 				O_LOAD_SNAPSHOT(&oSnapshot, snapshot);
+
+			/*
+			 * Look the ctid up in the bridge with the same snapshot as the
+			 * row.  An update of a bridged column gives the row a new ctid
+			 * and deletes the old ctid's bridge entry, but the bridged index
+			 * keeps its entries for the old values under the old ctid. A
+			 * snapshot that ignores the deletion follows those entries to the
+			 * current row, which no longer matches them; one that only sees
+			 * committed data loses rows a concurrent update deleted. The
+			 * query's snapshot sees each ctid exactly when the row version
+			 * that carries it is visible.
+			 */
+			bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
+												   (Pointer) &bridge_bound, BTreeKeyBound,
+												   &oSnapshot, &tupleCsn,
+												   slot->tts_mcxt, NULL);
 		}
 		if (O_TUPLE_IS_NULL(bridge_tup))
 			return false;

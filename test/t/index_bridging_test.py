@@ -6,6 +6,43 @@ import unittest
 
 from .base_test import BaseTest
 
+# An update of a bridged index column gives the row a new bridge ctid and
+# deletes the old ctid's bridge entry, but the bridged index -- GIN never
+# removes entries on update -- keeps the old values under the old ctid.  The
+# bridge has to be read with the query's snapshot: a snapshot that ignores the
+# deletion follows the stale entries to the row's current version, which no
+# longer matches them, and a GIN match that needs no recheck returned it
+# (issue #1266).  One that sees committed data only loses rows a concurrent
+# update deleted (PR #1002).
+STALE_SETUP = """
+	CREATE EXTENSION IF NOT EXISTS orioledb;
+	CREATE TABLE o_test (
+		id bigint PRIMARY KEY,
+		terms tsvector,
+		tags text[] COLLATE "C"
+	) USING orioledb;
+	CREATE INDEX o_test_terms ON o_test USING gin (terms);
+	CREATE INDEX o_test_tags ON o_test USING gin (tags);
+	INSERT INTO o_test VALUES
+		(1, to_tsvector('simple', 'invoice'), ARRAY['old']);
+"""
+
+STALE_UPDATE = """
+	UPDATE o_test SET terms = to_tsvector('simple', 'contract'),
+					  tags = ARRAY['new']
+		WHERE id = 1;
+"""
+
+# Each query, and whether row 1 matches it before and after the update
+STALE_QUERIES = {
+    "terms_old": "terms @@ to_tsquery('simple', 'invoice')",
+    "terms_new": "terms @@ to_tsquery('simple', 'contract')",
+    "tags_old": "tags @> ARRAY['old']",
+    "tags_new": "tags @> ARRAY['new']",
+}
+STALE_BEFORE = {"terms_old", "tags_old"}
+STALE_AFTER = {"terms_new", "tags_new"}
+
 
 class IndexBridgingTest(BaseTest):
 
@@ -1458,4 +1495,185 @@ class IndexBridgingTest(BaseTest):
 		SET enable_seqscan = off;
 			SELECT max(length(big)) FROM o_test WHERE big LIKE '%%xxxxx%%';
 		""")[0][0])
+		node.stop()
+
+	def _stale_matches(self, con, scan="bitmap"):
+		"""Which queries row 1 comes back from, through the index."""
+		con.execute("SET enable_seqscan = off;")
+		con.execute("SET enable_indexscan = %s;" %
+		            ("on" if scan == "index" else "off"))
+		con.execute("SET enable_bitmapscan = %s;" %
+		            ("on" if scan == "bitmap" else "off"))
+		found = set()
+		for name, cond in STALE_QUERIES.items():
+			rows = con.execute("SELECT id, %s FROM o_test WHERE %s;" %
+			                   (cond, cond))
+			# A row the index returns has to satisfy its own predicate
+			for row in rows:
+				self.assertTrue(
+				    row[1], "%s returned row %s, which does not match it" %
+				    (name, row[0]))
+			if rows:
+				found.add(name)
+		return found
+
+	def test_bridge_stale_entry_own_update(self):
+		node = self.node
+		node.start()
+		node.safe_psql(STALE_SETUP)
+		with node.connect() as con:
+			self.assertEqual(self._stale_matches(con), STALE_BEFORE)
+			con.execute(STALE_UPDATE)
+			self.assertEqual(self._stale_matches(con), STALE_AFTER)
+			con.rollback()
+			self.assertEqual(self._stale_matches(con), STALE_BEFORE)
+		node.stop()
+
+	def test_bridge_stale_entry_committed_update(self):
+		node = self.node
+		node.start()
+		node.safe_psql(STALE_SETUP)
+		node.safe_psql(STALE_UPDATE)
+		with node.connect() as con:
+			self.assertEqual(self._stale_matches(con), STALE_AFTER)
+		node.stop()
+
+	def test_bridge_stale_entry_concurrent_reader(self):
+		node = self.node
+		node.start()
+		node.safe_psql(STALE_SETUP)
+		writer = node.connect()
+		reader = node.connect()
+		rr = node.connect()
+		try:
+			rr.execute("BEGIN ISOLATION LEVEL REPEATABLE READ;")
+			self.assertEqual(self._stale_matches(rr), STALE_BEFORE)
+
+			# An open reader of the bridged indexes must not block the
+			# update: o_tbl_update() used to take AccessExclusiveLock on
+			# every index just to read its definition
+			writer.execute("SET lock_timeout = '10s';")
+			writer.execute(STALE_UPDATE)
+			# The update is in progress: everybody else still sees the row
+			# as it was, through its old entries only
+			self.assertEqual(self._stale_matches(reader), STALE_BEFORE)
+			reader.commit()
+			self.assertEqual(self._stale_matches(rr), STALE_BEFORE)
+
+			writer.commit()
+			self.assertEqual(self._stale_matches(reader), STALE_AFTER)
+			reader.commit()
+			# A snapshot from before the commit keeps the old version
+			self.assertEqual(self._stale_matches(rr), STALE_BEFORE)
+			rr.commit()
+			self.assertEqual(self._stale_matches(rr), STALE_AFTER)
+		finally:
+			writer.close()
+			reader.close()
+			rr.close()
+		node.stop()
+
+	def test_bridge_stale_entry_index_scan(self):
+		"""The same through orioledb_index_fetch_tuple(): an index scan of a
+		bridged btree, whose matches need no recheck either."""
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test (id bigint PRIMARY KEY, val int)
+				USING orioledb;
+			CREATE INDEX o_test_val ON o_test (val)
+				WITH (orioledb_index = false);
+			INSERT INTO o_test VALUES (1, 10);
+		""")
+
+		def found(con):
+			con.execute("SET enable_seqscan = off;")
+			con.execute("SET enable_bitmapscan = off;")
+			result = set()
+			for val in (10, 20):
+				rows = con.execute(
+				    "SELECT id, val FROM o_test WHERE val = %d;" % val)
+				for row in rows:
+					self.assertEqual(
+					    row[1], val, "val = %d returned row %s with val %s" %
+					    (val, row[0], row[1]))
+				if rows:
+					result.add(val)
+			return result
+
+		with node.connect() as con:
+			plan = "\n".join(r[0] for r in con.execute(
+			    "SET enable_seqscan = off; SET enable_bitmapscan = off;"
+			    "EXPLAIN (COSTS OFF) SELECT * FROM o_test WHERE val = 10;"))
+			self.assertIn("o_test_val", plan)
+			self.assertEqual(found(con), {10})
+			con.execute("UPDATE o_test SET val = 20 WHERE id = 1;")
+			self.assertEqual(found(con), {20})
+			con.rollback()
+			self.assertEqual(found(con), {10})
+		node.stop()
+
+	def test_bridge_stale_entry_lossy_bitmap(self):
+		"""The same when the bitmap goes lossy and every bridge entry of a
+		page is looked at."""
+		node = self.node
+		node.start()
+		node.safe_psql(STALE_SETUP)
+		node.safe_psql("""
+			INSERT INTO o_test
+				SELECT g, to_tsvector('simple', 'invoice'), ARRAY['old']
+				FROM generate_series(2, 300000) g;
+		""")
+		with node.connect() as con:
+			# 291 bridge ctids to a block: 300000 rows span over 1000
+			# blocks, more exact pages than 64kB of bitmap holds
+			con.execute("SET work_mem = '64kB';")
+			con.execute("SET enable_seqscan = off;")
+			con.execute(STALE_UPDATE)
+			for cond, expected in ((STALE_QUERIES["terms_old"],
+			                        299999), (STALE_QUERIES["terms_new"], 1),
+			                       (STALE_QUERIES["tags_old"], 299999)):
+				self.assertEqual(
+				    con.execute("SELECT count(*), count(*) FILTER "
+				                "(WHERE %s) FROM o_test WHERE %s;" %
+				                (cond, cond))[0], (expected, expected), cond)
+			con.rollback()
+			con.execute("SET enable_seqscan = off;")
+			self.assertEqual(
+			    con.execute("SELECT count(*) FROM o_test WHERE %s;" %
+			                STALE_QUERIES["terms_new"])[0][0], 0)
+		node.stop()
+
+	def test_bridge_stale_entry_primary_key_change(self):
+		"""
+		An update of the primary key alone keeps the row's bridge ctid and
+		points its bridge entry at the new key.  A snapshot from before the
+		update has to get the old key from the bridge, the one its version
+		of the row has: the bridge is read with the query's snapshot, not
+		only the primary index.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test (id bigint PRIMARY KEY, terms tsvector)
+				USING orioledb;
+			CREATE INDEX o_test_terms ON o_test USING gin (terms);
+			INSERT INTO o_test VALUES (1, to_tsvector('simple', 'invoice'));
+		""")
+		query = ("SELECT id FROM o_test "
+		         "WHERE terms @@ to_tsquery('simple', 'invoice');")
+		rr = node.connect()
+		try:
+			rr.execute("BEGIN ISOLATION LEVEL REPEATABLE READ;")
+			rr.execute("SET enable_seqscan = off;")
+			self.assertEqual(rr.execute(query), [(1, )])
+			node.safe_psql("UPDATE o_test SET id = 2 WHERE id = 1;")
+			self.assertEqual(rr.execute(query), [(1, )])
+			rr.commit()
+			rr.execute("SET enable_seqscan = off;")
+			self.assertEqual(rr.execute(query), [(2, )])
+		finally:
+			rr.close()
 		node.stop()
