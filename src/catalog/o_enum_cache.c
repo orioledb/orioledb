@@ -150,18 +150,23 @@ o_enum_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	enumform = (Form_pg_enum) GETSTRUCT(enumtup);
 
 	prev_context = MemoryContextSwitchTo(enum_cache->mcxt);
-	if (o_enum != NULL)			/* Existed o_enum updated */
+	if (o_enum != NULL)
 	{
-		Assert(false);
+		/* B-tree format entry: data is shifted by inline NAMEOID keys */
+		OEnumData  *data;
+
+		data = (OEnumData *) (((Pointer) o_enum) + offsetof(OEnum, data) +
+							  o_enum->key.common.dataLength);
+		data->oid = enumform->oid;
+		data->enumsortorder = enumform->enumsortorder;
 	}
 	else
 	{
 		o_enum = palloc0(sizeof(OEnum));
 		*entry_ptr = (Pointer) o_enum;
+		o_enum->data.oid = enumform->oid;
+		o_enum->data.enumsortorder = enumform->enumsortorder;
 	}
-
-	o_enum->data.oid = enumform->oid;
-	o_enum->data.enumsortorder = enumform->enumsortorder;
 
 	MemoryContextSwitchTo(prev_context);
 	ReleaseSysCache(enumtup);
@@ -184,17 +189,16 @@ o_enumoid_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	enumform = (Form_pg_enum) GETSTRUCT(enumtup);
 
 	prev_context = MemoryContextSwitchTo(enumoid_cache->mcxt);
-	if (o_enumoid != NULL)		/* Existed o_enum updated */
+	if (o_enumoid != NULL)
 	{
-		Assert(false);
+		o_enumoid->enumtypid = enumform->enumtypid;
 	}
 	else
 	{
 		o_enumoid = palloc0(sizeof(OEnumOid));
 		*entry_ptr = (Pointer) o_enumoid;
+		o_enumoid->enumtypid = enumform->enumtypid;
 	}
-
-	o_enumoid->enumtypid = enumform->enumtypid;
 
 	MemoryContextSwitchTo(prev_context);
 	ReleaseSysCache(enumtup);
@@ -246,7 +250,7 @@ o_enumoid_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 }
 
 void
-o_enum_cache_delete_all(Oid datoid, Oid enum_oid)
+o_enum_cache_delete_all(Oid datoid, Oid enum_oid, bool autonomous)
 {
 	BTreeDescr *td = get_sys_tree(enum_cache->sys_tree_num);
 	BTreeIterator *it;
@@ -281,9 +285,31 @@ o_enum_cache_delete_all(Oid datoid, Oid enum_oid)
 		o_enum_data =
 			(OEnumData *) (((Pointer) o_enum) + offsetof(OEnum, data) +
 						   o_enum->key.common.dataLength);
-		o_enum_cache_delete(datoid, o_enum->key.keys[0],
-							NameGetDatum(O_KEY_GET_NAME(&o_enum->key, 1)));
-		o_enumoid_cache_delete(datoid, o_enum_data->oid);
+
+		if (autonomous)
+		{
+			OSysCacheKey2 ekey;
+			OSysCacheKey1 okey;
+
+			memset(&ekey, 0, sizeof(ekey));
+			ekey.common.datoid = datoid;
+			ekey.keys[0] = o_enum->key.keys[0];
+			ekey.keys[1] = NameGetDatum(O_KEY_GET_NAME(&o_enum->key, 1));
+			o_sys_cache_delete_autonomous(enum_cache,
+										  (OSysCacheKey *) &ekey);
+
+			memset(&okey, 0, sizeof(okey));
+			okey.common.datoid = datoid;
+			okey.keys[0] = ObjectIdGetDatum(o_enum_data->oid);
+			o_sys_cache_delete_autonomous(enumoid_cache,
+										  (OSysCacheKey *) &okey);
+		}
+		else
+		{
+			o_enum_cache_delete(datoid, o_enum->key.keys[0],
+								NameGetDatum(O_KEY_GET_NAME(&o_enum->key, 1)));
+			o_enumoid_cache_delete(datoid, o_enum_data->oid);
+		}
 
 		pfree(tup.data);
 	} while (true);

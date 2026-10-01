@@ -442,7 +442,8 @@ extern HeapTuple o_enum_cache_search_htup(TupleDesc tupdesc, Oid enumtypid,
 										  Name enumlabel);
 extern void o_enum_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 								   OTuple tup, Pointer arg);
-extern void o_enum_cache_delete_all(Oid datoid, Oid enum_oid);
+extern void o_enum_cache_delete_all(Oid datoid, Oid enum_oid,
+									bool autonomous);
 
 extern HeapTuple o_enumoid_cache_search_htup(TupleDesc tupdesc, Oid enum_oid);
 extern void o_enumoid_cache_tup_print(BTreeDescr *desc, StringInfo buf,

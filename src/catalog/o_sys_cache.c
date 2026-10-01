@@ -975,6 +975,24 @@ o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg)
 
 	if (entry != NULL)
 	{
+		OSysCacheKey *sys_cache_key = (OSysCacheKey *) entry;
+
+		if (!sys_cache_key->common.deleted)
+		{
+			o_sys_cache_unlock(sys_cache, key, AccessExclusiveLock);
+			return;
+		}
+
+		/*
+		 * Refresh data and re-activate the soft-deleted entry.  This happens
+		 * when delete_all + add_all re-encounters an entry whose key still
+		 * exists (e.g. RENAME VALUE followed by ADD VALUE reusing the old
+		 * label).
+		 */
+		sys_cache->funcs->fill_entry(&entry, key, arg);
+		sys_cache_key = (OSysCacheKey *) entry;
+		sys_cache_key->common.deleted = false;
+		o_sys_cache_update(sys_cache, entry);
 		o_sys_cache_unlock(sys_cache, key, AccessExclusiveLock);
 		return;
 	}
