@@ -9,6 +9,7 @@
 # Use this file for iteration / experiments without touching the
 # original test.
 
+import contextlib
 import datetime
 import inspect
 import os
@@ -116,7 +117,7 @@ class RrStressTest(BaseTest):
 		postmaster_kill_enabled = _env_int('RR_KILL_POSTMASTER', 0)
 		postmaster_kill_interval = _env_float('RR_KILL_POSTMASTER_INTERVAL',
 		                                      duration / 3.0)
-		# Assertion-injection cadence: the assert_chaos_loop arms one
+		# Assertion-injection cadence: the assert_chaos_step arms one
 		# stop-event assertion every RR_ASSERT_PERIOD seconds (each firing
 		# escalates to a PANIC, taking the cluster down). Expressed as the
 		# period between firings, not a count per run. Defaults to
@@ -202,8 +203,7 @@ class RrStressTest(BaseTest):
 		first_crash_time = [None]
 		injection_history = []
 		injection_history_lock = threading.Lock()
-		# Per-point counter: how many times each injection point was
-		# attached (i.e. won the rating tournament) by `error_chaos_loop`.
+		# Per-point counter: how many times each injection point was armed.
 		# Reported at the end of the test.
 		attach_counts = {}
 		attach_counts_lock = threading.Lock()
@@ -226,7 +226,7 @@ class RrStressTest(BaseTest):
 		kill_count = [
 		    0
 		]  # successful postmaster SIGKILLs by postmaster_kill_loop
-		rollback_count = [0]  # deliberate ROLLBACKs by rollbacker_loop
+		rollback_count = [0]  # deliberate ROLLBACKs by rollbacker_step
 
 		def record_error(msg):
 			with errors_lock:
@@ -238,287 +238,159 @@ class RrStressTest(BaseTest):
 			with print_lock:
 				print(msg, flush=True)
 
-		def writer_loop(writer_id):
-			con = node.connect()
-			local_w = 0
-			local_c = 0
-			local_disc = 0
+		def run_loop(step, ok_count=None, err_count=None, pause=0):
+			# Call step(con) until `stop`.  A step that raises is probed with
+			# rollback(): if that works the backend is alive (server-side
+			# ERROR); otherwise the connection is gone (cluster crashed,
+			# FATAL'd, or killed) and the next iteration reconnects.
+			con = None
+			ok = err = disc = 0
 			try:
 				while not stop.is_set():
-					if con is None:
-						try:
+					try:
+						if con is None:
 							con = node.connect()
-						except Exception:
-							local_disc += 1
-							if stop.wait(0.5):
-								break
-							continue
-					v_from = random.randint(1, n_accounts)
-					v_to = random.randint(1, n_accounts)
-					if v_from == v_to:
-						continue
-					amount = random.randint(1, 10)
-					try:
-						con.begin(IsolationLevel.RepeatableRead)
-						from_bal, from_token = con.execute(
-						    "SELECT balance, token "
-						    "FROM o_bank_account "
-						    f"WHERE id = {v_from}")[0]
-						to_bal, to_token = con.execute("SELECT balance, token "
-						                               "FROM o_bank_account "
-						                               f"WHERE id = {v_to}")[0]
-						# Pocket-free 2-row swap: tokens rotate directly
-						# between v_from and v_to with no writer-side
-						# pocket state. So token set must be fully complete even
-						# even after postmaster SIGKILL or any injection
-						con.execute("UPDATE o_bank_account "
-						            f"SET balance = {from_bal - amount}, "
-						            f"    token = {to_token} "
-									f"{	f', token_arr = ARRAY[{to_token}]::bigint[] ' if bridge_enabled else ""}"
-						            f"WHERE id = {v_from}")
-						if random.randint(0, 1) == 0:
-							time.sleep(0)
-						con.execute("UPDATE o_bank_account "
-						            f"SET balance = {to_bal + amount}, "
-						            f"    token = {from_token} "
-									f"{	f', token_arr =  ARRAY[{from_token}]::bigint[] ' if bridge_enabled else ""}"
-						            f"WHERE id = {v_to}")
-						con.commit()
-						local_w += 1
+						step(con)
+						ok += 1
 					except Exception:
-						# Probe connection health via rollback.  If even
-						# rollback fails, the backend is gone (cluster
-						# crashed, FATAL'd, or network reset) -- count as
-						# a disconnect and force reconnect on next round.
-						con_dead = False
 						try:
 							con.rollback()
+							err += 1
 						except Exception:
-							con_dead = True
-						if con_dead:
-							try:
+							with contextlib.suppress(Exception):
 								con.close()
-							except Exception:
-								pass
 							con = None
-							local_disc += 1
-						else:
-							local_c += 1
-			finally:
-				if con is not None:
-					try:
-						con.close()
-					except Exception:
-						pass
-				with counters_lock:
-					write_count[0] += local_w
-					conflict_count[0] += local_c
-					disconnect_count[0] += local_disc
-
-		def rollbacker_loop(rollbacker_id):
-			# Abort-path traffic generator.  Every iteration opens a
-			# REPEATABLE READ tx, forces an oxid with NO material changes via
-			# orioledb_get_current_oxid(), sleeps holding it, then rollback().
-			# This manufactures a no-material-change abort that takes
-			# wal_rollback's !has_material_changes fast path -> no durable
-			# rollback record -> resurrected as in-flight by crash recovery
-			# -> deferred WAL_REC_ROLLBACK.  The orioledb_get_current_oxid()
-			# call is what makes this exercise the fast path at all: a bare
-			# BEGIN/ROLLBACK acquires no oxid (lazy assignment) and never
-			# reaches wal_rollback.
-			con = node.connect()
-			local_rb = 0
-			local_disc = 0
-			try:
-				while not stop.is_set():
-					if con is None:
-						try:
-							con = node.connect()
-						except Exception:
-							local_disc += 1
-							if stop.wait(0.5):
-								break
-							continue
-					try:
-						con.begin(IsolationLevel.RepeatableRead)
-						# Force oxid assignment with no material WAL, then hold
-						# it across the sleep so a SIGKILL can catch it in-flight.
-						con.execute("SELECT orioledb_get_current_oxid()")
-						time.sleep(random.randint(0, 10) * 0.1)
-						con.rollback()
-						local_rb += 1
-					except Exception:
-						# Same connection-health probe as writer_loop: if even
-						# rollback fails the backend is gone -> reconnect.
-						con_dead = False
-						try:
-							con.rollback()
-						except Exception:
-							con_dead = True
-						if con_dead:
-							try:
-								con.close()
-							except Exception:
-								pass
-							con = None
-							local_disc += 1
-			finally:
-				if con is not None:
-					try:
-						con.close()
-					except Exception:
-						pass
-				with counters_lock:
-					rollback_count[0] += local_rb
-					disconnect_count[0] += local_disc
-
-		def reader_pk_loop(reader_id):
-			con = node.connect()
-			local_r = 0
-			try:
-				while not stop.is_set():
-					try:
-						con.begin(IsolationLevel.RepeatableRead)
-						total, uniq, rows = con.execute(
-						    "SELECT sum(balance)::bigint, "
-						    "       count(DISTINCT token)::int, "
-						    "       count(*)::int "
-						    "FROM o_bank_account")[0]
-						con.commit()
-						if total != expected_total:
-							record_error(
-							    f'PK: total {total} != {expected_total}')
-						if uniq != n_accounts:
-							record_error(
-							    f'PK: unique tokens {uniq} != {n_accounts}')
-						if rows != n_accounts:
-							record_error(f'PK: rows {rows} != {n_accounts}')
-						local_r += 1
-					except Exception:
-						try:
-							con.rollback()
-						except Exception:
-							pass
-			finally:
-				try:
-					con.close()
-				except Exception:
-					pass
-				with counters_lock:
-					read_count[0] += local_r
-
-		def reader_sk_loop(reader_id):
-			con = node.connect()
-			local_r = 0
-			try:
-				while not stop.is_set():
-					try:
-						con.begin(IsolationLevel.RepeatableRead)
-						sk_rows = con.execute("SELECT id, balance, token "
-						                      "FROM o_bank_account "
-						                      "ORDER BY token")
-						pk_rows = con.execute("SELECT id, balance "
-						                      "FROM o_bank_account "
-						                      "ORDER BY id")
-						con.commit()
-						pk_bal = {r[0]: r[1] for r in pk_rows}
-						sk_total = 0
-						tokens = set()
-						for rid, bal, tok in sk_rows:
-							sk_total += bal
-							tokens.add(tok)
-							if pk_bal.get(rid) != bal:
-								record_error(f'SK xref: id={rid} sk={bal} '
-								             f'pk={pk_bal.get(rid)}')
-						pk_total = sum(pk_bal.values())
-						if sk_total != expected_total:
-							record_error(
-							    f'SK: total {sk_total} != {expected_total}')
-						if pk_total != expected_total:
-							record_error(f'SK xref: pk total {pk_total} != '
-							             f'{expected_total}')
-						if len(sk_rows) != n_accounts:
-							record_error(
-							    f'SK: rows {len(sk_rows)} != {n_accounts}')
-						if len(tokens) != n_accounts:
-							record_error(f'SK: unique tokens {len(tokens)} != '
-							             f'{n_accounts}')
-						local_r += 1
-					except Exception:
-						try:
-							con.rollback()
-						except Exception:
-							pass
-			finally:
-				try:
-					con.close()
-				except Exception:
-					pass
-				with counters_lock:
-					read_count[0] += local_r
-
-		def reader_mixed_loop(reader_id):
-			con = node.connect()
-			local_r = 0
-			try:
-				while not stop.is_set():
-					start = random.randint(1, n_accounts)
-					try:
-						con.begin(IsolationLevel.RepeatableRead)
-						ge_sum, ge_cnt = con.execute(
-						    "SELECT coalesce(sum(balance), 0)::bigint, "
-						    "       count(*)::int "
-						    "FROM o_bank_account "
-						    f"WHERE id >= {start}")[0]
-						lt_sum, lt_cnt = con.execute(
-						    "SELECT coalesce(sum(balance), 0)::bigint, "
-						    "       count(*)::int "
-						    "FROM o_bank_account "
-						    f"WHERE id < {start}")[0]
-						v_min, v_max = con.execute("SELECT min(id), max(id) "
-						                           "FROM o_bank_account")[0]
-						con.commit()
-						if ge_sum + lt_sum != expected_total:
-							record_error(f'mixed: GE+LT {ge_sum + lt_sum} != '
-							             f'{expected_total}')
-						if ge_cnt + lt_cnt != n_accounts:
-							record_error(f'mixed: GE+LT count '
-							             f'{ge_cnt + lt_cnt} != {n_accounts}')
-						if v_min is None or v_max is None:
-							record_error('mixed: min/max NULL')
-						local_r += 1
-					except Exception:
-						try:
-							con.rollback()
-						except Exception:
-							pass
-			finally:
-				try:
-					con.close()
-				except Exception:
-					pass
-				with counters_lock:
-					read_count[0] += local_r
-
-		def checkpointer_loop():
-			con = node.connect()
-			try:
-				while not stop.is_set():
-					try:
-						con.execute("CHECKPOINT")
-						con.commit()
-					except Exception:
-						try:
-							con.rollback()
-						except Exception:
-							pass
-					if stop.wait(checkpoint_interval):
+							disc += 1
+							stop.wait(0.5)
+					if pause and stop.wait(pause):
 						break
 			finally:
-				try:
+				with contextlib.suppress(Exception):
 					con.close()
-				except Exception:
-					pass
+				with counters_lock:
+					if ok_count is not None:
+						ok_count[0] += ok
+					if err_count is not None:
+						err_count[0] += err
+					disconnect_count[0] += disc
+
+		def writer_step(con):
+			v_from, v_to = random.sample(range(1, n_accounts + 1), 2)
+			amount = random.randint(1, 10)
+			con.begin(IsolationLevel.RepeatableRead)
+			from_bal, from_token = con.execute("SELECT balance, token "
+			                                   "FROM o_bank_account "
+			                                   f"WHERE id = {v_from}")[0]
+			to_bal, to_token = con.execute("SELECT balance, token "
+			                               "FROM o_bank_account "
+			                               f"WHERE id = {v_to}")[0]
+			# Pocket-free 2-row swap: tokens rotate directly between v_from
+			# and v_to with no writer-side pocket state.  So the token set
+			# must stay complete even after postmaster SIGKILL or any
+			# injection.
+			_arr = (lambda t: f', token_arr = ARRAY[{t}]::bigint[] '
+			        if bridge_enabled else '')
+			con.execute("UPDATE o_bank_account "
+			            f"SET balance = {from_bal - amount}, "
+			            f"    token = {to_token} "
+			            f"{_arr(to_token)}"
+			            f"WHERE id = {v_from}")
+			if random.randint(0, 1) == 0:
+				time.sleep(0)
+			con.execute("UPDATE o_bank_account "
+			            f"SET balance = {to_bal + amount}, "
+			            f"    token = {from_token} "
+			            f"{_arr(from_token)}"
+			            f"WHERE id = {v_to}")
+			con.commit()
+
+		def rollbacker_step(con):
+			# Abort-path traffic generator.  Opens a REPEATABLE READ tx,
+			# forces an oxid with NO material changes via
+			# orioledb_get_current_oxid(), sleeps holding it so a SIGKILL can
+			# catch it in-flight, then rollback().  That abort takes
+			# wal_rollback's !has_material_changes fast path -> no durable
+			# rollback record -> resurrected as in-flight by crash recovery
+			# -> deferred WAL_REC_ROLLBACK.  A bare BEGIN/ROLLBACK acquires
+			# no oxid (lazy assignment) and never reaches wal_rollback.
+			con.begin(IsolationLevel.RepeatableRead)
+			con.execute("SELECT orioledb_get_current_oxid()")
+			time.sleep(random.randint(0, 10) * 0.1)
+			con.rollback()
+
+		def reader_pk_step(con):
+			con.begin(IsolationLevel.RepeatableRead)
+			total, uniq, rows = con.execute(
+			    "SELECT sum(balance)::bigint, "
+			    "       count(DISTINCT token)::int, "
+			    "       count(*)::int "
+			    "FROM o_bank_account")[0]
+			con.commit()
+			if total != expected_total:
+				record_error(f'PK: total {total} != {expected_total}')
+			if uniq != n_accounts:
+				record_error(f'PK: unique tokens {uniq} != {n_accounts}')
+			if rows != n_accounts:
+				record_error(f'PK: rows {rows} != {n_accounts}')
+
+		def reader_sk_step(con):
+			con.begin(IsolationLevel.RepeatableRead)
+			sk_rows = con.execute("SELECT id, balance, token "
+			                      "FROM o_bank_account "
+			                      "ORDER BY token")
+			pk_rows = con.execute("SELECT id, balance "
+			                      "FROM o_bank_account "
+			                      "ORDER BY id")
+			con.commit()
+			pk_bal = {r[0]: r[1] for r in pk_rows}
+			sk_total = 0
+			tokens = set()
+			for rid, bal, tok in sk_rows:
+				sk_total += bal
+				tokens.add(tok)
+				if pk_bal.get(rid) != bal:
+					record_error(f'SK xref: id={rid} sk={bal} '
+					             f'pk={pk_bal.get(rid)}')
+			pk_total = sum(pk_bal.values())
+			if sk_total != expected_total:
+				record_error(f'SK: total {sk_total} != {expected_total}')
+			if pk_total != expected_total:
+				record_error(f'SK xref: pk total {pk_total} != '
+				             f'{expected_total}')
+			if len(sk_rows) != n_accounts:
+				record_error(f'SK: rows {len(sk_rows)} != {n_accounts}')
+			if len(tokens) != n_accounts:
+				record_error(f'SK: unique tokens {len(tokens)} != '
+				             f'{n_accounts}')
+
+		def reader_mixed_step(con):
+			start = random.randint(1, n_accounts)
+			con.begin(IsolationLevel.RepeatableRead)
+			ge_sum, ge_cnt = con.execute(
+			    "SELECT coalesce(sum(balance), 0)::bigint, "
+			    "       count(*)::int "
+			    "FROM o_bank_account "
+			    f"WHERE id >= {start}")[0]
+			lt_sum, lt_cnt = con.execute(
+			    "SELECT coalesce(sum(balance), 0)::bigint, "
+			    "       count(*)::int "
+			    "FROM o_bank_account "
+			    f"WHERE id < {start}")[0]
+			v_min, v_max = con.execute("SELECT min(id), max(id) "
+			                           "FROM o_bank_account")[0]
+			con.commit()
+			if ge_sum + lt_sum != expected_total:
+				record_error(f'mixed: GE+LT {ge_sum + lt_sum} != '
+				             f'{expected_total}')
+			if ge_cnt + lt_cnt != n_accounts:
+				record_error(f'mixed: GE+LT count '
+				             f'{ge_cnt + lt_cnt} != {n_accounts}')
+			if v_min is None or v_max is None:
+				record_error('mixed: min/max NULL')
+
+		def checkpointer_step(con):
+			con.execute("CHECKPOINT")
+			con.commit()
 
 		# Stop-event reference (moved out of the C sites).  Each name maps
 		# to a STOPEVENT_CONDITION + elog(ERROR) site; arming it makes the
@@ -573,7 +445,7 @@ class RrStressTest(BaseTest):
 		# `commit_assert` and `before_pre_commit_wal_finish`
 		# are NOT in `error_injections` because arming either always
 		# causes a PANIC (both raise inside a START_CRIT_SECTION).  They
-		# share a dedicated worker (`assert_chaos_loop` below) that arms
+		# share a dedicated worker (`assert_chaos_step` below) that arms
 		# one of them on a slow, duration-relative cadence so we get a
 		# controlled number of crash+recovery cycles per run instead of
 		# one per ~0.1s.
@@ -582,63 +454,26 @@ class RrStressTest(BaseTest):
 			_subset = [p.strip() for p in _env_pts.split(',') if p.strip()]
 			error_injections = [p for p in error_injections if p in _subset]
 
-		def error_chaos_loop():
-			con = node.connect()
-			try:
-				while not stop.is_set():
-					if stop.wait(error_chaos_idle):
-						break
-					try:
-						# sleep between iterations
-						time.sleep(0.5 * random.random())
+		def arm(con, points, label=''):
+			point = random.choice(points)
+			con.execute(f"SELECT pg_stopevent_set('{point}', 'true')")
+			con.commit()
+			with attach_counts_lock:
+				attach_counts[point] = attach_counts.get(point, 0) + 1
+			with injection_history_lock:
+				injection_history.append(
+				    (time.time() - test_start, point + label))
 
-						rating = []
-						for point in error_injections:
-							rating.append(
-							    (point, random.randint(1,
-							                           len(error_injections))))
-						rating.sort(key=lambda x: x[1])
+		def disarm(con, points):
+			for point in points:
+				con.execute(f"SELECT pg_stopevent_reset('{point}')")
+			con.commit()
 
-						con.execute("SELECT pg_stopevent_set("
-						            f"'{rating[0][0]}', 'true')")
-						con.commit()
-						with attach_counts_lock:
-							attach_counts[rating[0][0]] = (
-							    attach_counts.get(rating[0][0], 0) + 1)
-						with injection_history_lock:
-							injection_history.append(
-							    (time.time() - test_start, rating[0][0]))
-					except Exception:
-						try:
-							con.rollback()
-						except Exception:
-							pass
-					time.sleep(0)
-					try:
-						for point in error_injections:
-							con.execute("SELECT pg_stopevent_reset("
-							            f"'{point}')")
-						con.commit()
-					except Exception:
-						try:
-							con.rollback()
-						except Exception:
-							pass
-			finally:
-				try:
-					for point in error_injections:
-						con.execute("SELECT pg_stopevent_reset("
-						            f"'{point}')")
-					con.commit()
-				except Exception:
-					try:
-						con.rollback()
-					except Exception:
-						pass
-				try:
-					con.close()
-				except Exception:
-					pass
+		def error_chaos_step(con):
+			time.sleep(0.5 * random.random())
+			arm(con, error_injections)
+			time.sleep(0)
+			disarm(con, error_injections)
 
 		# produce the state corruption without any stop event enabled
 		#
@@ -651,7 +486,7 @@ class RrStressTest(BaseTest):
 		#     ERROR re-enters the same function and re-fires during
 		#     XACT_EVENT_ABORT, where ereport escalates to PANIC.
 		# Either way the cluster goes down, so all of them share the slow,
-		# duration-relative `assert_chaos_loop` cadence.
+		# duration-relative `assert_chaos_step` cadence.
 		assert_injections = [
 		    'commit_assert',
 		    'before_pre_commit_wal_finish',
@@ -674,93 +509,23 @@ class RrStressTest(BaseTest):
 			    p for p in assert_injections if p in _assert_subset
 			]
 
-		def assert_chaos_loop():
-			# Arm one of `assert_injections` once every `interval`
-			# seconds (the configurable RR_ASSERT_PERIOD cadence, default
-			# duration/3).  Every point here turns into a PANIC once it
-			# fires (directly via a START_CRIT_SECTION, or via abort
-			# re-entry for the commit/abort shared sites -- see the list above),
-			# which takes the cluster down.
-			# Same pattern as `error_chaos_loop`: pick one
-			# via rating tournament, arm -> `time.sleep(0)` -> reset every point in
-			# the list.  The arm window is wide enough that at higher
-			# writer counts several backends may hit the event before
-			# the worker pulls it back; postmaster's quickdie fan-out
-			# kills every other backend, so the in-process abort pileup
-			# is still bounded.
-			interval = max(assert_chaos_interval, 1.0)
-			con = None
-			next_arm_at = test_start + interval
+		assert_interval = max(assert_chaos_interval, 1.0)
+		next_assert_arm = [test_start + assert_interval]
 
-			try:
-				while not stop.is_set():
-					if stop.wait(0.5):
-						break
-					if con is None:
-						try:
-							con = node.connect()
-						except Exception:
-							continue
-					if time.time() < next_arm_at:
-						continue
-					try:
-						rating = []
-						for point in assert_injections:
-							rating.append(
-							    (point,
-							     random.randint(1, len(assert_injections))))
-						rating.sort(key=lambda x: x[1])
-						chosen = rating[0][0]
-						con.execute("SELECT pg_stopevent_set("
-						            f"'{chosen}', 'true')")
-						con.commit()
-						next_arm_at = time.time() + interval
-						with attach_counts_lock:
-							attach_counts[chosen] = (
-							    attach_counts.get(chosen, 0) + 1)
-						with injection_history_lock:
-							injection_history.append(
-							    (time.time() - test_start,
-							     f'{chosen} (assert-armed)'))
-					except Exception:
-						try:
-							con.close()
-						except Exception:
-							pass
-						con = None
-						continue
-					time.sleep(0)
-					try:
-						for point in assert_injections:
-							con.execute("SELECT pg_stopevent_reset("
-							            f"'{point}')")
-						con.commit()
-					except Exception:
-						# Reset failed -- cluster almost certainly
-						# PANICked while the stop event was armed.
-						# Drop the now-broken connection; we'll
-						# reconnect on the next iteration.
-						try:
-							con.close()
-						except Exception:
-							pass
-						con = None
-			finally:
-				if con is not None:
-					try:
-						for point in assert_injections:
-							con.execute("SELECT pg_stopevent_reset("
-							            f"'{point}')")
-						con.commit()
-					except Exception:
-						try:
-							con.rollback()
-						except Exception:
-							pass
-					try:
-						con.close()
-					except Exception:
-						pass
+		def assert_chaos_step(con):
+			# Arm one of `assert_injections` once every RR_ASSERT_PERIOD
+			# seconds (default duration/3).  Every point here turns into a
+			# PANIC once it fires (directly via a START_CRIT_SECTION, or via
+			# abort re-entry for the commit/abort shared sites -- see the
+			# list above), which takes the cluster down.  If the reset fails
+			# the cluster almost certainly PANICked while the event was
+			# armed; run_loop reconnects.
+			if time.time() < next_assert_arm[0]:
+				return
+			arm(con, assert_injections, ' (assert-armed)')
+			next_assert_arm[0] = time.time() + assert_interval
+			time.sleep(0)
+			disarm(con, assert_injections)
 
 		def postmaster_kill_loop():
 			# Periodically SIGKILL the postmaster.  Unlike a backend
@@ -768,9 +533,9 @@ class RrStressTest(BaseTest):
 			# restart_after_crash (that GUC controls how the postmaster
 			# reacts to a CHILD's death, not its own), so this loop
 			# both kills and restarts on every cycle, exercising the
-			# unclean-shutdown recovery path each iteration.  Existing
-			# writer/reader loops reconnect via their own except
-			# handlers; their disconnect_count will inflate by roughly
+			# unclean-shutdown recovery path each iteration.  Every
+			# run_loop worker reconnects; disconnect_count will inflate by
+			# roughly
 			# kill_count * (n_writers+n_readers_*) -- see the
 			# expected-baseline figure in the [totals] line.
 			#
@@ -910,26 +675,24 @@ class RrStressTest(BaseTest):
 								first_crash_time[0] = (time.time() -
 								                       test_start)
 
+		def spawn(n, step, *counts, **kw):
+			for _ in range(n):
+				threads.append(
+				    threading.Thread(target=run_loop,
+				                     args=(step, ) + counts,
+				                     kwargs=kw))
+
 		threads = []
-		for wid in range(1, n_writers + 1):
-			threads.append(threading.Thread(target=writer_loop, args=(wid, )))
-		for rid in range(1, n_readers_pk + 1):
-			threads.append(
-			    threading.Thread(target=reader_pk_loop, args=(rid, )))
-		for rid in range(1, n_readers_sk + 1):
-			threads.append(
-			    threading.Thread(target=reader_sk_loop, args=(rid, )))
-		for rid in range(1, n_readers_mixed + 1):
-			threads.append(
-			    threading.Thread(target=reader_mixed_loop, args=(rid, )))
-		for rbid in range(1, n_rollbackers + 1):
-			threads.append(
-			    threading.Thread(target=rollbacker_loop, args=(rbid, )))
-		threads.append(threading.Thread(target=checkpointer_loop))
+		spawn(n_writers, writer_step, write_count, conflict_count)
+		spawn(n_readers_pk, reader_pk_step, read_count)
+		spawn(n_readers_sk, reader_sk_step, read_count)
+		spawn(n_readers_mixed, reader_mixed_step, read_count)
+		spawn(n_rollbackers, rollbacker_step, rollback_count)
+		spawn(1, checkpointer_step, pause=checkpoint_interval)
 		if error_injections:
-			threads.append(threading.Thread(target=error_chaos_loop))
+			spawn(1, error_chaos_step, pause=error_chaos_idle)
 		if assert_chaos_interval > 0 and assert_injections:
-			threads.append(threading.Thread(target=assert_chaos_loop))
+			spawn(1, assert_chaos_step, pause=0.5)
 		if postmaster_kill_enabled:
 			threads.append(threading.Thread(target=postmaster_kill_loop))
 		threads.append(threading.Thread(target=crash_watchdog))
@@ -979,6 +742,12 @@ class RrStressTest(BaseTest):
 			    '[teardown] primary did not accept connections within 10s '
 			    'after the final kill -- proceeding (possible real restart bug)'
 			)
+
+		# A step can die between arm and disarm; leave nothing armed for the
+		# checks below.
+		with contextlib.suppress(Exception):
+			with node.connect(autocommit=True) as con:
+				disarm(con, error_injections + assert_injections)
 
 		# Final authoritative check against the PG log.  Match both
 		# `PANIC` (ereport-driven) and `TRAP:` (Assert-driven crashes
