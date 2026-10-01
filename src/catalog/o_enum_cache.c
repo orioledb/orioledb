@@ -340,7 +340,7 @@ o_enum_cache_search_htup(TupleDesc tupdesc, Oid enumtypid, Name enumlabel)
 			(OEnumData *) (((Pointer) o_enum) + offsetof(OEnum, data) +
 						   o_enum->key.common.dataLength);
 		values[Anum_pg_enum_enumtypid - 1] = o_enum->key.keys[0];
-		namestrcpy(&enumlabel, DatumGetName(o_enum->key.keys[0])->data);
+		namestrcpy(&enumlabel, NameStr(*O_KEY_GET_NAME(&o_enum->key, 1)));
 		values[Anum_pg_enum_enumlabel - 1] = NameGetDatum(&enumlabel);
 		values[Anum_pg_enum_oid - 1] = ObjectIdGetDatum(o_enum_data->oid);
 		values[Anum_pg_enum_enumsortorder - 1] =
