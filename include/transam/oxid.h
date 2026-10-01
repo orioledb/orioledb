@@ -242,6 +242,7 @@ extern void fill_current_oxid_osnapshot_no_check(OXid *oxid,
 extern int	oxid_get_procnum(OXid oxid);
 extern bool xid_is_finished(OXid xid);
 extern bool xid_is_finished_for_everybody(OXid xid);
+extern OXid oxid_refresh_global_xmin(void);
 extern void fsync_xidmap_range(OXid xmin, OXid xmax, uint32 wait_event_info);
 extern void clear_rewind_oxid(OXid oxid);
 extern bool csn_is_retained_for_rewind(CommitSeqNo csn);

@@ -1088,8 +1088,12 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 	BTreePageItemLocator loc;
 	int64		blocksScanned = 0;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+	OXid		horizon;
 
 	Assert(bridge != NULL);
+
+	/* Deletes older than this are seen by every snapshot */
+	horizon = oxid_refresh_global_xmin();
 
 #if PG_VERSION_NUM >= 170000
 	vacrel->current_block = InvalidBlockNumber;
@@ -1129,7 +1133,15 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 
 			BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tup, p, &loc);
 
-			tuple_can_be_vaccumed = XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo);
+			/*
+			 * A dead bridge entry takes the bridged indexes' entries for its
+			 * ctid with it, and frees the ctid for reuse.  Neither has undo
+			 * to fall back on, so wait until no snapshot can still see the
+			 * row: the delete has to be older than every snapshot's xmin, not
+			 * just finished.
+			 */
+			tuple_can_be_vaccumed = XACT_INFO_GET_OXID(tupHdr->xactInfo) <
+				horizon;
 
 			if (tupHdr->deleted != BTreeLeafTupleNonDeleted &&
 				tuple_can_be_vaccumed)

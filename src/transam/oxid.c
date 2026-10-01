@@ -2367,3 +2367,18 @@ xid_is_finished_for_everybody(OXid xid)
 
 	return COMMITSEQNO_IS_COMMITTED(csn);
 }
+
+/*
+ * Brings globalXmin up to date and returns it.
+ *
+ * globalXmin is only advanced every so often, when the xid map moves on, so
+ * between those moments it can lag far behind the oldest snapshot.  A caller
+ * that removes something an older snapshot might still need, and has no undo
+ * to keep it for that snapshot, has to know the actual horizon.
+ */
+OXid
+oxid_refresh_global_xmin(void)
+{
+	advance_global_xmin(InvalidOXid);
+	return pg_atomic_read_u64(&xid_meta->globalXmin);
+}
