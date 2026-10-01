@@ -1897,7 +1897,15 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		foreach(indexId, indexIds)
 		{
 			Oid			indexOid = lfirst_oid(indexId);
-			Relation	index_rel = index_open(indexOid, AccessExclusiveLock);
+
+			/*
+			 * Only the index definition is read here, and the executor
+			 * already holds RowExclusiveLock on every index of the table. An
+			 * AccessExclusiveLock made any open transaction that had read
+			 * through a bridged index block every update of the table until
+			 * it ended.
+			 */
+			Relation	index_rel = index_open(indexOid, AccessShareLock);
 			bool		interesting = index_rel->rd_rel->relam != BTREE_AM_OID;
 
 			if (!interesting)
@@ -1932,7 +1940,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 
 				bms_free(index_attrs);
 			}
-			index_close(index_rel, AccessExclusiveLock);
+			index_close(index_rel, AccessShareLock);
 		}
 		o_stop_saving_inval_messages(was_saving);
 	}
