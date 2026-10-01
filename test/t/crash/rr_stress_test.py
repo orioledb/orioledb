@@ -531,15 +531,12 @@ class RrStressTest(BaseTest):
 		# would fire a second time during that abort, where ereport escalates
 		# to PANIC, crashing the backend.  Each such site therefore has a
 		# `_guarded` twin that fires only on the commit-side entry (gated by
-		# an isCommit-style check: the rec_type or the wal_in_rollback flag),
+		# an isCommit-style check or the wal_in_rollback flag),
 		# so an armed error stays single-shot.  This list
 		# arms only the `_guarded` names below (clean, recoverable errors);
 		# the unguarded twins are armed by `assert_injections` instead,
 		# since firing them PANICs the cluster via the abort re-entry above.
 		#
-		#   add_finish_wal_guarded (add_finish_wal_record): invoked for both
-		#       WAL_REC_COMMIT (wal_commit) and WAL_REC_ROLLBACK
-		#       (wal_rollback).
 		#   wal_flush_guarded (flush_local_wal + flush_local_wal_if_needed
 		#       overflow path): every flushed WAL batch funnels through here;
 		#       also called from wal_rollback.
@@ -676,7 +673,6 @@ class RrStressTest(BaseTest):
 		    'set_xlog_ptr',
 		    'add_finish_wal',
 		    'wal_flush',
-		    'add_finish_wal_guarded',
 		    'wal_flush_guarded',
 		    'csn_incremented',
 		    'after_flush_local_wal',

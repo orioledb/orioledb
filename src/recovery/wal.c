@@ -494,9 +494,6 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 
 	if (STOPEVENT_CONDITION(STOPEVENT_ADD_FINISH_WAL, NULL))
 		elog(ERROR, "stop event \"add_finish_wal\" fired");
-	if (rec_type == WAL_REC_COMMIT &&
-		STOPEVENT_CONDITION(STOPEVENT_ADD_FINISH_WAL_GUARDED, NULL))
-		elog(ERROR, "stop event \"add_finish_wal_guarded\" fired");
 
 	recLength = sizeof(WALRecFinish);
 	if (rec_type == WAL_REC_COMMIT &&
