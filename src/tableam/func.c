@@ -1346,7 +1346,7 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 
 	for (i = 0; i < descr->nIndices; i++)
 	{
-	    bool curr_tree_result = true;
+		bool		curr_tree_result = true;
 		OIndexDescr *idx = descr->indices[i];
 
 		o_tables_rel_lock_extended(&idx->oids, AccessExclusiveLock, true);

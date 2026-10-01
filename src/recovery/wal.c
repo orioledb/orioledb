@@ -948,10 +948,10 @@ flush_local_wal_buffer(void)
 		return;
 
 	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH, NULL))
-  		elog(ERROR, "stop event \"wal_flush\" fired");
-   	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH_GUARDED, NULL)
-  		&& !wal_in_rollback)
-  		elog(ERROR, "stop event \"wal_flush_guarded\" fired");
+		elog(ERROR, "stop event \"wal_flush\" fired");
+	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH_GUARDED, NULL)
+		&& !wal_in_rollback)
+		elog(ERROR, "stop event \"wal_flush_guarded\" fired");
 
 	START_CRIT_SECTION();
 	log_logical_wal_container(local_wal.buffer, local_wal.buffer_offset, false);

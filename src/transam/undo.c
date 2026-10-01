@@ -2707,15 +2707,15 @@ undo_xact_callback(XactEvent event, void *arg)
 				 */
 				if (TransactionIdIsValid(heapXid))
 				{
-				    if (STOPEVENT_CONDITION(STOPEVENT_COMMIT_ASSERT, NULL))
-    				{
-    					/*
-    					 * CRIT_SECTION + elog(ERROR) = PANIC
-    					 */
-    					START_CRIT_SECTION();
-    					elog(ERROR, "stop event \"commit_assert\" fired");
-    					END_CRIT_SECTION();
-    				}
+					if (STOPEVENT_CONDITION(STOPEVENT_COMMIT_ASSERT, NULL))
+					{
+						/*
+						 * CRIT_SECTION + elog(ERROR) = PANIC
+						 */
+						START_CRIT_SECTION();
+						elog(ERROR, "stop event \"commit_assert\" fired");
+						END_CRIT_SECTION();
+					}
 					current_oxid_precommit();
 				}
 
@@ -2782,16 +2782,17 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * XACT_EVENT_PRE_PROC_ARRAY already, before its CSN became
 				 * visible; see the comment there.
 				 */
-				if (!TransactionIdIsValid(heapXid)) {
-    				if (STOPEVENT_CONDITION(STOPEVENT_COMMIT_ASSERT, NULL))
-    				{
-    					/*
-    					 * CRIT_SECTION + elog(ERROR) = PANIC
-    					 */
-    					START_CRIT_SECTION();
-    					elog(ERROR, "stop event \"commit_assert\" fired");
-    					END_CRIT_SECTION();
-    				}
+				if (!TransactionIdIsValid(heapXid))
+				{
+					if (STOPEVENT_CONDITION(STOPEVENT_COMMIT_ASSERT, NULL))
+					{
+						/*
+						 * CRIT_SECTION + elog(ERROR) = PANIC
+						 */
+						START_CRIT_SECTION();
+						elog(ERROR, "stop event \"commit_assert\" fired");
+						END_CRIT_SECTION();
+					}
 					current_oxid_precommit();
 				}
 

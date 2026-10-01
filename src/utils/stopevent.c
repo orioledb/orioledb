@@ -455,6 +455,7 @@ check_stopevent(int event_id, Jsonb *params)
 
 	params = make_empty_params();
 	result = check_stopevent_condition(event, params);
+
 	/*
 	 * Explicitly reset stopevents_ctx as it can outlive the tx context, hence
 	 * allocated params can leak
