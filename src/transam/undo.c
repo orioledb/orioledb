@@ -2706,12 +2706,18 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * replication wait that come first.
 				 */
 				if (TransactionIdIsValid(heapXid))
+				{
+				    if (STOPEVENT_CONDITION(STOPEVENT_COMMIT_ASSERT, NULL))
+    				{
+    					/*
+    					 * CRIT_SECTION + elog(ERROR) = PANIC
+    					 */
+    					START_CRIT_SECTION();
+    					elog(ERROR, "stop event \"commit_assert\" fired");
+    					END_CRIT_SECTION();
+    				}
 					current_oxid_precommit();
-
-				/*
-				 * TODO: Add here commit assert injection as it is alternative path for
-				 * heap xidfull tx
-				 */
+				}
 
 				break;
 
