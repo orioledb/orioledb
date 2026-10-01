@@ -20,6 +20,9 @@
 #include "replication/decode.h"
 #include "replication/logical.h"
 
+#if PG_VERSION_NUM >= 180000
+extern ReorderBufferTxnStatus orioledb_logical_txn_status(TransactionId xid);
+#endif
 extern void orioledb_decode(LogicalDecodingContext *ctx,
 							XLogRecordBuffer *buf);
 

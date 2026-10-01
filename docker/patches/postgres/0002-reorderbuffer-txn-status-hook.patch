@@ -1,0 +1,97 @@
+From 783c546492c447c9d755fc1f1ef3945b7dd7afe1 Mon Sep 17 00:00:00 2001
+From: haruband <haruband@gmail.com>
+Date: Fri, 2 Oct 2026 00:15:44 +0900
+Subject: [PATCH] Let a decoding plugin answer the status of the xids it mints
+
+PG 18's ReorderBufferCheckAndTruncateAbortedTXN() asks CLOG whether a large
+transaction has already aborted. orioledb's logical xids have no CLOG entry,
+so on a young cluster decoding a transaction past logical_decoding_work_mem
+failed with 'could not access status of transaction 4286578688' / 'Could not
+open file pg_xact/0FF8', and on an old cluster it would read the status of
+an unrelated real xid. ReorderBufferTxnStatusHook lets the plugin answer for
+its own xids; RBTXN_STATUS_UNKNOWN keeps the CLOG path for heap xids.
+---
+ .../replication/logical/reorderbuffer.c       | 27 +++++++++++++++++++
+ src/include/replication/reorderbuffer.h       | 16 +++++++++++
+ 2 files changed, 43 insertions(+)
+
+diff --git a/src/backend/replication/logical/reorderbuffer.c b/src/backend/replication/logical/reorderbuffer.c
+index c160b60..a0925b5 100644
+--- a/src/backend/replication/logical/reorderbuffer.c
++++ b/src/backend/replication/logical/reorderbuffer.c
+@@ -275,6 +275,9 @@ static void ReorderBufferTruncateTXN(ReorderBuffer *rb, ReorderBufferTXN *txn,
+ 									 bool txn_prepared);
+ static void ReorderBufferMaybeMarkTXNStreamed(ReorderBuffer *rb, ReorderBufferTXN *txn);
+ static bool ReorderBufferCheckAndTruncateAbortedTXN(ReorderBuffer *rb, ReorderBufferTXN *txn);
++
++/* Plugin-supplied transaction status for xids CLOG does not know. */
++ReorderBufferTxnStatusHookType ReorderBufferTxnStatusHook = NULL;
+ static void ReorderBufferCleanupSerializedTXNs(const char *slotname);
+ static void ReorderBufferSerializedPath(char *path, ReplicationSlot *slot,
+ 										TransactionId xid, XLogSegNo segno);
+@@ -1790,6 +1793,28 @@ ReorderBufferCheckAndTruncateAbortedTXN(ReorderBuffer *rb, ReorderBufferTXN *txn
+ 		return true;
+ 	}
+ 
++	/*
++	 * A plugin that minted this xid (orioledb's logical xids have no CLOG
++	 * entry; a lookup there fails with "could not access status of
++	 * transaction") answers first.  Anything it does not know goes to CLOG.
++	 */
++	if (ReorderBufferTxnStatusHook != NULL)
++	{
++		switch (ReorderBufferTxnStatusHook(txn->xid))
++		{
++			case RBTXN_STATUS_IN_PROGRESS:
++				return false;
++			case RBTXN_STATUS_COMMITTED:
++				Assert(!rbtxn_is_aborted(txn));
++				txn->txn_flags |= RBTXN_IS_COMMITTED;
++				return false;
++			case RBTXN_STATUS_ABORTED:
++				goto aborted;
++			case RBTXN_STATUS_UNKNOWN:
++				break;
++		}
++	}
++
+ 	/* Otherwise, check the transaction status using CLOG lookup */
+ 
+ 	if (TransactionIdIsInProgress(txn->xid))
+@@ -1806,6 +1831,8 @@ ReorderBufferCheckAndTruncateAbortedTXN(ReorderBuffer *rb, ReorderBufferTXN *txn
+ 		return false;
+ 	}
+ 
++aborted:
++
+ 	/*
+ 	 * The transaction aborted. We discard both the changes collected so far
+ 	 * and the toast reconstruction data. The full cleanup will happen as part
+diff --git a/src/include/replication/reorderbuffer.h b/src/include/replication/reorderbuffer.h
+index 7583e5e..38279de 100644
+--- a/src/include/replication/reorderbuffer.h
++++ b/src/include/replication/reorderbuffer.h
+@@ -781,4 +781,20 @@ extern uint32 ReorderBufferGetInvalidations(ReorderBuffer *rb,
+ 
+ extern void StartupReorderBuffer(void);
+ 
++/*
++ * A decoding plugin that generates transaction ids of its own — ids with no
++ * CLOG entry — answers their status here, so the reorder buffer never asks
++ * CLOG about them.  RBTXN_STATUS_UNKNOWN hands the xid back to CLOG.
++ */
++typedef enum ReorderBufferTxnStatus
++{
++	RBTXN_STATUS_UNKNOWN,
++	RBTXN_STATUS_IN_PROGRESS,
++	RBTXN_STATUS_COMMITTED,
++	RBTXN_STATUS_ABORTED
++} ReorderBufferTxnStatus;
++
++typedef ReorderBufferTxnStatus (*ReorderBufferTxnStatusHookType) (TransactionId xid);
++extern PGDLLIMPORT ReorderBufferTxnStatusHookType ReorderBufferTxnStatusHook;
++
+ #endif
+-- 
+2.54.0 (Apple Git-157)
+

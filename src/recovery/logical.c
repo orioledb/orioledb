@@ -602,6 +602,81 @@ remove_skipped_dml(HTAB **cache, uint64 oxid)
 }
 
 /*
+ * Logical xid -> OXid of every transaction this backend has queued into the
+ * reorder buffer.  PG 18's ReorderBufferCheckAndTruncateAbortedTXN() asks
+ * whether a large transaction has already aborted; for a heap xid it asks
+ * CLOG, which knows nothing of Oriole's logical xids (on a young cluster they
+ * sit at the top of the xid space and the lookup fails with "could not access
+ * status of transaction"; on an old one it would read an unrelated xid).
+ * ReorderBufferTxnStatusHook answers from the oxid's CSN instead.
+ *
+ * Entries are removed when the transaction's finish record is decoded; an
+ * entry that outlives its transaction (decoding restarted mid-way) still
+ * answers correctly, since the status is read live from the oxid map.
+ */
+typedef struct LogicalXidOxidEntry
+{
+	TransactionId logicalXid;
+	OXid		oxid;
+} LogicalXidOxidEntry;
+
+static HTAB *logicalXidOxidHash = NULL;
+
+static void
+remember_logical_xid(TransactionId logicalXid, OXid oxid)
+{
+	LogicalXidOxidEntry *entry;
+	bool		found;
+
+	if (!TransactionIdIsValid(logicalXid))
+		return;
+
+	if (!logicalXidOxidHash)
+	{
+		HASHCTL		ctl;
+
+		MemSet(&ctl, 0, sizeof(ctl));
+		ctl.keysize = sizeof(TransactionId);
+		ctl.entrysize = sizeof(LogicalXidOxidEntry);
+		ctl.hcxt = TopMemoryContext;
+		logicalXidOxidHash = hash_create("OrioleDB logical decoder xid to oxid", 64,
+										 &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+	}
+	entry = hash_search(logicalXidOxidHash, &logicalXid, HASH_ENTER, &found);
+	entry->oxid = oxid;
+}
+
+static void
+forget_logical_xid(TransactionId logicalXid)
+{
+	if (logicalXidOxidHash && TransactionIdIsValid(logicalXid))
+		hash_search(logicalXidOxidHash, &logicalXid, HASH_REMOVE, NULL);
+}
+
+#if PG_VERSION_NUM >= 180000
+ReorderBufferTxnStatus
+orioledb_logical_txn_status(TransactionId xid)
+{
+	LogicalXidOxidEntry *entry;
+	CommitSeqNo csn;
+
+	if (!logicalXidOxidHash)
+		return RBTXN_STATUS_UNKNOWN;
+	entry = hash_search(logicalXidOxidHash, &xid, HASH_FIND, NULL);
+	if (!entry)
+		return RBTXN_STATUS_UNKNOWN;
+
+	csn = oxid_get_csn(entry->oxid, false);
+	if (COMMITSEQNO_IS_INPROGRESS(csn))
+		return RBTXN_STATUS_IN_PROGRESS;
+	if (COMMITSEQNO_IS_ABORTED(csn))
+		return RBTXN_STATUS_ABORTED;
+	/* normal csn, or frozen: the transaction is done and its changes stay */
+	return RBTXN_STATUS_COMMITTED;
+}
+#endif
+
+/*
  * Per-process cache of "skipped DML" flags for Oriole transactions
  * (OXID).
  *
@@ -822,9 +897,11 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 								ReorderBufferTXN *cur_txn;
 
 								cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_m.cur);
+								forget_logical_xid(cur_txn->xid);
 								ReorderBufferForget(ctx->decodeCtx->reorder, cur_txn->xid,
 													ctx->xlogRecPtr);
 							}
+							forget_logical_xid(txn->xid);
 							ReorderBufferForget(ctx->decodeCtx->reorder, txn->xid,
 												ctx->xlogRecPtr);
 
@@ -844,6 +921,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 							ReorderBufferTXN *cur_txn;
 
 							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+							forget_logical_xid(cur_txn->xid);
 							ReorderBufferCommitChild(ctx->decodeCtx->reorder, txn->xid, cur_txn->xid,
 													 ctx->xlogRecPtr, ctx->xlogRecEndPtr);
 						}
@@ -852,6 +930,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 							 r->container.origin_info.id,
 							 LSN_FORMAT_ARGS(r->container.origin_info.lsn));
 
+						forget_logical_xid(rec->logicalXid);
 						ReorderBufferCommit(ctx->decodeCtx->reorder, rec->logicalXid,
 											xlogPtr, ctx->xlogRecEndPtr,
 											0,
@@ -881,11 +960,13 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 							ReorderBufferTXN *cur_txn;
 
 							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_m.cur);
+							forget_logical_xid(cur_txn->xid);
 							ReorderBufferAbort(ctx->decodeCtx->reorder, cur_txn->xid, ctx->xlogRecPtr, 0);
 						}
 						elog(DEBUG4, "ABORT record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
 							 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
+						forget_logical_xid(rec->logicalXid);
 						ReorderBufferAbort(ctx->decodeCtx->reorder, rec->logicalXid, ctx->xlogRecPtr, 0);
 					}
 				}
@@ -952,6 +1033,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 					elog(DEBUG4, "FORGET record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
 						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
+					forget_logical_xid(rec->logicalXid);
 					ReorderBufferForget(ctx->decodeCtx->reorder, rec->logicalXid, ctx->xlogRecPtr);
 				}
 				else
@@ -1201,12 +1283,14 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 						ReorderBufferTXN *cur_txn;
 
 						cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_m.cur);
+						forget_logical_xid(cur_txn->xid);
 						ReorderBufferAbort(ctx->decodeCtx->reorder, cur_txn->xid, ctx->xlogRecPtr, 0);
 					}
 					elog(DEBUG4,
 						 "ABORT record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
 						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
+					forget_logical_xid(rec->logicalXid);
 					ReorderBufferAbort(ctx->decodeCtx->reorder, rec->logicalXid, ctx->xlogRecPtr, 0);
 				}
 
@@ -1315,6 +1399,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 											   ctx->descr, ctx->indexDescr, ctx->o_toast_tupDesc, ctx->heap_toast_tupDesc,
 											   tuple1.tuple, tuple2.tuple, rec->u.modify.len1, rec->relreplident);
 
+						remember_logical_xid(rec->logicalXid, rec->oxid);
 						ReorderBufferQueueChange(ctx->decodeCtx->reorder, rec->logicalXid,
 												 xlogPtr, change, (ctx->ix_type == oIndexToast));
 					}

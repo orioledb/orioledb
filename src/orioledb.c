@@ -1566,6 +1566,9 @@ _PG_init(void)
 	getRunningTransactionsExtension = orioledb_get_running_transactions_extension;
 	waitSnapshotHook = orioledb_wait_snapshot;
 	GetReplayXlogPtrHook = recovery_get_effective_replay_ptr;
+#if PG_VERSION_NUM >= 180000
+	ReorderBufferTxnStatusHook = orioledb_logical_txn_status;
+#endif
 
 	prev_database_size_hook = database_size_hook;
 	database_size_hook = orioledb_calculate_database_size;
