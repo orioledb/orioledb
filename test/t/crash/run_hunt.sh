@@ -113,7 +113,7 @@ verify_explain_plans() {
 				# (a Bitmap Index Scan wrapped in Custom Scan (o_scan)),
 				# never a seq-scan fallback.
 				kind = (index(h, "gin-forced") ? "gin" : (index(h, "sk-forced") ? "sk" : "pk"))
-				idx_used = (index(p, "using o_bank_account_token_uniq") > 0)
+				idx_used = (index(p, "o_bank_account_token_uniq") > 0)
 				gin_used = (index(p, "o_token_to_id") > 0)
 				# A pk-forced query is PK-authoritative if it read the
 				# primary tree by EITHER path: a plain Seq Scan, or
