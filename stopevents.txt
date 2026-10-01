@@ -61,7 +61,6 @@ wal_flush_guarded
 before_xlog_insert
 update_pk_done_pre_sk
 set_csn
-set_csn_guarded
 set_xlog_ptr
 set_xlog_ptr_guarded
 before_curoxid_clear

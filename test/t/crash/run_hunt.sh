@@ -16,7 +16,7 @@
 #
 # Stop-event names (RR_ASSERT_INJECTIONS / RR_ERROR_INJECTIONS) use the
 # underscore form registered in stopevents.txt, e.g. commit_assert,
-# before_pre_commit_wal_finish, set_csn_guarded, wal_flush.
+# before_pre_commit_wal_finish, set_csn, wal_flush.
 #
 # Output: /tmp/hunt_<instance>.log
 #   - One header per trial: === trial N (Ts s, writes=W) ===

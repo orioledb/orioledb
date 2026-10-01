@@ -107,8 +107,6 @@ static bool xlog_ptr_committing_set = false;
 
 static LogicalXidCtx logicalXidContext = {InvalidTransactionId, false};
 
-static bool call_injection = false;
-
 static inline void
 reset_logical_xid_ctx(void)
 {
@@ -810,24 +808,8 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 	CommitSeqNo oldCsn;
 	OXid		writeInProgressXmin;
 
-	if (STOPEVENTS_ENABLED())
-	{
-		if (STOPEVENT_CONDITION(STOPEVENT_SET_CSN, NULL))
-			elog(ERROR, "stop event \"set_csn\" fired");
-
-		if (csn != COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
-											GET_CUR_PROCDATA()->autonomousNestingLevel,
-											COMMITSEQNO_STATUS_IN_PROGRESS)
-			&& csn != COMMITSEQNO_ABORTED)
-		{
-			if (call_injection)
-			{
-				call_injection = false;
-				if (STOPEVENT_CONDITION(STOPEVENT_SET_CSN_GUARDED, NULL))
-					elog(ERROR, "stop event \"set_csn_guarded\" fired");
-			}
-		}
-	}
+	if (STOPEVENT_CONDITION(STOPEVENT_SET_CSN, NULL))
+		elog(ERROR, "stop event \"set_csn\" fired");
 
 	oldCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn);
 	pg_read_barrier();
@@ -2015,11 +1997,6 @@ current_oxid_commit(CommitSeqNo csn)
 	if (!OXidIsValid(curOxid))
 		return;
 
-	/*
-	 * set_oxid_csn is called from multiple places and not every must trigger
-	 * a stopevent, so we need to set call_injection before calling oxid_csn
-	 */
-	call_injection = true;
 	set_oxid_csn(curOxid,
 				 csn | (enable_rewind ? COMMITSEQNO_RETAINED_FOR_REWIND : 0));
 	pg_write_barrier();
