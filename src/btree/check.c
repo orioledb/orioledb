@@ -67,6 +67,7 @@ static void get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 static void get_free_extents_from_file(SeqBufTag *tag, off_t offset,
 									   ExtentsArray *free_extents,
 									   bool compressed, bool should_exists);
+static off_t seq_buf_file_size(SeqBufTag *tag);
 static void get_free_extents_from_seqbuf_pending(SeqBufDescPrivate *seqBuf,
 												 SeqBufTag *expected_tag,
 												 ExtentsArray *free_extents,
@@ -287,6 +288,9 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 		bool		found;
 		uint32		num;
 		uint32		map_num;
+		off_t		map_offset;
+		SeqBufTag	consumed_tag = {0};
+		off_t		consumed_offset = 0;
 
 		/*
 		 * Reads free blocks from map file.
@@ -298,8 +302,55 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 											 chkp_num,
 											 &found);
 
-		get_free_extents_from_file(&chkp_tag, sizeof(CheckpointFileHeader),
-								   free_extents, is_compressed, found);
+		/*
+		 * The map file lists what was free when it was written, but pages
+		 * written since have taken extents from the free stream: eviction
+		 * writes dirty pages, and evicting even a clean child dirties its
+		 * parent.  Each extent taken shows up both busy and free -- "Excess
+		 * busy extent" against a sound tree -- unless we skip what the free
+		 * buffer has consumed since.
+		 *
+		 * For an uncompressed tree the map's free list is the free stream
+		 * itself, concatenated (see finalize_chkp_map()): the rest of the
+		 * file the free buffer was reading, then the .tmp files up to the
+		 * map's checkpoint.  The free buffer consumes it in the same order,
+		 * so what is still free is a tail of the map, as long as the tail of
+		 * the stream from where the buffer is now.
+		 */
+		map_offset = sizeof(CheckpointFileHeader);
+		if (!is_compressed && found &&
+			SEQ_BUF_SHARED_EXIST(desc->freeBuf.shared))
+		{
+			SeqBufTag	cur_tag = desc->freeBuf.shared->tag;
+			off_t		cur_offset = seq_buf_get_offset(&desc->freeBuf);
+
+			if (cur_tag.type == 'm' && cur_tag.num == chkp_tag.num)
+				map_offset = cur_offset;
+			else if (cur_tag.type == 't' && cur_tag.num <= chkp_tag.num)
+			{
+				off_t		map_size = seq_buf_file_size(&chkp_tag);
+				off_t		rest = seq_buf_file_size(&cur_tag) - cur_offset;
+				SeqBufTag	next_tag = cur_tag;
+
+				for (next_tag.num = cur_tag.num + 1;
+					 next_tag.num <= chkp_tag.num;
+					 next_tag.num++)
+					rest += seq_buf_file_size(&next_tag);
+				map_offset = Max(map_size - rest,
+								 (off_t) sizeof(CheckpointFileHeader));
+			}
+			else if (cur_tag.type == 't' && cur_tag.num > chkp_tag.num)
+			{
+				/* All of the map is taken, and part of the .tmp being read */
+				map_offset = -1;
+				consumed_tag = cur_tag;
+				consumed_offset = cur_offset;
+			}
+		}
+
+		if (map_offset >= 0)
+			get_free_extents_from_file(&chkp_tag, map_offset,
+									   free_extents, is_compressed, found);
 
 		/*
 		 * The map file only knows what was free when it was written.  Every
@@ -317,8 +368,10 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 
 			tmp_tag.num = num + 1;
 			tmp_tag.type = 't';
-			get_free_extents_from_file(&tmp_tag, 0, free_extents,
-									   is_compressed, false);
+			get_free_extents_from_file(&tmp_tag,
+									   SeqBufTagEqual(&tmp_tag, &consumed_tag) ?
+									   consumed_offset : 0,
+									   free_extents, is_compressed, false);
 			get_free_extents_from_seqbuf_pending(&desc->tmpBuf[(num + 1) % 2],
 												 &tmp_tag, free_extents,
 												 is_compressed);
@@ -418,6 +471,25 @@ decode_free_extent_buf(const char *buf, Size len, ExtentsArray *free_extents,
 		}
 		add_extent(free_extents, extent);
 	}
+}
+
+/*
+ * Size of a seq buf file, or 0 if there is none.
+ */
+static off_t
+seq_buf_file_size(SeqBufTag *tag)
+{
+	char	   *filename = get_seq_buf_filename(tag);
+	File		file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
+	off_t		size = 0;
+
+	if (file >= 0)
+	{
+		size = FileSize(file);
+		FileClose(file);
+	}
+	pfree(filename);
+	return size;
 }
 
 /*
