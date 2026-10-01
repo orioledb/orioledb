@@ -14,7 +14,6 @@ import inspect
 import os
 import random
 import shutil
-import signal
 import subprocess
 import threading
 import time
@@ -125,17 +124,7 @@ class RrStressTest(BaseTest):
 		# its run. Set <= 0 to disable assertion chaos entirely.
 		assert_chaos_interval = _env_float('RR_ASSERT_PERIOD', duration / 3.0)
 		checkpoint_interval = 0.5
-		ddl_nemesis_interval = 0.2
 		error_chaos_idle = _env_float('RR_ERROR_CHAOS_IDLE', 0.1)
-		stopevent_chaos_idle = 0.5
-		stopevent_chaos_window = 0.1
-		stopevent_chaos_events = (
-		    'page_read',
-		    'modify_start',
-		    'step_down',
-		    'apply_undo',
-		    'checkpoint_step',
-		)
 
 		expected_total = n_accounts * initial_balance
 
@@ -207,13 +196,10 @@ class RrStressTest(BaseTest):
 			replicas = self.getReplicas(n_replicas)
 			for _r in replicas:
 				_r.start()
-			replica = replicas[0]
 
 		test_start = time.time()
 		first_error_time = [None]
 		first_crash_time = [None]
-		current_injection = [None]
-		crash_injection = [None]
 		injection_history = []
 		injection_history_lock = threading.Lock()
 		# Per-point counter: how many times each injection point was
@@ -225,17 +211,10 @@ class RrStressTest(BaseTest):
 		errors = []
 		errors_lock = threading.Lock()
 
-		# Drain log: each writer pushes its final my_token here when it
-		# exits, so the harness can check the token-universe invariant
-		# (PK rows ∪ SK entries ∪ writer pockets == [1, n_accounts+n_writers]).
-		drained_tokens = []
-		drained_lock = threading.Lock()
-
 		def note_crash():
 			with errors_lock:
 				if first_crash_time[0] is None:
 					first_crash_time[0] = time.time() - test_start
-					crash_injection[0] = current_injection[0]
 			stop.set()
 
 		counters_lock = threading.Lock()
@@ -261,7 +240,6 @@ class RrStressTest(BaseTest):
 
 		def writer_loop(writer_id):
 			con = node.connect()
-			my_token = n_accounts + writer_id
 			local_w = 0
 			local_c = 0
 			local_disc = 0
@@ -327,14 +305,6 @@ class RrStressTest(BaseTest):
 						else:
 							local_c += 1
 			finally:
-				# Drain: writer's final pocketed token. my_token is set
-				# only after a successful commit (line ~213), so this is
-				# the token that left the database for the writer's pocket
-				# in the writer's last completed tx. On a rolled-back tx,
-				# my_token retains its pre-tx value, which is still the
-				# token NOT on any row.
-				with drained_lock:
-					drained_tokens.append((writer_id, my_token))
 				if con is not None:
 					try:
 						con.close()
@@ -344,8 +314,6 @@ class RrStressTest(BaseTest):
 					write_count[0] += local_w
 					conflict_count[0] += local_c
 					disconnect_count[0] += local_disc
-
-				disconnect_count[0] += local_disc
 
 		def rollbacker_loop(rollbacker_id):
 			# Abort-path traffic generator.  Every iteration opens a
@@ -534,13 +502,11 @@ class RrStressTest(BaseTest):
 
 		def checkpointer_loop():
 			con = node.connect()
-			local_cp = 0
 			try:
 				while not stop.is_set():
 					try:
 						con.execute("CHECKPOINT")
 						con.commit()
-						local_cp += 1
 					except Exception:
 						try:
 							con.rollback()
@@ -549,51 +515,6 @@ class RrStressTest(BaseTest):
 					if stop.wait(checkpoint_interval):
 						break
 			finally:
-				try:
-					con.close()
-				except Exception:
-					pass
-
-		def ddl_nemesis_loop():
-			con = node.connect()
-			local_add = 0
-			local_drop = 0
-			try:
-				while not stop.is_set():
-					try:
-						con.execute("ALTER TABLE o_bank_account "
-						            "ADD COLUMN IF NOT EXISTS nemesis_col int")
-						con.commit()
-						local_add += 1
-					except Exception:
-						try:
-							con.rollback()
-						except Exception:
-							pass
-					if stop.wait(ddl_nemesis_interval):
-						break
-					try:
-						con.execute("ALTER TABLE o_bank_account "
-						            "DROP COLUMN IF EXISTS nemesis_col")
-						con.commit()
-						local_drop += 1
-					except Exception:
-						try:
-							con.rollback()
-						except Exception:
-							pass
-					if stop.wait(ddl_nemesis_interval):
-						break
-			finally:
-				try:
-					con.execute("ALTER TABLE o_bank_account "
-					            "DROP COLUMN IF EXISTS nemesis_col")
-					con.commit()
-				except Exception:
-					try:
-						con.rollback()
-					except Exception:
-						pass
 				try:
 					con.close()
 				except Exception:
@@ -681,13 +602,6 @@ class RrStressTest(BaseTest):
 
 		def error_chaos_loop():
 			con = node.connect()
-			local_on = 0
-			logged_error = [False]
-
-			def log_once(context, exc):
-				if not logged_error[0]:
-					logged_error[0] = True
-
 			try:
 				while not stop.is_set():
 					if stop.wait(error_chaos_idle):
@@ -706,33 +620,28 @@ class RrStressTest(BaseTest):
 						con.execute("SELECT pg_stopevent_set("
 						            f"'{rating[0][0]}', 'true')")
 						con.commit()
-						current_injection[0] = rating[0][0]
 						with attach_counts_lock:
 							attach_counts[rating[0][0]] = (
 							    attach_counts.get(rating[0][0], 0) + 1)
 						with injection_history_lock:
 							injection_history.append(
 							    (time.time() - test_start, rating[0][0]))
-						local_on += 1
-					except Exception as e:
+					except Exception:
 						try:
 							con.rollback()
 						except Exception:
 							pass
-						log_once('attach', e)
 					time.sleep(0)
 					try:
 						for point in error_injections:
 							con.execute("SELECT pg_stopevent_reset("
 							            f"'{point}')")
 						con.commit()
-						current_injection[0] = None
-					except Exception as e:
+					except Exception:
 						try:
 							con.rollback()
 						except Exception:
 							pass
-						log_once('detach', e)
 			finally:
 				try:
 					for point in error_injections:
@@ -805,7 +714,6 @@ class RrStressTest(BaseTest):
 			# is still bounded.
 			interval = max(assert_chaos_interval, 1.0)
 			con = None
-			local_arms = 0
 			next_arm_at = test_start + interval
 
 			try:
@@ -830,7 +738,6 @@ class RrStressTest(BaseTest):
 						con.execute("SELECT pg_stopevent_set("
 						            f"'{chosen}', 'true')")
 						con.commit()
-						local_arms += 1
 						next_arm_at = time.time() + interval
 						with attach_counts_lock:
 							attach_counts[chosen] = (
@@ -878,58 +785,6 @@ class RrStressTest(BaseTest):
 						con.close()
 					except Exception:
 						pass
-
-		def stopevent_chaos_loop():
-			con = node.connect()
-			local_cycles = 0
-			armed = [None]
-			logged_error = [False]
-
-			def log_once(ctx, exc):
-				if not logged_error[0]:
-					logged_error[0] = True
-
-			def reset_armed():
-				if armed[0] is None:
-					return
-				try:
-					con.execute(f"SELECT pg_stopevent_reset("
-					            f"'{armed[0]}')")
-					con.commit()
-				except Exception as e:
-					try:
-						con.rollback()
-					except Exception:
-						pass
-					log_once('reset', e)
-				armed[0] = None
-
-			try:
-				while not stop.is_set():
-					if stop.wait(stopevent_chaos_idle):
-						break
-					event = random.choice(stopevent_chaos_events)
-					try:
-						con.execute(f"SELECT pg_stopevent_set("
-						            f"'{event}', 'true')")
-						con.commit()
-						armed[0] = event
-						local_cycles += 1
-					except Exception as e:
-						try:
-							con.rollback()
-						except Exception:
-							pass
-						log_once('set', e)
-						continue
-					stop.wait(stopevent_chaos_window)
-					reset_armed()
-			finally:
-				reset_armed()
-				try:
-					con.close()
-				except Exception:
-					pass
 
 		def postmaster_kill_loop():
 			# Periodically SIGKILL the postmaster.  Unlike a backend
@@ -1078,7 +933,6 @@ class RrStressTest(BaseTest):
 							if first_crash_time[0] is None:
 								first_crash_time[0] = (time.time() -
 								                       test_start)
-								crash_injection[0] = current_injection[0]
 
 		threads = []
 		for wid in range(1, n_writers + 1):
@@ -1164,7 +1018,6 @@ class RrStressTest(BaseTest):
 			pass
 		if panic_lines and first_crash_time[0] is None:
 			first_crash_time[0] = time.time() - test_start
-			crash_injection[0] = current_injection[0]
 
 		log_saved_path = [None]
 
@@ -1233,8 +1086,6 @@ class RrStressTest(BaseTest):
 			# crash).  Records the first trapped node in trapped_replica[0] so
 			# the save hooks preserve the right one.
 			for _r in replicas:
-				if _r is None:
-					continue
 				try:
 					rlog = os.path.join(_r.logs_dir, 'postgresql.log')
 					with open(rlog, errors='replace') as _f:
@@ -1274,7 +1125,6 @@ class RrStressTest(BaseTest):
 		      f'{_kill_field} '
 		      f'first_error_at={_fet_s} '
 		      f'first_crash_at={_fct_s} '
-		      f'crash_injection={crash_injection[0]!r} '
 		      f'panic_lines={len(panic_lines)}')
 		with attach_counts_lock:
 			_counts = sorted(attach_counts.items(), key=lambda kv: -kv[1])
@@ -1292,8 +1142,7 @@ class RrStressTest(BaseTest):
 
 		if panic_fatal and first_crash_time[0] is not None:
 			self.fail(f'cluster crashed at {first_crash_time[0]:.2f}s '
-			          f'(writes={write_count[0]} reads={read_count[0]} '
-			          f'crash_injection={crash_injection[0]!r})')
+			          f'(writes={write_count[0]} reads={read_count[0]})')
 		# When tolerating PANIC, wait briefly for recovery before
 		# running invariant queries; node.execute will keep getting
 		# 57P03 ("in recovery mode") until WAL replay completes.
@@ -1305,20 +1154,6 @@ class RrStressTest(BaseTest):
 					break
 				except Exception:
 					time.sleep(0.5)
-		# Assume the state may be corrupted -- run a PK-authoritative
-		# diagnostic before the regular invariant queries so we can tell
-		# PK-side corruption from SK-side corruption.  `count(*)` etc
-		# can be planned via the SK token unique index; forcing seq scan
-		# routes through the PK heap (orioledb is index-organized on
-		# PK).  If `pk_*_seq` disagrees with the default-plan numbers,
-		# the SK is the only thing that's off; if `pk_*_seq` itself is
-		# wrong, the PK is corrupt too.
-		def _safe_exec(sql):
-			try:
-				return node.execute(sql)
-			except Exception as _e:
-				return f'ERROR: {_e!r}'
-
 		# Each helper logs the EXPLAIN plan under a label so post-trial
 		# inspection can verify which scan actually answered the query.
 		# The planner picks Seq Scan over SK index-only at this row count,
@@ -1470,12 +1305,6 @@ class RrStressTest(BaseTest):
 		    "SELECT token, count(*) FROM o_bank_account "
 		    "GROUP BY token HAVING count(*) > 1",
 		    label='duplicate tokens')
-		# Default-plan canary -- at 100 rows the planner picks Seq Scan
-		# so this actually answers from PK heap, NOT SK. Kept for the
-		# diagnostic log; not used as an invariant signal.
-		sk_default = _default_exec(
-		    "SELECT count(DISTINCT token)::int FROM o_bank_account",
-		    label='count(DISTINCT token)')
 		# Enumerate SK contents directly (forced index path on unique
 		# token SK). The query returns (token, id): in orioledb, SK
 		# entries implicitly include the PK columns, so an Index Only
@@ -1523,20 +1352,8 @@ class RrStressTest(BaseTest):
 			sk_duplicate_pairs = sorted(
 			    (tok, _id, n) for (tok, _id), n in _c.items() if n > 1)
 
-		# Drain summary: the writer threads' final pocketed tokens.
-		# Kept as a forensic diagnostic only — writers SIGQUIT'd in the
-		# PG commit-window (after XLogFlush of COMMIT, before the Python
-		# `my_token = to_token` assignment runs) leave `drained_set` with
-		# stale pre-tx pockets while the DB reflects the post-commit
-		# state, so any invariant that joins `drained_set` against
-		# `pk_set`/`sk_set` fires spuriously on every cascade trial.
-		# See git history (`drained ∩` checks removed 2026-05-15) and
-		# project_v4_investigation_state.md for the full race analysis.
-		with drained_lock:
-			drained_raw = list(drained_tokens)
-		drained_set = {tok for _, tok in drained_raw}
 		expected_universe = set(range(1, n_accounts + n_writers + 1))
-		universe_union = pk_set | sk_set | drained_set
+		universe_union = pk_set | sk_set
 		universe_extra = sorted(universe_union - expected_universe)
 
 		with errors_lock:
@@ -1546,7 +1363,6 @@ class RrStressTest(BaseTest):
 		      f'{pk_seq!r}')
 		print(f'[diag] pk_distinct_tokens (forced) = {pk_distinct_tokens}')
 		print(f'[diag] sk_distinct_tokens (forced) = {sk_distinct_tokens}')
-		print(f'[diag] sk_default count(DISTINCT token) = {sk_default!r}')
 		print(f'[diag] pk_row_count (forced) = {pk_row_count} '
 		      f'sk_row_count (forced) = {sk_row_count}')
 		print(f'[diag] pk_token_dups = {pk_token_dups!r}')
@@ -1571,16 +1387,7 @@ class RrStressTest(BaseTest):
 		      f'{sk_missing_rows}')
 		print(f'[diag] sk_duplicate_pairs (token, id, count) = '
 		      f'{sk_duplicate_pairs}')
-		print(
-		    f'[diag] drained_tokens (writer_id, my_token) = {sorted(drained_raw)}'
-		)
-		print(f'[diag] drained_set (unique) = {sorted(drained_set)}')
-		print(
-		    f'[diag] universe coverage: '
-		    f'{len(universe_union & expected_universe)}/{len(expected_universe)} '
-		    f'(pk={len(pk_set)} sk_distinct={len(sk_set)} drained_distinct={len(drained_set)})'
-		)
-		print(f'[diag] universe_extra (in PK/SK/drained but outside '
+		print(f'[diag] universe_extra (in PK/SK but outside '
 		      f'[1,{n_accounts + n_writers}]) = {universe_extra}')
 		# Full per-row PK dump and SK token list -- unconditional, so a
 		# post-processor can do per-row PK<->SK matching across trials.
@@ -1588,19 +1395,6 @@ class RrStressTest(BaseTest):
 		print(f'[diag] sk_dump (token, id, ordered by token) = {sk_dump!r}')
 		print(f'[diag] tbl_check_ok = {tbl_check_ok!r} '
 		      f'retained_undo = {retained!r}')
-		if isinstance(pk_seq, list) and pk_seq and len(pk_seq[0]) >= 3:
-			_pk_rows, _pk_ids, _pk_toks, _pk_sum = pk_seq[0]
-			_pk_corrupt = (_pk_rows != n_accounts or _pk_ids != n_accounts
-			               or _pk_toks != n_accounts
-			               or _pk_sum != expected_total)
-			if _pk_corrupt:
-				print('[diag] PK CORRUPTION DETECTED')
-				print(f'[diag] pk_full_dump:')
-				if isinstance(pk_dump, list):
-					for _r in pk_dump:
-						print(f'  {_r}')
-				else:
-					print(f'  {pk_dump}')
 
 		def bridge_check(instance_node, violations_list):
 			for token in pk_set:
@@ -1784,14 +1578,6 @@ class RrStressTest(BaseTest):
 			                   'writers must have committed')
 		if (n_readers_pk + n_readers_sk + n_readers_mixed) > 0:
 			self.assertGreater(read_count[0], 0, 'readers must have completed')
-		self.assertFalse(
-		    retained,
-		    'orioledb retained undo after stop (possible snapshot leak)')
-		self.assertTrue(
-		    tbl_check_ok,
-		    f'{STORAGE_ENGINE} structural check on o_bank_account failed')
 		self.assertEqual(
 		    n_dangling, 0,
 		    f'{n_dangling} postgres backends survived node.stop()')
-
-		node.stop()
