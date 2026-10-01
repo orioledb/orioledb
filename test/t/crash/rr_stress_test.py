@@ -537,8 +537,8 @@ class RrStressTest(BaseTest):
 		# the unguarded twins are armed by `assert_injections` instead,
 		# since firing them PANICs the cluster via the abort re-entry above.
 		#
-		#   wal_flush_guarded (flush_local_wal + flush_local_wal_if_needed
-		#       overflow path): every flushed WAL batch funnels through here;
+		#   wal_flush_guarded (flush_local_wal + flush_local_wal_buffer):
+		#       every flushed WAL batch funnels through here;
 		#       also called from wal_rollback.
 		#   csn_incremented (undo_xact_callback, XACT_EVENT_COMMIT):
 		#       window between the global CSN increment and the per-oxid CSN
