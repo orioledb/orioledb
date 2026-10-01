@@ -76,6 +76,8 @@ extern OTuple btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
 									 BTreeLocationHint *hint);
 extern OTuple btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
 										 bool *end, BTreeLocationHint *hint);
+extern BTreeSeqScan *btree_hold_checkpoint_image(BTreeDescr *desc,
+												 uint32 *chkpNum);
 extern void free_btree_seq_scan(BTreeSeqScan *scan);
 extern void btree_seq_scan_set_range_filter(BTreeSeqScan *scan,
 											OBTreeKeyRange *scanRange);

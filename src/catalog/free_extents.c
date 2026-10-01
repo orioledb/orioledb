@@ -471,6 +471,7 @@ free_extent(BTreeDescr *desc, FileExtent extent)
 	}
 	btree_iterator_free(it);
 	enable_stopevents = old_enable_stopevents;
+	pg_atomic_fetch_add_u64(&BTREE_GET_META(desc)->extentsChangeCount, 1);
 }
 
 /*
@@ -681,6 +682,7 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 		if (remove_old_checkpoint_files)
 			seq_buf_remove_file(&metaPage->freeBuf.tag);
 	}
+	pg_atomic_fetch_add_u64(&metaPage->extentsChangeCount, 1);
 	LWLockRelease(metaLock);
 	btree_unpin_meta_page();
 }

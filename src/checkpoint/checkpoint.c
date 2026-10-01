@@ -2889,6 +2889,7 @@ free_extent_for_checkpoint(BTreeDescr *desc, FileExtent *extent, uint32 chkp_num
 	}
 	extent->len = InvalidFileExtentLen;
 	extent->off = InvalidFileExtentOff;
+	pg_atomic_fetch_add_u64(&BTREE_GET_META(desc)->extentsChangeCount, 1);
 }
 
 /*

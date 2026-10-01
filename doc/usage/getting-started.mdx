@@ -225,7 +225,9 @@ SELECT * FROM verify_orioledb('blog_post'::regclass);
 SELECT * FROM verify_orioledb('blog_post'::regclass, true);
 ```
 
-The function takes only `AccessShareLock`, so concurrent reads and writes are not blocked. If a checkpoint is running, it waits for the checkpoint to finish on the affected tree rather than reporting a spurious failure.
+Every check reconciles the pages of each tree with its free space: together they must cover the data file exactly once. With `thorough_check`, it also verifies the free space map file (`.map`) written by the last checkpoint that wrote the tree against the tree image that checkpoint wrote: the image pages and the free extents listed in the map must cover the data file, up to the length recorded in the map, exactly once. A recovery starts from that image and that map. The same flag is the `force_map_check` argument of `orioledb_tbl_check()`.
+
+The function takes only `AccessShareLock`, so concurrent reads and writes are not blocked. If a checkpoint is running, it waits for the checkpoint to finish on the affected tree rather than reporting a spurious failure. Pages written while the check runs move file extents under it; it then looks again rather than report a mismatch it did not see on a still tree.
 
 `verify_orioledb()` is also wired into PostgreSQL's `amcheck` integration, so OrioleDB relations are checked by [`pg_amcheck`](https://www.postgresql.org/docs/current/app-pgamcheck.html) alongside heap relations:
 
