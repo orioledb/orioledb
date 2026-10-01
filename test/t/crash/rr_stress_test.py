@@ -524,22 +524,12 @@ class RrStressTest(BaseTest):
 		# to a STOPEVENT_CONDITION + elog(ERROR) site; arming it makes the
 		# next backend that reaches the site raise an error.
 		#
-		# (un)guarded mechanism: several sites sit in functions that are
-		# reached on BOTH the commit and the abort path -- the function
-		# recurses because an ERROR raised on commit drives the abort, which
-		# re-enters the same function.  Arming the bare (unguarded) event
-		# would fire a second time during that abort, where ereport escalates
-		# to PANIC, crashing the backend.  Each such site therefore has a
-		# `_guarded` twin that fires only on the commit-side entry (gated by
-		# an isCommit-style check or the wal_in_rollback flag),
-		# so an armed error stays single-shot.  This list
-		# arms only the `_guarded` names below (clean, recoverable errors);
-		# the unguarded twins are armed by `assert_injections` instead,
-		# since firing them PANICs the cluster via the abort re-entry above.
+		# Several sites (set_csn, set_xlog_ptr, add_finish_wal, wal_flush) sit
+		# in functions that are reached on BOTH the commit and the abort
+		# path: an ERROR raised on commit drives the abort, which re-enters
+		# the same function and fires again, where ereport escalates to
+		# PANIC.  Those are armed by `assert_injections`, not by this list.
 		#
-		#   wal_flush_guarded (flush_local_wal + flush_local_wal_buffer):
-		#       every flushed WAL batch funnels through here;
-		#       also called from wal_rollback.
 		#   csn_incremented (undo_xact_callback, XACT_EVENT_COMMIT):
 		#       window between the global CSN increment and the per-oxid CSN
 		#       flip in current_oxid_commit -- nextCommitSeqNo has advanced
@@ -656,12 +646,10 @@ class RrStressTest(BaseTest):
 		#   - crit-section sites (commit_assert, before_pre_commit_wal_finish,
 		#     before_xlog_insert, after_page_io): the elog(ERROR) is raised
 		#     inside a START_CRIT_SECTION, so it escalates to PANIC directly.
-		#   - unguarded twins (set_csn, set_xlog_ptr, add_finish_wal,
-		#     wal_flush): the first hit on the commit path raises a clean
-		#     ERROR, but the resulting abort re-enters the same function and
-		#     re-fires during XACT_EVENT_ABORT, where ereport escalates to
-		#     PANIC (this is exactly what the `_guarded` twins in
-		#     `error_injections` are designed to avoid).
+		#   - commit/abort shared sites (set_csn, set_xlog_ptr,
+		#     add_finish_wal, wal_flush): the abort triggered by the first
+		#     ERROR re-enters the same function and re-fires during
+		#     XACT_EVENT_ABORT, where ereport escalates to PANIC.
 		# Either way the cluster goes down, so all of them share the slow,
 		# duration-relative `assert_chaos_loop` cadence.
 		assert_injections = [
@@ -673,7 +661,6 @@ class RrStressTest(BaseTest):
 		    'set_xlog_ptr',
 		    'add_finish_wal',
 		    'wal_flush',
-		    'wal_flush_guarded',
 		    'csn_incremented',
 		    'after_flush_local_wal',
 		    'before_curoxid_clear',
@@ -692,7 +679,7 @@ class RrStressTest(BaseTest):
 			# seconds (the configurable RR_ASSERT_PERIOD cadence, default
 			# duration/3).  Every point here turns into a PANIC once it
 			# fires (directly via a START_CRIT_SECTION, or via abort
-			# re-entry for the unguarded twins -- see the list above),
+			# re-entry for the commit/abort shared sites -- see the list above),
 			# which takes the cluster down.
 			# Same pattern as `error_chaos_loop`: pick one
 			# via rating tournament, arm -> `time.sleep(0)` -> reset every point in
@@ -1145,8 +1132,6 @@ class RrStressTest(BaseTest):
 					time.sleep(0.5)
 		# Each helper logs the EXPLAIN plan under a label so post-trial
 		# inspection can verify which scan actually answered the query.
-		# The planner picks Seq Scan over SK index-only at this row count,
-		# so without forcing GUCs the "SK" queries silently read from PK.
 		def _explain_lines(con, sql):
 			return [r[0] for r in con.execute('EXPLAIN (COSTS OFF) ' + sql)]
 

@@ -43,12 +43,6 @@ typedef struct
 
 static LocalWal local_wal;
 
-/*
- * Set by wal_rollback() while it is running so the -guarded variants
- * of the wal-flush stop events can skip an abort-side reentry.
- */
-static bool wal_in_rollback = false;
-
 static void add_finish_wal_record(uint8 rec_type, OXid xmin);
 static void add_joint_commit_wal_record(TransactionId xid, OXid xmin,
 										bool subTransaction);
@@ -412,16 +406,6 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	}
 
 	Assert(!is_recovery_process());
-
-	/*
-	 * Mark that any flush_local_wal / flush_local_wal_if_needed call below
-	 * originates from the abort path, so the -guarded variants of the
-	 * wal-flush stop events skip themselves and avoid re-entering ereport
-	 * during XACT_EVENT_ABORT (-> PANIC).
-	 */
-	if (STOPEVENTS_ENABLED())
-		wal_in_rollback = true;
-
 	flush_local_wal_if_needed(sizeof(WALRecFinish));
 	Assert(local_wal.buffer_offset + sizeof(WALRecFinish) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
@@ -435,9 +419,6 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 
 	elog(DEBUG4, "ROLLBACK oxid " UINT64_FORMAT " logicalXid %u",
 		 oxid, logicalXid);
-
-	if (STOPEVENTS_ENABLED())
-		wal_in_rollback = false;
 
 	if (synchronous_commit > SYNCHRONOUS_COMMIT_OFF)
 		XLogFlush(wait_pos);
@@ -900,8 +881,6 @@ flush_local_wal(bool isCommit, bool withXactTime)
 
 	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH, NULL))
 		elog(ERROR, "stop event \"wal_flush\" fired");
-	if (isCommit && STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH_GUARDED, NULL))
-		elog(ERROR, "stop event \"wal_flush_guarded\" fired");
 
 	/*
 	 * Put the xlog location of our commit record to the shared memory.  This
@@ -946,9 +925,6 @@ flush_local_wal_buffer(void)
 
 	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH, NULL))
 		elog(ERROR, "stop event \"wal_flush\" fired");
-	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH_GUARDED, NULL)
-		&& !wal_in_rollback)
-		elog(ERROR, "stop event \"wal_flush_guarded\" fired");
 
 	START_CRIT_SECTION();
 	log_logical_wal_container(local_wal.buffer, local_wal.buffer_offset, false);

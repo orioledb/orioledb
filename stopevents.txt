@@ -56,7 +56,6 @@ before_pre_commit_wal_finish
 after_flush_local_wal
 add_finish_wal
 wal_flush
-wal_flush_guarded
 before_xlog_insert
 update_pk_done_pre_sk
 set_csn
