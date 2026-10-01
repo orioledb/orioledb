@@ -62,7 +62,6 @@ before_xlog_insert
 update_pk_done_pre_sk
 set_csn
 set_xlog_ptr
-set_xlog_ptr_guarded
 before_curoxid_clear
 pk_mutated_pre_wal
 sk_mid_update

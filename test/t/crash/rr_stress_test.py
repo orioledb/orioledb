@@ -531,15 +531,12 @@ class RrStressTest(BaseTest):
 		# would fire a second time during that abort, where ereport escalates
 		# to PANIC, crashing the backend.  Each such site therefore has a
 		# `_guarded` twin that fires only on the commit-side entry (gated by
-		# an isCommit-style check: the rec_type, the wal_in_rollback flag, or
-		# a valid xlog ptr), so an armed error stays single-shot.  This list
+		# an isCommit-style check: the rec_type or the wal_in_rollback flag),
+		# so an armed error stays single-shot.  This list
 		# arms only the `_guarded` names below (clean, recoverable errors);
 		# the unguarded twins are armed by `assert_injections` instead,
 		# since firing them PANICs the cluster via the abort re-entry above.
 		#
-		#   set_xlog_ptr_guarded (set_oxid_xlog_ptr): also reached on abort
-		#       via set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr) in the
-		#       XACT_EVENT_ABORT case.
 		#   add_finish_wal_guarded (add_finish_wal_record): invoked for both
 		#       WAL_REC_COMMIT (wal_commit) and WAL_REC_ROLLBACK
 		#       (wal_rollback).
@@ -679,7 +676,6 @@ class RrStressTest(BaseTest):
 		    'set_xlog_ptr',
 		    'add_finish_wal',
 		    'wal_flush',
-		    'set_xlog_ptr_guarded',
 		    'add_finish_wal_guarded',
 		    'wal_flush_guarded',
 		    'csn_incremented',

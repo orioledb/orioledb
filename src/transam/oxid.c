@@ -860,9 +860,6 @@ set_oxid_xlog_ptr_internal(OXid oxid, XLogRecPtr ptr)
 
 	if (STOPEVENT_CONDITION(STOPEVENT_SET_XLOG_PTR, NULL))
 		elog(ERROR, "stop event \"set_xlog_ptr\" fired");
-	if (ptr != InvalidXLogRecPtr &&
-		STOPEVENT_CONDITION(STOPEVENT_SET_XLOG_PTR_GUARDED, NULL))
-		elog(ERROR, "stop event \"set_xlog_ptr_guarded\" fired");
 
 	oldPtr = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr);
 	pg_read_barrier();
