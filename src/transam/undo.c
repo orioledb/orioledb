@@ -2535,6 +2535,25 @@ rewind_handle_pending_deletes(void)
 	PostPrepare_smgr();
 }
 
+/*
+ * The oxid whose commit is durable and visible, but which has not yet run its
+ * on-commit undo and wal_after_commit().  Nothing in that window can abort the
+ * transaction any more, yet an ERROR there is an ordinary ERROR: the critical
+ * section is over, and PostgreSQL's own guard -- RecordTransactionAbort()'s
+ * "already committed" PANIC -- only fires for a heap xid.  Without a heap xid
+ * the abort would quietly skip the on-commit actions and tell the client the
+ * transaction failed.  Treat it like PostgreSQL treats a committed xid.
+ */
+static OXid committedNotFinishedOxid = InvalidOXid;
+
+static inline void
+check_abort_after_commit(void)
+{
+	if (OXidIsValid(committedNotFinishedOxid))
+		elog(PANIC, "cannot abort transaction " UINT64_FORMAT
+			 ", it was already committed", committedNotFinishedOxid);
+}
+
 void
 undo_xact_callback(XactEvent event, void *arg)
 {
@@ -2561,6 +2580,9 @@ undo_xact_callback(XactEvent event, void *arg)
 	 */
 	ea_counters = NULL;
 
+	if (event == XACT_EVENT_ABORT)
+		check_abort_after_commit();
+
 	if (event == XACT_EVENT_COMMIT || event == XACT_EVENT_ABORT)
 		seq_scans_cleanup();
 
@@ -2574,6 +2596,13 @@ undo_xact_callback(XactEvent event, void *arg)
 	{
 		if (event == XACT_EVENT_COMMIT || event == XACT_EVENT_ABORT)
 		{
+			/*
+			 * A commit clears the position it published itself, and an ERROR
+			 * before it does is a PANIC (see check_abort_after_commit()).
+			 * Clear it here anyway: a stale position makes every following
+			 * checkpoint wait for it in wait_finish_active_commits().
+			 */
+			wal_after_commit();
 			clear_my_logical_wal_retain_location();
 			reset_cur_undo_locations();
 			orioledb_reset_xmin_hook();
@@ -2779,6 +2808,7 @@ undo_xact_callback(XactEvent event, void *arg)
 					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 
 				current_oxid_commit(csn);
+				committedNotFinishedOxid = oxid;
 
 				END_CRIT_SECTION();
 
@@ -2802,6 +2832,7 @@ undo_xact_callback(XactEvent event, void *arg)
 				}
 
 				wal_after_commit();
+				committedNotFinishedOxid = InvalidOXid;
 				clear_my_logical_wal_retain_location();
 				reset_cur_undo_locations();
 				reset_command_undo_locations();
@@ -3145,6 +3176,7 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 			break;
 
 		case SUBXACT_EVENT_ABORT_SUB:
+			check_abort_after_commit();
 			if (parentSubid < minParentSubId || minParentSubId == InvalidSubTransactionId)
 				parentSubid = InvalidSubTransactionId;
 
@@ -3254,6 +3286,8 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 {
 	OXid		oxid = get_current_oxid_if_any();
 
+	check_abort_after_commit();
+
 	if (OXidIsValid(oxid))
 	{
 		int			i;
@@ -3306,12 +3340,14 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 		current_oxid_precommit();
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 		current_oxid_commit(csn);
+		committedNotFinishedOxid = oxid;
 
 		END_CRIT_SECTION();
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			on_commit_undo_stack((UndoLogType) i, oxid, true);
 		wal_after_commit();
+		committedNotFinishedOxid = InvalidOXid;
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			release_undo_size((UndoLogType) i);

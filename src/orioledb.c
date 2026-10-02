@@ -1722,6 +1722,9 @@ orioledb_on_shmem_exit(int code, Datum arg)
 	if (MyProc)
 	{
 		pg_atomic_write_u64(&oProcData[MYPROCNUMBER].xmin, InvalidOXid);
+		/* A stale commit position would block every following checkpoint */
+		pg_atomic_write_u64(&oProcData[MYPROCNUMBER].commitInProgressXlogLocation,
+							OWalInvalidCommitPos);
 
 		/*
 		 * Both are held only across a few statements, but dying inside one of
