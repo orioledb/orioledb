@@ -87,7 +87,7 @@ static Pointer o_sys_cache_get_from_tree(OSysCache *sys_cache,
 static Pointer o_sys_cache_get_from_toast_tree(OSysCache *sys_cache,
 											   OSysCacheKey *key);
 static bool o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key,
-							Pointer entry);
+							Pointer entry, bool transactional);
 static bool o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry);
 static int	o_sys_cache_key_cmp(OSysCache *sys_cache, int nkeys,
 								OSysCacheKey *key1, OSysCacheKey *key2);
@@ -660,11 +660,58 @@ o_sys_cache_unlock(OSysCache *sys_cache, OSysCacheKey *key, int lockmode)
 	}
 }
 
+static bool
+o_sys_cache_add_transactional(OSysCache *sys_cache, Pointer entry)
+{
+	bool		inserted;
+	OSysCacheKey *entry_key = (OSysCacheKey *) entry;
+	BTreeDescr *desc = get_sys_tree(sys_cache->sys_tree_num);
+	OXid		oxid = get_current_oxid();
+
+	systrees_modify_start();
+	if (!sys_cache->is_toast)
+	{
+		OTuple		tup = {0};
+
+		tup.data = entry;
+		inserted = o_btree_modify(desc, BTreeOperationInsert,
+								  tup, BTreeKeyLeafTuple,
+								  NULL, BTreeKeyNone,
+								  oxid, COMMITSEQNO_INPROGRESS,
+								  RowLockUpdate, NULL,
+								  &nullCallbackInfo) ==
+			OBTreeModifyResultInserted;
+		if (inserted)
+			o_wal_insert(desc, tup, REPLICA_IDENTITY_DEFAULT,
+						 O_TABLE_INVALID_VERSION);
+	}
+	else
+	{
+		Pointer		data;
+		int			len;
+		OSysCacheToastKeyBound toast_key = {0};
+
+		toast_key.key = entry_key;
+		toast_key.common.chunknum = 0;
+		toast_key.lsn_cmp = true;
+		data = sys_cache->funcs->toast_serialize_entry(entry, &len);
+		inserted = generic_toast_insert(&oSysCacheToastAPI,
+										(Pointer) &toast_key,
+										data, len, oxid,
+										COMMITSEQNO_INPROGRESS, desc);
+		pfree(data);
+	}
+	systrees_modify_end(true);
+
+	return inserted;
+}
+
 static
 
 /* Non-key fields of entry should be filled before call */
 bool
-o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key, Pointer entry)
+o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key, Pointer entry,
+				bool transactional)
 {
 	bool		inserted;
 	OSysCacheKey *entry_key = (OSysCacheKey *) entry;
@@ -725,7 +772,9 @@ o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key, Pointer entry)
 		}
 	}
 
-	if (!sys_cache->is_toast)
+	if (transactional)
+		inserted = o_sys_cache_add_transactional(sys_cache, entry);
+	else if (!sys_cache->is_toast)
 	{
 		OTuple		tup = {0};
 
@@ -1008,7 +1057,7 @@ o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg,
 	/*
 	 * All done, now try to insert into B-tree.
 	 */
-	inserted = o_sys_cache_add(sys_cache, key, entry);
+	inserted = o_sys_cache_add(sys_cache, key, entry, transactional);
 	Assert(inserted);
 	o_sys_cache_unlock(sys_cache, key, AccessExclusiveLock);
 	sys_cache->funcs->free_entry(entry);
@@ -3105,7 +3154,7 @@ o_sys_cache_copy_tree(OSysCache *sys_cache, Oid src_datoid, Oid dst_datoid)
 					entry = o_sys_cache_get_from_toast_tree(sys_cache, key);
 					if (entry != NULL)
 					{
-						(void) o_sys_cache_add(sys_cache, dst_key, entry);
+						(void) o_sys_cache_add(sys_cache, dst_key, entry, false);
 						sys_cache->funcs->free_entry(entry);
 					}
 					pfree(dst_key);
@@ -3150,7 +3199,7 @@ o_sys_cache_copy_tree(OSysCache *sys_cache, Oid src_datoid, Oid dst_datoid)
 							PointerGetDatum(O_KEY_GET_NAME(key, i));
 				}
 
-				(void) o_sys_cache_add(sys_cache, dst_key, entry);
+				(void) o_sys_cache_add(sys_cache, dst_key, entry, false);
 				pfree(entry);
 			}
 		}
