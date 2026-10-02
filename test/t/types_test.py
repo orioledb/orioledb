@@ -163,6 +163,48 @@ class TypesTest(BaseTest):
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 4)
 		node.stop()
 
+	def test_enum_rename_in_progress_crash_cache_consistency(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+			CREATE TABLE o_enum_tbl (
+				id int NOT NULL,
+				val mood NOT NULL,
+				PRIMARY KEY (val, id)
+			) USING orioledb;
+			INSERT INTO o_enum_tbl VALUES (1, 'sad'), (2, 'happy');
+			CHECKPOINT;
+		""")
+
+		con = node.connect()
+		con.begin()
+		con.execute("ALTER TYPE mood RENAME VALUE 'sad' TO 'blue';")
+
+		enum_cache = str(
+		    node.execute("SELECT orioledb_sys_tree_structure(5, 'ne');"))
+		self.assertIn('"blue"', enum_cache)
+
+		node.safe_psql("SELECT pg_switch_wal();")
+		node.stop(['-m', 'immediate'])
+		con.close()
+
+		node.start()
+		self.assertEqual([('happy', ), ('sad', )],
+		                 node.execute("""
+			SELECT enumlabel::text
+				FROM pg_enum
+				WHERE enumtypid = 'mood'::regtype
+				ORDER BY enumlabel;
+		"""))
+		enum_cache = str(
+		    node.execute("SELECT orioledb_sys_tree_structure(5, 'ne');"))
+		self.assertNotIn('"blue"', enum_cache)
+		self.assertIn('"sad"', enum_cache)
+
+		node.stop()
+
 	def test_enum_index_recovery_rollback(self):
 		enum_amount = 0
 		enumoid_amount = 0
