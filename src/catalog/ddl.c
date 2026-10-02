@@ -143,6 +143,25 @@ Oid			o_saved_relrewrite = InvalidOid;
 static Oid	o_saved_reltablespace = InvalidOid;
 List	   *o_reuse_indices = NIL;
 static ORelOids saved_oids;
+
+/*
+ * Help-variables for ALTER TABLE ... SET ACCESS METHOD "orioledb"
+ * for a relation that is currently holded by another AM.
+ *
+ * We're lucky: Postgres implements this transition as usual rewrite:
+ * it creates a transient relation with new AM => copies the rows =>
+ * swaps relation files.  So we register the transient relation as
+ * an orioledb's table => Postgres will fill it on its own => move
+ * the OTable over the original relation once the files have been
+ * swapped.
+ *
+ * o_am_conversion_newrel -- transient relation
+ * o_am_conversion_oldrel -- the relation being converted
+ */
+Oid o_am_conversion_newrel = InvalidOid;
+static Oid o_am_conversion_oldrel = InvalidOid;
+static ORelOids o_am_conversion_oids;
+
 static bool in_rewrite = false;
 static bool in_cluster_rebuild = false;
 List	   *reindex_list = NIL;
@@ -179,6 +198,7 @@ static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
 static void o_copy_orioledb_template(Oid src_dboid, Oid dst_dboid);
 static void o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt);
+static void o_table_adopt_rewritten(Relation rel);
 static void o_process_added_column(AlterTableCmd *cmd);
 static void o_check_movedb(const AlterDatabaseStmt *stmt, movedb_params *movedb);
 static void o_movedb_failure_callback(int code, Datum arg);
@@ -1022,6 +1042,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		in_rewrite = false;
 		o_saved_relrewrite = InvalidOid;
 		o_saved_reltablespace = InvalidOid;
+		o_am_conversion_newrel = InvalidOid;
+		o_am_conversion_oldrel = InvalidOid;
+		ORelOidsSetInvalid(o_am_conversion_oids);
 		ORelOidsSetInvalid(saved_oids);
 		savedDataQuery = NULL;
 		in_nontransactional_truncate = false;
@@ -3937,13 +3960,45 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				{
 					Relation	old_rel = relation_open(rel->rd_rel->relrewrite, AccessShareLock);
 
-					o_saved_relrewrite = rel->rd_rel->relrewrite;
-					ORelOidsSetFromRel(saved_oids, old_rel);
-					relation_close(old_rel, AccessShareLock);
+					if (is_orioledb_rel(old_rel))
+					{
+						o_saved_relrewrite = rel->rd_rel->relrewrite;
+						ORelOidsSetFromRel(saved_oids, old_rel);
+						relation_close(old_rel, AccessShareLock);
+					}
+					else
+					{
+						/*
+						 * ALTER TABLE ... SET ACCESS METHOD "orioledb": the relation
+						 * being rewritten belongs to another table AM.  Let the Postgres
+						 * rewrite move them and register this relation as their
+						 * destination (see o_am_conversion_newrel).
+						 */
+						bool old_has_toast = OidIsValid(old_rel->rd_rel->reltoastrelid);
+						relation_close(old_rel, AccessShareLock);
+
+						o_am_conversion_oldrel = rel->rd_rel->relrewrite;
+						o_am_conversion_newrel = RelationGetRelid(rel);
+						ORelOidsSetFromRel(o_am_conversion_oids, rel);
+
+						create_o_table_for_rel(rel);
+
+						/*
+						 * ACHTUNG: currently every orioledb's table keeps TOAST.  Probably,
+						 * in the future, we should remove it.
+						 */
+						if (!old_has_toast)
+						{
+							CommandCounterIncrement();
+							NewRelationCreateToastTable(RelationGetRelid(rel), (Datum)0);
+						}
+					}
 				}
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_TOASTVALUE) &&
-					 (subId == 0) && !OidIsValid(rel->rd_rel->relrewrite))
+					 (subId == 0) &&
+					 (!OidIsValid(rel->rd_rel->relrewrite) ||
+					  OidIsValid(o_am_conversion_newrel)))
 			{
 				Oid			tbl_oid;
 				Relation	tbl = NULL;
@@ -3952,7 +4007,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				tbl_oid = pg_strtoint64(strrchr(rel->rd_rel->relname.data,
 												'_') + 1);
 
-				tbl = try_table_open(tbl_oid, AccessShareLock);
+				if (!OidIsValid(rel->rd_rel->relrewrite) ||
+					tbl_oid == o_am_conversion_newrel)
+					tbl = try_table_open(tbl_oid, AccessShareLock);
+
 				if (tbl && is_orioledb_rel(tbl))
 				{
 					set_toast_oids_and_options(tbl, rel, false, false);
@@ -4462,6 +4520,33 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					}
 				}
 				relation_close(tbl, AccessShareLock);
+			}
+			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
+					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
+					 (subId == 0) && objectId == o_am_conversion_oldrel)
+			{
+				ORelOids	new_oids;
+
+				/*
+				 * "ALTER TABLE ... SET ACCESS METHOD orioledb".  swap_relation_files()
+				 * triggers this hook for both relations it
+				 * swaps, so make sure this one is the swap itself.
+				 */
+				CommandCounterIncrement();
+				ORelOidsSetFromRel(new_oids, rel);
+				if (is_orioledb_rel(rel) &&
+					new_oids.relnode == o_am_conversion_oids.relnode)
+				{
+					o_table_adopt_rewritten(rel);
+
+					/*
+					 * Now the relation is an ordinary OrioleDB table.  The indices
+					 * rebuilds right after the swap go through orioledb_ambuild().
+					 */
+					o_am_conversion_newrel = InvalidOid;
+					o_am_conversion_oldrel = InvalidOid;
+					ORelOidsSetInvalid(o_am_conversion_oids);
+				}
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
@@ -5509,6 +5594,9 @@ o_ddl_cleanup(void)
 	{
 		o_saved_relrewrite = InvalidOid;
 		in_rewrite = false;
+		o_am_conversion_newrel = InvalidOid;
+		o_am_conversion_oldrel = InvalidOid;
+		ORelOidsSetInvalid(o_am_conversion_oids);
 	}
 	if (o_alter_generated_column_id)
 	{
@@ -5829,4 +5917,53 @@ orioledb_upgrade_refresh(PG_FUNCTION_ARGS)
 	o_upgrade_refresh_database();
 
 	PG_RETURN_VOID();
+}
+
+/*
+ * Finish the ALTER TABLE ... SET ACCESS METHOD orioledb once PostgreSQL has
+ * swapped the relation files: hand the OTable that was built for the
+ * transient relation over to "rel", which now owns its relnode.
+ */
+static void
+o_table_adopt_rewritten(Relation rel)
+{
+	OTable	   *o_table;
+	OSnapshot	oSnapshot;
+	OXid		oxid;
+	ListCell	*index_lc;
+	ORelOids	old_oids = o_am_conversion_oids;
+
+	Assert(is_orioledb_rel(rel));
+	Assert(ORelOidsIsValid(old_oids));
+
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+
+	o_tables_rel_meta_lock(rel);
+	o_table = o_tables_drop_by_oids(old_oids, oxid, oSnapshot.csn);
+	if (o_table == NULL)
+		elog(ERROR, "orioledb table \"%s\" not found after rewrite",
+			 RelationGetRelationName(rel));
+	o_table->oids.reloid = RelationGetRelid(rel);
+	o_tables_add(o_table, oxid, oSnapshot.csn);
+	o_tables_rel_meta_unlock(rel, InvalidOid);
+
+	o_invalidate_oids(old_oids);
+	o_invalidate_oids(o_table->oids);
+	orioledb_free_rd_amcache(rel);
+	o_table_free(o_table);
+
+	/*
+	 * Non-obvious moment here.
+	 *
+	 * Index relcache caches the IndexAmRoutine its table's access
+	 * method!  Here we invalidate it to make reindex_relation(),
+	 * which is called inside finish_heap_swap(), build them
+	 * through orioledb_ambuild().
+	 */
+	foreach(index_lc, RelationGetIndexList(rel))
+	{
+		Oid index_oid = lfirst_oid(index_lc);
+		CacheInvalidateRelcacheByRelid(index_oid);
+	}
+	CommandCounterIncrement();
 }
