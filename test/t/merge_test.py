@@ -700,6 +700,174 @@ class MergeTest(BaseTest):
 			except Exception:
 				pass
 
+	def _split_diff_base(self, table):
+		"""
+		Fill a table, then split every leaf once into full page-level images
+		while an older snapshot retains the undo.  Every leaf then carries a
+		page-level history, so later splits keep an image instead of freezing
+		both halves; with no sequential scan registered those are
+		differential.  Returns the older snapshot's connection and the key
+		set a snapshot taken now sees.
+		"""
+		node = self.node
+		node.safe_psql(
+		    'postgres', "CREATE TABLE IF NOT EXISTS %s ("
+		    "    id int NOT NULL,"
+		    "    payload text NOT NULL,"
+		    "    PRIMARY KEY (id)"
+		    ") USING orioledb;"
+		    "TRUNCATE %s;"
+		    "CREATE TABLE IF NOT EXISTS %s_aux (id int PRIMARY KEY) "
+		    "USING orioledb;"
+		    "TRUNCATE %s_aux;" % (table, table, table, table))
+		# Free slots between the keys, so every round below splits the same
+		# leaves again.
+		node.execute("INSERT INTO %s "
+		             "(SELECT id * 4, repeat('x', 100) "
+		             "FROM generate_series(1, 2000) id);" % table)
+
+		con_old = node.connect()
+		con_old.begin()
+		con_old.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+		con_old.execute("SELECT count(*) FROM %s;" % table)
+
+		# A sequential scan parked on the tree forces full images.
+		con_hold = node.connect()
+		try:
+			con_hold.begin()
+			con_hold.execute("SET enable_indexscan = off;")
+			con_hold.execute("SET enable_bitmapscan = off;")
+			con_hold.execute("DECLARE ch NO SCROLL CURSOR FOR "
+			                 "SELECT id FROM %s;" % table)
+			self.assertEqual(len(con_hold.execute("FETCH 1 FROM ch;")), 1)
+			node.execute("INSERT INTO %s "
+			             "(SELECT id * 4 + 1, repeat('y', 100) "
+			             "FROM generate_series(1, 2000) id);" % table)
+			con_hold.execute("CLOSE ch;")
+		finally:
+			con_hold.rollback()
+			con_hold.close()
+
+		expected = sorted([i * 4 for i in range(1, 2001)] +
+		                  [i * 4 + 1 for i in range(1, 2001)])
+		return con_old, expected
+
+	def _open_writing_reader(self, table, expected):
+		"""
+		A REPEATABLE READ reader that has written something of its own: only
+		then do its iterators merge the live leaf with the undo image
+		(combinedResult).
+		"""
+		con = self.node.connect()
+		con.begin()
+		con.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+		self.assertEqual(
+		    con.execute("SELECT count(*) FROM %s;" % table)[0][0],
+		    len(expected))
+		con.execute("INSERT INTO %s_aux VALUES (1);" % table)
+		return con
+
+	def test_split_diff_twice_ordered_scan(self):
+		"""
+		An ordered scan of a writing reader must survive a differential split
+		whose left half was split differentially again.
+
+		Both halves of the second split walk back to the first split's record
+		and stop there, on its left side, because the first split's pre-split
+		page is older than the reader's snapshot.  Stepping from one half to
+		the other, undo_it_next_page() re-walked the chain, stopped on the same
+		record, and took "same record" to mean "same page": it asserted that
+		could only happen at the leftmost or rightmost edge.  The pages are
+		told apart by their hikeys now.  Issue ORI-336, ORI-256.
+		"""
+		node = self.node
+		con_old, expected = self._split_diff_base('o_diff2')
+		con = self._open_writing_reader('o_diff2', expected)
+		try:
+			node.execute("INSERT INTO o_diff2 "
+			             "(SELECT id * 4 + 2, repeat('z', 100) "
+			             "FROM generate_series(1, 2000) id);")
+			node.execute("INSERT INTO o_diff2 "
+			             "(SELECT id * 4 + 3, repeat('w', 100) "
+			             "FROM generate_series(1, 2000) id);")
+
+			con.execute("SET enable_seqscan = off;")
+			con.execute("SET enable_bitmapscan = off;")
+			forward = [
+			    r[0]
+			    for r in con.execute("SELECT id FROM o_diff2 ORDER BY id;")
+			]
+			backward = [
+			    r[0] for r in con.execute(
+			        "SELECT id FROM o_diff2 ORDER BY id DESC;")
+			]
+			self.assertEqual(len(forward), len(expected))
+			self.assertEqual(forward, expected)
+			self.assertEqual(len(backward), len(expected))
+			self.assertEqual(backward, list(reversed(expected)))
+		finally:
+			# An assert-enabled build aborts the backend instead, so the
+			# connections may be gone; don't mask what failed.
+			for c in (con, con_old):
+				try:
+					c.rollback()
+					c.close()
+				except Exception:
+					pass
+
+	def test_split_diff_twice_seq_scan(self):
+		"""
+		The same defect reached from a sequential scan, which is the route the
+		Antithesis run took.
+
+		The second split is parked on the page_split stop event after it chose
+		a differential image but before the parent has the new right sibling's
+		downlink.  A sequential scan that registers in that window follows the
+		stale downlink, finds the leaf's hikey short of it and falls back to a
+		tree iterator, which steps across both halves.  Issue ORI-336.
+		"""
+		node = self.node
+		con_old, expected = self._split_diff_base('o_diff2s')
+		con = self._open_writing_reader('o_diff2s', expected)
+		con_split = node.connect()
+		con_ctl = node.connect()
+		splitter = None
+		try:
+			# Round one: differential splits of the leftmost leaf.
+			node.execute("INSERT INTO o_diff2s "
+			             "(SELECT -id, repeat('z', 100) "
+			             "FROM generate_series(1, 150) id);")
+
+			# Round two, parked right after its first leaf split.
+			con_split.execute("SET orioledb.enable_stopevents = true;")
+			split_pid = con_split.pid
+			con_ctl.execute("SELECT pg_stopevent_set('page_split', 'true');")
+			splitter = ThreadQueryExecutor(
+			    con_split, "INSERT INTO o_diff2s "
+			    "(SELECT -id, repeat('w', 100) "
+			    "FROM generate_series(151, 300) id);")
+			splitter.start()
+			wait_stopevent(node, split_pid)
+
+			con.execute("SET enable_indexscan = off;")
+			con.execute("SET enable_bitmapscan = off;")
+			self.assertEqual(
+			    con.execute(
+			        "SELECT count(*), min(id), max(id), sum(id::bigint) "
+			        "FROM o_diff2s;")[0],
+			    (len(expected), min(expected), max(expected), sum(expected)))
+		finally:
+			con_ctl.execute("SELECT pg_stopevent_reset('page_split');")
+			if splitter is not None:
+				splitter.join()
+			con_split.commit()
+			for c in (con, con_old, con_split, con_ctl):
+				try:
+					c.rollback()
+					c.close()
+				except Exception:
+					pass
+
 	def test_split_diff_update_grow(self):
 		"""
 		A single UPDATE that grows every row, forcing in-statement page splits
