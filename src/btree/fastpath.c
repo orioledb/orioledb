@@ -41,7 +41,8 @@ typedef struct
 	ArraySearchFunc func;
 } ArraySearchDesc;
 
-static ArraySearchDesc *find_array_search_desc_by_typeid(Oid typeid);
+static ArraySearchDesc *find_array_search_desc_by_typeid(Oid typeid,
+														 bool resolveOpclass);
 
 static bool find_downlink_get_keys(BTreeDescr *desc,
 								   void *key, BTreeKeyType keyType,
@@ -89,8 +90,11 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 
 	ASAN_UNPOISON_MEMORY_REGION(meta, sizeof(*meta));
 
-	if (!BTREE_PAGE_FIND_IS(context, FETCH) ||
-		IS_SYS_TREE_OIDS(desc->oids))
+	/*
+	 * Which levels of the descent may use the fastpath depends on the mode;
+	 * find_page() decides that per level.
+	 */
+	if (IS_SYS_TREE_OIDS(desc->oids))
 	{
 		meta->enabled = false;
 		return;
@@ -141,9 +145,18 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 	offset = 0;
 	for (i = 0; i < numKeys; i++)
 	{
-		ArraySearchDesc *searchDesc = find_array_search_desc_by_typeid(
-																	   TupleDescAttr(id->nonLeafTupdesc, i)->atttypid);
+		ArraySearchDesc *searchDesc;
 		OIndexField *field = &id->fields[i];
+
+		/*
+		 * Only a FETCH descent may look up a missing default opclass: the
+		 * lookup goes through the syscache.  MODIFY descents also run in the
+		 * background writer, the checkpointer and recovery workers -- page
+		 * eviction, WAL replay -- which have no catalog access.  They take
+		 * the fastpath once some FETCH in the same process resolved it.
+		 */
+		searchDesc = find_array_search_desc_by_typeid(TupleDescAttr(id->nonLeafTupdesc, i)->atttypid,
+													  BTREE_PAGE_FIND_IS(context, FETCH));
 
 		/*
 		 * The array-search routines compare raw datums, so they require the
@@ -181,7 +194,7 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 }
 
 static ArraySearchDesc *
-find_array_search_desc_by_typeid(Oid typeid)
+find_array_search_desc_by_typeid(Oid typeid, bool resolveOpclass)
 {
 	int			i;
 
@@ -192,6 +205,9 @@ find_array_search_desc_by_typeid(Oid typeid)
 			if (!OidIsValid(arraySearchDescs[i].opcid))
 			{
 				bool		was_saving;
+
+				if (!resolveOpclass)
+					return NULL;
 
 				was_saving = o_start_saving_inval_messages();
 				arraySearchDescs[i].opcid = GetDefaultOpClass(typeid, BTREE_AM_OID);
