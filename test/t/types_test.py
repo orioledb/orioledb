@@ -1206,4 +1206,116 @@ class TypesTest(BaseTest):
 		check('o_enum_pk', range(4))
 		for table in tables[1:]:
 			check(table, range(1000))
+
+	def test_enum_rename_value_cache_consistency(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+			CREATE TABLE o_enum_tbl (
+				id int NOT NULL,
+				val mood NOT NULL,
+				PRIMARY KEY (val, id)
+			) USING orioledb;
+			INSERT INTO o_enum_tbl VALUES (1, 'sad');
+			ALTER TYPE mood RENAME VALUE 'sad' TO 'blue';
+			ALTER TYPE mood ADD VALUE 'sad';
+		""")
+		node.safe_psql("INSERT INTO o_enum_tbl VALUES (3, 'sad');")
+
+		# Verify pg_enum OIDs differ for 'blue' and 'sad'
+		oids = node.execute("""
+			SELECT enumlabel::text, oid
+				FROM pg_enum
+				WHERE enumtypid = 'mood'::regtype
+				ORDER BY oid;
+		""")
+		blue_oid = next(r[1] for r in oids if r[0] == 'blue')
+		sad_oid = next(r[1] for r in oids if r[0] == 'sad')
+		self.assertNotEqual(blue_oid, sad_oid)
+
+		# ENUM_CACHE must map 'sad' to the new OID, not the renamed one
+		enum_cache = node.execute(
+		    "SELECT orioledb_sys_tree_structure(5, 'ne');")
+		cache_str = str(enum_cache)
+		self.assertIn('"sad"', cache_str)
+		self.assertIn('"blue"', cache_str)
+		# There must be no stale entry mapping 'sad' to blue's OID
+		self.assertNotIn('oid: %d' % blue_oid,
+		                 [l for l in cache_str.split('\\n')
+		                  if '"sad"' in l][0])
+
+		# Both labels resolve to correct rows
+		self.assertEqual(
+		    [(1, 'blue')],
+		    node.execute(
+		        "SELECT id, val::text FROM o_enum_tbl WHERE val = 'blue';"))
+		self.assertEqual(
+		    [(3, 'sad')],
+		    node.execute(
+		        "SELECT id, val::text FROM o_enum_tbl WHERE val = 'sad';"))
+
+		# Verify after crash recovery
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(
+		    [(1, 'blue')],
+		    node.execute(
+		        "SELECT id, val::text FROM o_enum_tbl WHERE val = 'blue';"))
+		self.assertEqual(
+		    [(3, 'sad')],
+		    node.execute(
+		        "SELECT id, val::text FROM o_enum_tbl WHERE val = 'sad';"))
+
+		node.stop()
+
+	def test_enum_alter_checkpoint_crash(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+			CREATE TABLE o_enum_tbl (
+				id int NOT NULL,
+				val mood NOT NULL,
+				PRIMARY KEY (val, id)
+			) USING orioledb;
+			INSERT INTO o_enum_tbl VALUES (1, 'sad'), (2, 'happy');
+		""")
+
+		with node.connect() as con1:
+			with node.connect() as con2:
+				con1_pid = con1.pid
+				con1.execute("SET orioledb.enable_stopevents = true;")
+				con1.begin()
+				con2.execute("""
+					SELECT pg_stopevent_set(
+						'enum_cache_after_delete_all',
+						'true');
+				""")
+
+				t1 = ThreadQueryExecutor(
+				    con1, """
+					ALTER TYPE mood RENAME VALUE 'sad' TO 'blue';
+				""")
+				t1.start()
+				wait_stopevent(node, con1_pid)
+
+				con2.execute("CHECKPOINT;")
+				con2.execute("""
+					SELECT pg_stopevent_reset(
+						'enum_cache_after_delete_all');
+				""")
+				t1.join()
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+
+		self.assertEqual([(1, 'sad'), (2, 'happy')],
+		                 node.execute("""
+				SELECT id, val::text FROM o_enum_tbl
+				ORDER BY id;
+			"""))
+
 		node.stop()

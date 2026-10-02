@@ -4732,7 +4732,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					CommandCounterIncrement();
 					o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-					o_enum_cache_add_all(datoid, objectId, cur_lsn);
+					o_enum_cache_delete_all(datoid, objectId);
+					STOPEVENT(STOPEVENT_ENUM_CACHE_AFTER_DELETE_ALL,
+							  NULL);
+					o_enum_cache_add_all(datoid, objectId, cur_lsn,
+										 true);
 				}
 				break;
 

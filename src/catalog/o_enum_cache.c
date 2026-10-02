@@ -100,7 +100,8 @@ O_SYS_CACHE_INIT_FUNC(enumoid_cache)
 }
 
 void
-o_enum_cache_add_all(Oid datoid, Oid enum_oid, XLogRecPtr insert_lsn)
+o_enum_cache_add_all(Oid datoid, Oid enum_oid, XLogRecPtr insert_lsn,
+					 bool transactional)
 {
 	Relation	enum_rel;
 	SysScanDesc enum_scan;
@@ -119,11 +120,37 @@ o_enum_cache_add_all(Oid datoid, Oid enum_oid, XLogRecPtr insert_lsn)
 	{
 		Form_pg_enum en = (Form_pg_enum) GETSTRUCT(enum_tuple);
 
-		o_enum_cache_add_if_needed(datoid, ObjectIdGetDatum(en->enumtypid),
-								   NameGetDatum(&en->enumlabel), insert_lsn,
-								   NULL);
-		o_enumoid_cache_add_if_needed(datoid, ObjectIdGetDatum(en->oid),
-									  insert_lsn, NULL);
+		if (transactional)
+		{
+			OSysCacheKeyCommon common = {0};
+			OSysCacheKey2 ekey;
+			OSysCacheKey1 okey;
+
+			common.datoid = datoid;
+			common.lsn = insert_lsn;
+
+			memset(&ekey, 0, sizeof(ekey));
+			ekey.common = common;
+			ekey.keys[0] = ObjectIdGetDatum(en->enumtypid);
+			ekey.keys[1] = NameGetDatum(&en->enumlabel);
+			o_sys_cache_add_if_needed(enum_cache, (OSysCacheKey *) &ekey,
+									  NULL, true);
+
+			memset(&okey, 0, sizeof(okey));
+			okey.common = common;
+			okey.keys[0] = ObjectIdGetDatum(en->oid);
+			o_sys_cache_add_if_needed(enumoid_cache, (OSysCacheKey *) &okey,
+									  NULL, true);
+		}
+		else
+		{
+			o_enum_cache_add_if_needed(datoid,
+									   ObjectIdGetDatum(en->enumtypid),
+									   NameGetDatum(&en->enumlabel),
+									   insert_lsn, NULL);
+			o_enumoid_cache_add_if_needed(datoid, ObjectIdGetDatum(en->oid),
+										  insert_lsn, NULL);
+		}
 	}
 
 	systable_endscan(enum_scan);
@@ -150,18 +177,23 @@ o_enum_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	enumform = (Form_pg_enum) GETSTRUCT(enumtup);
 
 	prev_context = MemoryContextSwitchTo(enum_cache->mcxt);
-	if (o_enum != NULL)			/* Existed o_enum updated */
+	if (o_enum != NULL)
 	{
-		Assert(false);
+		/* B-tree format entry: data is shifted by inline NAMEOID keys */
+		OEnumData  *data;
+
+		data = (OEnumData *) (((Pointer) o_enum) + offsetof(OEnum, data) +
+							  o_enum->key.common.dataLength);
+		data->oid = enumform->oid;
+		data->enumsortorder = enumform->enumsortorder;
 	}
 	else
 	{
 		o_enum = palloc0(sizeof(OEnum));
 		*entry_ptr = (Pointer) o_enum;
+		o_enum->data.oid = enumform->oid;
+		o_enum->data.enumsortorder = enumform->enumsortorder;
 	}
-
-	o_enum->data.oid = enumform->oid;
-	o_enum->data.enumsortorder = enumform->enumsortorder;
 
 	MemoryContextSwitchTo(prev_context);
 	ReleaseSysCache(enumtup);
@@ -184,17 +216,16 @@ o_enumoid_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	enumform = (Form_pg_enum) GETSTRUCT(enumtup);
 
 	prev_context = MemoryContextSwitchTo(enumoid_cache->mcxt);
-	if (o_enumoid != NULL)		/* Existed o_enum updated */
+	if (o_enumoid != NULL)
 	{
-		Assert(false);
+		o_enumoid->enumtypid = enumform->enumtypid;
 	}
 	else
 	{
 		o_enumoid = palloc0(sizeof(OEnumOid));
 		*entry_ptr = (Pointer) o_enumoid;
+		o_enumoid->enumtypid = enumform->enumtypid;
 	}
-
-	o_enumoid->enumtypid = enumform->enumtypid;
 
 	MemoryContextSwitchTo(prev_context);
 	ReleaseSysCache(enumtup);
@@ -281,6 +312,7 @@ o_enum_cache_delete_all(Oid datoid, Oid enum_oid)
 		o_enum_data =
 			(OEnumData *) (((Pointer) o_enum) + offsetof(OEnum, data) +
 						   o_enum->key.common.dataLength);
+
 		o_enum_cache_delete(datoid, o_enum->key.keys[0],
 							NameGetDatum(O_KEY_GET_NAME(&o_enum->key, 1)));
 		o_enumoid_cache_delete(datoid, o_enum_data->oid);
@@ -340,7 +372,7 @@ o_enum_cache_search_htup(TupleDesc tupdesc, Oid enumtypid, Name enumlabel)
 			(OEnumData *) (((Pointer) o_enum) + offsetof(OEnum, data) +
 						   o_enum->key.common.dataLength);
 		values[Anum_pg_enum_enumtypid - 1] = o_enum->key.keys[0];
-		namestrcpy(&enumlabel, DatumGetName(o_enum->key.keys[0])->data);
+		namestrcpy(&enumlabel, NameStr(*O_KEY_GET_NAME(&o_enum->key, 1)));
 		values[Anum_pg_enum_enumlabel - 1] = NameGetDatum(&enumlabel);
 		values[Anum_pg_enum_oid - 1] = ObjectIdGetDatum(o_enum_data->oid);
 		values[Anum_pg_enum_enumsortorder - 1] =
