@@ -964,7 +964,8 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 }
 
 void
-o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg)
+o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg,
+						  bool transactional)
 {
 	Pointer		entry = NULL;
 	bool		inserted PG_USED_FOR_ASSERTS_ONLY;
@@ -992,7 +993,10 @@ o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg)
 		sys_cache->funcs->fill_entry(&entry, key, arg);
 		sys_cache_key = (OSysCacheKey *) entry;
 		sys_cache_key->common.deleted = false;
-		o_sys_cache_update(sys_cache, entry);
+		if (transactional)
+			o_sys_cache_update_transactional(sys_cache, entry);
+		else
+			o_sys_cache_update(sys_cache, entry);
 		o_sys_cache_unlock(sys_cache, key, AccessExclusiveLock);
 		return;
 	}
@@ -1794,7 +1798,7 @@ o_cache_type_safe(Oid datoid, Oid typoid, Oid opclass, XLogRecPtr insert_lsn,
 				o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
 				o_class_cache_add_if_needed(sys_datoid, EnumRelationId, sys_lsn,
 											NULL);
-				o_enum_cache_add_all(datoid, typoid, insert_lsn);
+				o_enum_cache_add_all(datoid, typoid, insert_lsn, false);
 			}
 			break;
 		case TYPTYPE_DOMAIN:

@@ -100,7 +100,8 @@ O_SYS_CACHE_INIT_FUNC(enumoid_cache)
 }
 
 void
-o_enum_cache_add_all(Oid datoid, Oid enum_oid, XLogRecPtr insert_lsn)
+o_enum_cache_add_all(Oid datoid, Oid enum_oid, XLogRecPtr insert_lsn,
+					 bool transactional)
 {
 	Relation	enum_rel;
 	SysScanDesc enum_scan;
@@ -119,11 +120,37 @@ o_enum_cache_add_all(Oid datoid, Oid enum_oid, XLogRecPtr insert_lsn)
 	{
 		Form_pg_enum en = (Form_pg_enum) GETSTRUCT(enum_tuple);
 
-		o_enum_cache_add_if_needed(datoid, ObjectIdGetDatum(en->enumtypid),
-								   NameGetDatum(&en->enumlabel), insert_lsn,
-								   NULL);
-		o_enumoid_cache_add_if_needed(datoid, ObjectIdGetDatum(en->oid),
-									  insert_lsn, NULL);
+		if (transactional)
+		{
+			OSysCacheKeyCommon common = {0};
+			OSysCacheKey2 ekey;
+			OSysCacheKey1 okey;
+
+			common.datoid = datoid;
+			common.lsn = insert_lsn;
+
+			memset(&ekey, 0, sizeof(ekey));
+			ekey.common = common;
+			ekey.keys[0] = ObjectIdGetDatum(en->enumtypid);
+			ekey.keys[1] = NameGetDatum(&en->enumlabel);
+			o_sys_cache_add_if_needed(enum_cache, (OSysCacheKey *) &ekey,
+									  NULL, true);
+
+			memset(&okey, 0, sizeof(okey));
+			okey.common = common;
+			okey.keys[0] = ObjectIdGetDatum(en->oid);
+			o_sys_cache_add_if_needed(enumoid_cache, (OSysCacheKey *) &okey,
+									  NULL, true);
+		}
+		else
+		{
+			o_enum_cache_add_if_needed(datoid,
+									   ObjectIdGetDatum(en->enumtypid),
+									   NameGetDatum(&en->enumlabel),
+									   insert_lsn, NULL);
+			o_enumoid_cache_add_if_needed(datoid, ObjectIdGetDatum(en->oid),
+										  insert_lsn, NULL);
+		}
 	}
 
 	systable_endscan(enum_scan);
@@ -250,7 +277,7 @@ o_enumoid_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 }
 
 void
-o_enum_cache_delete_all(Oid datoid, Oid enum_oid, bool autonomous)
+o_enum_cache_delete_all(Oid datoid, Oid enum_oid)
 {
 	BTreeDescr *td = get_sys_tree(enum_cache->sys_tree_num);
 	BTreeIterator *it;
@@ -286,30 +313,9 @@ o_enum_cache_delete_all(Oid datoid, Oid enum_oid, bool autonomous)
 			(OEnumData *) (((Pointer) o_enum) + offsetof(OEnum, data) +
 						   o_enum->key.common.dataLength);
 
-		if (autonomous)
-		{
-			OSysCacheKey2 ekey;
-			OSysCacheKey1 okey;
-
-			memset(&ekey, 0, sizeof(ekey));
-			ekey.common.datoid = datoid;
-			ekey.keys[0] = o_enum->key.keys[0];
-			ekey.keys[1] = NameGetDatum(O_KEY_GET_NAME(&o_enum->key, 1));
-			o_sys_cache_delete_autonomous(enum_cache,
-										  (OSysCacheKey *) &ekey);
-
-			memset(&okey, 0, sizeof(okey));
-			okey.common.datoid = datoid;
-			okey.keys[0] = ObjectIdGetDatum(o_enum_data->oid);
-			o_sys_cache_delete_autonomous(enumoid_cache,
-										  (OSysCacheKey *) &okey);
-		}
-		else
-		{
-			o_enum_cache_delete(datoid, o_enum->key.keys[0],
-								NameGetDatum(O_KEY_GET_NAME(&o_enum->key, 1)));
-			o_enumoid_cache_delete(datoid, o_enum_data->oid);
-		}
+		o_enum_cache_delete(datoid, o_enum->key.keys[0],
+							NameGetDatum(O_KEY_GET_NAME(&o_enum->key, 1)));
+		o_enumoid_cache_delete(datoid, o_enum_data->oid);
 
 		pfree(tup.data);
 	} while (true);

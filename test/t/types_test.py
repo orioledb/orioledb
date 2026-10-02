@@ -1269,3 +1269,53 @@ class TypesTest(BaseTest):
 		        "SELECT id, val::text FROM o_enum_tbl WHERE val = 'sad';"))
 
 		node.stop()
+
+	def test_enum_alter_checkpoint_crash(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+			CREATE TABLE o_enum_tbl (
+				id int NOT NULL,
+				val mood NOT NULL,
+				PRIMARY KEY (val, id)
+			) USING orioledb;
+			INSERT INTO o_enum_tbl VALUES (1, 'sad'), (2, 'happy');
+		""")
+
+		with node.connect() as con1:
+			with node.connect() as con2:
+				con1_pid = con1.pid
+				con1.execute("SET orioledb.enable_stopevents = true;")
+				con1.begin()
+				con2.execute("""
+					SELECT pg_stopevent_set(
+						'enum_cache_after_delete_all',
+						'true');
+				""")
+
+				t1 = ThreadQueryExecutor(
+				    con1, """
+					ALTER TYPE mood RENAME VALUE 'sad' TO 'blue';
+				""")
+				t1.start()
+				wait_stopevent(node, con1_pid)
+
+				con2.execute("CHECKPOINT;")
+				con2.execute("""
+					SELECT pg_stopevent_reset(
+						'enum_cache_after_delete_all');
+				""")
+				t1.join()
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+
+		self.assertEqual([(1, 'sad'), (2, 'happy')],
+		                 node.execute("""
+				SELECT id, val::text FROM o_enum_tbl
+				ORDER BY id;
+			"""))
+
+		node.stop()

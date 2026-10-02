@@ -255,7 +255,7 @@ extern OSysCache *o_create_sys_cache(int sys_tree_num, bool is_toast,
 extern Pointer o_sys_cache_search(OSysCache *sys_cache, int nkeys,
 								  OSysCacheKey *key);
 extern void o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key,
-									  Pointer arg);
+									  Pointer arg, bool transactional);
 extern void o_sys_cache_update_if_needed(OSysCache *sys_cache,
 										 OSysCacheKey *key, Pointer arg);
 extern bool o_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key);
@@ -384,7 +384,8 @@ extern int no_such_variable
 		common.datoid = datoid;												\
 		common.lsn = insert_lsn;											\
 		key.common = common;												\
-		o_sys_cache_add_if_needed(cache_name, (OSysCacheKey *) &key, arg);	\
+		o_sys_cache_add_if_needed(cache_name, (OSysCacheKey *) &key, arg,	\
+								 false);								\
 	}																		\
 	extern int no_such_variable
 
@@ -437,13 +438,13 @@ typedef struct
 O_SYS_CACHE_DECLS(enum_cache, OEnum, 2);
 O_SYS_CACHE_DECLS(enumoid_cache, OEnumOid, 1);
 extern void o_enum_cache_add_all(Oid datoid, Oid enum_oid,
-								 XLogRecPtr insert_lsn);
+								 XLogRecPtr insert_lsn,
+								 bool transactional);
 extern HeapTuple o_enum_cache_search_htup(TupleDesc tupdesc, Oid enumtypid,
 										  Name enumlabel);
 extern void o_enum_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 								   OTuple tup, Pointer arg);
-extern void o_enum_cache_delete_all(Oid datoid, Oid enum_oid,
-									bool autonomous);
+extern void o_enum_cache_delete_all(Oid datoid, Oid enum_oid);
 
 extern HeapTuple o_enumoid_cache_search_htup(TupleDesc tupdesc, Oid enum_oid);
 extern void o_enumoid_cache_tup_print(BTreeDescr *desc, StringInfo buf,
