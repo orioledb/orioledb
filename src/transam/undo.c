@@ -2793,6 +2793,9 @@ undo_xact_callback(XactEvent event, void *arg)
 					reset_precommit_xid_subxids();
 				}
 
+				if (STOPEVENT_CONDITION(STOPEVENT_BEFORE_ON_COMMIT_UNDO_STACK, NULL))
+					elog(ERROR, "Debug condition: error before on-commit undo.");
+
 				for (i = 0; i < (int) UndoLogsCount; i++)
 				{
 					on_commit_undo_stack((UndoLogType) i, oxid, true);
