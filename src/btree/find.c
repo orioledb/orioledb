@@ -573,6 +573,18 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	/* starts from the rootPageBlkno */
 	intCxt.blkno = desc->rootInfo.rootPageBlkno;
 	intCxt.pageChangeCount = desc->rootInfo.rootPageChangeCount;
+
+	/*
+	 * o_btree_load_shmem() above just made the root resident, so
+	 * we count here a hit; every level below is counted when its downlink
+	 * is resolved -- hit when downlink is in memory and read_page_from_disk()
+	 * will count it separately from here if it is on disk.
+	 *
+	 * Concurrent changes shouldn't be counted again (I assume so), the retry
+	 * restarts at the top of the loop without resolving the downlink.
+	 */
+	o_btree_count_page_hit(desc);
+
 	while (true)
 	{
 		BTreeNonLeafTuphdr *nonLeafHdr = NULL;
@@ -1133,6 +1145,9 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		}
 		else
 		{
+			/* The downlink is resolved and is at memory => hit.  */
+			o_btree_count_page_hit(desc);
+
 			/*
 			 * IN_MEMORY downlink at the parent of the target in IMAGE mode.
 			 * If we got here under the lock (needLock = true on an earlier
