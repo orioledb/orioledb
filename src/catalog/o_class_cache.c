@@ -207,6 +207,22 @@ o_class_cache_deserialize_entry(MemoryContext mcxt, Pointer data, Size length)
 	return (Pointer) o_class;
 }
 
+/*
+ * Refresh the entry of a composite type the current transaction alters, see
+ * o_sys_cache_refresh_transactional().  Recovery and background processes
+ * compare stored values of the type by this entry, so a rollback that left
+ * the altered definition behind would make them disagree with backends.
+ */
+void
+o_class_cache_refresh(Oid datoid, Oid classoid, Pointer arg)
+{
+	OSysCacheKey1 key = {0};
+
+	key.common.datoid = datoid;
+	key.keys[0] = ObjectIdGetDatum(classoid);
+	o_sys_cache_refresh_transactional(class_cache, (OSysCacheKey *) &key, arg);
+}
+
 TupleDesc
 o_class_cache_search_tupdesc(Oid cc_reloid)
 {
