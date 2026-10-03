@@ -258,6 +258,8 @@ extern void o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key,
 									  Pointer arg, bool transactional);
 extern void o_sys_cache_update_if_needed(OSysCache *sys_cache,
 										 OSysCacheKey *key, Pointer arg);
+extern void o_sys_cache_refresh_transactional(OSysCache *sys_cache,
+											  OSysCacheKey *key, Pointer arg);
 extern bool o_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key);
 extern bool o_sys_cache_delete_autonomous(OSysCache *sys_cache,
 										  OSysCacheKey *key);
@@ -490,6 +492,7 @@ typedef struct OClassArg
 
 O_SYS_CACHE_DECLS(class_cache, OClass, 1);
 extern TupleDesc o_class_cache_search_tupdesc(Oid cc_reloid);
+extern void o_class_cache_refresh(Oid datoid, Oid classoid, Pointer arg);
 extern void o_class_cache_preload_for_column(Oid typoid);
 
 /* o_opclass_cache.c */
