@@ -74,6 +74,11 @@ typedef struct
 	 *		 reservation size.
 	 */
 	pg_atomic_uint64 lastUsedLocation;
+	/*
+	 * Every undo record bumps lastUsedLocation, and every snapshot reads it.
+	 * Keep the other fields, read on every snapshot too, off its cache line.
+	 */
+	char		lastUsedLocationPad[PG_CACHE_LINE_SIZE - sizeof(pg_atomic_uint64)];
 
 	/*
 	 * advanceReservedLocation is used for preliminary reservation of RAM undo
@@ -235,7 +240,10 @@ typedef struct
 	LWLock		undoWriteLock;
 
 	int			undoStackLocationsFlushLockTrancheId;
-} UndoMeta;
+} pg_attribute_aligned(PG_CACHE_LINE_SIZE) UndoMeta;
+
+StaticAssertDecl(offsetof(UndoMeta, advanceReservedLocation) == PG_CACHE_LINE_SIZE,
+				 "lastUsedLocation must own a cache line");
 
 typedef struct
 {
