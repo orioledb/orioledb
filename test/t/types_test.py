@@ -606,13 +606,7 @@ class TypesTest(BaseTest):
 			) USING orioledb;
 		""")
 		class_amount += 1  # coordinates_removed
-		# ALTER TYPE caches the composite types it alters, for a rollback to
-		# take the entries back
-		class_amount += 2  # coordinates_renamed, custom_type
 		type_amount += 1  # coordinates_removed
-		# The later ALTERs find the entry the first one added and cache the
-		# type with the types of its attributes
-		type_amount += 3  # coordinates_renamed, custom_type, float8
 		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 0)
 		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 
