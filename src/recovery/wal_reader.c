@@ -67,7 +67,9 @@ static WalParseResult wal_parse_rec_dbcreate_copy(WalReaderState *r, WalRecord *
  * buffers.  Reset at the start of every build_fixed_tuples(), so a copy
  * outlives its record by nothing.
  */
+#ifndef FRONTEND
 static MemoryContext bigTupleCxt = NULL;
+#endif
 
 const char *
 wal_type_name(WalRecordType type)
@@ -439,6 +441,7 @@ wal_parse_rec_dbcreate_copy(WalReaderState *r, WalRecord *rec)
 	return WALPARSE_OK;
 }
 
+#ifndef FRONTEND
 static void
 build_fixed_tuple_from_tuple_view(const OTuple *view, const uint32 len, OFixedTuple *tuple)
 {
@@ -515,6 +518,7 @@ build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple
 		build_fixed_tuple_from_tuple_view(&rec->u.modify.t2, rec->u.modify.len2, tuple2);
 	}
 }
+#endif
 
 
 

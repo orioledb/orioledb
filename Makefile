@@ -448,13 +448,16 @@ ifeq ($(PORTNAME), darwin)
     else
         $(PG_REWIND_EXTENSION): LINK_FLAGS = -bundle -bundle_loader $(top_builddir)/src/bin/pg_rewind
     endif
+    $(PG_REWIND_EXTENSION): PG_REWIND_SHLIB_LINK = $(libpq)
 else
     $(PG_REWIND_EXTENSION): LINK_FLAGS = -shared $(rpath)
+    $(PG_REWIND_EXTENSION): PG_REWIND_LDFLAGS_SL = $(LDFLAGS_SL)
+    $(PG_REWIND_EXTENSION): PG_REWIND_SHLIB_LINK = $(SHLIB_LINK)
 endif
 
 $(PG_REWIND_EXTENSION): CPPFLAGS += -I$(includedir) -DFRONTEND=1
 $(PG_REWIND_EXTENSION): $(PG_REWIND_EXTENSION_SOURCES)
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(LDFLAGS_SL) $^ $(LINK_FLAGS) $(SHLIB_LINK) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(PG_REWIND_LDFLAGS_SL) $^ $(LINK_FLAGS) $(PG_REWIND_SHLIB_LINK) -o $@
 
 install: install-pg-rewind-ext
 install-pg-rewind-ext: $(PG_REWIND_EXTENSION)
