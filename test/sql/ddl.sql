@@ -553,6 +553,10 @@ SELECT * FROM o_test_replica_identity_fail;
 CREATE TABLE o_test_set_access_method_fail (i int PRIMARY KEY, t text) USING orioledb;
 ALTER TABLE o_test_set_access_method_fail SET ACCESS METHOD heap;
 
+CREATE TABLE heap_to_orioledb_fail (i bigint PRIMARY KEY, t text) USING heap;
+ALTER TABLE heap_to_orioledb_fail SET ACCESS METHOD orioledb;
+DROP TABLE heap_to_orioledb_fail;
+
 -- Test AT_SetStatistics
 CREATE TABLE o_test_set_statistics (
 	i int PRIMARY KEY,
