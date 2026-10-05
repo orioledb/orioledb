@@ -918,22 +918,77 @@ read_ntoh32(char **ptr)
 	return pg_ntoh32(u32data);
 }
 
+static uint16
+read_ntoh16(char **ptr)
+{
+	uint16		u16data;
+
+	memcpy(&u16data, *ptr, sizeof(u16data));
+	*ptr += sizeof(u16data);
+	return pg_ntoh16(u16data);
+}
+
+static uint64
+read_ntoh64(char **ptr)
+{
+	uint64		u64data;
+
+	memcpy(&u64data, *ptr, sizeof(u64data));
+	*ptr += sizeof(u64data);
+	return pg_ntoh64(u64data);
+}
+
+typedef struct RewindKeysFileInfo
+{
+	uint64		count;
+	uint64		payload_length;
+	uint32		checksum;
+} RewindKeysFileInfo;
+
 /*
  * Add the keys of a rewind keys file (see rewind_keys_save()) to the key map.
  * Returns the number of keys.
  */
 static int
 add_rewind_keys(OrioledbKeyMap *map, char *ptr, char *end,
-				const char *what)
+				const char *what, XLogRecPtr switchpoint, bool add,
+				RewindKeysFileInfo *info)
 {
 	int			nkeys = 0;
+	char	   *payload;
+	pg_crc32c	crc;
+	uint32		magic;
+	uint16		version;
+	uint16		header_length;
+	XLogRecPtr	file_switchpoint;
 
-	if (end - ptr < (int) sizeof(uint32) || read_ntoh32(&ptr) != REWIND_KEYS_MAGIC)
+	if (end - ptr < REWIND_KEYS_FINAL_HEADER_SIZE)
+		pg_fatal("%s is truncated", what);
+	magic = read_ntoh32(&ptr);
+	version = read_ntoh16(&ptr);
+	header_length = read_ntoh16(&ptr);
+	file_switchpoint = read_ntoh64(&ptr);
+	info->count = read_ntoh64(&ptr);
+	info->payload_length = read_ntoh64(&ptr);
+	info->checksum = read_ntoh32(&ptr);
+	if (magic != REWIND_KEYS_MAGIC ||
+		version != REWIND_KEYS_FORMAT_VERSION ||
+		header_length != REWIND_KEYS_FINAL_HEADER_SIZE ||
+		file_switchpoint != switchpoint)
 		pg_fatal("unexpected contents of %s", what);
+	if ((uint64) (end - ptr) != info->payload_length)
+		pg_fatal("invalid payload length in %s", what);
+	payload = ptr;
+	INIT_CRC32C(crc);
+	COMP_CRC32C(crc, payload, info->payload_length);
+	FIN_CRC32C(crc);
+	if ((uint32) crc != info->checksum)
+		pg_fatal("checksum mismatch in %s", what);
 
 	while (ptr < end)
 	{
 		OrioledbTreeKey tree_key = { 0 };
+		ORelOids	tree_oids;
 		uint8		formatFlags;
 		uint32		len;
 
@@ -945,6 +1000,16 @@ add_rewind_keys(OrioledbKeyMap *map, char *ptr, char *end,
 		tree_key.reloid = read_ntoh32(&ptr);
 		tree_key.relnode = read_ntoh32(&ptr);
 		tree_key.spcoid = read_ntoh32(&ptr);
+		tree_oids.datoid = tree_key.datoid;
+		tree_oids.reloid = tree_key.reloid;
+		tree_oids.relnode = tree_key.relnode;
+		tree_oids.spcoid = tree_key.spcoid;
+		if (tree_key.type < oIndexInvalid || tree_key.type > oIndexExclusion ||
+			(!IS_SYS_TREE_OIDS(tree_oids) &&
+			 tree_key.type != oIndexInvalid &&
+			 tree_key.type != oIndexToast &&
+			 tree_key.type != oIndexBridge))
+			pg_fatal("unsupported tree type in %s", what);
 
 		formatFlags = *(uint8 *) ptr;
 		ptr += sizeof(uint8);
@@ -954,12 +1019,18 @@ add_rewind_keys(OrioledbKeyMap *map, char *ptr, char *end,
 		if (end - ptr < (int) len)
 			pg_fatal("%s is truncated", what);
 
-		orioledb_key_map_add_tree(map, tree_key);
-		map->tree_key = tree_key;
-		orioledb_key_map_add_key(map, create_orioledb_key(len, ptr, formatFlags));
+		if (add)
+		{
+			orioledb_key_map_add_tree(map, tree_key);
+			map->tree_key = tree_key;
+			orioledb_key_map_add_key(map,
+								 create_orioledb_key(len, ptr, formatFlags));
+		}
 		ptr += len;
 		nkeys++;
 	}
+	if ((uint64) nkeys != info->count)
+		pg_fatal("entry count mismatch in %s", what);
 
 	return nkeys;
 }
@@ -997,6 +1068,10 @@ add_divergence_rewind_keys(OrioledbKeyMap *orioledb_map, PGconn *conn,
 	bool		found = false;
 	int			nkeys = 0;
 	int			fd;
+	RewindKeysFileInfo source_info = {0};
+	RewindKeysFileInfo target_info = {0};
+	char	   *source_buf = NULL;
+	int			source_len = 0;
 
 	snprintf(path, sizeof(path), REWIND_KEYS_FILENAME_FORMAT,
 			 LSN_FORMAT_ARGS(divergerec));
@@ -1014,8 +1089,12 @@ add_divergence_rewind_keys(OrioledbKeyMap *orioledb_map, PGconn *conn,
 		char	   *ptr = PQgetvalue(res, 0, 0);
 
 		snprintf(what, sizeof(what), "\"%s\" on the source server", path);
-		nkeys += add_rewind_keys(orioledb_map, ptr,
-								 ptr + PQgetlength(res, 0, 0), what);
+		source_len = PQgetlength(res, 0, 0);
+		source_buf = pg_malloc(source_len);
+		memcpy(source_buf, ptr, source_len);
+		nkeys += add_rewind_keys(orioledb_map, source_buf,
+								 source_buf + source_len, what, divergerec,
+								 true, &source_info);
 		found = true;
 	}
 	PQclear(res);
@@ -1035,23 +1114,30 @@ add_divergence_rewind_keys(OrioledbKeyMap *orioledb_map, PGconn *conn,
 		close(fd);
 
 		snprintf(what, sizeof(what), "\"%s\"", target_path);
-		nkeys += add_rewind_keys(orioledb_map, buf, buf + st.st_size, what);
+		if (found)
+		{
+			(void) add_rewind_keys(orioledb_map, buf, buf + st.st_size, what,
+								 divergerec, false, &target_info);
+			if (source_info.payload_length != target_info.payload_length ||
+				source_info.count != target_info.count ||
+				source_info.checksum != target_info.checksum)
+				pg_fatal("source and target rewind key files for %X/%X do not match",
+						 LSN_FORMAT_ARGS(divergerec));
+		}
+		else
+			nkeys += add_rewind_keys(orioledb_map, buf, buf + st.st_size, what,
+									 divergerec, true, &target_info);
 		pg_free(buf);
 		found = true;
 	}
 	else if (errno != ENOENT)
 		pg_fatal("could not open file \"%s\": %m", target_path);
 
+	if (source_buf != NULL)
+		pg_free(source_buf);
 	if (!found)
-	{
-		/*
-		 * This situation may happen and it is ok, just in case we throw the
-		 * warning here.
-		 */
-		pg_log_warning("Target and source servers don't have the OrioleDB"
-					   "rewind keys of the divergence point %x/%X",
-					   LSN_FORMAT_ARGS(divergerec));
-	}
+		pg_fatal("source and target servers do not have the OrioleDB rewind keys "
+				 "for divergence point %X/%X", LSN_FORMAT_ARGS(divergerec));
 	else
 		pg_log_info("added %d keys of rows rolled back at the divergence point", nkeys);
 }

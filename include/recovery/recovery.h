@@ -37,9 +37,13 @@ extern void rewind_keys_cleanup(void);
  */
 typedef struct
 {
+	uint16		version;
+	uint16		flags;
 	XLogRecPtr	switchpoint;
+	uint64		total_length;
+	uint32		total_checksum;
 	uint64		offset;
-	uint8		flags;
+	uint32		chunk_length;
 } WALRecRewindKeys;
 
 #define REWIND_KEYS_FIRST	(1 << 0)	/* The first chunk.  */
