@@ -43,8 +43,10 @@ typedef struct
 static LocalWal local_wal;
 static XLogRecPtr cur_trx_start = InvalidXLogRecPtr;
 
+static void add_finish_wal_record(uint8 rec_type, OXid xmin);
 static void add_joint_commit_wal_record(TransactionId xid, OXid xmin,
 										bool subTransaction);
+static void add_xid_wal_record(OXid oxid, TransactionId logicalXid);
 static void add_xid_wal_record_if_needed(void);
 static void flush_local_wal_if_needed(int required_length);
 static inline void add_local_modify(uint8 record_type, OTuple record, uint32 length, OTuple record2, uint32 length2);
@@ -455,7 +457,7 @@ wal_emit_recovery_finish_rollback(OXid oxid, TransactionId logicalXid)
 	XLogFlush(wait_pos);
 }
 
-void
+static void
 add_finish_wal_record(uint8 rec_type, OXid xmin)
 {
 	WALRecFinish *rec;
@@ -521,7 +523,7 @@ add_joint_commit_wal_record(TransactionId xid, OXid xmin, bool subTransaction)
 /*
  * Returns size of a new record.
  */
-void
+static void
 add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 {
 	WALRecXid  *rec;
@@ -1210,6 +1212,10 @@ Datum
 orioledb_flush_local_wal(PG_FUNCTION_ARGS)
 {
 	XLogRecPtr	pos;
+
+	/* flush_local_wal() insists on something to flush */
+	if (local_wal_is_empty())
+		PG_RETURN_VOID();
 
 	pos = flush_local_wal(false, false);
 	XLogFlush(pos);

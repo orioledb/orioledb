@@ -13,23 +13,30 @@
 
 #include "postgres.h"
 
+#include <sys/stat.h>
+
 #include "orioledb.h"
 
 #include "btree/io.h"
 #include "btree/iterator.h"
 #include "catalog/sys_trees.h"
+#include "checkpoint/control.h"
 #include "recovery/internal.h"
 #include "recovery/recovery.h"
 #include "tableam/descr.h"
-#include "transam/undo.h"
 
 #include "access/heapam.h"
 #include "access/table.h"
+#include "access/timeline.h"
+#include "access/xlog_internal.h"
+#include "access/xloginsert.h"
+#include "access/xlogrecovery.h"
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "port/pg_bswap.h"
+#include "storage/fd.h"
 
 #define O_REWIND_FOUND '\1'
 #define O_REWIND_NOT_FOUND '\0'
@@ -354,11 +361,11 @@ get_tup_oxid_callback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 {
 	uint8	   *deleted_result = arg;
 
+	*deleted_result = deleted;
+
 	if (!(COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&
 		  tupOxid == get_current_oxid_if_any()))
 		return OTupleFetchNext;
-
-	*deleted_result = deleted;
 
 	return OTupleFetchMatch;
 }
@@ -592,34 +599,22 @@ orioledb_pg_rewind_new_row_versions(PG_FUNCTION_ARGS)
 	PG_RETURN_BYTEA_P(result);
 }
 
+#define REWIND_OXID 0
 
 static void
-apply_rewind_row(OTableDescr *descr, OIndexDescr *indexDescr,
-				 int sys_tree_num,
-				 OTuple rewind_row,
-				 bool deleted)
+start_rewind_oxid(void)
 {
-	const int	temp_oxid = 0;
+	advance_oxids(REWIND_OXID);
+	recovery_switch_to_oxid(REWIND_OXID, -1);
+}
 
+static void
+finish_rewind_oxid(void)
+{
 	bool		single = *recovery_single_process;
 	bool		sync = false;
 	XLogRecPtr	rec;
 
-	advance_oxids(temp_oxid);
-	recovery_switch_to_oxid(temp_oxid, -1);
-
-	if (sys_tree_num < 0)
-		apply_modify_record(descr, indexDescr,
-							deleted ? RecoveryMsgTypeDelete : RecoveryMsgTypeInsert,
-							rewind_row);
-	else
-	{
-		Assert(sys_tree_supports_transactions(sys_tree_num));
-		apply_sys_tree_modify_record(sys_tree_num,
-									 deleted ? RecoveryMsgTypeDelete : RecoveryMsgTypeInsert,
-									 rewind_row, temp_oxid,
-									 COMMITSEQNO_INPROGRESS);
-	}
 	rec = recovery_get_current_ptr();
 	if (!single)
 	{
@@ -634,6 +629,26 @@ apply_rewind_row(OTableDescr *descr, OIndexDescr *indexDescr,
 	}
 
 	recovery_finish_current_oxid(COMMITSEQNO_FROZEN, rec, -1, sync);
+}
+
+static void
+apply_rewind_row(OTableDescr *descr, OIndexDescr *indexDescr,
+				 int sys_tree_num,
+				 OTuple rewind_row,
+				 bool deleted)
+{
+	if (sys_tree_num < 0)
+		apply_modify_record(descr, indexDescr,
+							deleted ? RecoveryMsgTypeDelete : RecoveryMsgTypeInsert,
+							rewind_row);
+	else
+	{
+		Assert(sys_tree_supports_transactions(sys_tree_num));
+		apply_sys_tree_modify_record(sys_tree_num,
+									 deleted ? RecoveryMsgTypeDelete : RecoveryMsgTypeInsert,
+									 rewind_row, REWIND_OXID,
+									 COMMITSEQNO_INPROGRESS);
+	}
 }
 
 static void
@@ -712,6 +727,15 @@ replay_rewind_row(File rewind_file, char *read_buf, off_t *offset,
 		toast_consistent = true;
 /* TODO: Find out are we need real */
 		/* toast_consistent value */
+
+		/*
+		 * Delete the target's version of the row and insert the source's one
+		 * in a single transaction.  The insert finds the row deleted by its
+		 * own transaction and rolls the deletion back first, which needs the
+		 * undo record of the deletion.  The undo record is kept only while
+		 * the transaction runs.
+		 */
+		start_rewind_oxid();
 		apply_rewind_row(descr, indexDescr, sys_tree_num,
 						 rewind_row,
 						 true);
@@ -719,9 +743,397 @@ replay_rewind_row(File rewind_file, char *read_buf, off_t *offset,
 			apply_rewind_row(descr, indexDescr, sys_tree_num,
 							 rewind_row,
 							 deleted);
+		finish_rewind_oxid();
 		toast_consistent = old_toast_consistent;
 	}
 	return rewind_row;
+}
+
+/*
+ * Keys of the rows the promotion rolled back.
+ *
+ * At promotion recovery_finish() rolls back the transactions still in
+ * progress.  The old primary key have committed them after the divergence
+ * point, so pg_rewind has to take this node's version of every row they
+ * changed, including the rows changed before the last common checkpoint.
+ *
+ * See add_divergence_rewind_keys() scheme.
+ */
+bool		rewind_keys_capturing = false;
+static StringInfo rewind_keys = NULL;
+
+#define REWIND_KEYS_WORKER_PREFIX	"rewind_keys."
+#define REWIND_KEYS_WORKER_SUFFIX	".tmp"
+
+void
+rewind_keys_capture(BTreeDescr *desc, BTreeOperationType action, OTuple tuple)
+{
+	OIndexType	type = desc->type;
+	ORelOids	oids = desc->oids;
+	OTuple		key = tuple;
+	bool		key_allocated = false;
+	int			len;
+	MemoryContext oldcxt;
+
+	if (action == BTreeOperationLock)
+		return;
+
+	/* System trees are logged under their own oids.  */
+	if (!IS_SYS_TREE_OIDS(oids))
+	{
+		/*
+		 * Record only the rows of the trees whose changes go to WAL, and name
+		 * their trees just like WAL do, so pg_rewind takes these keys just like
+		 * the ones it finds it at WAL.
+		 *
+		 * Callers of add_modify_wal_record_extended logs:
+		 *  - Primary index as a table row.
+		 *	  - TOAST and bridge index rows are logged by records on their own.  They
+		 *		are registered under their own oids, so neither follows from the table
+		 *		rows, so the rewind needs their keys too.
+		 *  - Secondary index rows are not logged at all.  A table row is applied
+		 *	  via apply_tbl_modify_record() -- this function updates the secondary
+		 *	  indexes too.
+		 */
+		if (type == oIndexPrimary)
+		{
+			oids = ((OIndexDescr *) desc->arg)->tableOids;
+			type = oIndexInvalid;
+		}
+		else if (type != oIndexToast && type != oIndexBridge)
+			return;
+	}
+
+	/* Update undo keeps the whole old tuple, the others keep the key.  */
+	if (action == BTreeOperationUpdate)
+		key = o_btree_tuple_make_key(desc, tuple, NULL, true, &key_allocated);
+	len = o_btree_len(desc, key, OKeyLength);
+
+	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+	if (rewind_keys == NULL)
+		rewind_keys = makeStringInfo();
+	appendHton32StringInfo(rewind_keys, (uint32) type);
+	appendHton32StringInfo(rewind_keys, oids.datoid);
+	appendHton32StringInfo(rewind_keys, oids.reloid);
+	appendHton32StringInfo(rewind_keys, oids.relnode);
+	appendHton32StringInfo(rewind_keys, oids.spcoid);
+	appendStringInfoChar(rewind_keys, (char) key.formatFlags);
+	appendHton32StringInfo(rewind_keys, (uint32) len);
+	appendBinaryStringInfoNT(rewind_keys, key.data, len);
+	MemoryContextSwitchTo(oldcxt);
+
+	if (key_allocated)
+		pfree(key.data);
+}
+
+
+static bool
+write_rewind_keys_file(const char *path, const char *data, int len)
+{
+	bool res = true;
+	int fd = OpenTransientFile(path, O_WRONLY | O_CREAT | O_TRUNC | PG_BINARY);
+	if (fd < 0 || write(fd, data, len) != len || pg_fsync(fd) != 0)
+	{
+		ereport(WARNING, (errcode_for_file_access(),
+						  errmsg("could not write rewind keys file \"%s\"", path)));
+		res = false;
+	}
+	CloseTransientFile(fd);
+	return res;
+}
+
+void
+rewind_keys_finish_process(int worker_id)
+{
+	char path [MAXPGPATH];
+	rewind_keys_capturing = false;
+	if (worker_id < 0 || rewind_keys == NULL)
+		return;
+
+	snprintf(path, sizeof(path), ORIOLEDB_DATA_DIR "/"
+								 REWIND_KEYS_WORKER_PREFIX "%d"
+								 REWIND_KEYS_WORKER_SUFFIX, worker_id);
+	(void)write_rewind_keys_file(path, rewind_keys->data, rewind_keys->len);
+
+	pfree(rewind_keys->data);
+	pfree(rewind_keys);
+
+	rewind_keys = NULL;
+}
+
+#define PG_REWIND_KEYS_WAL_CHUNK (1024 * 1024)
+
+static void
+log_rewind_keys(XLogRecPtr switchpoint, const char *data, int len)
+{
+	XLogRecPtr lsn;
+	int offset = 0;
+
+	do
+	{
+		WALRecRewindKeys rec;
+		int chunk = Min(len - offset, PG_REWIND_KEYS_WAL_CHUNK);
+
+		rec.switchpoint = switchpoint;
+		rec.offset = offset;
+		rec.flags = (offset == 0 ? REWIND_KEYS_FIRST : 0) |
+					((offset + chunk) == len ? REWIND_KEYS_LAST : 0);
+
+		XLogBeginInsert();
+		XLogRegisterData((char *)&rec, sizeof(rec));
+		XLogRegisterData((char *)data + offset, chunk);
+		lsn = XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_REWIND_KEYS);
+		offset += chunk;
+	} while (offset < len);
+
+	XLogFlush(lsn);
+}
+
+
+/*
+ * Redo of ORIOLEDB_XLOG_REWIND_KEYS: rebuild on this node the rewind
+ * keys file that the node promoted at rec.switchpoint saved (see
+ * rewind_keys_save()).
+ */
+void
+rewind_keys_redo(XLogReaderState *record)
+{
+	WALRecRewindKeys rec;
+	char *data = XLogRecGetData(record) + sizeof(rec);
+	int len = XLogRecGetDataLen(record) - sizeof(rec);
+	char path [MAXPGPATH];
+	char tmppath [MAXPGPATH];
+	int fd;
+
+	memcpy(&rec, XLogRecGetData(record), sizeof (rec));
+	snprintf(path, sizeof (path), REWIND_KEYS_FILENAME_FORMAT,
+			 LSN_FORMAT_ARGS(rec.switchpoint));
+	snprintf(tmppath, sizeof(tmppath), "%s.new", path);
+
+	if (rec.flags & REWIND_KEYS_FIRST)
+	{
+		uint32 magic = pg_hton32(REWIND_KEYS_MAGIC);
+
+		/*
+		 * Start the file over: it may be left over from an earlier replay
+		 * of this record.
+		 */
+		fd = OpenTransientFile(tmppath, O_WRONLY | O_CREAT | O_TRUNC | PG_BINARY);
+		if (fd >= 0 && write(fd, &magic, sizeof (magic)) != sizeof(magic))
+		{
+			CloseTransientFile(fd);
+			fd = -1;
+		}
+	}
+	else
+	{
+		/* First chunk created the file, so later chunks go into this.  */
+		fd = OpenTransientFile(tmppath, O_WRONLY | PG_BINARY);
+		if (fd < 0 && errno != ENOENT && access(path, F_OK) == 0)
+			return;
+	}
+
+	if (fd < 0 ||
+		pg_pwrite(fd, data, len, sizeof(uint32) + rec.offset) != len ||
+		pg_fsync(fd) != 0)
+	{
+		ereport(WARNING,
+				(errcode_for_file_access(),
+				 errmsg("could not write rewind keys file \"%s\"", tmppath)));
+
+		if (fd >= 0)
+			CloseTransientFile(fd);
+
+		return;
+	}
+
+	CloseTransientFile(fd);
+
+	if (rec.flags & REWIND_KEYS_LAST)
+		(void)durable_rename(tmppath, path, WARNING);
+}
+
+/*
+ * Called by the startup process at the end of recovery.  A new timeline
+ * means a promotion: save the keys under its switchpoint, and log them
+ * for the standbys.
+ */
+void
+rewind_keys_save(XLogRecPtr switchpoint)
+{
+	StringInfo all = makeStringInfo();
+	DIR *dir;
+	struct dirent *de;
+
+	/* 1. Start with magic word.  */
+	appendHton32StringInfo(all, REWIND_KEYS_MAGIC);
+
+	if (rewind_keys != NULL)
+	{
+		appendBinaryStringInfoNT(all, rewind_keys->data, rewind_keys->len);
+		pfree(rewind_keys->data);
+		pfree(rewind_keys);
+		rewind_keys = NULL;
+	}
+
+	/*
+	 * 2. Collect rewind keys from workers.
+	 *
+	 * Every recovery worker rolled back its own transactions and wrote
+	 * its keys to orioledb_data/rewind_keys.<n>.tmp (see
+	 * rewind_keys_finish_process()).
+	 */
+	dir = AllocateDir(ORIOLEDB_DATA_DIR);
+	while ((de = ReadDir(dir, ORIOLEDB_DATA_DIR)) != NULL)
+	{
+		char path [MAXPGPATH];
+		size_t namelen = strlen(de->d_name);
+		int fd;
+		struct stat st;
+
+		if (strncmp(de->d_name, REWIND_KEYS_WORKER_PREFIX,
+					strlen(REWIND_KEYS_WORKER_PREFIX)) != 0 ||
+			namelen < strlen(REWIND_KEYS_WORKER_SUFFIX) ||
+			strcmp(de->d_name + namelen - strlen(REWIND_KEYS_WORKER_SUFFIX),
+				   REWIND_KEYS_WORKER_SUFFIX) != 0)
+			continue;
+
+		snprintf(path, sizeof(path), ORIOLEDB_DATA_DIR "/%s", de->d_name);
+		fd = OpenTransientFile(path, O_RDONLY | PG_BINARY);
+		if (fd >= 0 && fstat(fd, &st) == 0)
+		{
+			enlargeStringInfo(all, st.st_size);
+			if (read(fd, all->data + all->len, st.st_size) == st.st_size)
+			{
+				all->len += st.st_size;
+				all->data [all->len] = '\0';
+			}
+			else
+				ereport(WARNING, (errcode_for_file_access(),
+								  errmsg("could not read rewind keys file \"%s\"", path)));
+		}
+		if (fd >= 0)
+			CloseTransientFile(fd);
+		unlink(path);
+	}
+	FreeDir(dir);
+
+	/*
+	 * A new timeline starts at switchpoint exactly when recovery was started
+	 * by startup, e.g. on promotion.
+	 */
+	if (ArchiveRecoveryRequested)
+	{
+		char path [MAXPGPATH];
+		char tmppath [MAXPGPATH];
+
+		snprintf(path, sizeof (path), REWIND_KEYS_FILENAME_FORMAT,
+				 LSN_FORMAT_ARGS(switchpoint));
+		snprintf(tmppath, sizeof(tmppath), "%s.new", path);
+		if (write_rewind_keys_file(tmppath, all->data, all->len) &&
+			durable_rename(tmppath, path, WARNING) == 0)
+			elog(LOG, "OrioleDB: saved the keys of the rows rolled back by the"
+					  " promotion at %X/%X ti \"%s\"",
+					  LSN_FORMAT_ARGS(switchpoint), path);
+		log_rewind_keys(switchpoint, all->data + sizeof(uint32),
+						all->len - sizeof(uint32));
+	}
+
+	pfree(all->data);
+	pfree(all);
+}
+
+/*
+ * Remove the rewind keys files nobody can ask for anymore.  The file of a
+ * switchpoint might be necessary until another node could be rewound onto
+ * this one with the timeline forket here.  Two options here:
+ *
+ * - a timeline of this node that begins at the switchpoint.  After this node
+ *   is rewound itself its history changes, and nobody forks from the old one.
+ * - the WAL around the switchpoint, which the rewound node replays from this
+ *   one.  Once it is removed, no one can catch up from here.
+ */
+void
+rewind_keys_cleanup(void)
+{
+	TimeLineID tli;
+	List *history;
+	XLogSegNo lastRemovedSegNo = XLogGetLastRemovedSegno();
+	DIR *dir;
+	struct dirent *de;
+
+	if (RecoveryInProgress())
+		(void)GetXLogReplayRecPtr(&tli);
+	else
+		tli = GetWALInsertionTimeLine();
+
+	tli = findNewestTimeLine(tli);
+	history = readTimeLineHistory(tli);
+
+	dir = AllocateDir(ORIOLEDB_DATA_DIR);
+	while ((de = ReadDir(dir, ORIOLEDB_DATA_DIR)) != NULL)
+	{
+		uint32 hi, lo;
+		char stop_sym;
+		XLogRecPtr switchpoint;
+		ListCell *lc;
+		bool in_history = false;
+		const char *reason = NULL;
+		char path [MAXPGPATH];
+		XLogSegNo segno;
+
+		/*
+		 * Here we intentionally skip rewind_keys_<switchpoint>.{new, tmp}.
+		 * The final version is rewind_keys_<switchpoint> format.
+		 */
+		if (sscanf(de->d_name, "rewind_keys_%08X%08X%c", &hi, &lo, &stop_sym) != 2)
+			continue;
+
+		/* Check that this switchpoint is still actual.  */
+		switchpoint = ((uint64)hi << 32) | lo;
+
+		foreach(lc, history)
+		{
+			TimeLineHistoryEntry *entry = (TimeLineHistoryEntry *)lfirst(lc);
+			if (entry->begin == switchpoint)
+				in_history = true;
+		}
+		XLByteToSeg(switchpoint, segno, wal_segment_size);
+
+		if (!in_history)
+			reason = "no timeline of this server begins at its switchpoint";
+		else if (!XLogArchivingActive() &&
+				 lastRemovedSegNo > 0 &&
+				 segno <= lastRemovedSegNo)
+			reason = "the WAL after its switchpoint is removed";
+		else
+			continue;
+
+		snprintf(path, sizeof(path), ORIOLEDB_DATA_DIR "/%s", de->d_name);
+		if (unlink(path) == 0)
+			elog(LOG,  "OrioleDB: removed rewind keys file \"%s\": %s",
+				 path, reason);
+		else if (errno != ENOENT)
+			ereport(WARNING, (errcode_for_file_access(),
+							  errmsg("could not remove rewind keys file \"%s\"", path)));
+	}
+
+	FreeDir(dir);
+	list_free_deep(history);
+}
+
+void
+rewind_keys_desc(StringInfo buf, XLogReaderState *record)
+{
+	WALRecRewindKeys rec;
+
+	memcpy(&rec, XLogRecGetData(record), sizeof(rec));
+	appendStringInfo(buf, "rewind keys of the promotion at %X/%X: %u bytes at offset " UINT64_FORMAT "%s%s",
+					 LSN_FORMAT_ARGS(rec.switchpoint),
+					 (unsigned) (XLogRecGetDataLen(record) - sizeof(rec)),
+					 rec.offset,
+					 (rec.flags & REWIND_KEYS_FIRST) ? ", first" : "",
+					 (rec.flags & REWIND_KEYS_LAST) ? ", last" : "");
 }
 
 /*
@@ -931,31 +1343,12 @@ replay_rewind(uint32 chkp_num, bool single)
 	pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmax, lastXid);
 
 	/*
-	 * Reset undo metadata for every undo log type.  All locations start at 0
-	 * and will be advanced by subsequent WAL replay.
+	 * The undo metadata is left alone.  It was loaded from the target's
+	 * control file and has since been advanced by the rows applied above.
+	 * Other processes (e.g. the orioledb bgwriter) already reserve undo space
+	 * at this point, so resetting these counters would corrupt their
+	 * reservations and let new undo records overwrite existing ones.
 	 */
-	{
-		int i;
-		for (i = 0; i < (int) UndoLogsCount; i++)
-		{
-			UndoMeta *undo_meta = get_undo_meta_by_type((UndoLogType) i);
-
-			pg_atomic_init_u64(&undo_meta->lastUsedLocation, 0);
-			pg_atomic_init_u64(&undo_meta->advanceReservedLocation, 0);
-			pg_atomic_init_u64(&undo_meta->writeInProgressLocation, 0);
-			pg_atomic_init_u64(&undo_meta->writtenLocation, 0);
-			pg_atomic_init_u64(&undo_meta->lastUsedUndoLocationWhenUpdatedMinLocation, 0);
-			pg_atomic_init_u64(&undo_meta->minProcRetainLocation, 0);
-			pg_atomic_init_u64(&undo_meta->minRewindRetainLocation, 0);
-			pg_atomic_init_u64(&undo_meta->minProcTransactionRetainLocation, 0);
-			pg_atomic_init_u64(&undo_meta->minProcReservedLocation, 0);
-			pg_atomic_init_u64(&undo_meta->cleanedLocation, 0);
-			pg_atomic_init_u64(&undo_meta->checkpointRetainStartLocation, 0);
-			pg_atomic_init_u64(&undo_meta->checkpointRetainEndLocation, 0);
-			pg_atomic_init_u64(&undo_meta->cleanedCheckpointStartLocation, 0);
-			pg_atomic_init_u64(&undo_meta->cleanedCheckpointEndLocation, 0);
-		}
-	}
 
 	/*
 	 * Mark the checkpoint state as finished and reset the stack so that

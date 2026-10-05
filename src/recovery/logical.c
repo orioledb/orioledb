@@ -1376,6 +1376,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	WalParseResult st;
 
+	/* Only containers carry changes to decode */
+	if ((XLogRecGetInfo(record) & ~XLR_INFO_MASK) != ORIOLEDB_XLOG_CONTAINER)
+		return;
+
 	/* do our best to disable streaming */
 	ctx->streaming = false;
 

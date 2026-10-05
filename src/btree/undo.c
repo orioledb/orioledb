@@ -544,29 +544,9 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	tuple.formatFlags = item->tuphdr.formatFlags;
 	tuple.data = (Pointer) item + sizeof(BTreeModifyUndoStackItem);
 
-	/*
-	 * Capture this undo item so o_emit_recovery_finish_undo_wal() can re-emit
-	 * it as a committed cleanup DELETE after end-of-recovery.  Done after the
-	 * desc check so we can resolve the table oids from the index descriptor;
-	 * only meaningful while recovery_finish() is aborting in-progress
-	 * transactions (no-ops otherwise).  The undo log buffer the key points at
-	 * may be recycled before emit time, so the helper copies the key bytes.
-	 */
-	if (recovery_finish_undo_capturing)
-	{
-		LocationIndex tupleLen = item->header.itemSize -
-			sizeof(BTreeModifyUndoStackItem);
-		ORelOids	tableOids;
-
-		if (item->header.indexType == oIndexPrimary)
-			tableOids = ((OIndexDescr *) desc->arg)->tableOids;
-		else
-			tableOids = item->oids;
-
-		recovery_finish_capture_undo_row(tableOids, item->header.indexType,
-										 item->action, item->tuphdr.formatFlags,
-										 tupleLen, tuple.data);
-	}
+	/* A promotion rolls this row back: keep old primary for pg_rewind.  */
+	if (rewind_keys_capturing)
+		rewind_keys_capture(desc, item->action, tuple);
 
 	if (STOPEVENTS_ENABLED())
 	{

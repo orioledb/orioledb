@@ -35,9 +35,6 @@ o_get_prefixes_for_tablespace(Oid datoid, Oid tablespace,
 							  char **prefix, char **db_prefix)
 {
 	static char pathbuf[MAXPGPATH];
-	Datum		path_datum;
-	text	   *path;
-	char	   *path_str;
 
 	/*
 	 * Treat InvalidOid as the default tablespace.  System trees and trees
@@ -45,16 +42,21 @@ o_get_prefixes_for_tablespace(Oid datoid, Oid tablespace,
 	 */
 	if (!OidIsValid(tablespace))
 		tablespace = DEFAULTTABLESPACE_OID;
-	path_datum = DirectFunctionCall1(pg_tablespace_location, ObjectIdGetDatum(tablespace));
-	path = DatumGetTextP(path_datum);
-	path_str = text_to_cstring(path);
 
-	if (path_str[0] == '\0')
+	/*
+	 * Like GetRelationPath(), go through the pg_tblspc/<oid> link instead of
+	 * resolving it.  During recovery the tablespace can already be gone while
+	 * WAL replay still refers to it (pg_rewind removes the tablespaces the
+	 * source dropped), and the callers treat missing files as already
+	 * removed.
+	 */
+	if (tablespace == DEFAULTTABLESPACE_OID ||
+		tablespace == GLOBALTABLESPACE_OID)
 		snprintf(pathbuf, sizeof(pathbuf), "%s", ORIOLEDB_DATA_DIR);
 	else
-		snprintf(pathbuf, sizeof(pathbuf), "%s/" TABLESPACE_VERSION_DIRECTORY "/%s", path_str, ORIOLEDB_DATA_DIR);
-	pfree(path_str);
-	pfree(path);
+		snprintf(pathbuf, sizeof(pathbuf),
+				 "%s/%u/" TABLESPACE_VERSION_DIRECTORY "/%s",
+				 PG_TBLSPC_DIR, tablespace, ORIOLEDB_DATA_DIR);
 	if (prefix)
 		*prefix = pathbuf;
 	if (db_prefix)

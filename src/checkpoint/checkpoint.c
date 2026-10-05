@@ -1731,6 +1731,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	}
 	PG_END_TRY();
 
+	rewind_keys_cleanup();
+
 	if (next_CheckPoint_hook)
 		next_CheckPoint_hook(redo_pos, flags);
 }
@@ -2435,7 +2437,11 @@ o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
 	 * #876).
 	 */
 	if (flags == 0)
+	{
 		o_emit_recovery_finish_rollbacks();
+		/* checkPointRedo is the end of recovery: a new timeline starts here.  */
+		rewind_keys_save(checkPointRedo);
+	}
 
 	if (!(flags & (CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_END_OF_RECOVERY)))
 	{
