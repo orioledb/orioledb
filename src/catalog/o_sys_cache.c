@@ -89,8 +89,6 @@ static Pointer o_sys_cache_get_from_toast_tree(OSysCache *sys_cache,
 static bool o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key,
 							Pointer entry, bool transactional);
 static bool o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry);
-static bool key_refreshed_in_this_transaction(OSysCache *sys_cache,
-											  OSysCacheKey *key);
 static int	o_sys_cache_key_cmp(OSysCache *sys_cache, int nkeys,
 								OSysCacheKey *key1, OSysCacheKey *key2);
 static void o_sys_cache_keys_to_str(StringInfo buf, OSysCache *sys_cache,
@@ -1016,6 +1014,20 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 	return result;
 }
 
+/*
+ * Keys o_sys_cache_refresh_transactional() handled in the current
+ * transaction, identified by its top-level xid.  The list is dropped
+ * lazily, once another transaction looks at it.
+ */
+typedef struct
+{
+	OSysCache  *sys_cache;
+	OSysCacheHashKey hash;
+} RefreshedKey;
+
+static TransactionId refreshed_keys_xid = InvalidTransactionId;
+static List *refreshed_keys = NIL;
+
 void
 o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg,
 						  bool transactional)
@@ -1023,8 +1035,31 @@ o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg,
 	Pointer		entry = NULL;
 	bool		inserted PG_USED_FOR_ASSERTS_ONLY;
 
-	if (!transactional && key_refreshed_in_this_transaction(sys_cache, key))
-		transactional = true;
+	/*
+	 * Promote to transactional if refresh_transactional() touched this key
+	 * earlier in the transaction.  A hash collision only adds unnecessary
+	 * transactional overhead.
+	 */
+	if (!transactional && refreshed_keys != NIL &&
+		TransactionIdEquals(refreshed_keys_xid, GetTopTransactionIdIfAny()))
+	{
+		OSysCacheHashKey hash;
+		ListCell   *lc;
+
+		hash = compute_hash_value(sys_cache->cc_hashfunc,
+								  sys_cache->nkeys, key);
+		foreach(lc, refreshed_keys)
+		{
+			RefreshedKey *refreshed = (RefreshedKey *) lfirst(lc);
+
+			if (refreshed->sys_cache == sys_cache &&
+				refreshed->hash == hash)
+			{
+				transactional = true;
+				break;
+			}
+		}
+	}
 
 	o_sys_cache_lock(sys_cache, key, AccessExclusiveLock);
 
@@ -1098,67 +1133,6 @@ o_sys_cache_update_if_needed(OSysCache *sys_cache, OSysCacheKey *key,
 }
 
 /*
- * Keys o_sys_cache_refresh_transactional() handled in the current
- * transaction, identified by its top-level xid.  The list is dropped
- * lazily, once another transaction looks at it.
- */
-typedef struct
-{
-	OSysCache  *sys_cache;
-	OSysCacheHashKey hash;
-} RefreshedKey;
-
-static TransactionId refreshed_keys_xid = InvalidTransactionId;
-static List *refreshed_keys = NIL;
-
-static void
-remember_refreshed_key(OSysCache *sys_cache, OSysCacheKey *key)
-{
-	TransactionId xid = GetTopTransactionId();
-	RefreshedKey *refreshed;
-	MemoryContext prev_context;
-
-	if (refreshed_keys_xid != xid)
-	{
-		list_free_deep(refreshed_keys);
-		refreshed_keys = NIL;
-		refreshed_keys_xid = xid;
-	}
-
-	prev_context = MemoryContextSwitchTo(TopMemoryContext);
-	refreshed = palloc(sizeof(RefreshedKey));
-	refreshed->sys_cache = sys_cache;
-	refreshed->hash = compute_hash_value(sys_cache->cc_hashfunc,
-										 sys_cache->nkeys, key);
-	refreshed_keys = lappend(refreshed_keys, refreshed);
-	MemoryContextSwitchTo(prev_context);
-}
-
-/*
- * A hash collision only makes an add transactional without a need.
- */
-static bool
-key_refreshed_in_this_transaction(OSysCache *sys_cache, OSysCacheKey *key)
-{
-	ListCell   *lc;
-	OSysCacheHashKey hash;
-
-	if (refreshed_keys == NIL ||
-		!TransactionIdEquals(refreshed_keys_xid, GetTopTransactionIdIfAny()))
-		return false;
-
-	hash = compute_hash_value(sys_cache->cc_hashfunc, sys_cache->nkeys, key);
-	foreach(lc, refreshed_keys)
-	{
-		RefreshedKey *refreshed = (RefreshedKey *) lfirst(lc);
-
-		if (refreshed->sys_cache == sys_cache && refreshed->hash == hash)
-			return true;
-	}
-	return false;
-}
-
-/*
  * Bring the entry in line with a definition the current transaction changes.
  * The transaction writes it itself, so a rollback puts the previous entry
  * back rather than leaving the cache describing an object that never
@@ -1182,7 +1156,28 @@ o_sys_cache_refresh_transactional(OSysCache *sys_cache, OSysCacheKey *key,
 	Assert(!is_recovery_process());
 
 	o_sys_cache_lock(sys_cache, key, AccessExclusiveLock);
-	remember_refreshed_key(sys_cache, key);
+
+	/* Remember the key so a later add_if_needed makes it transactional. */
+	{
+		TransactionId xid = GetTopTransactionId();
+		RefreshedKey *refreshed;
+		MemoryContext prev_context;
+
+		if (refreshed_keys_xid != xid)
+		{
+			list_free_deep(refreshed_keys);
+			refreshed_keys = NIL;
+			refreshed_keys_xid = xid;
+		}
+
+		prev_context = MemoryContextSwitchTo(TopMemoryContext);
+		refreshed = palloc(sizeof(RefreshedKey));
+		refreshed->sys_cache = sys_cache;
+		refreshed->hash = compute_hash_value(sys_cache->cc_hashfunc,
+											 sys_cache->nkeys, key);
+		refreshed_keys = lappend(refreshed_keys, refreshed);
+		MemoryContextSwitchTo(prev_context);
+	}
 
 	o_sys_cache_set_datoid_lsn(&key->common.lsn, NULL);
 	entry = o_sys_cache_search(sys_cache, sys_cache->nkeys, key);
