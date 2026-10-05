@@ -21,6 +21,7 @@
 #include "catalog/o_tables.h"
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
+#include "recovery/wal_partial.h"
 #include "storage/itemptr.h"
 #include "tableam/descr.h"
 #include "tableam/operations.h"
@@ -406,6 +407,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 			if (type == RecoveryMsgTypeInsert ||
 				type == RecoveryMsgTypeUpdate ||
+				type == RecoveryMsgTypeUpdatePartial ||
 				type == RecoveryMsgTypeDelete ||
 				type == RecoveryMsgTypeBridgeErase)
 			{
@@ -477,6 +479,12 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 						Assert(ORelOidsIsValid(oids));
 
 						tuple.data = data + data_pos;
+						if (type == RecoveryMsgTypeUpdatePartial)
+						{
+							descr = recovery_partial_update_descr(descr,
+																  tuple);
+							indexDescr = GET_PRIMARY(descr);
+						}
 						apply_modify_record(descr, indexDescr,
 											type,
 											tuple);
@@ -854,6 +862,36 @@ recovery_bridge_ctid_update(OIndexDescr *id, OTuple tuple)
 }
 
 /*
+ * The table descriptor a partial update record has to be replayed with.
+ *
+ * Replay rebuilds the row from its fields, so it needs the version of the
+ * table descriptor the primary built the row with.  A worker fetches the
+ * descriptor only when the relation changes, so after an ALTER TABLE that
+ * kept the relnode it may still hold the previous version.  Reloading keeps
+ * the same hash entry, and its reference count with it.
+ */
+OTableDescr *
+recovery_partial_update_descr(OTableDescr *descr, OTuple payload)
+{
+	uint32		version = o_wal_partial_update_get_version(payload.data);
+
+	if (descr->version != version)
+	{
+		OTableFetchContext ctx = {
+			.snapshot = &o_non_deleted_snapshot,
+			.version = version
+		};
+		ORelOids	oids = descr->oids;
+
+		descr = o_fetch_table_descr_extended(oids, ctx);
+		if (descr == NULL)
+			elog(ERROR, "version %u of table [ %u %u %u ] for a partial update record is not found",
+				 version, oids.datoid, oids.reloid, oids.relnode);
+	}
+	return descr;
+}
+
+/*
  * Apply the modify WAL record.
  */
 void
@@ -861,6 +899,23 @@ apply_modify_record(OTableDescr *descr, OIndexDescr *id, uint16 type,
 					OTuple p)
 {
 	OXid		oxid;
+
+	if (type == RecoveryMsgTypeUpdatePartial)
+	{
+		OTuple		tuple;
+
+		/*
+		 * Replay owns the row's key, so the version found here is the one the
+		 * update applies to.  No row, or a newer version, means a later
+		 * record already shows in the checkpoint image.
+		 */
+		if (o_wal_partial_update_build(id, p.data, &tuple))
+		{
+			apply_modify_record(descr, id, RecoveryMsgTypeUpdate, tuple);
+			pfree(tuple.data);
+		}
+		return;
+	}
 
 	oxid = get_current_oxid();
 

@@ -480,7 +480,9 @@ build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple
 	Assert(rec);
 	Assert(tuple1);
 	Assert(tuple2);
-	Assert(rec->type == WAL_REC_INSERT || rec->type == WAL_REC_UPDATE || rec->type == WAL_REC_DELETE || rec->type == WAL_REC_REINSERT);
+	Assert(rec->type == WAL_REC_INSERT || rec->type == WAL_REC_UPDATE ||
+		   rec->type == WAL_REC_DELETE || rec->type == WAL_REC_REINSERT ||
+		   rec->type == WAL_REC_UPDATE_PARTIAL);
 
 	if (bigTupleCxt == NULL)
 		bigTupleCxt = AllocSetContextCreate(TopMemoryContext,
