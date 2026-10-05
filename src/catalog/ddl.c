@@ -1225,6 +1225,40 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					}
 				}
 			}
+			else if (rel->rd_rel->relkind == RELKIND_RELATION ||
+					 rel->rd_rel->relkind == RELKIND_MATVIEW)
+			{
+				ListCell   *lc;
+				AlterTableCmd *set_am_cmd = NULL;
+
+				foreach(lc, atstmt->cmds)
+				{
+					AlterTableCmd *cmd = (AlterTableCmd *) lfirst(lc);
+
+					if (cmd->subtype == AT_SetAccessMethod)
+					{
+						if (set_am_cmd != NULL)
+						{
+							set_am_cmd = NULL;
+							break;
+						}
+						set_am_cmd = cmd;
+					}
+				}
+
+				if (set_am_cmd != NULL)
+				{
+					const char *amname = set_am_cmd->name
+						? set_am_cmd->name
+						: default_table_access_method;
+
+					if (strcmp(amname, "orioledb") == 0)
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("changing access method to OrioleDB is not supported"),
+								 errdetail("Use CREATE TABLE ... USING orioledb instead.")));
+				}
+			}
 			else if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
 			{
 				/*
