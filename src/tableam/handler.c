@@ -179,6 +179,53 @@ orioledb_index_fetch_end(IndexFetchTableData *scan)
 	pfree(o_scan);
 }
 
+/*
+ * Remembers the transaction of the newest version of a bridge entry, unless
+ * it is finished or our own.
+ */
+static TupleFetchCallbackResult
+bridge_entry_writer_callback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
+							 void *arg, bool oxidIsFinished)
+{
+	OXid	   *waitOxid = (OXid *) arg;
+
+	/*
+	 * oxidIsFinished is only true for a committed transaction: a version left
+	 * by one that rolled back reads as unfinished, and waiting for it would
+	 * never end.
+	 */
+	if (!oxidIsFinished && tupOxid != get_current_oxid_if_any() &&
+		tupOxid >= pg_atomic_read_u64(&xid_meta->runXmin))
+	{
+		CommitSeqNo csn = oxid_get_csn(tupOxid, false);
+
+		if (!COMMITSEQNO_IS_COMMITTED(csn) && !COMMITSEQNO_IS_ABORTED(csn))
+			*waitOxid = tupOxid;
+	}
+	return OTupleFetchMatch;
+}
+
+/*
+ * Returns the running transaction, other than ours, that made the last
+ * change to the bridge entry for the given ctid -- inserted, deleted or
+ * repointed it -- or InvalidOXid if there is none.
+ */
+static OXid
+bridge_entry_running_writer(OIndexDescr *bridge, OBTreeKeyBound *bound)
+{
+	OXid		waitOxid = InvalidOXid;
+	OTuple		tuple;
+
+	tuple = o_btree_find_tuple_by_key_cb(&bridge->desc, (Pointer) bound,
+										 BTreeKeyBound, &o_non_deleted_snapshot,
+										 NULL, CurrentMemoryContext, NULL,
+										 NULL, bridge_entry_writer_callback,
+										 &waitOxid);
+	if (!O_TUPLE_IS_NULL(tuple))
+		pfree(tuple.data);
+	return waitOxid;
+}
+
 static bool
 orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 						   Datum tupleid,
@@ -244,6 +291,26 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 
 		if (snapshot->snapshot_type == SNAPSHOT_DIRTY)
 		{
+			/*
+			 * A dirty snapshot is what a unique check reads conflicts with.
+			 * Heap returns a tuple some other transaction is inserting or
+			 * deleting together with its xid, and the caller waits for that
+			 * transaction and looks again.  We have no xid to give it, so
+			 * wait here: until the last change of this ctid's bridge entry is
+			 * no other running transaction's, the answer is not known.
+			 * Skipping an entry another transaction is deleting let a
+			 * duplicate in once that transaction rolled back.
+			 */
+			for (;;)
+			{
+				OXid		waitOxid = bridge_entry_running_writer(descr->bridge,
+																   &bridge_bound);
+
+				if (!OXidIsValid(waitOxid))
+					break;
+				(void) wait_for_oxid(waitOxid, false);
+				CHECK_FOR_INTERRUPTS();
+			}
 			bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
 												   (Pointer) &bridge_bound, BTreeKeyBound,
 												   &o_in_progress_snapshot, &tupleCsn,

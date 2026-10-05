@@ -2,9 +2,10 @@
 # coding: utf-8
 
 import re
+import time
 import unittest
 
-from .base_test import BaseTest
+from .base_test import BaseTest, ThreadQueryExecutor
 
 # An update of a bridged index column gives the row a new bridge ctid and
 # deletes the old ctid's bridge entry, but the bridged index -- GIN never
@@ -1755,4 +1756,134 @@ class IndexBridgingTest(BaseTest):
 				    self._bridge_rr_count(con, ["w7", "w150", "n1007"]), 2)
 		finally:
 			rr.close()
+		node.stop()
+
+	def _bridge_unique_case(self, first, finish, expect_error):
+		"""
+		One transaction changes the row holding val = 10 and stays open;
+		another inserts val = 10 through a unique bridged index.  The insert
+		has to wait for the first transaction and then fail or succeed by
+		how it finished -- not decide early, and never let a duplicate in.
+		"""
+		node = self.node
+		node.safe_psql("""
+			DROP TABLE IF EXISTS o_uniq;
+			CREATE TABLE o_uniq (id int PRIMARY KEY, val int, note text)
+				USING orioledb;
+			CREATE UNIQUE INDEX o_uniq_val ON o_uniq (val)
+				WITH (orioledb_index = false);
+			INSERT INTO o_uniq VALUES (1, 10, 'a');
+		""")
+		con1 = node.connect()
+		con2 = node.connect()
+		try:
+			con1.execute(first)
+			con2.execute("SET lock_timeout = '30s';")
+			t = ThreadQueryExecutor(
+			    con2, "INSERT INTO o_uniq VALUES (100, 10, 'b');")
+			t.start()
+			time.sleep(1)
+			self.assertTrue(t.is_alive(),
+			                "the insert did not wait for %r" % first)
+			if finish == "commit":
+				con1.commit()
+			else:
+				con1.rollback()
+			if expect_error:
+				with self.assertRaises(Exception) as e:
+					t.join()
+				self.assertIn("duplicate key", str(e.exception))
+				con2.rollback()
+			else:
+				t.join()
+				con2.commit()
+		finally:
+			con1.close()
+			con2.close()
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_uniq WHERE val = 10;")[0][0],
+		    1)
+
+	def test_bridge_unique_waits_for_running_writer(self):
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		update = "UPDATE o_uniq SET val = 20 WHERE id = 1;"
+		delete = "DELETE FROM o_uniq WHERE id = 1;"
+		insert = "INSERT INTO o_uniq VALUES (2, 10, 'c');"
+		self._bridge_unique_case(update, "rollback", True)
+		self._bridge_unique_case(update, "commit", False)
+		self._bridge_unique_case(delete, "rollback", True)
+		self._bridge_unique_case(delete, "commit", False)
+		# Another transaction inserting the same value: was an error right
+		# away, even if that transaction then rolled back
+		node.safe_psql("""
+			DROP TABLE IF EXISTS o_uniq;
+			CREATE TABLE o_uniq (id int PRIMARY KEY, val int, note text)
+				USING orioledb;
+			CREATE UNIQUE INDEX o_uniq_val ON o_uniq (val)
+				WITH (orioledb_index = false);
+		""")
+		for finish, expect_error in (("rollback", False), ("commit", True)):
+			node.safe_psql("TRUNCATE o_uniq;")
+			con1 = node.connect()
+			con2 = node.connect()
+			try:
+				con1.execute(insert)
+				t = ThreadQueryExecutor(
+				    con2, "INSERT INTO o_uniq VALUES (100, 10, 'b');")
+				t.start()
+				time.sleep(1)
+				self.assertTrue(t.is_alive(), "did not wait for an insert")
+				con1.commit() if finish == "commit" else con1.rollback()
+				if expect_error:
+					with self.assertRaises(Exception) as e:
+						t.join()
+					self.assertIn("duplicate key", str(e.exception))
+					con2.rollback()
+				else:
+					t.join()
+					con2.commit()
+			finally:
+				con1.close()
+				con2.close()
+			self.assertEqual(
+			    node.execute("SELECT count(*) FROM o_uniq "
+			                 "WHERE val = 10;")[0][0], 1)
+		node.stop()
+
+	def test_bridge_unique_own_and_unrelated_changes(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_uniq (id int PRIMARY KEY, val int, note text)
+				USING orioledb;
+			CREATE UNIQUE INDEX o_uniq_val ON o_uniq (val)
+				WITH (orioledb_index = false);
+			INSERT INTO o_uniq VALUES (1, 10, 'a');
+		""")
+		with node.connect() as con:
+			# Our own change of the entry is no reason to wait
+			con.execute("UPDATE o_uniq SET val = 20 WHERE id = 1;")
+			con.execute("INSERT INTO o_uniq VALUES (2, 10, 'b');")
+			con.commit()
+		self.assertEqual(
+		    node.execute("SELECT id, val FROM o_uniq ORDER BY id;"), [(1, 20),
+		                                                              (2, 10)])
+
+		# A running update that keeps the value conflicts either way
+		con1 = node.connect()
+		try:
+			con1.execute("UPDATE o_uniq SET note = 'x' WHERE id = 2;")
+			with self.assertRaises(Exception) as e:
+				node.safe_psql("SET lock_timeout = '30s'; "
+				               "INSERT INTO o_uniq VALUES (3, 10, 'c');")
+			self.assertIn("duplicate key", str(e.exception))
+			con1.commit()
+		finally:
+			con1.close()
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_uniq WHERE val = 10;")[0][0],
+		    1)
 		node.stop()
