@@ -72,12 +72,12 @@ typedef struct
 	 *			 and transactionUndoRetainLocation, from read lastUsedLocation,
 	 *	   - advance shared meta->lastUsedLocation by the value of the
 	 *		 reservation size.
-	 */
-	pg_atomic_uint64 lastUsedLocation;
-	/*
+	 *
 	 * Every undo record bumps lastUsedLocation, and every snapshot reads it.
 	 * Keep the other fields, read on every snapshot too, off its cache line.
+	 * Aligning the first field aligns the whole struct.
 	 */
+	pg_atomic_uint64 pg_attribute_aligned(PG_CACHE_LINE_SIZE) lastUsedLocation;
 	char		lastUsedLocationPad[PG_CACHE_LINE_SIZE - sizeof(pg_atomic_uint64)];
 
 	/*
@@ -240,10 +240,12 @@ typedef struct
 	LWLock		undoWriteLock;
 
 	int			undoStackLocationsFlushLockTrancheId;
-} pg_attribute_aligned(PG_CACHE_LINE_SIZE) UndoMeta;
+} UndoMeta;
 
 StaticAssertDecl(offsetof(UndoMeta, advanceReservedLocation) == PG_CACHE_LINE_SIZE,
 				 "lastUsedLocation must own a cache line");
+StaticAssertDecl(sizeof(UndoMeta) % PG_CACHE_LINE_SIZE == 0,
+				 "UndoMeta must be aligned to the cache line");
 
 typedef struct
 {
