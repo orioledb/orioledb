@@ -28,6 +28,8 @@ extern void o_emit_recovery_finish_rollbacks(void);
 extern bool rewind_keys_capturing;
 extern void rewind_keys_capture(BTreeDescr *desc, BTreeOperationType action, OTuple tuple);
 extern void rewind_keys_finish_process(int worker_id);
+extern void rewind_keys_prepare(XLogRecPtr generation, int participants);
+extern void rewind_keys_resume_prepare(void);
 extern void rewind_keys_save(XLogRecPtr switchpoint);
 extern void rewind_keys_cleanup(void);
 
@@ -37,14 +39,10 @@ extern void rewind_keys_cleanup(void);
  */
 typedef struct
 {
-	uint16		version;
-	uint16		flags;
-	XLogRecPtr	switchpoint;
-	uint64		total_length;
-	uint32		total_checksum;
-	uint64		offset;
-	uint32		chunk_length;
+	uint8		data[36];
 } WALRecRewindKeys;
+
+#define REWIND_KEYS_WAL_HEADER_SIZE	36
 
 #define REWIND_KEYS_FIRST	(1 << 0)	/* The first chunk.  */
 #define REWIND_KEYS_LAST	(1 << 1)	/* The last chunk.  */
@@ -82,6 +80,8 @@ extern int	recovery_idx_pool_size_guc;
 extern OXid recovery_oxid;
 extern TransactionId recoveryHeapTransactionId;
 extern pg_atomic_uint64 *recovery_finished_list_ptr;
+extern pg_atomic_uint64 *recovery_rewind_keys_generation;
+extern pg_atomic_uint32 *recovery_rewind_keys_participants;
 
 typedef struct BTreeDescr BTreeDescr;
 

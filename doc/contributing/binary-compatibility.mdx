@@ -20,6 +20,21 @@ release, you need to increment it. To check whether it was already bumped,
 compare `include/orioledb.h` against the last release tag, e.g.
 `git diff <last-tag> -- include/orioledb.h`.
 
+### Divergence rewind keys
+
+The divergence-key pg_rewind files and `ORIOLEDB_XLOG_REWIND_KEYS` records use
+their own explicit format version. Their headers are encoded field by field
+with fixed-width integers in network byte order; they must not be written as a
+native C struct. Readers reject unknown versions.
+
+Introducing version 1 of this format does not bump `ORIOLEDB_BINARY_VERSION`,
+`ORIOLEDB_SYS_TREE_VERSION`, `ORIOLEDB_PAGE_VERSION`, or
+`ORIOLEDB_COMPRESS_VERSION`: the format was added on an unreleased feature
+branch, is not part of pages, system trees, or compressed data, and carries its
+own compatibility boundary. A future incompatible change must bump
+`REWIND_KEYS_FORMAT_VERSION` and either provide an explicit compatibility path
+or reject the older format.
+
 ## Cross-architecture support
 
 At this point, PostgreSQL and OrioleDB cannot promise that a database initialized
