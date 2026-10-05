@@ -138,6 +138,32 @@ typedef struct
 	BTreeLeafTuphdr tuphdr;
 } BTreeModifyUndoStackItem;
 
+/*
+ * Lock dispatch record.
+ *
+ * A rollback of a version that has row-level locks above it restores the
+ * previous version into the page, but must not rewrite the lock-only records
+ * above it: a reader working from a copy of the page taken before the
+ * rollback still follows them to the version its copy holds.  Instead the
+ * rollback writes a dispatch record and points the page tuple header at it.
+ * base.tuphdr is the header of the restored version, which is what a reader
+ * following the lock-only page header gets.  lockChain is where the page
+ * header pointed before: the row-level locks continue there, and whoever
+ * looks for locks rather than for the version follows it.  The version
+ * header the lock chain ends with is the rolled back one; such a walker takes
+ * the dispatch record's header instead.
+ *
+ * Dispatch records are on no undo stack, and are only ever pointed to by
+ * lock-only headers.
+ */
+typedef struct
+{
+	BTreeModifyUndoStackItem base;
+	UndoLocation lockChain;
+} BTreeLockDispatchUndoStackItem;
+
+#define O_LOCK_DISPATCH_UNDO_SIZE MAXALIGN(sizeof(BTreeLockDispatchUndoStackItem))
+
 typedef struct
 {
 	OnCommitUndoStackItem header;
@@ -237,6 +263,11 @@ extern void lock_undo_callback(UndoLogType undoType, UndoLocation location,
 							   UndoStackItem *baseItem,
 							   OXid oxid, OUndoCallbackStage stage,
 							   bool changeCountsValid);
+extern void lock_dispatch_undo_callback(UndoLogType undoType,
+										UndoLocation location,
+										UndoStackItem *baseItem, OXid oxid,
+										OUndoCallbackStage stage,
+										bool changeCountsValid);
 extern void btree_relnode_undo_callback(UndoLogType undoType,
 										UndoLocation location,
 										UndoStackItem *baseItem, OXid oxid,

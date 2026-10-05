@@ -259,6 +259,7 @@ typedef enum
 	SysCacheDeleteUndoItemType,
 	InvalidateComparatorUndoItemType,
 	CICCaptureUndoItemType,
+	LockDispatchUndoItemType,
 } UndoItemType;
 
 struct UndoStackItem

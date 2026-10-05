@@ -96,6 +96,7 @@ static void unlock_release(BTreeModifyInternalContext *context, bool unlock);
 static ConflictResolution o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context);
 static OBTreeModifyResult o_btree_modify_handle_tuple_not_found(BTreeModifyInternalContext *context);
 static bool o_btree_modify_item_rollback(BTreeModifyInternalContext *context);
+static bool reserve_undo_for_lock_dispatch(BTreeModifyInternalContext *context);
 static void o_btree_modify_insert_update(BTreeModifyInternalContext *context);
 static void o_btree_modify_add_undo_record(BTreeModifyInternalContext *context);
 static OBTreeModifyResult o_btree_modify_delete(BTreeModifyInternalContext *context);
@@ -620,6 +621,9 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 
 			if (rollbackConflict)
 			{
+				if (!reserve_undo_for_lock_dispatch(context))
+					return ConflictResolutionRetry;
+
 				/*
 				 * Transaction changes should be undone by the transaction
 				 * owner.  But we rollback those changes ourself instead of
@@ -818,6 +822,39 @@ o_btree_modify_handle_tuple_not_found(BTreeModifyInternalContext *context)
 	}
 }
 
+/*
+ * A rollback below may write a lock dispatch record, see page_item_rollback().
+ * Make sure undo for it is reserved on top of what the modification itself
+ * may still take.  In practice that needs no wait: o_btree_modify() reserved
+ * twice the largest record up front.  When it does, wait with the page
+ * unlocked, find the page again and return false: the caller has to look at
+ * the tuple anew.
+ */
+static bool
+reserve_undo_for_lock_dispatch(BTreeModifyInternalContext *context)
+{
+	OBTreeFindPageContext *pageFindContext = context->pageFindContext;
+	BTreeDescr *desc = pageFindContext->desc;
+	Size		size = O_UPDATE_MAX_UNDO_SIZE + O_LOCK_DISPATCH_UNDO_SIZE;
+	OFindPageResult result PG_USED_FOR_ASSERTS_ONLY;
+
+	if (desc->undoType == UndoLogNone ||
+		get_reserved_undo_size(desc->undoType) >= size ||
+		reserve_undo_size_extended(desc->undoType, size, false))
+		return true;
+
+	unlock_page(pageFindContext->items[pageFindContext->index].blkno);
+	reserve_undo_size(desc->undoType, size);
+	result = refind_page(pageFindContext,
+						 context->key,
+						 context->keyType,
+						 0,
+						 pageFindContext->items[pageFindContext->index].blkno,
+						 pageFindContext->items[pageFindContext->index].pageChangeCount);
+	Assert(result == OFindPageResultSuccess);
+	return false;
+}
+
 static bool
 o_btree_modify_item_rollback(BTreeModifyInternalContext *context)
 {
@@ -827,6 +864,22 @@ o_btree_modify_item_rollback(BTreeModifyInternalContext *context)
 	BTreePageItemLocator loc;
 	Page		page;
 	bool		applyResult;
+
+	if (!reserve_undo_for_lock_dispatch(context))
+	{
+		/*
+		 * The page was let go while waiting.  The version to roll back is
+		 * still ours, but what is above it may have changed: look again.
+		 */
+		blkno = pageFindContext->items[pageFindContext->index].blkno;
+		loc = pageFindContext->items[pageFindContext->index].locator;
+		page = O_GET_IN_MEMORY_PAGE(blkno);
+		context->conflictTupHdr =
+			*((BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(page, &loc));
+		context->conflictUndoLocation =
+			find_non_lock_only_undo_record(desc->undoType,
+										   &context->conflictTupHdr);
+	}
 
 	blkno = pageFindContext->items[pageFindContext->index].blkno;
 	loc = pageFindContext->items[pageFindContext->index].locator;
