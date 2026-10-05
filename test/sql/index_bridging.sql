@@ -1364,6 +1364,66 @@ UPDATE o_bridge_expr SET value = 'GAMMA' WHERE id = 2;
 SELECT id, value FROM o_bridge_expr ORDER BY id;
 RESET enable_seqscan;
 
+-- ON CONFLICT with a bridged index that is not an arbiter.  The bridged-index
+-- insertion call used to see every index of the result relation, so it also
+-- wrote OrioleDB's own non-arbiter secondary indexes -- which the ON CONFLICT
+-- loop then wrote again, met the row it had just inserted itself, and called
+-- a unique violation on (issue #1275); with a secondary arbiter the second
+-- write of the arbiter tripped a speculative conflict with ourselves instead.
+CREATE TABLE o_bridge_ioc_sk (
+	id integer,
+	part integer,
+	tenant text,
+	terms tsvector,
+	PRIMARY KEY (id, part),
+	UNIQUE (id, part, tenant)
+) USING orioledb;
+CREATE INDEX ON o_bridge_ioc_sk USING gin (terms);
+
+-- first insert into an empty table used to fail with a false 23505 on the
+-- secondary unique constraint
+INSERT INTO o_bridge_ioc_sk VALUES (1, 0, 'tenant-a', 'alpha'::tsvector)
+	ON CONFLICT (id, part) DO UPDATE
+	SET tenant = EXCLUDED.tenant, terms = EXCLUDED.terms;
+SELECT id, part, tenant FROM o_bridge_ioc_sk;
+
+-- a real conflict on the primary key arbiter takes the update path
+INSERT INTO o_bridge_ioc_sk VALUES (1, 0, 'tenant-b', 'beta'::tsvector)
+	ON CONFLICT (id, part) DO UPDATE
+	SET tenant = EXCLUDED.tenant, terms = EXCLUDED.terms;
+SELECT id, part, tenant FROM o_bridge_ioc_sk;
+
+-- the secondary unique constraint as the arbiter used to crash the backend
+INSERT INTO o_bridge_ioc_sk VALUES (2, 0, 'x', 'xx'::tsvector)
+	ON CONFLICT (id, part, tenant) DO UPDATE SET terms = EXCLUDED.terms;
+INSERT INTO o_bridge_ioc_sk VALUES (2, 0, 'x', 'yy'::tsvector)
+	ON CONFLICT (id, part, tenant) DO UPDATE SET terms = EXCLUDED.terms;
+SELECT id, part, tenant, terms::text FROM o_bridge_ioc_sk ORDER BY id, part;
+
+-- the bridged index is still maintained through all of the above
+SET enable_seqscan = off;
+SELECT id FROM o_bridge_ioc_sk WHERE terms @@ to_tsquery('simple', 'beta');
+SELECT id FROM o_bridge_ioc_sk WHERE terms @@ to_tsquery('simple', 'yy');
+SELECT id FROM o_bridge_ioc_sk WHERE terms @@ to_tsquery('simple', 'alpha');
+RESET enable_seqscan;
+
+-- a non-unique secondary index must not be written twice either: the doubled
+-- entry made every scan through it return the same row twice
+CREATE TABLE o_bridge_ioc_plainsk (
+	id int NOT NULL PRIMARY KEY,
+	tenant text,
+	tags int[]
+) USING orioledb;
+CREATE INDEX ON o_bridge_ioc_plainsk (tenant);
+CREATE INDEX ON o_bridge_ioc_plainsk USING gin (tags);
+
+INSERT INTO o_bridge_ioc_plainsk VALUES (1, 'a', ARRAY[1])
+	ON CONFLICT (id) DO UPDATE SET tenant = EXCLUDED.tenant;
+SET enable_seqscan = off;
+SELECT id, tenant FROM o_bridge_ioc_plainsk WHERE tenant = 'a';
+SELECT id FROM o_bridge_ioc_plainsk WHERE tags @> ARRAY[1];
+RESET enable_seqscan;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;

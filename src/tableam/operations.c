@@ -1147,6 +1147,23 @@ o_check_exclusion_constraint(OTableDescr *descr, OIndexDescr *index, TupleTableS
 }
 
 /*
+ * Whether this index of an OrioleDB table goes through the bridge rather
+ * than being one of OrioleDB's own B-tree indexes.
+ *
+ * Everything that is not a B-tree is bridged (GIN, GiST, BRIN, ...), and so
+ * is a B-tree explicitly created WITH (orioledb_index=off).  A B-tree with
+ * no reloptions is OrioleDB's own.
+ */
+static bool
+result_index_is_bridged(Relation indexRel)
+{
+	OBTOptions *options = (OBTOptions *) indexRel->rd_options;
+
+	return indexRel->rd_rel->relam != BTREE_AM_OID ||
+		(options && !options->orioledb_index);
+}
+
+/*
  * The arbiter indexes that go through the bridge, as an oid list.
  *
  * ON CONFLICT resolves conflicts on OrioleDB's own indexes by inserting into
@@ -1172,7 +1189,6 @@ bridged_arbiter_indexes(ResultRelInfo *resultRelInfo, List *arbiterIndexes,
 	{
 		Relation	indexRel = resultRelInfo->ri_IndexRelationDescs[i];
 		IndexInfo  *indexInfo = resultRelInfo->ri_IndexRelationInfo[i];
-		OBTOptions *options;
 
 		if (indexRel == NULL || indexInfo == NULL)
 			continue;
@@ -1181,9 +1197,7 @@ bridged_arbiter_indexes(ResultRelInfo *resultRelInfo, List *arbiterIndexes,
 			!list_member_oid(arbiterIndexes, RelationGetRelid(indexRel)))
 			continue;
 
-		options = (OBTOptions *) indexRel->rd_options;
-		if (indexRel->rd_rel->relam == BTREE_AM_OID &&
-			!(options && !options->orioledb_index))
+		if (!result_index_is_bridged(indexRel))
 			continue;
 
 		if (!indexInfo->ii_ReadyForInserts ||
@@ -1527,9 +1541,70 @@ o_tbl_insert_with_arbiter(Relation rel,
 				}
 			}
 
-			ExecInsertIndexTuples(resultRelInfo, slot, estate,
-								  false, true, &specConflict,
-								  arbiterIndexes, false);
+			/*
+			 * Insert into the bridged indexes only.
+			 *
+			 * ExecInsertIndexTuples() walks every index of the result
+			 * relation, but OrioleDB's own non-arbiter indexes are none of
+			 * its business here: the loop below writes them itself, and it
+			 * does so with the ON CONFLICT wait callbacks and undo/retry
+			 * handling that a bare index insert lacks.  Handing it the full
+			 * set makes it write those trees a second time through
+			 * orioledb_aminsert(), so the loop below then meets the row we
+			 * just inserted ourselves and reports a false unique violation
+			 * (issue #1275); an arbiter written a second time with
+			 * UNIQUE_CHECK_PARTIAL instead trips a speculative conflict with
+			 * ourselves.  Temporarily narrow the result relation to the
+			 * bridged indexes for the duration of the call.
+			 */
+			{
+				RelationPtr savedDescs = resultRelInfo->ri_IndexRelationDescs;
+				IndexInfo **savedInfos = resultRelInfo->ri_IndexRelationInfo;
+				int			savedNumIndices = resultRelInfo->ri_NumIndices;
+				RelationPtr bridgedDescs;
+				IndexInfo **bridgedInfos;
+				int			nBridged = 0;
+				int			ix;
+
+				bridgedDescs = (RelationPtr)
+					palloc(sizeof(Relation) * savedNumIndices);
+				bridgedInfos = (IndexInfo **)
+					palloc(sizeof(IndexInfo *) * savedNumIndices);
+
+				for (ix = 0; ix < savedNumIndices; ix++)
+				{
+					if (savedDescs[ix] != NULL && savedInfos[ix] != NULL &&
+						result_index_is_bridged(savedDescs[ix]))
+					{
+						bridgedDescs[nBridged] = savedDescs[ix];
+						bridgedInfos[nBridged] = savedInfos[ix];
+						nBridged++;
+					}
+				}
+
+				resultRelInfo->ri_NumIndices = nBridged;
+				resultRelInfo->ri_IndexRelationDescs = bridgedDescs;
+				resultRelInfo->ri_IndexRelationInfo = bridgedInfos;
+
+				PG_TRY();
+				{
+					ExecInsertIndexTuples(resultRelInfo, slot, estate,
+										  false, true, &specConflict,
+										  arbiterIndexes, false);
+				}
+				PG_CATCH();
+				{
+					resultRelInfo->ri_NumIndices = savedNumIndices;
+					resultRelInfo->ri_IndexRelationDescs = savedDescs;
+					resultRelInfo->ri_IndexRelationInfo = savedInfos;
+					PG_RE_THROW();
+				}
+				PG_END_TRY();
+
+				resultRelInfo->ri_NumIndices = savedNumIndices;
+				resultRelInfo->ri_IndexRelationDescs = savedDescs;
+				resultRelInfo->ri_IndexRelationInfo = savedInfos;
+			}
 
 			if (specConflict)
 			{
