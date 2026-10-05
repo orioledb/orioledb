@@ -85,9 +85,14 @@ class UndoReservedRaceTest(BaseTest):
 				bulk.commit()
 
 		try:
-			# Give the row an undo chain, so there is a chain to clean later.
+			# Leave a finished row-level lock inside the row's undo chain: the
+			# lock is taken on one version, another transaction updates the
+			# row on top of it, then both finish.
 			locker.begin()
-			locker.execute("UPDATE o_race SET v = v + 1 WHERE id = 1;")
+			locker.execute("SELECT * FROM o_race WHERE id = 1 FOR KEY SHARE;")
+			bulk.begin()
+			bulk.execute("UPDATE o_race SET v = v + 1 WHERE id = 1;")
+			bulk.commit()
 			locker.commit()
 
 			ctl.execute(
@@ -96,13 +101,9 @@ class UndoReservedRaceTest(BaseTest):
 			ctl.execute(
 			    "SELECT pg_stopevent_set('undo_write_after_reserve', 'true');")
 
-			# One transaction locks the tuple, a second queues behind it.  When
-			# the first finishes it is the waiter that strips the lock-only
-			# record from the chain -- clean_chain_has_locks_flag() ->
-			# undo_write() -- which is the path both events sit on.
-			locker.begin()
-			locker.execute("SELECT * FROM o_race WHERE id = 1 FOR UPDATE;")
-
+			# The next locker strips the finished lock-only record from the
+			# chain, which rewrites the header of the update's undo record --
+			# undo_write(), the path both events sit on.
 			def parker():
 				try:
 					park.begin()
@@ -114,8 +115,6 @@ class UndoReservedRaceTest(BaseTest):
 
 			thread = Thread(target=parker)
 			thread.start()
-			time.sleep(1.0)
-			locker.commit()
 
 			wait_parked("undo_write_before_reserve")
 

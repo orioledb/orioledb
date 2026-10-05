@@ -52,6 +52,221 @@ static void update_leaf_header_in_undo(UndoLogType undoType,
 									   UndoLocation location);
 
 /*
+ * Walking a tuple's undo chain for row-level locks.
+ *
+ * A reader following the chain for a version gets through a lock dispatch
+ * record without noticing it: the lock-only header points at the dispatch
+ * record's header, which is the version.  Whoever looks for locks follows the
+ * dispatch record's lock chain instead, and takes the dispatch record's
+ * version once the lock chain ends.  See BTreeLockDispatchUndoStackItem.
+ */
+typedef struct
+{
+	UndoLocation raw;			/* undoLocation as the header stores it */
+	UndoLocation inner;			/* dispatch record whose lockChain leads to
+								 * the header's target, or invalid */
+	UndoLocation outer;			/* the first dispatch record on the way */
+} LockChainLink;
+
+typedef struct
+{
+	/* dispatch record whose lock chain the walk is in, or invalid */
+	UndoLocation versionDispatch;
+} LockChainWalk;
+
+#define LOCK_DISPATCH_ITEM(location) \
+	((location) - offsetof(BTreeModifyUndoStackItem, tuphdr))
+#define LOCK_DISPATCH_CHAIN(location) \
+	(LOCK_DISPATCH_ITEM(location) + \
+	 offsetof(BTreeLockDispatchUndoStackItem, lockChain))
+
+/*
+ * If location is a lock dispatch record, places its lock chain into
+ * *lockChain and returns true.
+ */
+static bool
+lock_dispatch_get_chain(UndoLogType undoType, UndoLocation location,
+						UndoLocation *lockChain)
+{
+	UndoStackItem header;
+
+	if (!UndoLocationIsValid(location))
+		return false;
+	if (!undo_read_if_exists(undoType, LOCK_DISPATCH_ITEM(location),
+							 sizeof(header), (Pointer) &header))
+		return false;
+	if (header.type != LockDispatchUndoItemType)
+		return false;
+	return undo_read_if_exists(undoType, LOCK_DISPATCH_CHAIN(location),
+							   sizeof(*lockChain), (Pointer) lockChain);
+}
+
+/*
+ * Makes *hdr lead where a lock walker goes on: past the dispatch records a
+ * lock-only header points to, into their lock chain.  *link remembers the
+ * way, for lock_chain_unlink() and lock_chain_stored().
+ */
+static void
+lock_chain_resolve(UndoLogType undoType, BTreeLeafTuphdr *hdr,
+				   LockChainLink *link)
+{
+	UndoLocation lockChain;
+
+	link->raw = hdr->undoLocation;
+	link->inner = InvalidUndoLocation;
+	link->outer = InvalidUndoLocation;
+
+	if (!XACT_INFO_IS_LOCK_ONLY(hdr->xactInfo))
+		return;
+
+	while (lock_dispatch_get_chain(undoType, hdr->undoLocation, &lockChain))
+	{
+		if (!UndoLocationIsValid(link->outer))
+			link->outer = hdr->undoLocation;
+		link->inner = hdr->undoLocation;
+		hdr->undoLocation = lockChain;
+	}
+}
+
+/*
+ * Moves *hdr, resolved, to the header it leads to and resolves that one.
+ * *location gets where the new header is stored, *raw the header the
+ * record holds -- they differ when the record ends the lock chain of a
+ * dispatch record, which then gives its version instead.  Returns false if
+ * the undo is gone.
+ */
+static bool
+lock_chain_step(UndoLogType undoType, LockChainWalk *walk,
+				BTreeLeafTuphdr *hdr, LockChainLink *link,
+				UndoLocation *location, BTreeLeafTuphdr *raw)
+{
+	UndoLocation loc = hdr->undoLocation;
+	BTreeLeafTuphdr next = {0, 0};
+
+	if (UndoLocationIsValid(link->outer) &&
+		!UndoLocationIsValid(walk->versionDispatch))
+		walk->versionDispatch = link->outer;
+
+	if (!UndoLocationIsValid(loc) ||
+		!undo_read_if_exists(undoType, loc, sizeof(next), (Pointer) &next))
+		return false;
+	if (raw)
+		*raw = next;
+
+	if (UndoLocationIsValid(walk->versionDispatch) &&
+		!XACT_INFO_IS_LOCK_ONLY(next.xactInfo))
+	{
+		loc = walk->versionDispatch;
+		walk->versionDispatch = InvalidUndoLocation;
+		if (!undo_read_if_exists(undoType, loc, sizeof(next), (Pointer) &next))
+			return false;
+	}
+
+	*hdr = next;
+	*location = loc;
+	lock_chain_resolve(undoType, hdr, link);
+	return true;
+}
+
+/*
+ * Takes the lock record the resolved lock-only header *cur leads to out of
+ * the chain: *cur takes over *raw, what the record holds.  The caller then
+ * stores lock_chain_stored() where *cur came from.
+ *
+ * A dispatch record on the way stays, so that the page keeps leading to the
+ * version it holds: the lock goes from its lock chain instead, and once no
+ * lock is left there *cur becomes the version.
+ */
+static void
+lock_chain_unlink(UndoLogType undoType, BTreeLeafTuphdr *cur,
+				  LockChainLink *link, const BTreeLeafTuphdr *raw)
+{
+	if (!UndoLocationIsValid(link->outer))
+	{
+		cur->xactInfo = raw->xactInfo;
+		cur->undoLocation = raw->undoLocation;
+		cur->chainHasLocks = raw->chainHasLocks;
+	}
+	else if (XACT_INFO_IS_LOCK_ONLY(raw->xactInfo))
+	{
+		UndoLocation lockChain = raw->undoLocation;
+
+		(void) undo_write_if_exists(undoType, LOCK_DISPATCH_CHAIN(link->inner),
+									sizeof(lockChain), (Pointer) &lockChain);
+		cur->xactInfo = raw->xactInfo;
+		cur->undoLocation = link->raw;
+		cur->chainHasLocks = raw->chainHasLocks;
+	}
+	else
+	{
+		BTreeLeafTuphdr version = {0, 0};
+
+		if (!undo_read_if_exists(undoType, link->outer, sizeof(version),
+								 (Pointer) &version))
+			version = *raw;
+		cur->xactInfo = version.xactInfo;
+		cur->undoLocation = version.undoLocation;
+		cur->chainHasLocks = version.chainHasLocks;
+	}
+	lock_chain_resolve(undoType, cur, link);
+}
+
+/*
+ * The header to store for the resolved *cur.
+ */
+static BTreeLeafTuphdr
+lock_chain_stored(const BTreeLeafTuphdr *cur, const LockChainLink *link)
+{
+	BTreeLeafTuphdr stored = *cur;
+
+	stored.undoLocation = link->raw;
+	return stored;
+}
+
+/*
+ * Writes a lock dispatch record whose version is *version and whose lock
+ * chain starts at lockChain.  The caller must have the undo reserved.
+ */
+static UndoLocation
+make_lock_dispatch(BTreeDescr *desc, BTreeLeafTuphdr *version,
+				   UndoLocation lockChain, OInMemoryBlkno blkno,
+				   uint32 pageChangeCount)
+{
+	BTreeLockDispatchUndoStackItem *item;
+	UndoLocation location;
+
+	item = (BTreeLockDispatchUndoStackItem *) get_undo_record(desc->undoType,
+															  &location,
+															  O_LOCK_DISPATCH_UNDO_SIZE);
+	memset(item, 0, sizeof(*item));
+	item->base.header.type = LockDispatchUndoItemType;
+	item->base.header.indexType = desc->type;
+	item->base.header.itemSize = sizeof(*item);
+	item->base.header.prev = InvalidUndoLocation;
+	item->base.action = BTreeOperationLock;
+	item->base.oids = desc->oids;
+	item->base.blkno = blkno;
+	item->base.pageChangeCount = pageChangeCount;
+	item->base.tuphdr = *version;
+	item->lockChain = lockChain;
+	release_reserved_undo_location(desc->undoType);
+
+	return location + offsetof(BTreeModifyUndoStackItem, tuphdr);
+}
+
+/*
+ * A dispatch record is on no undo stack, so this is never called.
+ */
+void
+lock_dispatch_undo_callback(UndoLogType undoType, UndoLocation location,
+							UndoStackItem *baseItem, OXid oxid,
+							OUndoCallbackStage stage, bool changeCountsValid)
+{
+	elog(PANIC, "lock dispatch undo record at " UINT64_FORMAT " is on an undo stack",
+		 location);
+}
+
+/*
  * Add page image to the undo log.
  */
 UndoLocation
@@ -158,6 +373,7 @@ page_item_rollback(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 	Pointer		item;
 	BTreeLeafTuphdr *tuphdr,
 				nonLockTuphdr;
+	UndoLocation freshDispatch = InvalidUndoLocation;
 
 	item = BTREE_PAGE_LOCATOR_GET_ITEM(p, locator);
 	tuphdr = (BTreeLeafTuphdr *) item;
@@ -262,14 +478,37 @@ retry:
 		{
 			*nonLockTuphdrPtr = *tuphdr = prev_header;
 		}
+		else if (UndoLocationIsValid(freshDispatch))
+		{
+			/*
+			 * We wrote this dispatch record in this very call, with reads of
+			 * the page blocked: nobody can have followed it yet.
+			 */
+			tuphdr->deleted = prev_header.deleted;
+			*nonLockTuphdrPtr = prev_header;
+			update_leaf_header_in_undo(desc->undoType, &prev_header,
+									   freshDispatch);
+		}
 		else
 		{
+			/*
+			 * Row-level locks are above the version.  Don't rewrite the
+			 * lock-only records to lead to the restored version: a reader
+			 * working from a copy of the page taken before still follows them
+			 * to the version its copy holds.  Lead the page to a dispatch
+			 * record instead.  See BTreeLockDispatchUndoStackItem.
+			 *
+			 * The caller must have reserved undo for the dispatch record: we
+			 * hold the page locked, and can't wait for undo space here.
+			 */
+			Assert(get_reserved_undo_size(desc->undoType) >= O_LOCK_DISPATCH_UNDO_SIZE);
 			tuphdr->deleted = prev_header.deleted;
-			nonLockTuphdrPtr->undoLocation = prev_header.undoLocation;
-			nonLockTuphdrPtr->xactInfo = prev_header.xactInfo;
-			update_leaf_header_in_undo(desc->undoType,
-									   nonLockTuphdrPtr,
-									   nonLockUndoLocation);
+			freshDispatch = make_lock_dispatch(desc, &prev_header,
+											   tuphdr->undoLocation,
+											   OInvalidInMemoryBlkno,
+											   InvalidOPageChangeCount);
+			tuphdr->undoLocation = freshDispatch;
+			*nonLockTuphdrPtr = prev_header;
 		}
 
 		BTREE_PAGE_SET_ITEM_FLAGS(p, locator, tuple.formatFlags);
@@ -278,7 +517,8 @@ retry:
 		if ((UndoLocationIsValid(nonLockUndoLocation) ||
 			 !XACT_INFO_IS_FINISHED(prev_header.xactInfo)) && wholeChain)
 		{
-			/* Find the next item in the chain */
+			/* Find the next item in the chain, starting from the page again */
+			*nonLockTuphdrPtr = *tuphdr;
 			nonLockUndoLocation = find_non_lock_only_undo_record(desc->undoType,
 																 nonLockTuphdrPtr);
 			if (XACT_INFO_IS_FINISHED(nonLockTuphdrPtr->xactInfo))
@@ -535,6 +775,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	OBTreeFindPageContext context;
 	BTreeKeyType keyType = item->action == BTreeOperationUpdate ? BTreeKeyLeafTuple : BTreeKeyNonLeafKey;
 	OFindPageResult findResult;
+	bool		undoReserved = false;
 
 	Assert(stage == OUndoCallbackStageAbort);
 
@@ -553,12 +794,13 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 		STOPEVENT(STOPEVENT_APPLY_UNDO, params);
 	}
 
+	if (!changeCountsValid)
+		item->pageChangeCount = InvalidOPageChangeCount;
+
+retry:
 	init_page_find_context(&context, desc,
 						   COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_MODIFY);
-
-	if (!changeCountsValid)
-		item->pageChangeCount = InvalidOPageChangeCount;
 
 	o_set_syscache_hooks();
 	findResult = refind_page(&context, (Pointer) &tuple, keyType,
@@ -570,6 +812,8 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 		 * BTree can be already deleted and cleaned by
 		 * btree_relnode_undo_callback().
 		 */
+		if (undoReserved)
+			release_undo_size(desc->undoType);
 		return;
 	}
 	Assert(findResult == OFindPageResultSuccess);
@@ -595,6 +839,8 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 		 * already "undone" earlier.
 		 */
 		unlock_page(blkno);
+		if (undoReserved)
+			release_undo_size(desc->undoType);
 		return;
 	}
 
@@ -609,7 +855,28 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 		 * this might happen if operation was already "undone" earlier.
 		 */
 		unlock_page(blkno);
+		if (undoReserved)
+			release_undo_size(desc->undoType);
 		return;
+	}
+
+	/*
+	 * Rolling back a version with row-level locks above writes a lock
+	 * dispatch record.  Reserve undo for it, which we can only wait for with
+	 * the page unlocked.
+	 */
+	if (UndoLocationIsValid(nonLockUndoLocation) &&
+		get_reserved_undo_size(desc->undoType) < O_LOCK_DISPATCH_UNDO_SIZE)
+	{
+		if (!reserve_undo_size_extended(desc->undoType, O_LOCK_DISPATCH_UNDO_SIZE,
+										false))
+		{
+			unlock_page(blkno);
+			reserve_undo_size(desc->undoType, O_LOCK_DISPATCH_UNDO_SIZE);
+			undoReserved = true;
+			goto retry;
+		}
+		undoReserved = true;
 	}
 
 	page_block_reads(blkno);
@@ -623,6 +890,8 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 		(void) page_item_rollback(desc, p, loc, false,
 								  &nonLockTupHdr, nonLockUndoLocation);
 	}
+	if (undoReserved)
+		release_undo_size(desc->undoType);
 
 	MARK_DIRTY(desc, blkno);
 	if (blkno != desc->rootInfo.rootPageBlkno && is_page_too_sparse(desc, p))
@@ -656,6 +925,8 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 	UndoLocation tuphdrUndoLocation,
 				lastLockOnlyUndoLocation = InvalidUndoLocation;
 	OFindPageResult findResult;
+	LockChainLink link;
+	LockChainWalk walk = {InvalidUndoLocation};
 
 	Assert(stage == OUndoCallbackStageAbort);
 
@@ -714,20 +985,24 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 
 	page_tuphdr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, locptr);
 	tuphdr = *page_tuphdr;
+	lock_chain_resolve(desc->undoType, &tuphdr, &link);
 	tuphdrUndoLocation = InvalidUndoLocation;
 
 	while (!XACT_INFO_IS_FINISHED(tuphdr.xactInfo) || tuphdr.chainHasLocks)
 	{
 		bool		delete_record = false;
-		UndoLocation undoLocation = tuphdr.undoLocation;
-		BTreeLeafTuphdr prev_tuphdr = tuphdr;
+		BTreeLeafTuphdr prev_tuphdr = tuphdr,
+					raw_tuphdr;
+		LockChainLink prevLink = link;
+		UndoLocation prevLocation;
 
 		/*
 		 * A concurrent transaction may have committed and released its undo
 		 * while we are walking the chain.  Treat this the same as reaching a
 		 * committed record — stop walking.
 		 */
-		if (!get_prev_leaf_header_from_undo_if_exists(desc->undoType, &prev_tuphdr))
+		if (!lock_chain_step(desc->undoType, &walk, &prev_tuphdr, &prevLink,
+							 &prevLocation, &raw_tuphdr))
 			break;
 
 		if (XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo) && XACT_INFO_GET_OXID(tuphdr.xactInfo) == oxid)
@@ -738,27 +1013,28 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 
 		if (delete_record)
 		{
+			BTreeLeafTuphdr stored;
+
 			if (!tuphdr.chainHasLocks &&
 				XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo))
 				clean_chain_has_locks_flag(desc->undoType,
 										   lastLockOnlyUndoLocation,
 										   page_tuphdr, blkno);
 
+			lock_chain_unlink(desc->undoType, &tuphdr, &link, &raw_tuphdr);
+			stored = lock_chain_stored(&tuphdr, &link);
 			if (!UndoLocationIsValid(tuphdrUndoLocation))
 			{
 				page_block_reads(blkno);
-				page_tuphdr->xactInfo = prev_tuphdr.xactInfo;
-				page_tuphdr->undoLocation = prev_tuphdr.undoLocation;
-				page_tuphdr->chainHasLocks = prev_tuphdr.chainHasLocks;
-				tuphdr = *page_tuphdr;
+				page_tuphdr->xactInfo = stored.xactInfo;
+				page_tuphdr->undoLocation = stored.undoLocation;
+				page_tuphdr->chainHasLocks = stored.chainHasLocks;
 				MARK_DIRTY(desc, blkno);
 			}
 			else
 			{
-				tuphdr.xactInfo = prev_tuphdr.xactInfo;
-				tuphdr.undoLocation = prev_tuphdr.undoLocation;
-				tuphdr.chainHasLocks = prev_tuphdr.chainHasLocks;
-				update_leaf_header_in_undo_if_exists(desc->undoType, &tuphdr,
+				stored.formatFlags = tuphdr.formatFlags;
+				update_leaf_header_in_undo_if_exists(desc->undoType, &stored,
 													 tuphdrUndoLocation);
 			}
 		}
@@ -767,8 +1043,8 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 			lastLockOnlyUndoLocation = tuphdrUndoLocation;
 
 		tuphdr = prev_tuphdr;
-		tuphdrUndoLocation = undoLocation;
-		undoLocation = tuphdr.undoLocation;
+		link = prevLink;
+		tuphdrUndoLocation = prevLocation;
 	}
 	unlock_page(blkno);
 }
@@ -1835,6 +2111,15 @@ clean_chain_has_locks_flag(UndoLogType undoType, UndoLocation location,
 	 */
 	while (UndoLocationIsValid(location) && location >= retainedUndoLocation)
 	{
+		UndoLocation lockChain;
+
+		/*
+		 * Locks under a lock dispatch record are not on the way the raw
+		 * pointers lead.  A flag left set only costs a longer walk.
+		 */
+		if (lock_dispatch_get_chain(undoType, location, &lockChain))
+			break;
+
 		if (!undo_read_if_exists(undoType, location, sizeof(tuphdr), (Pointer) &tuphdr))
 			break;
 
@@ -1885,8 +2170,12 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location(undoType);
 	bool		foundFinal;
 	bool		result = false;
+	LockChainLink curLink;
+	LockChainWalk walk = {InvalidUndoLocation};
 
-	finalTuphdr = curTuphdr = *pageTuphdr;
+	curTuphdr = *pageTuphdr;
+	lock_chain_resolve(undoType, &curTuphdr, &curLink);
+	finalTuphdr = curTuphdr;
 	finalUndoLocation = curUndoLocation = InvalidUndoLocation;
 	lastLockOnlyUndoLocation = InvalidUndoLocation;
 	xactInfo = curTuphdr.xactInfo;
@@ -1988,10 +2277,18 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 
 		if (delete_record && undoLocation >= retainedUndoLocation)
 		{
-			BTreeLeafTuphdr prev_tuphdr;
+			BTreeLeafTuphdr prev_tuphdr,
+						raw_tuphdr,
+						newTuphdr,
+						stored;
+			LockChainLink prevLink = curLink,
+						newLink = curLink;
+			LockChainWalk peek = walk;
+			UndoLocation prevLocation;
 
 			prev_tuphdr = curTuphdr;
-			if (!get_prev_leaf_header_from_undo_if_exists(undoType, &prev_tuphdr))
+			if (!lock_chain_step(undoType, &peek, &prev_tuphdr, &prevLink,
+								 &prevLocation, &raw_tuphdr))
 			{
 				/*
 				 * Undo gone — end of chain.  Return like the !delete_record
@@ -2014,12 +2311,36 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				}
 				return result;
 			}
+			newTuphdr = curTuphdr;
+			lock_chain_unlink(undoType, &newTuphdr, &newLink, &raw_tuphdr);
+			stored = lock_chain_stored(&newTuphdr, &newLink);
+
+			/*
+			 * The header now stands where it stood: go on from there, never
+			 * writing into the record taken out.  Readers of an older copy of
+			 * the page still follow it.
+			 */
 			if (!UndoLocationIsValid(curUndoLocation))
 			{
+				bool		lastLock = XACT_INFO_IS_LOCK_ONLY(curTuphdr.xactInfo) &&
+					!curTuphdr.chainHasLocks;
+
 				page_block_reads(blkno);
-				pageTuphdr->xactInfo = prev_tuphdr.xactInfo;
-				pageTuphdr->undoLocation = prev_tuphdr.undoLocation;
-				pageTuphdr->chainHasLocks = prev_tuphdr.chainHasLocks;
+				pageTuphdr->xactInfo = stored.xactInfo;
+				pageTuphdr->undoLocation = stored.undoLocation;
+				pageTuphdr->chainHasLocks = stored.chainHasLocks;
+				curTuphdr = newTuphdr;
+				curLink = newLink;
+
+				/* That was the last lock: no chain below has any */
+				if (lastLock)
+				{
+					clean_chain_has_locks_flag(undoType,
+											   lastLockOnlyUndoLocation,
+											   pageTuphdr,
+											   blkno);
+					lastLockOnlyUndoLocation = InvalidUndoLocation;
+				}
 			}
 			else
 			{
@@ -2037,11 +2358,10 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 					lastLockOnlyUndoLocation = InvalidUndoLocation;
 				}
 
-				curTuphdr.xactInfo = prev_tuphdr.xactInfo;
-				curTuphdr.undoLocation = prev_tuphdr.undoLocation;
-				curTuphdr.chainHasLocks = prev_tuphdr.chainHasLocks;
+				curTuphdr = newTuphdr;
+				curLink = newLink;
 				update_leaf_header_in_undo_if_exists(undoType,
-													 &curTuphdr,
+													 &stored,
 													 curUndoLocation);
 
 			}
@@ -2085,7 +2405,8 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			 * A concurrent commit may have released the undo.  Treat as end
 			 * of chain.
 			 */
-			if (!get_prev_leaf_header_from_undo_if_exists(undoType, &curTuphdr))
+			if (!lock_chain_step(undoType, &walk, &curTuphdr, &curLink,
+								 &curUndoLocation, NULL))
 			{
 				if (!result)
 				{
@@ -2096,7 +2417,6 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			}
 		}
 
-		curUndoLocation = undoLocation;
 		xactInfo = curTuphdr.xactInfo;
 		xactMode = XACT_INFO_GET_LOCK_MODE(xactInfo);
 		if (ROW_LOCKS_CONFLICT(xactMode, mode))
@@ -2155,84 +2475,91 @@ remove_redundant_row_locks(BTreeLeafTuphdr *pageTuphdr,
 						   OXid my_oxid, OInMemoryBlkno blkno,
 						   UndoLocation savepointUndoLocation)
 {
-	BTreeLeafTuphdr tuphdr = *pageTuphdr;
-	OTupleXactInfo xactInfo = tuphdr.xactInfo;
-	bool		chainHasLocks = tuphdr.chainHasLocks,
-				xactIsFinished = XACT_INFO_IS_FINISHED(xactInfo);
-	UndoLocation undoLocation = tuphdr.undoLocation,
-				prevUndoLoc = InvalidUndoLocation,
+	BTreeLeafTuphdr cur = *pageTuphdr;
+	LockChainLink curLink;
+	LockChainWalk walk = {InvalidUndoLocation};
+	UndoLocation curLocation = InvalidUndoLocation,
 				lastLockOnlyUndoLocation = InvalidUndoLocation;
 	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location(undoType);
-	int			prevFormatFlags = 0;
 
-	while ((!xactIsFinished || chainHasLocks) &&
-		   undoLocation >= retainedUndoLocation &&
-		   UndoLocationIsValid(undoLocation))
+	lock_chain_resolve(undoType, &cur, &curLink);
+
+	while ((!XACT_INFO_IS_FINISHED(cur.xactInfo) || cur.chainHasLocks) &&
+		   UndoLocationIsValid(cur.undoLocation) &&
+		   cur.undoLocation >= retainedUndoLocation)
 	{
+		BTreeLeafTuphdr next = cur,
+					raw;
+		LockChainLink nextLink = curLink;
+		LockChainWalk peek = walk;
+		UndoLocation nextLocation;
+		UndoLocation target = cur.undoLocation;
+
 		/*
 		 * A concurrent commit may have released the undo.  Treat as end of
 		 * chain.
 		 */
-		if (!get_prev_leaf_header_from_undo_if_exists(undoType, &tuphdr))
+		if (!lock_chain_step(undoType, &peek, &next, &nextLink,
+							 &nextLocation, &raw))
 			break;
 
-		if (XACT_INFO_IS_LOCK_ONLY(xactInfo) && XACT_INFO_GET_OXID(xactInfo) == my_oxid)
+		if (XACT_INFO_IS_LOCK_ONLY(cur.xactInfo) &&
+			XACT_INFO_GET_OXID(cur.xactInfo) == my_oxid)
 		{
-			bool		delete_record = false;
+			BTreeLeafTuphdr stored;
 
-			if (!UndoLocationIsValid(undoLocation) || !UNDO_REC_EXISTS(undoType, undoLocation))
+			if (!UNDO_REC_EXISTS(undoType, target))
 				break;
 
-			if (XACT_INFO_GET_LOCK_MODE(xactInfo) <= mode &&
+			if (XACT_INFO_GET_LOCK_MODE(cur.xactInfo) <= mode &&
 				(!UndoLocationIsValid(savepointUndoLocation) ||
-				 (UndoLocationIsValid(undoLocation) &&
-				  undoLocation >= savepointUndoLocation)))
-				delete_record = true;
-
-			if (delete_record)
+				 target >= savepointUndoLocation))
 			{
-				if (*conflictTupHdrUndoLocation == undoLocation)
+				/*
+				 * Update chainHasLocks flag of the next undo records if
+				 * needed.
+				 */
+				if (UndoLocationIsValid(curLocation) && !cur.chainHasLocks)
+					clean_chain_has_locks_flag(undoType,
+											   lastLockOnlyUndoLocation,
+											   pageTuphdr,
+											   blkno);
+
+				/*
+				 * The header now stands where it stood: look at it again
+				 * there, never writing into the record taken out.  Readers of
+				 * an older copy of the page still follow it.
+				 */
+				lock_chain_unlink(undoType, &cur, &curLink, &raw);
+				stored = lock_chain_stored(&cur, &curLink);
+				if (*conflictTupHdrUndoLocation == target)
 				{
-					*conflictTuphdrPtr = tuphdr;
-					*conflictTupHdrUndoLocation = prevUndoLoc;
+					*conflictTuphdrPtr = cur;
+					*conflictTupHdrUndoLocation = curLocation;
 				}
-				if (!UndoLocationIsValid(prevUndoLoc))
+				if (!UndoLocationIsValid(curLocation))
 				{
 					page_block_reads(blkno);
-					pageTuphdr->xactInfo = tuphdr.xactInfo;
-					pageTuphdr->undoLocation = tuphdr.undoLocation;
+					pageTuphdr->xactInfo = stored.xactInfo;
+					pageTuphdr->undoLocation = stored.undoLocation;
 				}
 				else
-				{
-					/*
-					 * Update chainHasLocks flag of the next undo records if
-					 * needed.
-					 */
-					if (XACT_INFO_IS_LOCK_ONLY(xactInfo) && !chainHasLocks)
-					{
-						clean_chain_has_locks_flag(undoType,
-												   lastLockOnlyUndoLocation,
-												   pageTuphdr,
-												   blkno);
-					}
-					tuphdr.formatFlags = prevFormatFlags;
-					update_leaf_header_in_undo_if_exists(undoType, &tuphdr, prevUndoLoc);
-				}
+					update_leaf_header_in_undo_if_exists(undoType, &stored,
+														 curLocation);
+				continue;
 			}
 		}
 
 		/*
 		 * Update last location of lock-only record.
 		 */
-		if (XACT_INFO_IS_LOCK_ONLY(xactInfo))
-			lastLockOnlyUndoLocation = prevUndoLoc;
+		if (XACT_INFO_IS_LOCK_ONLY(cur.xactInfo))
+			lastLockOnlyUndoLocation = curLocation;
 
-		prevUndoLoc = undoLocation;
-		prevFormatFlags = tuphdr.formatFlags;
-		xactInfo = tuphdr.xactInfo;
-		xactIsFinished = XACT_INFO_IS_FINISHED(xactInfo);
-		undoLocation = tuphdr.undoLocation;
-		chainHasLocks = tuphdr.chainHasLocks;
+		walk = peek;
+		cur = next;
+		curLink = nextLink;
+		curLocation = nextLocation;
 	}
 }
 
