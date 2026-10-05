@@ -58,6 +58,7 @@ OBJS = src/btree/btree.o \
 	   src/recovery/logical.o \
 	   src/recovery/recovery.o \
 	   src/recovery/wal.o \
+	   src/recovery/wal_partial.o \
 	   src/recovery/wal_reader.o \
 	   src/recovery/worker.o \
 	   src/rewind/rewind.o \
@@ -278,6 +279,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/seq_scan_undo_test.py \
 						test/t/temp_local_pool_test.py \
 						test/t/wal_savepoint_buffer_test.py \
+						test/t/wal_partial_update_test.py \
 						test/t/toast_index_test.py \
 						test/t/trigger_test.py \
 						test/t/undo_cleanup_test.py \

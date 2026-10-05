@@ -15,10 +15,12 @@
 
 #include "orioledb.h"
 
+#include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "catalog/sys_trees.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "recovery/wal_partial.h"
 #include "recovery/wal_record.h"
 #include "tableam/descr.h"
 #include "transam/oxid.h"
@@ -109,7 +111,9 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	}
 
 	Assert(!is_recovery_process());
-	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
+	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE ||
+		   rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT ||
+		   rec_type == WAL_REC_UPDATE_PARTIAL);
 	Assert(!O_TUPLE_IS_NULL(tuple));
 
 	write_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
@@ -1056,6 +1060,47 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident,
 
 	if (call_pfree1)
 		pfree(wal_record1.data);
+}
+
+/*
+ * Makes WAL record for an update of a table row from oldTuple, as stored in
+ * the primary index, to tuple.
+ *
+ * Below wal_level = logical only replay reads the record, so it can carry the
+ * changed fields alone, see src/recovery/wal_partial.c.  oldWalTuple is what
+ * a full record carries as the old tuple.
+ */
+void
+o_wal_update_row(OIndexDescr *primary, OTuple tuple, OTuple oldTuple,
+				 OTuple oldWalTuple, char relreplident, uint32 version)
+{
+	BTreeDescr *desc = &primary->desc;
+
+	if (!XLogLogicalInfoActive() &&
+		relreplident != REPLICA_IDENTITY_FULL &&
+		!primary->bridging && !primary->primaryIsCtid &&
+		!O_TUPLE_IS_NULL(oldTuple))
+	{
+		StringInfoData buf;
+		OTuple		payload;
+
+		initStringInfo(&buf);
+		if (o_wal_partial_update_payload(primary, version, oldTuple, tuple,
+										 &buf) &&
+			buf.len < o_btree_len(desc, tuple, OTupleLength))
+		{
+			payload.formatFlags = 0;
+			payload.data = buf.data;
+			add_modify_wal_record(WAL_REC_UPDATE_PARTIAL, desc, payload,
+								  buf.len, relreplident, version,
+								  O_TABLE_INVALID_VERSION);
+			pfree(buf.data);
+			return;
+		}
+		pfree(buf.data);
+	}
+
+	o_wal_update(desc, tuple, oldWalTuple, relreplident, version);
 }
 
 /*

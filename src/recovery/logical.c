@@ -1328,6 +1328,16 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				break;
 			}
 
+		case WAL_REC_UPDATE_PARTIAL:
+
+			/*
+			 * Only written below wal_level = logical, and a logical slot does
+			 * not let the server start there.
+			 */
+			elog(ERROR, "cannot decode a partial update record at %X/%X",
+				 LSN_FORMAT_ARGS(ctx->xlogRecPtr));
+			break;
+
 		default:
 			break;
 	}

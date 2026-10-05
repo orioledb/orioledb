@@ -330,6 +330,7 @@ wal_desc_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_UPDATE:
 		case WAL_REC_DELETE:
 		case WAL_REC_REINSERT:
+		case WAL_REC_UPDATE_PARTIAL:
 			appendStringInfo(ctx->buf, " ([ %u %u %u ]);",
 							 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode);
 			break;

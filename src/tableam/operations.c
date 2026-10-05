@@ -2003,9 +2003,20 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 				primary->desc.storageType == BTreeStoragePersistence)
 			{
 				OTuple		final_tup = tts_orioledb_form_tuple(slot, descr);
+				OTableSlot *oldOSlot = (OTableSlot *) oldSlot;
+				OTuple		oldTup;
 
-				elog(DEBUG3, "CALL o_wal_update");
-				o_wal_update(&primary->desc, final_tup, oldWalTuple, rel->rd_rel->relreplident, descr->version);
+				/* The old row as the primary index stored it, if we have it */
+				if (oldOSlot->descr == descr &&
+					oldOSlot->ixnum == PrimaryIndexNumber &&
+					oldOSlot->leafTuple)
+					oldTup = oldOSlot->tuple;
+				else
+					O_TUPLE_SET_NULL(oldTup);
+
+				elog(DEBUG3, "CALL o_wal_update_row");
+				o_wal_update_row(primary, final_tup, oldTup, oldWalTuple,
+								 rel->rd_rel->relreplident, descr->version);
 			}
 
 			if (oldWalTupleAllocated)
