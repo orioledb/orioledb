@@ -1721,6 +1721,7 @@ class IndexBridgingTest(BaseTest):
 		finally:
 			rr.close()
 		node.stop()
+
 	def test_bridge_vacuum_keeps_entries_of_old_snapshot(self):
 		"""
 		VACUUM removes a dead bridge entry together with the bridged
