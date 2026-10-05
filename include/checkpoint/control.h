@@ -77,6 +77,9 @@ typedef struct
 
 #define CONTROL_FILENAME    ORIOLEDB_DATA_DIR"/control"
 
+#define REWIND_KEYS_FILENAME_FORMAT	ORIOLEDB_DATA_DIR"/rewind_keys_%08X%08X"
+#define REWIND_KEYS_MAGIC	0x4F524B31	/* "ORK1" */
+
 #define GetCheckpointableUndoLog(i) \
 	(AssertMacro((i) >= 0 && (i) < 2), \
 		(i) == 0 ? UndoLogRegular : UndoLogSystem)

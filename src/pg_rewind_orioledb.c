@@ -907,6 +907,155 @@ orioledb_process_row_map(OrioledbKeyMap *orioledb_map, const char *argv0,
 	patch_orioledb_control_file(datadir, lastXid);
 }
 
+/* Read u32 by address, advance the address on sizeof(u32).  */
+static uint32
+read_ntoh32(char **ptr)
+{
+	uint32		u32data;
+
+	memcpy(&u32data, *ptr, sizeof(u32data));
+	*ptr += sizeof(u32data);
+	return pg_ntoh32(u32data);
+}
+
+/*
+ * Add the keys of a rewind keys file (see rewind_keys_save()) to the key map.
+ * Returns the number of keys.
+ */
+static int
+add_rewind_keys(OrioledbKeyMap *map, char *ptr, char *end,
+				const char *what)
+{
+	int			nkeys = 0;
+
+	if (end - ptr < (int) sizeof(uint32) || read_ntoh32(&ptr) != REWIND_KEYS_MAGIC)
+		pg_fatal("unexpected contents of %s", what);
+
+	while (ptr < end)
+	{
+		OrioledbTreeKey tree_key = { 0 };
+		uint8		formatFlags;
+		uint32		len;
+
+		if (end - ptr < (int) (6 * sizeof(uint32) + sizeof(uint8)))
+			pg_fatal("%s is truncated", what);
+
+		tree_key.type = (OIndexType) read_ntoh32(&ptr);
+		tree_key.datoid = read_ntoh32(&ptr);
+		tree_key.reloid = read_ntoh32(&ptr);
+		tree_key.relnode = read_ntoh32(&ptr);
+		tree_key.spcoid = read_ntoh32(&ptr);
+
+		formatFlags = *(uint8 *) ptr;
+		ptr += sizeof(uint8);
+
+		/* Get the length of key and check the rest of block.  */
+		len = read_ntoh32(&ptr);
+		if (end - ptr < (int) len)
+			pg_fatal("%s is truncated", what);
+
+		orioledb_key_map_add_tree(map, tree_key);
+		map->tree_key = tree_key;
+		orioledb_key_map_add_key(map, create_orioledb_key(len, ptr, formatFlags));
+		ptr += len;
+		nkeys++;
+	}
+
+	return nkeys;
+}
+
+
+/*
+ * Add the keys of the rows the promotion at the divergence point rolled
+ * back.  The target could commit the transaction (let T) after the divergence
+ * point:
+ *                                              [A: COMMIT T]
+ *                                                    v
+ *                                            ------- * ------ (A: old primary)
+ *                                           /
+ * ----- * -------- | ----------- * ---------
+ *       ^          ^             ^          \
+ *  [T begins] [startpoint] [switchpoint]     -- * --- (B: promoted)
+ *                                               ^
+ *                                [B: recovery_finish(), rolls T back]
+ *
+ * We can't easily roll the already-committed transaction back.  The promotion
+ * is usually the source's, but it is the target's when a promoted standby is
+ * rewound back into its old primary.  So here we look at both: the promoted
+ * server and its standbys keep the keys under the switchpoint, which is the
+ * divergence point.
+ */
+static void
+add_divergence_rewind_keys(OrioledbKeyMap *orioledb_map, PGconn *conn,
+						   const char *datadir_target, XLogRecPtr divergerec)
+{
+	char		path[MAXPGPATH];
+	char		target_path[MAXPGPATH];
+	char		what[MAXPGPATH + 32];
+	const char *params[1];
+	PGresult   *res;
+	bool		found = false;
+	int			nkeys = 0;
+	int			fd;
+
+	snprintf(path, sizeof(path), REWIND_KEYS_FILENAME_FORMAT,
+			 LSN_FORMAT_ARGS(divergerec));
+
+	params[0] = path;
+	res = PQexecParams(conn,
+					   "SELECT pg_catalog.pg_read_binary_file($1, 0, s.size, true) "
+					   "FROM pg_catalog.pg_stat_file($1, true) s",
+					   1, NULL, params, NULL, NULL, 1);
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+		pg_fatal("could not read \"%s\" from the source server: %s",
+				 path, PQresultErrorMessage(res));
+	if (PQntuples(res) == 1 && !PQgetisnull(res, 0, 0))
+	{
+		char	   *ptr = PQgetvalue(res, 0, 0);
+
+		snprintf(what, sizeof(what), "\"%s\" on the source server", path);
+		nkeys += add_rewind_keys(orioledb_map, ptr,
+								 ptr + PQgetlength(res, 0, 0), what);
+		found = true;
+	}
+	PQclear(res);
+
+	snprintf(target_path, sizeof(target_path), "%s/%s", datadir_target, path);
+	fd = open(target_path, O_RDONLY | PG_BINARY, 0);
+	if (fd >= 0)
+	{
+		struct stat st;
+		char	   *buf;
+
+		if (fstat(fd, &st) != 0)
+			pg_fatal("could not stat file \"%s\": %m", target_path);
+		buf = pg_malloc(st.st_size);
+		if (read(fd, buf, st.st_size) != st.st_size)
+			pg_fatal("could not read file \"%s\": %m", target_path);
+		close(fd);
+
+		snprintf(what, sizeof(what), "\"%s\"", target_path);
+		nkeys += add_rewind_keys(orioledb_map, buf, buf + st.st_size, what);
+		pg_free(buf);
+		found = true;
+	}
+	else if (errno != ENOENT)
+		pg_fatal("could not open file \"%s\": %m", target_path);
+
+	if (!found)
+	{
+		/*
+		 * This situation may happen and it is ok, just in case we throw the
+		 * warning here.
+		 */
+		pg_log_warning("Target and source servers don't have the OrioleDB"
+					   "rewind keys of the divergence point %x/%X",
+					   LSN_FORMAT_ARGS(divergerec));
+	}
+	else
+		pg_log_info("added %d keys of rows rolled back at the divergence point", nkeys);
+}
+
 static WalParseResult
 pg_rewind_check_version(const WalReaderState *r)
 {
@@ -996,7 +1145,9 @@ extract_row_info(XLogReaderState *record, void *arg)
 {
 	RmgrId		rmid = XLogRecGetRmid(record);
 
-	if (rmid == ORIOLEDB_RMGR_ID)
+	/* Only containers carry changes; skip ORIOLEDB_XLOG_REWIND_KEYS */
+	if (rmid == ORIOLEDB_RMGR_ID &&
+		(XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_CONTAINER)
 	{
 		Pointer		startPtr = (Pointer) XLogRecGetData(record);
 		int			msg_len = XLogRecGetDataLen(record);
@@ -1022,13 +1173,28 @@ extract_row_info(XLogReaderState *record, void *arg)
 
 void
 _PG_rewind(const char *datadir_target, char *datadir_source,
-		   char *connstr_source, XLogRecPtr startpoint, int tliIndex,
-		   XLogRecPtr endpoint, const char *restoreCommand, const char *argv0,
-		   bool debug)
+		   char *connstr_source, XLogRecPtr startpoint, XLogRecPtr divergerec,
+		   int tliIndex, XLogRecPtr endpoint, const char *restoreCommand,
+		   const char *argv0, bool debug)
 {
-	OrioledbKeyMap *orioledb_map = create_orioledb_key_map(startpoint);
+	OrioledbKeyMap *orioledb_map;
 	PGconn	   *source_conn;
 	OXid		targetLastXid;
+
+	/*
+	 * The row-level rewind below fetches new row versions from a running
+	 * source server.  With --source-pgdata there is no server to ask, but the
+	 * source is shut down cleanly, so its OrioleDB files cannot change while
+	 * pg_rewind runs.  Leave the OrioleDB directories to pg_rewind, which
+	 * then copies them from the source in full.
+	 */
+	if (connstr_source == NULL)
+	{
+		pg_log_info("source is a data directory, OrioleDB files will be copied in full");
+		return;
+	}
+
+	orioledb_map = create_orioledb_key_map(startpoint);
 
 /* TODO:Close connection atexit */
 
@@ -1045,6 +1211,8 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 	orioledb_map->fill_map = true;
 	SimpleXLogRead(datadir_target, startpoint, tliIndex, endpoint,
 				   restoreCommand, extract_row_info, orioledb_map);
+	add_divergence_rewind_keys(orioledb_map, source_conn, datadir_target,
+							   divergerec);
 	/*
 	 * Choose the xid floor (divXid) used to seed globalXmin /
 	 * checkpointRetainXmin after rewind.  Recovery pins recovery_xmin to

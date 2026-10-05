@@ -118,6 +118,8 @@
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
 #define ORIOLEDB_RMGR_ID (129)
 #define ORIOLEDB_XLOG_CONTAINER (0x00)
+/* Keys of the rows a promotion rolled back, see rewind_keys_save() */
+#define ORIOLEDB_XLOG_REWIND_KEYS (0x10)
 
 /*
  * perform_page_split() removes a key data from first right page downlink.
