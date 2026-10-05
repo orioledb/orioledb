@@ -56,7 +56,7 @@ o_get_prefixes_for_tablespace(Oid datoid, Oid tablespace,
 	else
 		snprintf(pathbuf, sizeof(pathbuf),
 				 "%s/%u/" TABLESPACE_VERSION_DIRECTORY "/%s",
-				 PG_TBLSPC_DIR, tablespace, ORIOLEDB_DATA_DIR);
+				 "pg_tblspc", tablespace, ORIOLEDB_DATA_DIR);
 	if (prefix)
 		*prefix = pathbuf;
 	if (db_prefix)

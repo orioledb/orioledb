@@ -36,6 +36,7 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "port/pg_bswap.h"
+#include "port/pg_crc32c.h"
 #include "storage/fd.h"
 
 #define O_REWIND_FOUND '\1'
@@ -93,6 +94,14 @@ appendHton32StringInfo(StringInfo str, uint32 data)
 	uint32		u32data = pg_hton32(data);
 
 	appendBinaryStringInfoNT(str, (const char *) &u32data, sizeof(u32data));
+}
+
+static void
+appendHton64StringInfo(StringInfo str, uint64 data)
+{
+	uint64		u64data = pg_hton64(data);
+
+	appendBinaryStringInfoNT(str, (const char *) &u64data, sizeof(u64data));
 }
 
 static void
@@ -761,9 +770,7 @@ replay_rewind_row(File rewind_file, char *read_buf, off_t *offset,
  */
 bool		rewind_keys_capturing = false;
 static StringInfo rewind_keys = NULL;
-
-#define REWIND_KEYS_WORKER_PREFIX	"rewind_keys."
-#define REWIND_KEYS_WORKER_SUFFIX	".tmp"
+static uint64 rewind_keys_count = 0;
 
 void
 rewind_keys_capture(BTreeDescr *desc, BTreeOperationType action, OTuple tuple)
@@ -777,6 +784,10 @@ rewind_keys_capture(BTreeDescr *desc, BTreeOperationType action, OTuple tuple)
 
 	if (action == BTreeOperationLock)
 		return;
+	if (action != BTreeOperationInsert &&
+		action != BTreeOperationUpdate &&
+		action != BTreeOperationDelete)
+		elog(ERROR, "unsupported undo action %d in rewind key capture", action);
 
 	/* System trees are logged under their own oids.  */
 	if (!IS_SYS_TREE_OIDS(oids))
@@ -820,6 +831,7 @@ rewind_keys_capture(BTreeDescr *desc, BTreeOperationType action, OTuple tuple)
 	appendStringInfoChar(rewind_keys, (char) key.formatFlags);
 	appendHton32StringInfo(rewind_keys, (uint32) len);
 	appendBinaryStringInfoNT(rewind_keys, key.data, len);
+	rewind_keys_count++;
 	MemoryContextSwitchTo(oldcxt);
 
 	if (key_allocated)
@@ -827,64 +839,178 @@ rewind_keys_capture(BTreeDescr *desc, BTreeOperationType action, OTuple tuple)
 }
 
 
-static bool
-write_rewind_keys_file(const char *path, const char *data, int len)
+static uint32
+rewind_keys_checksum(const char *data, uint64 len)
 {
-	bool res = true;
-	int fd = OpenTransientFile(path, O_WRONLY | O_CREAT | O_TRUNC | PG_BINARY);
-	if (fd < 0 || write(fd, data, len) != len || pg_fsync(fd) != 0)
+	pg_crc32c	crc;
+
+	INIT_CRC32C(crc);
+	COMP_CRC32C(crc, data, len);
+	FIN_CRC32C(crc);
+	return (uint32) crc;
+}
+
+static void
+rewind_keys_write_all(int fd, const char *path, const char *data, uint64 len)
+{
+	uint64		offset = 0;
+
+	while (offset < len)
 	{
-		ereport(WARNING, (errcode_for_file_access(),
-						  errmsg("could not write rewind keys file \"%s\"", path)));
-		res = false;
+		ssize_t		written = write(fd, data + offset, len - offset);
+
+		if (written < 0 && errno == EINTR)
+			continue;
+		if (written <= 0)
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not write rewind keys file \"%s\": %m", path)));
+		offset += written;
 	}
-	CloseTransientFile(fd);
-	return res;
+}
+
+static void
+rewind_keys_write_file(const char *path, const char *data, uint64 len)
+{
+	int			fd;
+
+	fd = OpenTransientFile(path, O_WRONLY | O_CREAT | O_TRUNC | PG_BINARY);
+	if (fd < 0)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not open rewind keys file \"%s\": %m", path)));
+	rewind_keys_write_all(fd, path, data, len);
+	if (pg_fsync(fd) != 0)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not sync rewind keys file \"%s\": %m", path)));
+	if (CloseTransientFile(fd) != 0)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not close rewind keys file \"%s\": %m", path)));
+}
+
+static StringInfo
+rewind_keys_part_header(XLogRecPtr generation, int participant,
+						int participants, uint64 count, uint64 payload_length,
+						uint32 checksum)
+{
+	StringInfo	header = makeStringInfo();
+
+	appendHton32StringInfo(header, REWIND_KEYS_PART_MAGIC);
+	appendHton16StringInfo(header, REWIND_KEYS_FORMAT_VERSION);
+	appendHton16StringInfo(header, REWIND_KEYS_PART_HEADER_SIZE);
+	appendHton64StringInfo(header, generation);
+	appendHton32StringInfo(header, (uint32) participant);
+	appendHton32StringInfo(header, (uint32) participants);
+	appendHton64StringInfo(header, count);
+	appendHton64StringInfo(header, payload_length);
+	appendHton32StringInfo(header, checksum);
+	appendHton32StringInfo(header, 0);
+	Assert(header->len == REWIND_KEYS_PART_HEADER_SIZE);
+	return header;
+}
+
+static StringInfo
+rewind_keys_final_header(XLogRecPtr switchpoint, uint64 count,
+						 uint64 payload_length, uint32 checksum)
+{
+	StringInfo	header = makeStringInfo();
+
+	appendHton32StringInfo(header, REWIND_KEYS_MAGIC);
+	appendHton16StringInfo(header, REWIND_KEYS_FORMAT_VERSION);
+	appendHton16StringInfo(header, REWIND_KEYS_FINAL_HEADER_SIZE);
+	appendHton64StringInfo(header, switchpoint);
+	appendHton64StringInfo(header, count);
+	appendHton64StringInfo(header, payload_length);
+	appendHton32StringInfo(header, checksum);
+	Assert(header->len == REWIND_KEYS_FINAL_HEADER_SIZE);
+	return header;
 }
 
 void
 rewind_keys_finish_process(int worker_id)
 {
-	char path [MAXPGPATH];
+	char		writing[MAXPGPATH];
+	char		part[MAXPGPATH];
+	XLogRecPtr	generation = GetXLogReplayRecPtr(NULL);
+	int			workers = *recovery_single_process ? 0 :
+		(recovery_idx_pool_size_guc ? recovery_pool_size_guc + 1 :
+		 recovery_pool_size_guc);
+	int			participants = workers + 1;
+	const char *payload = rewind_keys == NULL ? "" : rewind_keys->data;
+	uint64		payload_length = rewind_keys == NULL ? 0 : rewind_keys->len;
+	StringInfo	header;
+	StringInfo	file;
+
 	rewind_keys_capturing = false;
-	if (worker_id < 0 || rewind_keys == NULL)
-		return;
+	header = rewind_keys_part_header(generation, worker_id, participants,
+								 rewind_keys_count, payload_length,
+								 rewind_keys_checksum(payload, payload_length));
+	file = makeStringInfo();
+	appendBinaryStringInfoNT(file, header->data, header->len);
+	appendBinaryStringInfoNT(file, payload, payload_length);
 
-	snprintf(path, sizeof(path), ORIOLEDB_DATA_DIR "/"
-								 REWIND_KEYS_WORKER_PREFIX "%d"
-								 REWIND_KEYS_WORKER_SUFFIX, worker_id);
-	(void)write_rewind_keys_file(path, rewind_keys->data, rewind_keys->len);
+	snprintf(writing, sizeof(writing), REWIND_KEYS_WRITING_FORMAT,
+			 LSN_FORMAT_ARGS(generation), worker_id);
+	snprintf(part, sizeof(part), REWIND_KEYS_PART_FORMAT,
+			 LSN_FORMAT_ARGS(generation), worker_id);
+	rewind_keys_write_file(writing, file->data, file->len);
+	if (durable_rename(writing, part, ERROR) != 0)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not publish rewind keys part \"%s\": %m", part)));
 
-	pfree(rewind_keys->data);
-	pfree(rewind_keys);
+	if (rewind_keys != NULL)
+	{
+		pfree(rewind_keys->data);
+		pfree(rewind_keys);
+	}
+	pfree(header->data);
+	pfree(header);
+	pfree(file->data);
+	pfree(file);
 
 	rewind_keys = NULL;
+	rewind_keys_count = 0;
 }
 
 #define PG_REWIND_KEYS_WAL_CHUNK (1024 * 1024)
 
 static void
-log_rewind_keys(XLogRecPtr switchpoint, const char *data, int len)
+log_rewind_keys(XLogRecPtr switchpoint, const char *data, uint64 len,
+				uint32 checksum)
 {
-	XLogRecPtr lsn;
-	int offset = 0;
+	XLogRecPtr	lsn = InvalidXLogRecPtr;
+	uint64		offset = 0;
 
 	do
 	{
 		WALRecRewindKeys rec;
-		int chunk = Min(len - offset, PG_REWIND_KEYS_WAL_CHUNK);
+		uint32		chunk = Min(len - offset, PG_REWIND_KEYS_WAL_CHUNK);
 
+		rec.version = REWIND_KEYS_FORMAT_VERSION;
 		rec.switchpoint = switchpoint;
+		rec.total_length = len;
+		rec.total_checksum = checksum;
 		rec.offset = offset;
+		rec.chunk_length = chunk;
 		rec.flags = (offset == 0 ? REWIND_KEYS_FIRST : 0) |
 					((offset + chunk) == len ? REWIND_KEYS_LAST : 0);
+		rec.version = pg_hton16(rec.version);
+		rec.flags = pg_hton16(rec.flags);
+		rec.switchpoint = pg_hton64(rec.switchpoint);
+		rec.total_length = pg_hton64(rec.total_length);
+		rec.total_checksum = pg_hton32(rec.total_checksum);
+		rec.offset = pg_hton64(rec.offset);
+		rec.chunk_length = pg_hton32(rec.chunk_length);
 
 		XLogBeginInsert();
 		XLogRegisterData((char *)&rec, sizeof(rec));
 		XLogRegisterData((char *)data + offset, chunk);
 		lsn = XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_REWIND_KEYS);
 		offset += chunk;
-	} while (offset < len);
+	} while (offset < len || !XLogRecPtrIsValid(lsn));
 
 	XLogFlush(lsn);
 }
@@ -906,51 +1032,145 @@ rewind_keys_redo(XLogReaderState *record)
 	int fd;
 
 	memcpy(&rec, XLogRecGetData(record), sizeof (rec));
+	rec.version = pg_ntoh16(rec.version);
+	rec.flags = pg_ntoh16(rec.flags);
+	rec.switchpoint = pg_ntoh64(rec.switchpoint);
+	rec.total_length = pg_ntoh64(rec.total_length);
+	rec.total_checksum = pg_ntoh32(rec.total_checksum);
+	rec.offset = pg_ntoh64(rec.offset);
+	rec.chunk_length = pg_ntoh32(rec.chunk_length);
+	if (rec.version != REWIND_KEYS_FORMAT_VERSION ||
+		rec.chunk_length != len || rec.offset + len > rec.total_length ||
+		(rec.flags & ~(REWIND_KEYS_FIRST | REWIND_KEYS_LAST)) != 0 ||
+		((rec.flags & REWIND_KEYS_FIRST) != 0) != (rec.offset == 0) ||
+		((rec.flags & REWIND_KEYS_LAST) != 0) !=
+		(rec.offset + len == rec.total_length))
+		ereport(PANIC,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("invalid OrioleDB rewind keys WAL record")));
 	snprintf(path, sizeof (path), REWIND_KEYS_FILENAME_FORMAT,
 			 LSN_FORMAT_ARGS(rec.switchpoint));
 	snprintf(tmppath, sizeof(tmppath), "%s.new", path);
 
 	if (rec.flags & REWIND_KEYS_FIRST)
 	{
-		uint32 magic = pg_hton32(REWIND_KEYS_MAGIC);
-
 		/*
 		 * Start the file over: it may be left over from an earlier replay
 		 * of this record.
 		 */
 		fd = OpenTransientFile(tmppath, O_WRONLY | O_CREAT | O_TRUNC | PG_BINARY);
-		if (fd >= 0 && write(fd, &magic, sizeof (magic)) != sizeof(magic))
-		{
-			CloseTransientFile(fd);
-			fd = -1;
-		}
 	}
 	else
 	{
 		/* First chunk created the file, so later chunks go into this.  */
 		fd = OpenTransientFile(tmppath, O_WRONLY | PG_BINARY);
-		if (fd < 0 && errno != ENOENT && access(path, F_OK) == 0)
-			return;
 	}
 
 	if (fd < 0 ||
-		pg_pwrite(fd, data, len, sizeof(uint32) + rec.offset) != len ||
+		pg_pwrite(fd, data, len, rec.offset) != len ||
 		pg_fsync(fd) != 0)
 	{
-		ereport(WARNING,
+		ereport(PANIC,
 				(errcode_for_file_access(),
 				 errmsg("could not write rewind keys file \"%s\"", tmppath)));
-
-		if (fd >= 0)
-			CloseTransientFile(fd);
-
-		return;
 	}
 
-	CloseTransientFile(fd);
+	if (CloseTransientFile(fd) != 0)
+		ereport(PANIC,
+				(errcode_for_file_access(),
+				 errmsg("could not close rewind keys file \"%s\": %m", tmppath)));
 
 	if (rec.flags & REWIND_KEYS_LAST)
-		(void)durable_rename(tmppath, path, WARNING);
+	{
+		char	   *contents;
+		struct stat st;
+
+		fd = OpenTransientFile(tmppath, O_RDONLY | PG_BINARY);
+		if (fd < 0 || fstat(fd, &st) != 0 || st.st_size != rec.total_length)
+			ereport(PANIC,
+					(errcode(ERRCODE_DATA_CORRUPTED),
+					 errmsg("invalid rewind keys redo file \"%s\"", tmppath)));
+		contents = palloc(st.st_size);
+		if (read(fd, contents, st.st_size) != st.st_size ||
+			rewind_keys_checksum(contents, st.st_size) != rec.total_checksum)
+			ereport(PANIC,
+					(errcode(ERRCODE_DATA_CORRUPTED),
+					 errmsg("rewind keys redo checksum mismatch for \"%s\"", tmppath)));
+		if (CloseTransientFile(fd) != 0)
+			ereport(PANIC,
+					(errcode_for_file_access(),
+					 errmsg("could not close rewind keys file \"%s\": %m", tmppath)));
+		pfree(contents);
+		if (durable_rename(tmppath, path, PANIC) != 0)
+			ereport(PANIC,
+					(errcode_for_file_access(),
+					 errmsg("could not publish rewind keys file \"%s\": %m", path)));
+	}
+}
+
+static void
+rewind_keys_publish_ready(const char *ready, XLogRecPtr switchpoint)
+{
+	char		path[MAXPGPATH];
+	char		header[REWIND_KEYS_FINAL_HEADER_SIZE];
+	char	   *contents;
+	struct stat st;
+	uint16		u16;
+	uint32		u32;
+	uint64		u64;
+	uint64		payload_length;
+	uint32		payload_checksum;
+	int			fd;
+
+	fd = OpenTransientFile(ready, O_RDONLY | PG_BINARY);
+	if (fd < 0 || fstat(fd, &st) != 0 ||
+		st.st_size < REWIND_KEYS_FINAL_HEADER_SIZE ||
+		read(fd, header, sizeof(header)) != sizeof(header))
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not read rewind keys ready file \"%s\"", ready)));
+	memcpy(&u32, header, 4);
+	if (pg_ntoh32(u32) != REWIND_KEYS_MAGIC)
+		ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+						errmsg("invalid rewind keys ready file \"%s\"", ready)));
+	memcpy(&u16, header + 4, 2);
+	if (pg_ntoh16(u16) != REWIND_KEYS_FORMAT_VERSION)
+		ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+						errmsg("unsupported rewind keys ready file \"%s\"", ready)));
+	memcpy(&u16, header + 6, 2);
+	if (pg_ntoh16(u16) != REWIND_KEYS_FINAL_HEADER_SIZE)
+		ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+						errmsg("invalid rewind keys header length in \"%s\"", ready)));
+	memcpy(&u64, header + 8, 8);
+	if (pg_ntoh64(u64) != switchpoint)
+		ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+						errmsg("wrong switchpoint in rewind keys ready file \"%s\"", ready)));
+	memcpy(&u64, header + 24, 8);
+	payload_length = pg_ntoh64(u64);
+	memcpy(&u32, header + 32, 4);
+	payload_checksum = pg_ntoh32(u32);
+	if ((uint64) st.st_size != REWIND_KEYS_FINAL_HEADER_SIZE + payload_length)
+		ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+						errmsg("invalid payload length in rewind keys ready file \"%s\"", ready)));
+	contents = palloc(st.st_size);
+	memcpy(contents, header, sizeof(header));
+	if (read(fd, contents + sizeof(header), payload_length) != payload_length ||
+		rewind_keys_checksum(contents + sizeof(header), payload_length) !=
+		payload_checksum)
+		ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+						errmsg("checksum mismatch in rewind keys ready file \"%s\"", ready)));
+	if (CloseTransientFile(fd) != 0)
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not close rewind keys ready file \"%s\": %m", ready)));
+
+	log_rewind_keys(switchpoint, contents, st.st_size,
+					rewind_keys_checksum(contents, st.st_size));
+	snprintf(path, sizeof(path), REWIND_KEYS_FILENAME_FORMAT,
+			 LSN_FORMAT_ARGS(switchpoint));
+	if (durable_rename(ready, path, ERROR) != 0)
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not publish rewind keys file \"%s\": %m", path)));
+	pfree(contents);
 }
 
 /*
@@ -961,84 +1181,145 @@ rewind_keys_redo(XLogReaderState *record)
 void
 rewind_keys_save(XLogRecPtr switchpoint)
 {
-	StringInfo all = makeStringInfo();
-	DIR *dir;
+	StringInfo	payload = makeStringInfo();
+	StringInfo	header;
+	StringInfo	all;
+	uint64		count = 0;
+	uint32		checksum;
+	int			workers = *recovery_single_process ? 0 :
+		(recovery_idx_pool_size_guc ? recovery_pool_size_guc + 1 :
+		 recovery_pool_size_guc);
+	int			participant;
+	char		ready[MAXPGPATH];
+	char		newpath[MAXPGPATH];
+	char		path[MAXPGPATH];
+	DIR		   *dir;
 	struct dirent *de;
 
-	/* 1. Start with magic word.  */
-	appendHton32StringInfo(all, REWIND_KEYS_MAGIC);
-
-	if (rewind_keys != NULL)
-	{
-		appendBinaryStringInfoNT(all, rewind_keys->data, rewind_keys->len);
-		pfree(rewind_keys->data);
-		pfree(rewind_keys);
-		rewind_keys = NULL;
-	}
-
-	/*
-	 * 2. Collect rewind keys from workers.
-	 *
-	 * Every recovery worker rolled back its own transactions and wrote
-	 * its keys to orioledb_data/rewind_keys.<n>.tmp (see
-	 * rewind_keys_finish_process()).
-	 */
+	/* Complete publication left pending by a crash in an earlier startup. */
 	dir = AllocateDir(ORIOLEDB_DATA_DIR);
 	while ((de = ReadDir(dir, ORIOLEDB_DATA_DIR)) != NULL)
 	{
-		char path [MAXPGPATH];
-		size_t namelen = strlen(de->d_name);
-		int fd;
-		struct stat st;
+		uint32		hi;
+		uint32		lo;
+		char		stop;
+		XLogRecPtr	pending_switchpoint;
+		char		pending[MAXPGPATH];
+		size_t		namelen = strlen(de->d_name);
 
-		if (strncmp(de->d_name, REWIND_KEYS_WORKER_PREFIX,
-					strlen(REWIND_KEYS_WORKER_PREFIX)) != 0 ||
-			namelen < strlen(REWIND_KEYS_WORKER_SUFFIX) ||
-			strcmp(de->d_name + namelen - strlen(REWIND_KEYS_WORKER_SUFFIX),
-				   REWIND_KEYS_WORKER_SUFFIX) != 0)
+		if (namelen < strlen(".ready") ||
+			strcmp(de->d_name + namelen - strlen(".ready"), ".ready") != 0 ||
+			sscanf(de->d_name, "rewind_keys.%08X%08X.ready%c",
+				   &hi, &lo, &stop) != 2)
 			continue;
-
-		snprintf(path, sizeof(path), ORIOLEDB_DATA_DIR "/%s", de->d_name);
-		fd = OpenTransientFile(path, O_RDONLY | PG_BINARY);
-		if (fd >= 0 && fstat(fd, &st) == 0)
-		{
-			enlargeStringInfo(all, st.st_size);
-			if (read(fd, all->data + all->len, st.st_size) == st.st_size)
-			{
-				all->len += st.st_size;
-				all->data [all->len] = '\0';
-			}
-			else
-				ereport(WARNING, (errcode_for_file_access(),
-								  errmsg("could not read rewind keys file \"%s\"", path)));
-		}
-		if (fd >= 0)
-			CloseTransientFile(fd);
-		unlink(path);
+		pending_switchpoint = ((uint64) hi << 32) | lo;
+		snprintf(pending, sizeof(pending), ORIOLEDB_DATA_DIR "/%s",
+				 de->d_name);
+		rewind_keys_publish_ready(pending, pending_switchpoint);
 	}
 	FreeDir(dir);
+
+	if (!ArchiveRecoveryRequested)
+		return;
+
+	for (participant = -1; participant < workers; participant++)
+	{
+		char		part[MAXPGPATH];
+		char		headerbuf[REWIND_KEYS_PART_HEADER_SIZE];
+		uint32		u32;
+		uint64		u64;
+		uint64		part_count;
+		uint64		part_length;
+		uint32		part_checksum;
+		uint16		u16;
+		int			fd;
+		struct stat st;
+
+		snprintf(part, sizeof(part), REWIND_KEYS_PART_FORMAT,
+				 LSN_FORMAT_ARGS(switchpoint), participant);
+		fd = OpenTransientFile(part, O_RDONLY | PG_BINARY);
+		if (fd < 0 || fstat(fd, &st) != 0 ||
+			st.st_size < REWIND_KEYS_PART_HEADER_SIZE ||
+			read(fd, headerbuf, sizeof(headerbuf)) != sizeof(headerbuf))
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("missing or invalid rewind keys part \"%s\"", part)));
+		memcpy(&u32, headerbuf, 4);
+		if (pg_ntoh32(u32) != REWIND_KEYS_PART_MAGIC)
+			ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("invalid rewind keys part \"%s\"", part)));
+		memcpy(&u16, headerbuf + 4, 2);
+		if (pg_ntoh16(u16) != REWIND_KEYS_FORMAT_VERSION)
+			ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("unsupported rewind keys part version in \"%s\"", part)));
+		memcpy(&u16, headerbuf + 6, 2);
+		if (pg_ntoh16(u16) != REWIND_KEYS_PART_HEADER_SIZE)
+			ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("invalid rewind keys part header in \"%s\"", part)));
+		memcpy(&u64, headerbuf + 8, 8);
+		if (pg_ntoh64(u64) != switchpoint)
+			ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("stale rewind keys part \"%s\"", part)));
+		memcpy(&u32, headerbuf + 16, 4);
+		if ((int32) pg_ntoh32(u32) != participant)
+			ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("wrong participant in rewind keys part \"%s\"", part)));
+		memcpy(&u32, headerbuf + 20, 4);
+		if (pg_ntoh32(u32) != (uint32) (workers + 1))
+			ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("wrong participant count in rewind keys part \"%s\"", part)));
+		memcpy(&u64, headerbuf + 24, 8);
+		part_count = pg_ntoh64(u64);
+		memcpy(&u64, headerbuf + 32, 8);
+		part_length = pg_ntoh64(u64);
+		memcpy(&u32, headerbuf + 40, 4);
+		part_checksum = pg_ntoh32(u32);
+		if ((uint64) st.st_size != REWIND_KEYS_PART_HEADER_SIZE + part_length)
+			ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("invalid length in rewind keys part \"%s\"", part)));
+		enlargeStringInfo(payload, part_length);
+		if (read(fd, payload->data + payload->len, part_length) != part_length ||
+			rewind_keys_checksum(payload->data + payload->len, part_length) !=
+			part_checksum)
+			ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("invalid checksum in rewind keys part \"%s\"", part)));
+		payload->len += part_length;
+		payload->data[payload->len] = '\0';
+		count += part_count;
+		if (CloseTransientFile(fd) != 0)
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not close rewind keys part \"%s\": %m", part)));
+	}
+
+	checksum = rewind_keys_checksum(payload->data, payload->len);
+	header = rewind_keys_final_header(switchpoint, count, payload->len, checksum);
+	all = makeStringInfo();
+	appendBinaryStringInfoNT(all, header->data, header->len);
+	appendBinaryStringInfoNT(all, payload->data, payload->len);
+	snprintf(ready, sizeof(ready), REWIND_KEYS_READY_FORMAT,
+			 LSN_FORMAT_ARGS(switchpoint));
+	snprintf(newpath, sizeof(newpath), "%s.new", ready);
+	rewind_keys_write_file(newpath, all->data, all->len);
+	if (durable_rename(newpath, ready, ERROR) != 0)
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not publish rewind keys ready file \"%s\": %m", ready)));
 
 	/*
 	 * A new timeline starts at switchpoint exactly when recovery was started
 	 * by startup, e.g. on promotion.
 	 */
-	if (ArchiveRecoveryRequested)
-	{
-		char path [MAXPGPATH];
-		char tmppath [MAXPGPATH];
+	rewind_keys_publish_ready(ready, switchpoint);
+	snprintf(path, sizeof (path), REWIND_KEYS_FILENAME_FORMAT,
+			 LSN_FORMAT_ARGS(switchpoint));
+	elog(LOG, "OrioleDB: saved " UINT64_FORMAT
+		 " rewind keys for promotion at %X/%X in \"%s\"",
+		 count, LSN_FORMAT_ARGS(switchpoint), path);
 
-		snprintf(path, sizeof (path), REWIND_KEYS_FILENAME_FORMAT,
-				 LSN_FORMAT_ARGS(switchpoint));
-		snprintf(tmppath, sizeof(tmppath), "%s.new", path);
-		if (write_rewind_keys_file(tmppath, all->data, all->len) &&
-			durable_rename(tmppath, path, WARNING) == 0)
-			elog(LOG, "OrioleDB: saved the keys of the rows rolled back by the"
-					  " promotion at %X/%X ti \"%s\"",
-					  LSN_FORMAT_ARGS(switchpoint), path);
-		log_rewind_keys(switchpoint, all->data + sizeof(uint32),
-						all->len - sizeof(uint32));
-	}
-
+	pfree(payload->data);
+	pfree(payload);
+	pfree(header->data);
+	pfree(header);
 	pfree(all->data);
 	pfree(all);
 }
@@ -1128,6 +1409,9 @@ rewind_keys_desc(StringInfo buf, XLogReaderState *record)
 	WALRecRewindKeys rec;
 
 	memcpy(&rec, XLogRecGetData(record), sizeof(rec));
+	rec.flags = pg_ntoh16(rec.flags);
+	rec.switchpoint = pg_ntoh64(rec.switchpoint);
+	rec.offset = pg_ntoh64(rec.offset);
 	appendStringInfo(buf, "rewind keys of the promotion at %X/%X: %u bytes at offset " UINT64_FORMAT "%s%s",
 					 LSN_FORMAT_ARGS(rec.switchpoint),
 					 (unsigned) (XLogRecGetDataLen(record) - sizeof(rec)),
