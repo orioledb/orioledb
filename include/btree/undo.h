@@ -164,6 +164,38 @@ typedef struct
 
 #define O_LOCK_DISPATCH_UNDO_SIZE MAXALIGN(sizeof(BTreeLockDispatchUndoStackItem))
 
+/*
+ * Update record holding the previous version of the row as a difference from
+ * the version that replaced it.
+ *
+ * The page tuple whose header points to an update record is always the
+ * version that replaced the one in the record: rolling back the update puts
+ * the record's version back together with its header, and a reader walking
+ * the undo chain carries the tuple it rebuilt down to the next record.  So
+ * the record only needs the bytes the update changed.  That holds for the
+ * row-level undo log only.  System trees replace their own versions in the
+ * page without a new undo record, so the page tuple there may be newer than
+ * the version the record was made against.
+ *
+ * The record is followed by the key of the row, which rollback looks the row
+ * up by, and then by the fragments.  Each fragment is three LocationIndex
+ * values: the number of bytes to copy from the newer version, the number of
+ * bytes of it to skip after that, and the number of bytes that follow the
+ * fragment header and go to the older version.  What is left of the newer
+ * version after the last fragment is copied as is.  Neither the fragment
+ * headers nor the bytes are aligned.
+ */
+typedef struct
+{
+	BTreeModifyUndoStackItem base;
+	LocationIndex newTupleLen;	/* length of the version the update made */
+	LocationIndex tupleLen;		/* length of the version in the record */
+	LocationIndex keyLen;
+	uint8		keyFormatFlags;
+} BTreeUpdateDiffUndoStackItem;
+
+#define O_UPDATE_DIFF_FRAGMENT_HEADER_SIZE (3 * sizeof(LocationIndex))
+
 typedef struct
 {
 	OnCommitUndoStackItem header;
@@ -220,6 +252,11 @@ extern UndoLocation make_undo_record(BTreeDescr *desc, OTuple tuple,
 									 OInMemoryBlkno blkno,
 									 uint32 pageChangeCount,
 									 BTreeLeafTuphdr *curTupHdr);
+extern UndoLocation make_update_undo_record(BTreeDescr *desc, OTuple oldTuple,
+											OTuple newTuple,
+											OInMemoryBlkno blkno,
+											uint32 pageChangeCount,
+											BTreeLeafTuphdr *curTupHdr);
 extern void make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno,
 									int pgprocno,
 									OPageWaiterShmemState *lockerState);
@@ -300,6 +337,7 @@ extern void get_prev_leaf_header_from_undo(UndoLogType undoType,
 extern void get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 													 BTreeLeafTuphdr *tuphdr,
 													 OTuple *tuple,
+													 LocationIndex tupleLen,
 													 LocationIndex sizeAvailable);
 extern void add_undo_truncate_relnode(ORelOids oldOids, OIndexKey *oldTrees,
 									  int oldNumTrees,

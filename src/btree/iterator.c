@@ -891,10 +891,16 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		}
 		else
 		{
-			if (curTupleAllocated)
-				pfree(curTuple.data);
+			OTuple		newerTuple = curTuple;
+
+			/* The undo record may hold a difference from curTuple */
 			get_prev_leaf_header_and_tuple_from_undo(desc->undoType, &tupHdr,
-													 &curTuple, 0);
+													 &curTuple,
+													 o_btree_len(desc, newerTuple,
+																 OTupleLength),
+													 0);
+			if (curTupleAllocated)
+				pfree(newerTuple.data);
 			curTupleAllocated = true;
 		}
 

@@ -362,10 +362,18 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 				BTreeLeafTuphdr tuphdr,
 						   *pageTuphdr;
 				OTuple		tuple;
+				OTuple		version;
+				bool		versionAllocated = false;
 				bool		inUndo = false;
 
 				BTREE_PAGE_READ_LEAF_ITEM(pageTuphdr, tuple, p, &loc);
 				tuphdr = *pageTuphdr;
+
+				/*
+				 * The version of the row the undo record at hand belongs to.
+				 * An update record may hold only the difference from it.
+				 */
+				version = tuple;
 				appendStringInfo(outbuf, "    Item %i: ", i);
 
 				while (true)
@@ -466,12 +474,18 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 							appendStringInfo(outbuf, "INVALID UNDO LOCATION: %llu\n", (unsigned long long) tuphdr.undoLocation);
 							break;
 						}
-						if (inUndo && !O_TUPLE_IS_NULL(tuple))
-							pfree(tuple.data);
 						if (!tuphdr.deleted && !XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo))
 						{
+							OTuple		newer = version;
+
 							get_prev_leaf_header_and_tuple_from_undo(desc->undoType,
-																	 &tuphdr, &tuple, 0);
+																	 &tuphdr, &version,
+																	 o_btree_len(desc, newer, OTupleLength),
+																	 0);
+							if (versionAllocated)
+								pfree(newer.data);
+							versionAllocated = true;
+							tuple = version;
 						}
 						else
 						{
@@ -485,8 +499,8 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 						break;
 					}
 				}
-				if (inUndo && !O_TUPLE_IS_NULL(tuple))
-					pfree(tuple.data);
+				if (versionAllocated)
+					pfree(version.data);
 			}
 			else
 			{
