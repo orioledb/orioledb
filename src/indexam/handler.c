@@ -550,10 +550,14 @@ append_rowid_values(OIndexDescr *id,
 	 * values[] and isnull[] live on the stack of ExecInsertIndexTuples (or
 	 * ExecUpdateIndexTuples), which is compiled without ASAN.  Stale stack
 	 * shadow from a prior ASAN-instrumented callee can survive sigsetjmp /
-	 * longjmp error unwinding and poison those slots; unpoison before each
-	 * write.  Same class as the amcostestimate out-param unpoison; no-op in
-	 * non-ASAN builds.
+	 * longjmp error unwinding and poison those slots.  Unpoison the full
+	 * range so that both the writes below and the reads in downstream callers
+	 * (o_form_tuple, detoast_passed_values) are safe.  No-op in non-ASAN
+	 * builds.
 	 */
+	ASAN_UNPOISON_MEMORY_REGION(values, id->nFields * sizeof(Datum));
+	ASAN_UNPOISON_MEMORY_REGION(isnull, id->nFields * sizeof(bool));
+
 	if (!id->primaryIsCtid)
 	{
 		ORowIdAddendumNonCtid *add;
@@ -590,11 +594,7 @@ append_rowid_values(OIndexDescr *id,
 				AttrNumber	attnum = id->primaryFieldsAttnums[i] - 1;
 
 				if (attnum >= pk_from)
-				{
-					ASAN_UNPOISON_MEMORY_REGION(&values[attnum], sizeof(values[attnum]));
-					ASAN_UNPOISON_MEMORY_REGION(&isnull[attnum], sizeof(isnull[attnum]));
 					values[attnum] = o_fastgetattr(tuple, i + 1, pk_tupdesc, pk_spec, &isnull[attnum]);
-				}
 			}
 		}
 	}
@@ -610,8 +610,6 @@ append_rowid_values(OIndexDescr *id,
 		*csn = add->csn;
 		*version = add->version;
 		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
-		ASAN_UNPOISON_MEMORY_REGION(&values[attnum], sizeof(values[attnum]));
-		ASAN_UNPOISON_MEMORY_REGION(&isnull[attnum], sizeof(isnull[attnum]));
 		values[attnum] = PointerGetDatum(p);
 		isnull[attnum] = false;
 	}
@@ -730,6 +728,13 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 			break;
 	}
 	Assert(ix_num < descr->nIndices);
+
+	/*
+	 * Stale-shadow unpoison, see append_rowid_values(); needed before
+	 * duplicate removal reads values[] prior to append_rowid_values().
+	 */
+	ASAN_UNPOISON_MEMORY_REGION(values, rel->rd_att->natts * sizeof(Datum));
+	ASAN_UNPOISON_MEMORY_REGION(isnull, rel->rd_att->natts * sizeof(bool));
 
 	if (index_descr->duplicates != NIL)
 	{
