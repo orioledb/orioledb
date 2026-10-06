@@ -85,6 +85,14 @@ class UndoReservedRaceTest(BaseTest):
 				bulk.commit()
 
 		try:
+			# The locker below takes the finished lock out of the chain only
+			# if its own snapshot is older than the lock: the part of the
+			# chain behind its snapshot counts as settled.  So it takes the
+			# snapshot first.
+			park.begin()
+			park.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+			park.execute("SELECT v FROM o_race WHERE id = 1;")
+
 			# Leave a finished row-level lock inside the row's undo chain: the
 			# lock is taken on one version, another transaction updates the
 			# row on top of it, then both finish.
@@ -103,15 +111,17 @@ class UndoReservedRaceTest(BaseTest):
 
 			# The next locker strips the finished lock-only record from the
 			# chain, which rewrites the header of the update's undo record --
-			# undo_write(), the path both events sit on.
+			# undo_write(), the path both events sit on.  The row changed
+			# after its snapshot, so it then fails to serialize; that does not
+			# matter here.
 			def parker():
 				try:
-					park.begin()
 					park.execute(
 					    "SELECT * FROM o_race WHERE id = 1 FOR UPDATE;")
 					park.commit()
 				except Exception as e:
 					print("parker: %s" % str(e)[:100], flush=True)
+					park.rollback()
 
 			thread = Thread(target=parker)
 			thread.start()
