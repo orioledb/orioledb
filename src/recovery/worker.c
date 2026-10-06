@@ -875,6 +875,7 @@ recovery_partial_update_descr(OTableDescr *descr, OTuple payload)
 {
 	uint32		version = o_wal_partial_update_get_version(payload.data);
 
+	Assert(descr != NULL);
 	if (descr->version != version)
 	{
 		OTableFetchContext ctx = {
