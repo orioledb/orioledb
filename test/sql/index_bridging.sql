@@ -1424,6 +1424,30 @@ SELECT id, tenant FROM o_bridge_ioc_plainsk WHERE tenant = 'a';
 SELECT id FROM o_bridge_ioc_plainsk WHERE tags @> ARRAY[1];
 RESET enable_seqscan;
 
+-- The table stays bridged after its last bridged index is dropped.  With a
+-- secondary unique arbiter the first insert into the empty table used to be
+-- skipped as a conflict with itself, silently (issue #1278).
+CREATE TABLE o_bridge_ioc_dropped (
+	id integer PRIMARY KEY,
+	message_id integer UNIQUE,
+	terms tsvector
+) USING orioledb;
+CREATE INDEX o_bridge_ioc_dropped_terms ON o_bridge_ioc_dropped
+	USING gin (terms);
+DROP INDEX o_bridge_ioc_dropped_terms;
+INSERT INTO o_bridge_ioc_dropped VALUES (1, 2, 'alpha'::tsvector)
+	ON CONFLICT (message_id) DO NOTHING RETURNING id;
+-- a real conflict on the secondary arbiter is still skipped
+INSERT INTO o_bridge_ioc_dropped VALUES (3, 2, 'beta'::tsvector)
+	ON CONFLICT (message_id) DO NOTHING RETURNING id;
+-- and the primary key arbiter does not report the secondary key as taken
+INSERT INTO o_bridge_ioc_dropped VALUES (4, 5, 'gamma'::tsvector)
+	ON CONFLICT (id) DO NOTHING RETURNING id;
+SELECT * FROM o_bridge_ioc_dropped ORDER BY id;
+SET enable_seqscan = off;
+SELECT id FROM o_bridge_ioc_dropped WHERE message_id = 2;
+RESET enable_seqscan;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;
