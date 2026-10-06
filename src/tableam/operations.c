@@ -1556,6 +1556,10 @@ o_tbl_insert_with_arbiter(Relation rel,
 			 * UNIQUE_CHECK_PARTIAL instead trips a speculative conflict with
 			 * ourselves.  Temporarily narrow the result relation to the
 			 * bridged indexes for the duration of the call.
+			 *
+			 * The table stays bridged once its bridged indexes are dropped;
+			 * then there is nothing left for the call to do.  The arrays are
+			 * built for every row, in the query's memory context: free them.
 			 */
 			{
 				RelationPtr savedDescs = resultRelInfo->ri_IndexRelationDescs;
@@ -1582,28 +1586,34 @@ o_tbl_insert_with_arbiter(Relation rel,
 					}
 				}
 
-				resultRelInfo->ri_NumIndices = nBridged;
-				resultRelInfo->ri_IndexRelationDescs = bridgedDescs;
-				resultRelInfo->ri_IndexRelationInfo = bridgedInfos;
+				if (nBridged > 0)
+				{
+					resultRelInfo->ri_NumIndices = nBridged;
+					resultRelInfo->ri_IndexRelationDescs = bridgedDescs;
+					resultRelInfo->ri_IndexRelationInfo = bridgedInfos;
 
-				PG_TRY();
-				{
-					ExecInsertIndexTuples(resultRelInfo, slot, estate,
-										  false, true, &specConflict,
-										  arbiterIndexes, false);
-				}
-				PG_CATCH();
-				{
+					PG_TRY();
+					{
+						ExecInsertIndexTuples(resultRelInfo, slot, estate,
+											  false, true, &specConflict,
+											  arbiterIndexes, false);
+					}
+					PG_CATCH();
+					{
+						resultRelInfo->ri_NumIndices = savedNumIndices;
+						resultRelInfo->ri_IndexRelationDescs = savedDescs;
+						resultRelInfo->ri_IndexRelationInfo = savedInfos;
+						PG_RE_THROW();
+					}
+					PG_END_TRY();
+
 					resultRelInfo->ri_NumIndices = savedNumIndices;
 					resultRelInfo->ri_IndexRelationDescs = savedDescs;
 					resultRelInfo->ri_IndexRelationInfo = savedInfos;
-					PG_RE_THROW();
 				}
-				PG_END_TRY();
 
-				resultRelInfo->ri_NumIndices = savedNumIndices;
-				resultRelInfo->ri_IndexRelationDescs = savedDescs;
-				resultRelInfo->ri_IndexRelationInfo = savedInfos;
+				pfree(bridgedDescs);
+				pfree(bridgedInfos);
 			}
 
 			if (specConflict)

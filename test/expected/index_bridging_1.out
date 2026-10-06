@@ -5344,9 +5344,156 @@ SELECT id, value FROM o_bridge_expr ORDER BY id;
 (2 rows)
 
 RESET enable_seqscan;
+-- ON CONFLICT with a bridged index that is not an arbiter.  The bridged-index
+-- insertion call used to see every index of the result relation, so it also
+-- wrote OrioleDB's own non-arbiter secondary indexes -- which the ON CONFLICT
+-- loop then wrote again, met the row it had just inserted itself, and called
+-- a unique violation on (issue #1275); with a secondary arbiter the second
+-- write of the arbiter tripped a speculative conflict with ourselves instead.
+CREATE TABLE o_bridge_ioc_sk (
+	id integer,
+	part integer,
+	tenant text,
+	terms tsvector,
+	PRIMARY KEY (id, part),
+	UNIQUE (id, part, tenant)
+) USING orioledb;
+CREATE INDEX ON o_bridge_ioc_sk USING gin (terms);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_ioc_sk'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+-- first insert into an empty table used to fail with a false 23505 on the
+-- secondary unique constraint
+INSERT INTO o_bridge_ioc_sk VALUES (1, 0, 'tenant-a', 'alpha'::tsvector)
+	ON CONFLICT (id, part) DO UPDATE
+	SET tenant = EXCLUDED.tenant, terms = EXCLUDED.terms;
+SELECT id, part, tenant FROM o_bridge_ioc_sk;
+ id | part |  tenant  
+----+------+----------
+  1 |    0 | tenant-a
+(1 row)
+
+-- a real conflict on the primary key arbiter takes the update path
+INSERT INTO o_bridge_ioc_sk VALUES (1, 0, 'tenant-b', 'beta'::tsvector)
+	ON CONFLICT (id, part) DO UPDATE
+	SET tenant = EXCLUDED.tenant, terms = EXCLUDED.terms;
+SELECT id, part, tenant FROM o_bridge_ioc_sk;
+ id | part |  tenant  
+----+------+----------
+  1 |    0 | tenant-b
+(1 row)
+
+-- the secondary unique constraint as the arbiter used to crash the backend
+INSERT INTO o_bridge_ioc_sk VALUES (2, 0, 'x', 'xx'::tsvector)
+	ON CONFLICT (id, part, tenant) DO UPDATE SET terms = EXCLUDED.terms;
+INSERT INTO o_bridge_ioc_sk VALUES (2, 0, 'x', 'yy'::tsvector)
+	ON CONFLICT (id, part, tenant) DO UPDATE SET terms = EXCLUDED.terms;
+SELECT id, part, tenant, terms::text FROM o_bridge_ioc_sk ORDER BY id, part;
+ id | part |  tenant  | terms  
+----+------+----------+--------
+  1 |    0 | tenant-b | 'beta'
+  2 |    0 | x        | 'yy'
+(2 rows)
+
+-- the bridged index is still maintained through all of the above
+SET enable_seqscan = off;
+SELECT id FROM o_bridge_ioc_sk WHERE terms @@ to_tsquery('simple', 'beta');
+ id 
+----
+  1
+(1 row)
+
+SELECT id FROM o_bridge_ioc_sk WHERE terms @@ to_tsquery('simple', 'yy');
+ id 
+----
+  2
+(1 row)
+
+SELECT id FROM o_bridge_ioc_sk WHERE terms @@ to_tsquery('simple', 'alpha');
+ id 
+----
+(0 rows)
+
+RESET enable_seqscan;
+-- a non-unique secondary index must not be written twice either: the doubled
+-- entry made every scan through it return the same row twice
+CREATE TABLE o_bridge_ioc_plainsk (
+	id int NOT NULL PRIMARY KEY,
+	tenant text,
+	tags int[]
+) USING orioledb;
+CREATE INDEX ON o_bridge_ioc_plainsk (tenant);
+CREATE INDEX ON o_bridge_ioc_plainsk USING gin (tags);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_ioc_plainsk'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+INSERT INTO o_bridge_ioc_plainsk VALUES (1, 'a', ARRAY[1])
+	ON CONFLICT (id) DO UPDATE SET tenant = EXCLUDED.tenant;
+SET enable_seqscan = off;
+SELECT id, tenant FROM o_bridge_ioc_plainsk WHERE tenant = 'a';
+ id | tenant 
+----+--------
+  1 | a
+(1 row)
+
+SELECT id FROM o_bridge_ioc_plainsk WHERE tags @> ARRAY[1];
+ id 
+----
+  1
+(1 row)
+
+RESET enable_seqscan;
+-- The table stays bridged after its last bridged index is dropped.  With a
+-- secondary unique arbiter the first insert into the empty table used to be
+-- skipped as a conflict with itself, silently (issue #1278).
+CREATE TABLE o_bridge_ioc_dropped (
+	id integer PRIMARY KEY,
+	message_id integer UNIQUE,
+	terms tsvector
+) USING orioledb;
+CREATE INDEX o_bridge_ioc_dropped_terms ON o_bridge_ioc_dropped
+	USING gin (terms);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_ioc_dropped'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+DROP INDEX o_bridge_ioc_dropped_terms;
+INSERT INTO o_bridge_ioc_dropped VALUES (1, 2, 'alpha'::tsvector)
+	ON CONFLICT (message_id) DO NOTHING RETURNING id;
+ id 
+----
+  1
+(1 row)
+
+-- a real conflict on the secondary arbiter is still skipped
+INSERT INTO o_bridge_ioc_dropped VALUES (3, 2, 'beta'::tsvector)
+	ON CONFLICT (message_id) DO NOTHING RETURNING id;
+ id 
+----
+(0 rows)
+
+-- and the primary key arbiter does not report the secondary key as taken
+INSERT INTO o_bridge_ioc_dropped VALUES (4, 5, 'gamma'::tsvector)
+	ON CONFLICT (id) DO NOTHING RETURNING id;
+ id 
+----
+  4
+(1 row)
+
+SELECT * FROM o_bridge_ioc_dropped ORDER BY id;
+ id | message_id |  terms  
+----+------------+---------
+  1 |          2 | 'alpha'
+  4 |          5 | 'gamma'
+(2 rows)
+
+SET enable_seqscan = off;
+SELECT id FROM o_bridge_ioc_dropped WHERE message_id = 2;
+ id 
+----
+  1
+(1 row)
+
+RESET enable_seqscan;
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 40 other objects
+NOTICE:  drop cascades to 43 other objects
 DETAIL:  drop cascades to table o_test_ix_ams
 drop cascades to table o_test_bridging_with_regular_no_pkey
 drop cascades to table o_test_bridging_with_regular_pkey
@@ -5387,6 +5534,9 @@ drop cascades to table o_bridge_sec_btree
 drop cascades to table o_bridge_ioc
 drop cascades to table o_bridge_mixed
 drop cascades to table o_bridge_expr
+drop cascades to table o_bridge_ioc_sk
+drop cascades to table o_bridge_ioc_plainsk
+drop cascades to table o_bridge_ioc_dropped
 DROP SCHEMA index_bridging CASCADE;
 NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to function btree_index_content(name)

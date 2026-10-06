@@ -5361,9 +5361,59 @@ SELECT id FROM o_bridge_ioc_plainsk WHERE tags @> ARRAY[1];
 (1 row)
 
 RESET enable_seqscan;
+-- The table stays bridged after its last bridged index is dropped.  With a
+-- secondary unique arbiter the first insert into the empty table used to be
+-- skipped as a conflict with itself, silently (issue #1278).
+CREATE TABLE o_bridge_ioc_dropped (
+	id integer PRIMARY KEY,
+	message_id integer UNIQUE,
+	terms tsvector
+) USING orioledb;
+CREATE INDEX o_bridge_ioc_dropped_terms ON o_bridge_ioc_dropped
+	USING gin (terms);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_ioc_dropped'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+DROP INDEX o_bridge_ioc_dropped_terms;
+INSERT INTO o_bridge_ioc_dropped VALUES (1, 2, 'alpha'::tsvector)
+	ON CONFLICT (message_id) DO NOTHING RETURNING id;
+ id 
+----
+  1
+(1 row)
+
+-- a real conflict on the secondary arbiter is still skipped
+INSERT INTO o_bridge_ioc_dropped VALUES (3, 2, 'beta'::tsvector)
+	ON CONFLICT (message_id) DO NOTHING RETURNING id;
+ id 
+----
+(0 rows)
+
+-- and the primary key arbiter does not report the secondary key as taken
+INSERT INTO o_bridge_ioc_dropped VALUES (4, 5, 'gamma'::tsvector)
+	ON CONFLICT (id) DO NOTHING RETURNING id;
+ id 
+----
+  4
+(1 row)
+
+SELECT * FROM o_bridge_ioc_dropped ORDER BY id;
+ id | message_id |  terms  
+----+------------+---------
+  1 |          2 | 'alpha'
+  4 |          5 | 'gamma'
+(2 rows)
+
+SET enable_seqscan = off;
+SELECT id FROM o_bridge_ioc_dropped WHERE message_id = 2;
+ id 
+----
+  1
+(1 row)
+
+RESET enable_seqscan;
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 42 other objects
+NOTICE:  drop cascades to 43 other objects
 DETAIL:  drop cascades to table o_test_ix_ams
 drop cascades to table o_test_bridging_with_regular_no_pkey
 drop cascades to table o_test_bridging_with_regular_pkey
@@ -5406,6 +5456,7 @@ drop cascades to table o_bridge_mixed
 drop cascades to table o_bridge_expr
 drop cascades to table o_bridge_ioc_sk
 drop cascades to table o_bridge_ioc_plainsk
+drop cascades to table o_bridge_ioc_dropped
 DROP SCHEMA index_bridging CASCADE;
 NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to function btree_index_content(name)
