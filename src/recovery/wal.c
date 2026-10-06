@@ -1034,12 +1034,14 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident,
 	Assert(desc->type != oIndexToast);
 
 	/*
-	 * For REPLICA_IDENTITY_FULL include new and old tuples into
-	 * WAL_REC_UPDATE
+	 * Old tuple is only needed for logical decoding; skip it at wal_level <
+	 * logical to avoid WAL bloat.
 	 */
-	if (relreplident != REPLICA_IDENTITY_FULL)
+	if (!XLogLogicalInfoActive() || relreplident != REPLICA_IDENTITY_FULL)
 	{
-		add_modify_wal_record(WAL_REC_UPDATE, desc, wal_record1, size1, relreplident,
+		add_modify_wal_record(WAL_REC_UPDATE, desc, wal_record1, size1,
+							  relreplident == REPLICA_IDENTITY_FULL ?
+							  REPLICA_IDENTITY_DEFAULT : relreplident,
 							  version, O_TABLE_INVALID_VERSION	/* Asserted no base
 							    * version for non TOAST */ );
 	}
@@ -1075,7 +1077,8 @@ o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version)
 	Assert(!O_TUPLE_IS_NULL(tuple));
 	wal_record = recovery_rec_delete(desc, tuple, &call_pfree, &size, relreplident);
 	Assert(desc->type != oIndexToast);
-	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, relreplident,
+	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size,
+						  XLogLogicalInfoActive() ? relreplident : REPLICA_IDENTITY_DEFAULT,
 						  version, O_TABLE_INVALID_VERSION	/* Asserted no base
 						    * version for non TOAST */ );
 
@@ -1102,7 +1105,8 @@ o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relrepli
 	oldrecord = recovery_rec_delete(desc, oldtuple, &old_call_pfree, &oldsize, relreplident);
 	newrecord = recovery_rec_insert(desc, newtuple, &new_call_pfree, &newsize);
 	Assert(desc->type != oIndexToast);
-	add_modify_wal_record_extended(WAL_REC_REINSERT, desc, newrecord, newsize, oldrecord, oldsize, relreplident,
+	add_modify_wal_record_extended(WAL_REC_REINSERT, desc, newrecord, newsize, oldrecord, oldsize,
+								   XLogLogicalInfoActive() ? relreplident : REPLICA_IDENTITY_DEFAULT,
 								   version, O_TABLE_INVALID_VERSION /* Asserted no base
 								     * version for non TOAST */ );
 	if (old_call_pfree)
