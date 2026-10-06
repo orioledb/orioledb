@@ -306,7 +306,7 @@ EXPLAIN (COSTS OFF)
 SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
 COMMIT;
 
-CREATE TABLE o_bridging_vacuum_test (id serial primary key, val float, p point) USING orioledb;
+CREATE TABLE o_bridging_vacuum_test (id serial primary key, val float, p point) USING orioledb WITH (autovacuum_enabled = false);
 INSERT INTO o_bridging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
 SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
 CREATE INDEX o_bridging_vacuum_test_p_idx on o_bridging_vacuum_test using gist(p);
@@ -1281,7 +1281,7 @@ CREATE TABLE o_bridge_mixed (
 	id int NOT NULL PRIMARY KEY,
 	tags int[],
 	other int
-) USING orioledb;
+) USING orioledb WITH (autovacuum_enabled = false);
 CREATE INDEX ON o_bridge_mixed USING gin(tags);
 INSERT INTO o_bridge_mixed
 	SELECT i, ARRAY[i], i FROM generate_series(1, 4) i;
