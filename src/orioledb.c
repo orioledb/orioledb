@@ -659,6 +659,7 @@ _PG_init(void)
 		return;
 
 	o_install_slot_retain_hook();
+	o_install_decoding_startup_hook();
 
 	o_verify_dir_exists_or_create(pstrdup(ORIOLEDB_DATA_DIR), NULL, NULL);
 	o_verify_dir_exists_or_create(pstrdup(ORIOLEDB_UNDO_DIR), NULL, NULL);

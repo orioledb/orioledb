@@ -301,6 +301,7 @@ OrioleDB is currently in the development stage. Therefore it has the following t
 11. Backward fetches from a cursor is supported only when the cursor is declared with `SCROLL`.
 12. OrioleDB always uses checksums on data pages and initializing a database cluster without data checksums doesn't have effect on OrioleDB tables.
 13. PostgreSQL sequences are backed by heap relations. Accessing them (e.g., via `nextval()`) forces full PostgreSQL Transaction ID (XID) allocation, bypassing OrioleDB's optimized transaction mechanics unless sequence caching is utilized.
+14. Logical decoding doesn't stream in-progress transactions. This applies to all logical replication slots in the cluster, including databases without OrioleDB tables. Subscriptions with `streaming = on` or `streaming = parallel` still work, but large transactions are spilled to disk and sent at commit.
 
 ## Links
 
