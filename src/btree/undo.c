@@ -3004,12 +3004,10 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 	if (item.header.type == UpdateDiffUndoItemType)
 	{
 		BTreeUpdateDiffUndoStackItem diffItem;
-		char		buf[O_BTREE_MAX_TUPLE_SIZE];
-		Pointer		dest;
+		UndoLocation itemLocation;
 
-		undo_read(undoType,
-				  undoLocation - offsetof(BTreeModifyUndoStackItem, tuphdr),
-				  sizeof(diffItem),
+		itemLocation = undoLocation - offsetof(BTreeModifyUndoStackItem, tuphdr);
+		undo_read(undoType, itemLocation, sizeof(diffItem),
 				  (Pointer) &diffItem);
 		tupleSize = diffItem.tupleLen;
 		if (unlikely(tupleSize > O_BTREE_MAX_TUPLE_SIZE))
@@ -3024,18 +3022,26 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 					 errmsg("corrupted undo record: tuple size %u exceeds available %u",
 							(unsigned) tupleSize, (unsigned) sizeAvailable)));
 
-		/*
-		 * The previous version is written over the one it is rebuilt from
-		 * only when it is in the page, where there is no memory to allocate.
-		 */
-		dest = sizeAvailable == 0 ? palloc(tupleSize) : buf;
-		apply_update_diff(undoType,
-						  undoLocation - offsetof(BTreeModifyUndoStackItem, tuphdr),
-						  &diffItem, *tuple, tupleLen, dest);
 		if (sizeAvailable == 0)
+		{
+			Pointer		dest = palloc(tupleSize);
+
+			apply_update_diff(undoType, itemLocation, &diffItem,
+							  *tuple, tupleLen, dest);
 			tuple->data = dest;
+		}
 		else
+		{
+			char		buf[O_BTREE_MAX_TUPLE_SIZE];
+
+			/*
+			 * The previous version is written over the one it is rebuilt
+			 * from, in the page, where there is no memory to allocate.
+			 */
+			apply_update_diff(undoType, itemLocation, &diffItem,
+							  *tuple, tupleLen, buf);
 			memcpy(tuple->data, buf, tupleSize);
+		}
 		tuple->formatFlags = tuphdr->formatFlags;
 		tuphdr->formatFlags = 0;
 		return;
