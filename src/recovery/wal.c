@@ -1084,7 +1084,6 @@ o_wal_update_row(OIndexDescr *primary, OTuple tuple, OTuple oldTuple,
 	BTreeDescr *desc = &primary->desc;
 
 	if (!XLogLogicalInfoActive() &&
-		relreplident != REPLICA_IDENTITY_FULL &&
 		!primary->bridging && !primary->primaryIsCtid &&
 		!O_TUPLE_IS_NULL(oldTuple))
 	{
