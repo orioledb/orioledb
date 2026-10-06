@@ -546,6 +546,14 @@ append_rowid_values(OIndexDescr *id,
 	rowid = DatumGetByteaP(pkDatum);
 	p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 
+	/*
+	 * values[] and isnull[] live on the stack of ExecInsertIndexTuples (or
+	 * ExecUpdateIndexTuples), which is compiled without ASAN.  Stale stack
+	 * shadow from a prior ASAN-instrumented callee can survive sigsetjmp /
+	 * longjmp error unwinding and poison those slots; unpoison before each
+	 * write.  Same class as the amcostestimate out-param unpoison; no-op in
+	 * non-ASAN builds.
+	 */
 	if (!id->primaryIsCtid)
 	{
 		ORowIdAddendumNonCtid *add;
@@ -583,6 +591,8 @@ append_rowid_values(OIndexDescr *id,
 
 				if (attnum >= pk_from)
 				{
+					ASAN_UNPOISON_MEMORY_REGION(&values[attnum], sizeof(values[attnum]));
+					ASAN_UNPOISON_MEMORY_REGION(&isnull[attnum], sizeof(isnull[attnum]));
 					values[attnum] = o_fastgetattr(tuple, i + 1, pk_tupdesc, pk_spec, &isnull[attnum]);
 				}
 			}
@@ -600,6 +610,8 @@ append_rowid_values(OIndexDescr *id,
 		*csn = add->csn;
 		*version = add->version;
 		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
+		ASAN_UNPOISON_MEMORY_REGION(&values[attnum], sizeof(values[attnum]));
+		ASAN_UNPOISON_MEMORY_REGION(&isnull[attnum], sizeof(isnull[attnum]));
 		values[attnum] = PointerGetDatum(p);
 		isnull[attnum] = false;
 	}
