@@ -985,10 +985,10 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 
 		BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, &loc);
 
-		undoLocation = make_undo_record(desc, curTuple, true,
-										BTreeOperationUpdate, blkno,
-										O_PAGE_GET_CHANGE_COUNT(page),
-										tuphdr);
+		undoLocation = make_update_undo_record(desc, curTuple,
+											   context->tuple, blkno,
+											   O_PAGE_GET_CHANGE_COUNT(page),
+											   tuphdr);
 		leafTuphdr->undoLocation = undoLocation;
 		leafTuphdr->chainHasLocks = tuphdr->chainHasLocks ||
 			XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo);
