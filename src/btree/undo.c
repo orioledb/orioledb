@@ -900,7 +900,9 @@ retry:
 		btree_try_merge_and_unlock(context.desc, blkno, true, true);
 	}
 	else
+	{
 		unlock_page(blkno);
+	}
 }
 
 /*
