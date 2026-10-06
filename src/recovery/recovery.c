@@ -2950,7 +2950,7 @@ recovery_rec_delete(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size, 
 {
 	OTuple		key;
 
-	if (XLogLogicalInfoActive() && relreplident == REPLICA_IDENTITY_FULL)
+	if (relreplident == REPLICA_IDENTITY_FULL)
 	{
 		*allocated = false;
 		*size = o_btree_len(desc, tuple, OTupleLength);

@@ -57,6 +57,22 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 
+/*
+ * Replica identity to write to WAL for a modification of the relation.
+ *
+ * Only logical decoding reads the replica identity and the old-tuple data it
+ * asks for.  Without it the identity is reported as default, so WAL carries
+ * neither the old tuple of REPLICA IDENTITY FULL nor the record naming the
+ * identity.
+ */
+static char
+wal_relreplident(Relation rel)
+{
+	if (!RelationIsLogicallyLogged(rel))
+		return REPLICA_IDENTITY_DEFAULT;
+	return rel->rd_rel->relreplident;
+}
+
 static void set_pending_sk_marker_from_slot(UndoLocation pkUndoLoc, void *arg);
 static void set_pending_sk_marker_from_modify_arg(UndoLocation pkUndoLoc,
 												  void *arg);
@@ -547,7 +563,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 	tup = tts_orioledb_form_tuple(slot, descr);
 
 	if (primary->desc.storageType == BTreeStoragePersistence)
-		o_wal_insert(&primary->desc, tup, relation->rd_rel->relreplident, descr->version);
+		o_wal_insert(&primary->desc, tup, wal_relreplident(relation), descr->version);
 
 	return slot;
 }
@@ -878,7 +894,7 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 		tup = tts_orioledb_form_tuple(slot, descr);
 
 		if (pdesc->storageType == BTreeStoragePersistence)
-			o_wal_insert(pdesc, tup, relation->rd_rel->relreplident,
+			o_wal_insert(pdesc, tup, wal_relreplident(relation),
 						 descr->version);
 	}
 
@@ -1626,7 +1642,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 			tup = tts_orioledb_form_tuple(slot, descr);
 
 			if (primary->desc.storageType == BTreeStoragePersistence)
-				o_wal_insert(&primary->desc, tup, rel->rd_rel->relreplident, descr->version);
+				o_wal_insert(&primary->desc, tup, wal_relreplident(rel), descr->version);
 			return slot;
 		}
 
@@ -1792,8 +1808,7 @@ flatten_old_tuple_for_wal(Relation rel, OTableDescr *descr,
 
 	if (descr->ntoastable == 0 ||
 		GET_PRIMARY(descr)->desc.storageType != BTreeStoragePersistence ||
-		rel->rd_rel->relreplident != REPLICA_IDENTITY_FULL ||
-		!RelationIsLogicallyLogged(rel))
+		wal_relreplident(rel) != REPLICA_IDENTITY_FULL)
 		return tuple;
 
 	return o_tuple_flatten_toast(descr, oldSlot, allocated);
@@ -2005,7 +2020,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 				OTuple		final_tup = tts_orioledb_form_tuple(slot, descr);
 
 				elog(DEBUG3, "CALL o_wal_update");
-				o_wal_update(&primary->desc, final_tup, oldWalTuple, rel->rd_rel->relreplident, descr->version);
+				o_wal_update(&primary->desc, final_tup, oldWalTuple, wal_relreplident(rel), descr->version);
 			}
 
 			if (oldWalTupleAllocated)
@@ -2041,7 +2056,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			{
 				OTuple		final_tup = tts_orioledb_form_tuple(slot, descr);
 
-				o_wal_reinsert(&primary->desc, oldWalTuple, final_tup, rel->rd_rel->relreplident, descr->version);
+				o_wal_reinsert(&primary->desc, oldWalTuple, final_tup, wal_relreplident(rel), descr->version);
 			}
 
 			if (oldWalTupleAllocated)
@@ -2125,7 +2140,7 @@ o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 			}
 
 			if (primary->desc.storageType == BTreeStoragePersistence)
-				o_wal_delete(&primary->desc, primary_tuple, rel->rd_rel->relreplident, descr->version);
+				o_wal_delete(&primary->desc, primary_tuple, wal_relreplident(rel), descr->version);
 
 			if (primary_tuple_allocated)
 				pfree(primary_tuple.data);
