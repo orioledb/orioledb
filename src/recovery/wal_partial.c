@@ -92,11 +92,11 @@ field_length(Form_pg_attribute att, Pointer ptr)
 		return att->attlen;
 	if (att->attlen == -1)
 	{
-		uint32		header;
+		varattrib_4b header = {0};
 
 		if (VARATT_IS_1B(ptr))
 			return VARSIZE_1B(ptr);
-		memcpy(&header, ptr, sizeof(header));
+		memcpy(&header, ptr, sizeof(uint32));
 		return VARSIZE_4B(&header);
 	}
 	Assert(att->attlen == -2);
