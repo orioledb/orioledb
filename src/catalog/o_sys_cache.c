@@ -87,7 +87,7 @@ static Pointer o_sys_cache_get_from_tree(OSysCache *sys_cache,
 static Pointer o_sys_cache_get_from_toast_tree(OSysCache *sys_cache,
 											   OSysCacheKey *key);
 static bool o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key,
-							Pointer entry);
+							Pointer entry, bool transactional);
 static bool o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry);
 static int	o_sys_cache_key_cmp(OSysCache *sys_cache, int nkeys,
 								OSysCacheKey *key1, OSysCacheKey *key2);
@@ -531,11 +531,22 @@ o_sys_cache_get_by_lsn_callback(OTuple tuple, OXid tupOxid,
 {
 	OSysCacheToastChunkKey *tuple_key = (OSysCacheToastChunkKey *) tuple.data;
 	XLogRecPtr *cur_lsn = (XLogRecPtr *) arg;
+	XLogRecPtr	lsn = tuple_key->sys_cache_key.common.lsn;
 
+	/*
+	 * The transaction that wrote an entry transactionally has to see it: the
+	 * DDL itself, and the recovery replaying that DDL along with the data it
+	 * wrote.  Its entries can carry the current position, as WAL of the
+	 * transaction is not written out before commit.
+	 */
 	if (!oxidIsFinished)
+	{
+		if (tupOxid == get_current_oxid_if_any() && lsn <= *cur_lsn)
+			return OTupleFetchMatch;
 		return OTupleFetchNext;
+	}
 
-	if (tuple_key->sys_cache_key.common.lsn < *cur_lsn)
+	if (lsn < *cur_lsn)
 		return OTupleFetchMatch;
 	else
 		return OTupleFetchNext;
@@ -660,11 +671,61 @@ o_sys_cache_unlock(OSysCache *sys_cache, OSysCacheKey *key, int lockmode)
 	}
 }
 
+/*
+ * Insert the entry on behalf of oxid.  The caller decides whose transaction
+ * that is: an autonomous one, or the transaction running the DDL.
+ */
+static bool
+o_sys_cache_insert_entry(OSysCache *sys_cache, Pointer entry, OXid oxid)
+{
+	bool		inserted;
+	BTreeDescr *desc = get_sys_tree(sys_cache->sys_tree_num);
+
+	Assert(desc->undoType != UndoLogNone);
+
+	if (!sys_cache->is_toast)
+	{
+		OTuple		tup = {0};
+
+		tup.data = entry;
+		inserted = o_btree_modify(desc, BTreeOperationInsert,
+								  tup, BTreeKeyLeafTuple,
+								  NULL, BTreeKeyNone,
+								  oxid, COMMITSEQNO_INPROGRESS,
+								  RowLockUpdate, NULL,
+								  &nullCallbackInfo) ==
+			OBTreeModifyResultInserted;
+		/* no version is necessary here for system trees other than OTable */
+		if (inserted)
+			o_wal_insert(desc, tup, REPLICA_IDENTITY_DEFAULT,
+						 O_TABLE_INVALID_VERSION);
+	}
+	else
+	{
+		Pointer		data;
+		int			len;
+		OSysCacheToastKeyBound toast_key = {0};
+
+		toast_key.key = (OSysCacheKey *) entry;
+		toast_key.common.chunknum = 0;
+		toast_key.lsn_cmp = true;
+		data = sys_cache->funcs->toast_serialize_entry(entry, &len);
+		inserted = generic_toast_insert(&oSysCacheToastAPI,
+										(Pointer) &toast_key,
+										data, len, oxid,
+										COMMITSEQNO_INPROGRESS, desc);
+		pfree(data);
+	}
+
+	return inserted;
+}
+
 static
 
 /* Non-key fields of entry should be filled before call */
 bool
-o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key, Pointer entry)
+o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key, Pointer entry,
+				bool transactional)
 {
 	bool		inserted;
 	OSysCacheKey *entry_key = (OSysCacheKey *) entry;
@@ -725,36 +786,27 @@ o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key, Pointer entry)
 		}
 	}
 
-	if (!sys_cache->is_toast)
+	if (transactional)
 	{
-		OTuple		tup = {0};
-
-		tup.formatFlags = 0;
-		tup.data = entry;
-		inserted = o_btree_autonomous_insert(desc, tup);
+		/*
+		 * The undo of the transaction removes the entry if it rolls back, in
+		 * a backend and in recovery alike.
+		 */
+		Assert(!is_recovery_process());
+		systrees_modify_start();
+		inserted = o_sys_cache_insert_entry(sys_cache, entry,
+											get_current_oxid());
+		systrees_modify_end(true);
 	}
 	else
 	{
-		Pointer		data;
-		int			len;
-		OSysCacheToastKeyBound toast_key = {0};
 		OAutonomousTxState state;
-
-		toast_key.key = entry_key;
-		toast_key.common.chunknum = 0;
-		toast_key.lsn_cmp = true;
-
-		data = sys_cache->funcs->toast_serialize_entry(entry, &len);
 
 		start_autonomous_transaction(&state);
 		PG_TRY();
 		{
-			inserted = generic_toast_insert(&oSysCacheToastAPI,
-											(Pointer) &toast_key,
-											data, len,
-											get_current_oxid(),
-											COMMITSEQNO_INPROGRESS,
-											desc);
+			inserted = o_sys_cache_insert_entry(sys_cache, entry,
+												get_current_oxid());
 		}
 		PG_CATCH();
 		{
@@ -763,7 +815,6 @@ o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key, Pointer entry)
 		}
 		PG_END_TRY();
 		finish_autonomous_transaction(&state);
-		pfree(data);
 	}
 	if (allocated)
 		pfree(entry);
@@ -963,11 +1014,52 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 	return result;
 }
 
+/*
+ * Keys o_sys_cache_refresh_transactional() handled in the current
+ * transaction, identified by its top-level xid.  The list is dropped
+ * lazily, once another transaction looks at it.
+ */
+typedef struct
+{
+	OSysCache  *sys_cache;
+	OSysCacheHashKey hash;
+} RefreshedKey;
+
+static TransactionId refreshed_keys_xid = InvalidTransactionId;
+static List *refreshed_keys = NIL;
+
 void
-o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg)
+o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg,
+						  bool transactional)
 {
 	Pointer		entry = NULL;
 	bool		inserted PG_USED_FOR_ASSERTS_ONLY;
+
+	/*
+	 * Promote to transactional if refresh_transactional() touched this key
+	 * earlier in the transaction.  A hash collision only adds unnecessary
+	 * transactional overhead.
+	 */
+	if (!transactional && refreshed_keys != NIL &&
+		TransactionIdEquals(refreshed_keys_xid, GetTopTransactionIdIfAny()))
+	{
+		OSysCacheHashKey hash;
+		ListCell   *lc;
+
+		hash = compute_hash_value(sys_cache->cc_hashfunc,
+								  sys_cache->nkeys, key);
+		foreach(lc, refreshed_keys)
+		{
+			RefreshedKey *refreshed = (RefreshedKey *) lfirst(lc);
+
+			if (refreshed->sys_cache == sys_cache &&
+				refreshed->hash == hash)
+			{
+				transactional = true;
+				break;
+			}
+		}
+	}
 
 	o_sys_cache_lock(sys_cache, key, AccessExclusiveLock);
 
@@ -975,6 +1067,27 @@ o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg)
 
 	if (entry != NULL)
 	{
+		OSysCacheKey *sys_cache_key = (OSysCacheKey *) entry;
+
+		if (!sys_cache_key->common.deleted)
+		{
+			o_sys_cache_unlock(sys_cache, key, AccessExclusiveLock);
+			return;
+		}
+
+		/*
+		 * Refresh data and re-activate the soft-deleted entry.  This happens
+		 * when delete_all + add_all re-encounters an entry whose key still
+		 * exists (e.g. RENAME VALUE followed by ADD VALUE reusing the old
+		 * label).
+		 */
+		sys_cache->funcs->fill_entry(&entry, key, arg);
+		sys_cache_key = (OSysCacheKey *) entry;
+		sys_cache_key->common.deleted = false;
+		if (transactional)
+			o_sys_cache_update_transactional(sys_cache, entry);
+		else
+			o_sys_cache_update(sys_cache, entry);
 		o_sys_cache_unlock(sys_cache, key, AccessExclusiveLock);
 		return;
 	}
@@ -986,7 +1099,7 @@ o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg)
 	/*
 	 * All done, now try to insert into B-tree.
 	 */
-	inserted = o_sys_cache_add(sys_cache, key, entry);
+	inserted = o_sys_cache_add(sys_cache, key, entry, transactional);
 	Assert(inserted);
 	o_sys_cache_unlock(sys_cache, key, AccessExclusiveLock);
 	sys_cache->funcs->free_entry(entry);
@@ -1007,6 +1120,7 @@ o_sys_cache_update_if_needed(OSysCache *sys_cache, OSysCacheKey *key,
 	if (entry == NULL)
 	{
 		/* it's not exist in B-tree */
+		o_sys_cache_unlock(sys_cache, key, AccessExclusiveLock);
 		return;
 	}
 
@@ -1016,6 +1130,66 @@ o_sys_cache_update_if_needed(OSysCache *sys_cache, OSysCacheKey *key,
 	updated = o_sys_cache_update(sys_cache, entry);
 	Assert(updated);
 	o_sys_cache_unlock(sys_cache, key, AccessExclusiveLock);
+}
+
+/*
+ * Bring the entry in line with a definition the current transaction changes.
+ * The transaction writes it itself, so a rollback puts the previous entry
+ * back rather than leaving the cache describing an object that never
+ * committed.
+ *
+ * A missing entry is not added here: the object may never be cached at all.
+ * But whatever caches it later in this transaction does it from the
+ * uncommitted catalog, so such an add is made transactional too, see
+ * o_sys_cache_add_if_needed().
+ *
+ * The lock on the key is kept until the end of the transaction.  Others do
+ * not see the uncommitted entry, so they would otherwise add their own one
+ * next to it.
+ */
+void
+o_sys_cache_refresh_transactional(OSysCache *sys_cache, OSysCacheKey *key,
+								  Pointer arg)
+{
+	Pointer		entry = NULL;
+
+	Assert(!is_recovery_process());
+
+	o_sys_cache_lock(sys_cache, key, AccessExclusiveLock);
+
+	/* Remember the key so a later add_if_needed makes it transactional. */
+	{
+		TransactionId xid = GetTopTransactionId();
+		RefreshedKey *refreshed;
+		MemoryContext prev_context;
+
+		if (refreshed_keys_xid != xid)
+		{
+			list_free_deep(refreshed_keys);
+			refreshed_keys = NIL;
+			refreshed_keys_xid = xid;
+		}
+
+		prev_context = MemoryContextSwitchTo(TopMemoryContext);
+		refreshed = palloc(sizeof(RefreshedKey));
+		refreshed->sys_cache = sys_cache;
+		refreshed->hash = compute_hash_value(sys_cache->cc_hashfunc,
+											 sys_cache->nkeys, key);
+		refreshed_keys = lappend(refreshed_keys, refreshed);
+		MemoryContextSwitchTo(prev_context);
+	}
+
+	o_sys_cache_set_datoid_lsn(&key->common.lsn, NULL);
+	entry = o_sys_cache_search(sys_cache, sys_cache->nkeys, key);
+	if (entry != NULL)
+	{
+		bool		updated PG_USED_FOR_ASSERTS_ONLY;
+
+		sys_cache->funcs->fill_entry(&entry, (OSysCacheKey *) entry, arg);
+		((OSysCacheKey *) entry)->common.deleted = false;
+		updated = o_sys_cache_update_transactional(sys_cache, entry);
+		Assert(updated);
+	}
 }
 
 /*
@@ -1776,7 +1950,7 @@ o_cache_type_safe(Oid datoid, Oid typoid, Oid opclass, XLogRecPtr insert_lsn,
 				o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
 				o_class_cache_add_if_needed(sys_datoid, EnumRelationId, sys_lsn,
 											NULL);
-				o_enum_cache_add_all(datoid, typoid, insert_lsn);
+				o_enum_cache_add_all(datoid, typoid, insert_lsn, false);
 			}
 			break;
 		case TYPTYPE_DOMAIN:
@@ -2303,7 +2477,7 @@ o_SearchCatCacheInternal_hook(CatCache *cache, int nkeys, Datum v1, Datum v2,
 				Name		enumlabel;
 
 				enumtypid = DatumGetObjectId(v1);
-				enumlabel = DatumGetName(v1);
+				enumlabel = DatumGetName(v2);
 
 				Assert(tupdesc);
 
@@ -3083,7 +3257,7 @@ o_sys_cache_copy_tree(OSysCache *sys_cache, Oid src_datoid, Oid dst_datoid)
 					entry = o_sys_cache_get_from_toast_tree(sys_cache, key);
 					if (entry != NULL)
 					{
-						(void) o_sys_cache_add(sys_cache, dst_key, entry);
+						(void) o_sys_cache_add(sys_cache, dst_key, entry, false);
 						sys_cache->funcs->free_entry(entry);
 					}
 					pfree(dst_key);
@@ -3128,7 +3302,7 @@ o_sys_cache_copy_tree(OSysCache *sys_cache, Oid src_datoid, Oid dst_datoid)
 							PointerGetDatum(O_KEY_GET_NAME(key, i));
 				}
 
-				(void) o_sys_cache_add(sys_cache, dst_key, entry);
+				(void) o_sys_cache_add(sys_cache, dst_key, entry, false);
 				pfree(entry);
 			}
 		}

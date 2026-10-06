@@ -52,3 +52,4 @@ after_tree_root_page_write
 raw_iterate_chunk_crossing
 close_xids_before_count
 relnode_files_dropped
+enum_cache_after_delete_all

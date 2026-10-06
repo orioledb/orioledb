@@ -3704,8 +3704,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 				o_find_composite_type_dependencies(rel->rd_rel->reltype, rel);
 				CommandCounterIncrement();
-				o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
-											   (Pointer) &arg);
+				o_class_cache_refresh(MyDatabaseId, rel->rd_rel->oid,
+									  (Pointer) &arg);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_INDEX) &&
 					 (drop_arg->dropflags & PERFORM_DELETION_OF_RELATION))
@@ -4224,8 +4224,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 				o_find_composite_type_dependencies(rel->rd_rel->reltype, rel);
 				CommandCounterIncrement();
-				o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
-											   (Pointer) &arg);
+				o_class_cache_refresh(MyDatabaseId, rel->rd_rel->oid,
+									  (Pointer) &arg);
 				if (arg.found)
 				{
 					XLogRecPtr	cur_lsn;
@@ -4766,7 +4766,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					CommandCounterIncrement();
 					o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-					o_enum_cache_add_all(datoid, objectId, cur_lsn);
+					o_enum_cache_delete_all(datoid, objectId);
+					STOPEVENT(STOPEVENT_ENUM_CACHE_AFTER_DELETE_ALL,
+							  NULL);
+					o_enum_cache_add_all(datoid, objectId, cur_lsn,
+										 true);
 				}
 				break;
 
@@ -4782,8 +4786,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					reltype = rel->rd_rel->reltype;
 					relation_close(rel, AccessShareLock);
 					CommandCounterIncrement();
-					o_class_cache_update_if_needed(MyDatabaseId, reloid,
-												   (Pointer) &arg);
+					o_class_cache_refresh(MyDatabaseId, reloid,
+										  (Pointer) &arg);
 					if (arg.found)
 					{
 						XLogRecPtr	cur_lsn;

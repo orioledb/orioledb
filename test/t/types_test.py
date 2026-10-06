@@ -163,6 +163,48 @@ class TypesTest(BaseTest):
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 4)
 		node.stop()
 
+	def test_enum_rename_in_progress_crash_cache_consistency(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+			CREATE TABLE o_enum_tbl (
+				id int NOT NULL,
+				val mood NOT NULL,
+				PRIMARY KEY (val, id)
+			) USING orioledb;
+			INSERT INTO o_enum_tbl VALUES (1, 'sad'), (2, 'happy');
+			CHECKPOINT;
+		""")
+
+		con = node.connect()
+		con.begin()
+		con.execute("ALTER TYPE mood RENAME VALUE 'sad' TO 'blue';")
+
+		enum_cache = str(
+		    node.execute("SELECT orioledb_sys_tree_structure(5, 'ne');"))
+		self.assertIn('"blue"', enum_cache)
+
+		node.safe_psql("SELECT pg_switch_wal();")
+		node.stop(['-m', 'immediate'])
+		con.close()
+
+		node.start()
+		self.assertEqual([('happy', ), ('sad', )],
+		                 node.execute("""
+			SELECT enumlabel::text
+				FROM pg_enum
+				WHERE enumtypid = 'mood'::regtype
+				ORDER BY enumlabel;
+		"""))
+		enum_cache = str(
+		    node.execute("SELECT orioledb_sys_tree_structure(5, 'ne');"))
+		self.assertNotIn('"blue"', enum_cache)
+		self.assertIn('"sad"', enum_cache)
+
+		node.stop()
+
 	def test_enum_index_recovery_rollback(self):
 		enum_amount = 0
 		enumoid_amount = 0
@@ -1206,4 +1248,337 @@ class TypesTest(BaseTest):
 		check('o_enum_pk', range(4))
 		for table in tables[1:]:
 			check(table, range(1000))
+
+	def test_enum_rename_value_cache_consistency(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+			CREATE TABLE o_enum_tbl (
+				id int NOT NULL,
+				val mood NOT NULL,
+				PRIMARY KEY (val, id)
+			) USING orioledb;
+			INSERT INTO o_enum_tbl VALUES (1, 'sad');
+			ALTER TYPE mood RENAME VALUE 'sad' TO 'blue';
+			ALTER TYPE mood ADD VALUE 'sad';
+		""")
+		node.safe_psql("INSERT INTO o_enum_tbl VALUES (3, 'sad');")
+
+		# Verify pg_enum OIDs differ for 'blue' and 'sad'
+		oids = node.execute("""
+			SELECT enumlabel::text, oid
+				FROM pg_enum
+				WHERE enumtypid = 'mood'::regtype
+				ORDER BY oid;
+		""")
+		blue_oid = next(r[1] for r in oids if r[0] == 'blue')
+		sad_oid = next(r[1] for r in oids if r[0] == 'sad')
+		self.assertNotEqual(blue_oid, sad_oid)
+
+		# ENUM_CACHE must map 'sad' to the new OID, not the renamed one
+		enum_cache = node.execute(
+		    "SELECT orioledb_sys_tree_structure(5, 'ne');")
+		cache_str = str(enum_cache)
+		self.assertIn('"sad"', cache_str)
+		self.assertIn('"blue"', cache_str)
+		# There must be no stale entry mapping 'sad' to blue's OID
+		self.assertNotIn('oid: %d' % blue_oid,
+		                 [l for l in cache_str.split('\\n')
+		                  if '"sad"' in l][0])
+
+		# Both labels resolve to correct rows
+		self.assertEqual(
+		    [(1, 'blue')],
+		    node.execute(
+		        "SELECT id, val::text FROM o_enum_tbl WHERE val = 'blue';"))
+		self.assertEqual(
+		    [(3, 'sad')],
+		    node.execute(
+		        "SELECT id, val::text FROM o_enum_tbl WHERE val = 'sad';"))
+
+		# Verify after crash recovery
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(
+		    [(1, 'blue')],
+		    node.execute(
+		        "SELECT id, val::text FROM o_enum_tbl WHERE val = 'blue';"))
+		self.assertEqual(
+		    [(3, 'sad')],
+		    node.execute(
+		        "SELECT id, val::text FROM o_enum_tbl WHERE val = 'sad';"))
+
+		node.stop()
+
+	def test_enum_alter_checkpoint_crash(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+			CREATE TABLE o_enum_tbl (
+				id int NOT NULL,
+				val mood NOT NULL,
+				PRIMARY KEY (val, id)
+			) USING orioledb;
+			INSERT INTO o_enum_tbl VALUES (1, 'sad'), (2, 'happy');
+		""")
+
+		with node.connect() as con1:
+			with node.connect() as con2:
+				con1_pid = con1.pid
+				con1.execute("SET orioledb.enable_stopevents = true;")
+				con1.begin()
+				con2.execute("""
+					SELECT pg_stopevent_set(
+						'enum_cache_after_delete_all',
+						'true');
+				""")
+
+				t1 = ThreadQueryExecutor(
+				    con1, """
+					ALTER TYPE mood RENAME VALUE 'sad' TO 'blue';
+				""")
+				t1.start()
+				wait_stopevent(node, con1_pid)
+
+				con2.execute("CHECKPOINT;")
+				con2.execute("""
+					SELECT pg_stopevent_reset(
+						'enum_cache_after_delete_all');
+				""")
+				t1.join()
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+
+		self.assertEqual([(1, 'sad'), (2, 'happy')],
+		                 node.execute("""
+				SELECT id, val::text FROM o_enum_tbl
+				ORDER BY id;
+			"""))
+
+		node.stop()
+
+	def test_enum_rename_rollback_cache_consistency(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+			CREATE TABLE o_enum_tbl (
+				id int NOT NULL,
+				val mood NOT NULL,
+				PRIMARY KEY (val, id)
+			) USING orioledb;
+			INSERT INTO o_enum_tbl VALUES (1, 'sad'), (2, 'happy');
+		""")
+
+		with node.connect() as con:
+			con.begin()
+			con.execute("ALTER TYPE mood RENAME VALUE 'sad' TO 'blue';")
+			con.rollback()
+
+		self.assertEqual([('happy', ), ('sad', )],
+		                 node.execute("""
+			SELECT enumlabel::text
+				FROM pg_enum
+				WHERE enumtypid = 'mood'::regtype
+				ORDER BY enumlabel;
+		"""))
+		enum_cache = str(
+		    node.execute("SELECT orioledb_sys_tree_structure(5, 'ne');"))
+		self.assertNotIn('"blue"', enum_cache)
+		self.assertIn('"sad"', enum_cache)
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+
+		enum_cache = str(
+		    node.execute("SELECT orioledb_sys_tree_structure(5, 'ne');"))
+		self.assertNotIn('"blue"', enum_cache)
+		self.assertIn('"sad"', enum_cache)
+
+		node.stop()
+
+	def _enum_cache_labels(self, node):
+		enum_cache = str(
+		    node.execute("SELECT orioledb_sys_tree_structure(5, 'ne');"))
+		return re.findall(r'\(\d+, "(\w+)"\), [0-9A-F]+/[0-9A-F]+, N\)',
+		                  enum_cache)
+
+	def test_enum_rename_rollback_to_savepoint_cache_consistency(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+			CREATE TABLE o_enum_tbl (
+				id int NOT NULL,
+				val mood NOT NULL,
+				PRIMARY KEY (val, id)
+			) USING orioledb;
+			INSERT INTO o_enum_tbl VALUES (1, 'sad'), (2, 'happy');
+		""")
+
+		with node.connect() as con:
+			con.begin()
+			con.execute("SAVEPOINT s;")
+			con.execute("ALTER TYPE mood RENAME VALUE 'sad' TO 'blue';")
+			con.execute("ROLLBACK TO SAVEPOINT s;")
+			con.execute("ALTER TYPE mood RENAME VALUE 'happy' TO 'glad';")
+			con.commit()
+
+		self.assertEqual(['glad', 'sad'], self._enum_cache_labels(node))
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(['glad', 'sad'], self._enum_cache_labels(node))
+		node.stop()
+
+	def test_enum_add_value_rollback_cache_consistency(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+			CREATE TABLE o_enum_tbl (
+				id int NOT NULL,
+				val mood NOT NULL,
+				PRIMARY KEY (val, id)
+			) USING orioledb;
+			INSERT INTO o_enum_tbl VALUES (1, 'sad'), (2, 'happy');
+		""")
+
+		with node.connect() as con:
+			con.begin()
+			con.execute("ALTER TYPE mood ADD VALUE 'meh';")
+			con.rollback()
+
+		self.assertEqual(['happy', 'sad'], self._enum_cache_labels(node))
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(['happy', 'sad'], self._enum_cache_labels(node))
+		node.stop()
+
+	# Rows (i, i % 7): ordered by (a, b) they are ordered by id, ordered by b
+	# alone they are not.  Recovery compares the keys of the index on c by the
+	# class cache entry of comp, so a stale entry misorders the rows it
+	# replays.
+	COMPOSITE_SETUP = """
+		CREATE EXTENSION orioledb;
+		CREATE TYPE comp AS (a int, b int);
+		CREATE TABLE o_comp (id int PRIMARY KEY, c comp) USING orioledb;
+	"""
+
+	def _composite_fill_and_recover(self, node):
+		node.safe_psql("""
+			CHECKPOINT;
+			INSERT INTO o_comp SELECT i, ROW(i, i % 7)::comp
+				FROM generate_series(1, 2000) i;
+		""")
+		node.stop(['-m', 'immediate'])
+		node.start()
+
+	def _composite_index_check(self, node, natts=2):
+		row_from = "ROW(1000, 0)::comp" if natts == 2 else "ROW(0)::comp"
+		order_col = "(c).a" if natts == 2 else "id"
+		with node.connect() as con:
+			con.execute("SET enable_seqscan = off;")
+			con.execute("SET enable_bitmapscan = off;")
+			misordered = con.execute(f"""
+				SELECT count(*) FROM (
+					SELECT k, lag(k) OVER () AS prev FROM (
+						SELECT {order_col} AS k FROM o_comp ORDER BY c
+					) ordered
+				) pairs WHERE k < prev;""")[0][0]
+			found = con.execute(
+			    f"SELECT count(*) FROM o_comp WHERE c >= {row_from};")[0][0]
+		return misordered, found
+
+	def test_composite_drop_attribute_rollback_class_cache(self):
+		node = self.node
+		node.start()
+		node.safe_psql(self.COMPOSITE_SETUP + """
+			CREATE INDEX o_comp_c0 ON o_comp (c);
+			DROP INDEX o_comp_c0;
+		""")
+
+		with node.connect() as con:
+			con.begin()
+			con.execute("ALTER TYPE comp DROP ATTRIBUTE a;")
+			con.rollback()
+
+		node.safe_psql("CREATE INDEX o_comp_c ON o_comp (c);")
+		self._composite_fill_and_recover(node)
+		self.assertEqual((0, 1001), self._composite_index_check(node))
+		node.stop()
+
+	def test_composite_cached_in_rolled_back_transaction(self):
+		node = self.node
+		node.start()
+		node.safe_psql(self.COMPOSITE_SETUP)
+
+		with node.connect() as con:
+			con.begin()
+			con.execute("ALTER TYPE comp DROP ATTRIBUTE a;")
+			con.execute("CREATE INDEX o_comp_tmp ON o_comp (c);")
+			con.rollback()
+
+		node.safe_psql("CREATE INDEX o_comp_c ON o_comp (c);")
+		self._composite_fill_and_recover(node)
+		self.assertEqual((0, 1001), self._composite_index_check(node))
+		node.stop()
+
+	def test_composite_altered_and_used_in_one_transaction(self):
+		node = self.node
+		node.start()
+		node.safe_psql(self.COMPOSITE_SETUP)
+
+		# Recovery replays the rows along with the class cache entry the same
+		# transaction wrote, before the commit record.
+		with node.connect() as con:
+			con.begin()
+			con.execute("ALTER TYPE comp DROP ATTRIBUTE a;")
+			con.execute("CREATE INDEX o_comp_c ON o_comp (c);")
+			con.execute("""
+				INSERT INTO o_comp SELECT i, ROW(i)::comp
+					FROM generate_series(1, 2000) i;""")
+			con.commit()
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual((0, 2000), self._composite_index_check(node, natts=1))
+		node.stop()
+
+	def test_composite_cache_fill_waits_for_alter(self):
+		node = self.node
+		node.start()
+		node.safe_psql(self.COMPOSITE_SETUP + """
+			CREATE INDEX o_comp_c0 ON o_comp (c);
+			DROP INDEX o_comp_c0;
+		""")
+
+		con1 = node.connect()
+		con2 = node.connect()
+		try:
+			con1.begin()
+			con1.execute("ALTER TYPE comp DROP ATTRIBUTE a;")
+			con2.execute("SET lock_timeout = '30s';")
+			t = ThreadQueryExecutor(con2,
+			                        "CREATE INDEX o_comp_c ON o_comp (c);")
+			t.start()
+			# The index build caches comp and has to wait for the ALTER.
+			t.join(timeout=1)
+			self.assertTrue(t.is_alive())
+			con1.rollback()
+			t.join(timeout=30)
+			self.assertFalse(t.is_alive())
+			con2.commit()
+		finally:
+			con1.close()
+			con2.close()
+
+		self._composite_fill_and_recover(node)
+		self.assertEqual((0, 1001), self._composite_index_check(node))
 		node.stop()
