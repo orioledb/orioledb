@@ -80,15 +80,6 @@
  */
 #define ORIOLEDB_FLAT_OLD_TUPLE_WAL_VERSION (20)
 
-/*
- * WAL version that added WAL_REC_UPDATE_PARTIAL, an update record carrying
- * the primary key and the changed fields instead of the whole new tuple.
- * See src/recovery/wal_partial.c.
- *
- * We should never change this value.
- */
-#define ORIOLEDB_UPDATE_PARTIAL_WAL_VERSION (21)
-
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
 #define OWalInvalidCommitPos		UINT64_MAX
