@@ -75,6 +75,8 @@ read_varint(Pointer *ptr)
 	{
 		byte = *((uint8 *) *ptr);
 		(*ptr)++;
+		if (shift >= 28 && (byte & 0x80))
+			elog(ERROR, "varint overflow in partial update payload");
 		value |= (uint32) (byte & 0x7F) << shift;
 		shift += 7;
 	} while (byte & 0x80);
