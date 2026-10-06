@@ -259,6 +259,7 @@ typedef enum
 	InvalidateComparatorUndoItemType,
 	CICCaptureUndoItemType,
 	LockDispatchUndoItemType,
+	UpdateDiffUndoItemType,
 } UndoItemType;
 
 struct UndoStackItem
