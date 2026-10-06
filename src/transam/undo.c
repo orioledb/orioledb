@@ -189,6 +189,11 @@ static UndoItemTypeDescr undoItemTypeDescrs[] = {
 		.callback = lock_dispatch_undo_callback,
 		.callOnCommit = false
 	},
+	{
+		.type = UpdateDiffUndoItemType,
+		.callback = modify_undo_callback,
+		.callOnCommit = false
+	},
 };
 
 
