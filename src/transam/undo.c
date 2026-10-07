@@ -1157,6 +1157,10 @@ clear_my_logical_wal_retain_location(void)
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 
+	/* Nothing set it: see add_rel_wal_record() */
+	if (wal_level < WAL_LEVEL_LOGICAL)
+		return;
+
 	pg_atomic_write_u64(&curProcData->undoRetainLocations[UndoLogSystem].logicalWalRetainUndoLocation,
 						InvalidUndoLocation);
 }
