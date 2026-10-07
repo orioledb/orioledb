@@ -1912,6 +1912,15 @@ o_indices_get_extended(ORelOids oids, OIndexType type,
 	OIndexChunkKey key;
 	int			retry;
 
+	/*
+	 * Stale-shadow unpoison: with inlining the by-value parameters and key
+	 * local may land in a stack region whose shadow still carries redzones
+	 * left by a prior longjmp-aborted query (mixed ASAN build).
+	 */
+	ASAN_UNPOISON_MEMORY_REGION(&oids, sizeof(oids));
+	ASAN_UNPOISON_MEMORY_REGION(&ctx, sizeof(ctx));
+	ASAN_UNPOISON_MEMORY_REGION(&key, sizeof(key));
+
 	key.type = type;
 	key.oids = oids;
 	key.chunknum = 0;
