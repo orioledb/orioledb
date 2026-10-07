@@ -40,7 +40,7 @@ on:
       check_type:
         description: 'Narrow to one check type'
         type: choice
-        options: [all, normal, debug, sanitize, check_page, valgrind_1, valgrind_2, pg_tests, dm_log_writes]
+        options: [all, normal, debug, sanitize, check_page, valgrind_1, valgrind_2, pg_tests, dm_log_writes, ext_tests]
         default: all
 
 jobs:
@@ -67,6 +67,7 @@ jobs:
           check_types = [
               "normal", "debug", "sanitize", "check_page",
               "valgrind_1", "valgrind_2", "pg_tests", "dm_log_writes",
+              "ext_tests",
           ]
 
           # workflow_dispatch can ask for several copies of every cell, so a
@@ -100,7 +101,10 @@ jobs:
           def keep(cell):
               return all(v == "all" or str(cell[k]) == v for k, v in sel.items())
 
-          # dm-log-writes needs a kernel module unavailable on arm64 runners
+          # dm-log-writes needs a kernel module unavailable on arm64 runners.
+          # ext_tests (extension compatibility report, ci/ext/) is
+          # informational and builds third-party extensions, so it runs only
+          # when asked for through workflow_dispatch.
           def make_matrix(combos):
               global fanout
 
@@ -108,6 +112,7 @@ jobs:
                   cell
                   for (cpu, pg, comp), ct in itertools.product(combos, check_types)
                   if not (cpu == "arm64" and ct == "dm_log_writes")
+                  if not (ct == "ext_tests" and event_name != "workflow_dispatch")
                   for cell in [{"cpu": cpu, "pg_version": pg,
                                 "compiler": comp, "check_type": ct}]
                   if keep(cell)
@@ -289,6 +294,17 @@ jobs:
             ./postgresql/src/test/**/tmp_check/log/*
           retention-days: 2
           if-no-files-found: ignore
+
+      - name: Upload extension compatibility report
+        uses: actions/upload-artifact@v7
+        if: ${{ always() && matrix.check_type == 'ext_tests' }}
+        with:
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_ext_compat_r${{ matrix.run }}
+          path: |
+            ./orioledb/ci/ext/work/results
+            ./orioledb/ext_pg.log
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Show stuck processes
         run: bash ./orioledb/ci/list_stuck.sh
