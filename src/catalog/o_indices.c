@@ -1913,9 +1913,10 @@ o_indices_get_extended(ORelOids oids, OIndexType type,
 	int			retry;
 
 	/*
-	 * Stale-shadow unpoison: with inlining the by-value parameters and key
-	 * local may land in a stack region whose shadow still carries redzones
-	 * left by a prior longjmp-aborted query (mixed ASAN build).
+	 * Stale-shadow unpoison: with inlining the by-value parameters and locals
+	 * may land in a stack region whose shadow still carries redzones left by
+	 * a prior longjmp-aborted query (mixed ASAN build).  Loop-body locals
+	 * (deserKey, boundKey) are unpoisoned inside the loop.
 	 */
 	ASAN_UNPOISON_MEMORY_REGION(&oids, sizeof(oids));
 	ASAN_UNPOISON_MEMORY_REGION(&ctx, sizeof(ctx));
@@ -1940,6 +1941,9 @@ o_indices_get_extended(ORelOids oids, OIndexType type,
 		Size		dataLength;
 		Pointer		result;
 		OIndex	   *oIndex;
+
+		ASAN_UNPOISON_MEMORY_REGION(&deserKey, sizeof(deserKey));
+		ASAN_UNPOISON_MEMORY_REGION(&boundKey, sizeof(boundKey));
 
 		boundKey.key = key;
 		boundKey.oxid = InvalidOXid;
