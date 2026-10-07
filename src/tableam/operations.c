@@ -2698,6 +2698,13 @@ o_tbl_index_insert(OTableDescr *descr,
 		if (own_tup)
 		{
 			fill_key_bound(slot, id, &knew);
+
+			/*
+			 * Stale-shadow unpoison: own_tup points to an OTuple in the
+			 * caller's stack frame whose shadow may still carry redzones left
+			 * by a prior longjmp-aborted query (mixed ASAN build).
+			 */
+			ASAN_UNPOISON_MEMORY_REGION(own_tup, sizeof(OTuple));
 			tup = *own_tup;
 		}
 		else
