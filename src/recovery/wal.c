@@ -528,6 +528,18 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 
 	heapXid = GetTopTransactionIdIfAny();
 
+	/* Only logical decoding reads the logical xid */
+	if (wal_level < WAL_LEVEL_LOGICAL && !TransactionIdIsValid(heapXid))
+	{
+		WALRecXidShort *srec;
+
+		srec = (WALRecXidShort *) (&local_wal.buffer[local_wal.buffer_offset]);
+		srec->recType = WAL_REC_XID_SHORT;
+		memcpy(srec->oxid, &oxid, sizeof(OXid));
+		local_wal.buffer_offset += sizeof(*srec);
+		return;
+	}
+
 	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_XID;
 	memcpy(rec->oxid, &oxid, sizeof(OXid));

@@ -36,6 +36,7 @@ static WalParseResult wal_parse_rec_xid(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_finish(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_relation(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_relation_short(WalReaderState *r, WalRecord *rec);
+static WalParseResult wal_parse_rec_xid_short(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_o_tables_meta_unlock(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_savepoint(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_rollback_to_savepoint(WalReaderState *r, WalRecord *rec);
@@ -92,6 +93,17 @@ wal_parse_rec_xid(WalReaderState *r, WalRecord *rec)
 	{
 		rec->heapXid = InvalidTransactionId;
 	}
+	return WALPARSE_OK;
+}
+
+/* Parser for WAL_REC_XID_SHORT: a WAL_REC_XID with no logical or heap xid */
+static WalParseResult
+wal_parse_rec_xid_short(WalReaderState *r, WalRecord *rec)
+{
+	WR_PARSE(r, &rec->oxid);
+	rec->logicalXid = InvalidTransactionId;
+	rec->heapXid = InvalidTransactionId;
+	rec->type = WAL_REC_XID;
 	return WALPARSE_OK;
 }
 

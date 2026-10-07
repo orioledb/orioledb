@@ -81,9 +81,10 @@
 #define ORIOLEDB_FLAT_OLD_TUPLE_WAL_VERSION (20)
 
 /*
- * WAL version that added WAL_REC_RELATION_SHORT: the relation-switch record
- * without the fields only logical decoding reads (xmin, csn, cid, version,
- * base_version), written when wal_level < logical.
+ * WAL version that added the records written when wal_level < logical
+ * without the fields only logical decoding reads: WAL_REC_RELATION_SHORT
+ * (no xmin, csn, cid, version, base_version) and WAL_REC_XID_SHORT (no
+ * logical or heap xid).
  *
  * We should never change this value.
  */
@@ -145,6 +146,16 @@ typedef struct
 	uint8		relnode[sizeof(Oid)];
 	uint8		tablespace[sizeof(Oid)];
 } WALRecRelationShort;
+
+/*
+ * WAL_REC_XID without the logical and heap xids, written below
+ * wal_level = logical when the transaction has no heap xid.
+ */
+typedef struct
+{
+	uint8		recType;
+	uint8		oxid[sizeof(OXid)];
+} WALRecXidShort;
 
 typedef struct
 {

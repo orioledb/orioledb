@@ -64,7 +64,8 @@
 	X(WAL_REC_CIC_WRITERS_DIRECT,   22, "CIC_WRITERS_DIRECT", wal_parse_rec_cic_phase) \
 	X(WAL_REC_CIC_DRAIN_BARRIER,    23, "CIC_DRAIN_BARRIER",  wal_parse_rec_cic_phase) \
 	X(WAL_REC_CIC_INDEX_VALID,      24, "CIC_INDEX_VALID",    wal_parse_rec_cic_phase) \
-	X(WAL_REC_RELATION_SHORT,       25, "RELATION_SHORT",     wal_parse_rec_relation_short)
+	X(WAL_REC_RELATION_SHORT,       25, "RELATION_SHORT",     wal_parse_rec_relation_short) \
+	X(WAL_REC_XID_SHORT,            26, "XID_SHORT",          wal_parse_rec_xid_short)
 
 /*
  * Of the CIC records above only CIC_INDEX_VALID is emitted; the other two
