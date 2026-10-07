@@ -2554,6 +2554,13 @@ o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 
 	O_TUPLE_SET_NULL(nullTup);
 
+	/*
+	 * Stale-shadow unpoison: with NRVO the compiler may alias result to the
+	 * caller's return-value slot, whose shadow can carry redzones left by a
+	 * prior longjmp-aborted query (mixed ASAN build).
+	 */
+	ASAN_UNPOISON_MEMORY_REGION(&result, sizeof(result));
+
 	fill_key_bound(slot, id, &bound);
 
 	/* CIC capture for secondary index being built concurrently. */
@@ -2698,6 +2705,13 @@ o_tbl_index_insert(OTableDescr *descr,
 		if (own_tup)
 		{
 			fill_key_bound(slot, id, &knew);
+
+			/*
+			 * Stale-shadow unpoison: own_tup points to an OTuple in the
+			 * caller's stack frame whose shadow may still carry redzones left
+			 * by a prior longjmp-aborted query (mixed ASAN build).
+			 */
+			ASAN_UNPOISON_MEMORY_REGION(own_tup, sizeof(OTuple));
 			tup = *own_tup;
 		}
 		else
