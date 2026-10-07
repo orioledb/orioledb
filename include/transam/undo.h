@@ -96,8 +96,13 @@ typedef struct
 	 * otherwise if waitForUndoLocation == false and there is no place in a
 	 * buffer - revert modifications on advanceReservedLocation and return
 	 * failure.
+	 *
+	 * Every undo reservation adds to advanceReservedLocation and every
+	 * release subtracts from it, while every snapshot reads the minimal
+	 * retain locations below.  Keep them off its cache line too.
 	 */
-	pg_atomic_uint64 advanceReservedLocation;
+	pg_atomic_uint64 pg_attribute_aligned(PG_CACHE_LINE_SIZE) advanceReservedLocation;
+	char		advanceReservedLocationPad[PG_CACHE_LINE_SIZE - sizeof(pg_atomic_uint64)];
 
 	/*-----
 	 * Eviction of undo log from the RAM buffer to the file range on disk is
@@ -244,6 +249,8 @@ typedef struct
 
 StaticAssertDecl(offsetof(UndoMeta, advanceReservedLocation) == PG_CACHE_LINE_SIZE,
 				 "lastUsedLocation must own a cache line");
+StaticAssertDecl(offsetof(UndoMeta, writeInProgressLocation) == 2 * PG_CACHE_LINE_SIZE,
+				 "advanceReservedLocation must own a cache line");
 StaticAssertDecl(sizeof(UndoMeta) % PG_CACHE_LINE_SIZE == 0,
 				 "UndoMeta must be aligned to the cache line");
 
