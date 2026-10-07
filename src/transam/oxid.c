@@ -903,6 +903,10 @@ set_oxid_xlog_ptr(OXid oxid, XLogRecPtr ptr)
 {
 	Assert(!XLOG_PTR_IS_SPECIAL(ptr));
 
+	/* Only snapshots of logical decoding look commit LSNs up */
+	if (wal_level < WAL_LEVEL_LOGICAL && !is_recovery_process())
+		return;
+
 	set_oxid_xlog_ptr_internal(oxid, ptr);
 }
 
@@ -1914,6 +1918,9 @@ void
 current_oxid_xlog_precommit(void)
 {
 	if (!OXidIsValid(curOxid))
+		return;
+
+	if (wal_level < WAL_LEVEL_LOGICAL)
 		return;
 
 	/*
