@@ -168,7 +168,6 @@ o_convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 	/*
 	 * Decode original tuple. Drop ctid attribute if exists.
 	 */
-	Assert(descr->toast);
 	for (int i = 0; i < natts; i++)
 	{
 		old_values[i] = o_fastgetattr(tuple, i + ctid_off + 1,
@@ -179,7 +178,7 @@ o_convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 	}
 
 	/* Convert TOAST pointers */
-	for (int i = 0; i < descr->ntoastable; i++)
+	for (int i = 0; descr->toast && i < descr->ntoastable; i++)
 	{
 		int			toast_attn = descr->toastable[i] - ctid_off;
 		struct varlena *old_toastptr;

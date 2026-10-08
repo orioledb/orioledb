@@ -34,6 +34,7 @@
 #include "tableam/tree.h"
 #include "tableam/vacuum.h"
 #include "transam/oxid.h"
+#include "tuple/format.h"
 #include "tuple/slot.h"
 #include "utils/compress.h"
 #include "utils/rel.h"
@@ -1411,7 +1412,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 
 		if (method == TOTAL_SIZE)
 		{
-			for (i = 0; i < descr->nIndices + 1; i++)
+			for (i = 0; i < descr->nIndices + (descr->toast ? 1 : 0); i++)
 			{
 				td = i != descr->nIndices ? &descr->indices[i]->desc : &descr->toast->desc;
 				o_btree_load_shmem(td);
@@ -1446,14 +1447,17 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 				result += (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
 					ORIOLEDB_BLCKSZ;
 
-				o_btree_load_shmem(&descr->toast->desc);
-				result += (uint64) TREE_NUM_LEAF_PAGES(&descr->toast->desc) *
-					ORIOLEDB_BLCKSZ;
+				if (descr->toast)
+				{
+					o_btree_load_shmem(&descr->toast->desc);
+					result += (uint64) TREE_NUM_LEAF_PAGES(&descr->toast->desc) *
+						ORIOLEDB_BLCKSZ;
+				}
 			}
 		}
 		else if (method == TOAST_TABLE_SIZE)
 		{
-			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
+			if (descr && descr->toast && tbl_data_exists(&descr->toast->oids))
 			{
 				o_btree_load_shmem(&descr->toast->desc);
 				result = (uint64) TREE_NUM_LEAF_PAGES(&descr->toast->desc) *
@@ -1527,7 +1531,108 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 static bool
 orioledb_relation_needs_toast_table(Relation rel)
 {
-	return true;
+	TupleDesc	tupdesc = RelationGetDescr(rel);
+	ORelOids	oids;
+	OTable	   *table;
+	Bitmapset  *primary_attrs = NULL;
+	Size		data_length;
+	Size		tuple_length;
+	bool		maxlength_unknown = false;
+	bool		has_toastable_attrs = false;
+	int			i;
+
+	/*
+	 * Unlike heap, OrioleDB cannot externalize attributes stored in the
+	 * non-leaf tuples of its primary index.  Match o_find_toastable_attrs(),
+	 * including PRIMARY KEY INCLUDE attributes.  Read OTable directly: a
+	 * complete OTableDescr may not exist until TOAST is created.
+	 *
+	 * During CREATE TABLE or a rewrite the primary index metadata may not
+	 * exist yet; treating its future fields as toastable is a conservative
+	 * overestimate.
+	 */
+	ORelOidsSetFromRel(oids, rel);
+	table = o_tables_get(oids);
+	if (table)
+	{
+		if (table->has_primary)
+		{
+			OTableIndex *primary = &table->indices[PrimaryIndexNumber];
+
+			for (i = 0; i < primary->nfields; i++)
+				primary_attrs = bms_add_member(primary_attrs,
+											   primary->fields[i].attnum);
+		}
+		o_table_free(table);
+	}
+
+	/*
+	 * Heap has no inline ctid or bridge_ctid attributes.  OrioleDB can add
+	 * both to its primary leaf tuple.  Reserve aligned space for both even if
+	 * absent today, so adding/dropping a primary or bridge index cannot
+	 * invalidate a negative estimate made for a bounded-width table.
+	 */
+	data_length = 2 * MAXALIGN(sizeof(ItemPointerData));
+
+	for (i = 0; i < tupdesc->natts; i++)
+	{
+		Form_pg_attribute att = TupleDescAttr(tupdesc, i);
+
+		if (att->attisdropped)
+			continue;
+
+		/* Like heap, exclude virtual generated columns. */
+		if (att->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL)
+			continue;
+
+		data_length = att_align_nominal(data_length, att->attalign);
+		if (att->attlen > 0)
+		{
+			/* Fixed-length types are never toastable */
+			data_length += att->attlen;
+		}
+		else
+		{
+			int32		maxlen = type_maximum_size(att->atttypid,
+												   att->atttypmod);
+
+			if (maxlen < 0)
+				maxlength_unknown = true;
+			else
+				data_length += maxlen;
+			if (att->attstorage != TYPSTORAGE_PLAIN &&
+				!bms_is_member(i, primary_attrs))
+				has_toastable_attrs = true;
+		}
+	}
+	bms_free(primary_attrs);
+
+	if (!has_toastable_attrs)
+		return false;
+	if (maxlength_unknown)
+		return true;
+
+	/*
+	 * Heap adds SizeofHeapTupleHeader and compares against its approximately
+	 * quarter-page TOAST_TUPLE_THRESHOLD.  OrioleDB uses OTupleHeaderData and
+	 * a separately aligned null bitmap, and tts_orioledb_toast() activates at
+	 * O_BTREE_MAX_TUPLE_SIZE, the primary B-tree's approximately third-page
+	 * tuple limit.  Include the two possible internal attributes in the
+	 * bitmap. Assuming a non-fixed tuple with a bitmap and four-byte varlena
+	 * headers is deliberately conservative; fixed tuples and short varlenas
+	 * are smaller. Do not subtract compression savings: they depend on the
+	 * actual values.
+	 *
+	 * Unlike the existing re-TOAST path, a table without a TOAST tree must
+	 * detoast incoming external values inline before measuring them (see
+	 * tts_orioledb_toast()).  Otherwise INSERT ... SELECT could try to write
+	 * chunks even when this bounded schema fits and this callback returns
+	 * false.
+	 */
+	tuple_length = SizeOfOTupleHeader +
+		MAXALIGN(BITMAPLEN(tupdesc->natts + 2)) + MAXALIGN(data_length);
+
+	return tuple_length > O_BTREE_MAX_TUPLE_SIZE;
 }
 
 static Oid

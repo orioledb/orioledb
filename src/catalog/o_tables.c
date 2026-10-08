@@ -1573,9 +1573,12 @@ o_tables_evict_callback(OTable *o_table, void *arg)
 		write_tree_pages(td, -1, true);
 		args->evicted = lappend_oid(args->evicted, td->oids.relnode);
 	}
-	td = &descr->toast->desc;
-	write_tree_pages(td, -1, true);
-	args->evicted = lappend_oid(args->evicted, td->oids.relnode);
+	if (descr->toast)
+	{
+		td = &descr->toast->desc;
+		write_tree_pages(td, -1, true);
+		args->evicted = lappend_oid(args->evicted, td->oids.relnode);
+	}
 
 	table_descr_dec_refcnt(descr);
 	o_invalidate_descrs(descr->oids.datoid, descr->oids.reloid, descr->oids.reloid);
@@ -2785,7 +2788,7 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 	}
 	else
 	{
-		/* Parent partition can't have toast_oids */
+		/* Partitioned parents and inline-only tables have no TOAST tree. */
 		ORelOidsSetInvalid(oTable->toast_oids);
 	}
 	if (oTable->index_bridging)
