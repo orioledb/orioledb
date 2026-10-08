@@ -101,7 +101,6 @@ static void recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num,
 									  ORelOids old_oids, uint32 old_o_table_version,
 									  bool isrebuild);
 static void workers_send_finish(bool send_to_idx_pool);
-static XLogRecPtr recovery_get_current_ptr(void);
 
 /*
  * Recovery worker state in pool.
@@ -341,6 +340,42 @@ typedef struct
 static RecoveryFinishAbortedOxid *recovery_finish_aborted_oxids = NULL;
 static int	recovery_finish_aborted_count = 0;
 static int	recovery_finish_aborted_capacity = 0;
+
+/*
+ * Undo operations of the in-progress transactions that recovery_finish()
+ * aborts in memory are captured (via modify_undo_callback()) so that
+ * o_emit_recovery_finish_undo_wal() can re-emit them as a committed cleanup
+ * transaction.  In parallel recovery the undo is applied by the worker
+ * processes, so the capture buffer lives in shared memory: each worker
+ * appends one entry per undo item under a spinlock, and the leader scans it
+ * once XLog inserts are allowed again.
+ *
+ * A bare WAL_REC_ROLLBACK marker replayed on a pg_rewound standby (whose undo
+ * log was reset) has no undo to apply and leaves the pre-divergence in-progress
+ * rows in place; replaying these committed DELETEs removes them instead.
+ */
+#define RECOVERY_UNDO_CAPTURE_BUF_SIZE (4 * 1024 * 1024)
+
+typedef struct
+{
+	slock_t		lock;
+	uint64		writeoff;		/* bytes consumed so far */
+	bool		overflow;		/* buffer exhausted; capture is incomplete */
+} RecoveryUndoCaptureCtl;
+
+typedef struct
+{
+	ORelOids	tableOids;
+	OIndexType	indexType;
+	BTreeOperationType action;
+	uint8		formatFlags;
+	uint32		keyLen;			/* size of the key bytes that follow */
+} RecoveryUndoCaptureEntry;
+
+static RecoveryUndoCaptureCtl *recovery_undo_capture_ctl = NULL;
+static char *recovery_undo_capture_buf = NULL;
+
+bool		recovery_finish_undo_capturing = false;
 
 /*
  * Current orioledb transaction recovery id
@@ -870,18 +905,12 @@ static bool replay_container(Pointer startPtr, Pointer endPtr,
 static void worker_send_modify(int worker_id, BTreeDescr *desc,
 							   RecoveryMsgType recType,
 							   OTuple tuple, int tuple_len);
-static void workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback,
-									 bool commit);
 static void workers_send_savepoint(SubTransactionId parentSubId);
 static void workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 											   SubTransactionId parentSubId);
-static void workers_synchronize(XLogRecPtr ptr, bool send_synchronize);
 static void workers_notify_toast_consistent(void);
 static void worker_wait_shutdown(RecoveryWorkerState *worker);
 
-static inline bool apply_sys_tree_modify_record(int sys_tree_num, uint16 type,
-												OTuple tup,
-												OXid oxid, CommitSeqNo csn);
 static inline void spread_idx_modify(BTreeDescr *desc,
 									 RecoveryMsgType recType,
 									 OTuple rec);
@@ -912,6 +941,8 @@ recovery_shmem_needs(void)
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint64)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint64)));
 	size = add_size(size, CACHELINEALIGN(sizeof(ConditionVariable)));
+	size = add_size(size, CACHELINEALIGN(sizeof(RecoveryUndoCaptureCtl)));
+	size = add_size(size, CACHELINEALIGN(RECOVERY_UNDO_CAPTURE_BUF_SIZE));
 
 	return size;
 }
@@ -970,9 +1001,19 @@ recovery_shmem_init(Pointer ptr, bool found)
 	recovery_index_cv = (ConditionVariable *) ptr;
 	ptr += CACHELINEALIGN(sizeof(ConditionVariable));
 
+	recovery_undo_capture_ctl = (RecoveryUndoCaptureCtl *) ptr;
+	ptr += CACHELINEALIGN(sizeof(RecoveryUndoCaptureCtl));
+
+	recovery_undo_capture_buf = (char *) ptr;
+	ptr += CACHELINEALIGN(RECOVERY_UNDO_CAPTURE_BUF_SIZE);
+
 	if (!found)
 	{
 		int			i;
+
+		SpinLockInit(&recovery_undo_capture_ctl->lock);
+		recovery_undo_capture_ctl->writeoff = 0;
+		recovery_undo_capture_ctl->overflow = false;
 
 		recovery_undo_loc_flush->finishRequestCheckpointNumber = 0;
 		recovery_undo_loc_flush->immediateRequestCheckpointNumber = 0;
@@ -1338,6 +1379,7 @@ o_recovery_start_hook(void)
 
 	if (checkpoint_state->lastCheckpointNumber > 0)
 		apply_xids_branches();
+	replay_rewind(checkpoint_state->lastCheckpointNumber, recovery_single);
 }
 
 void
@@ -1581,7 +1623,7 @@ get_workers_commit_ptr(void)
 /*
  * Returns minimum ptr which is already reached by all recovery workers.
  */
-static XLogRecPtr
+XLogRecPtr
 recovery_get_current_ptr(void)
 {
 	Assert(RecoveryInProgress());
@@ -1801,6 +1843,18 @@ recovery_init(int worker_id)
 	HASHCTL		ctl;
 	RecoveryWorkerState *state;
 	int			i;
+
+	/*
+	 * Reset the shared undo capture buffer at the start of each recovery.
+	 * Only the leader does this; workers are started afterwards.
+	 */
+	if (worker_id < 0 && recovery_undo_capture_ctl != NULL)
+	{
+		SpinLockAcquire(&recovery_undo_capture_ctl->lock);
+		recovery_undo_capture_ctl->writeoff = 0;
+		recovery_undo_capture_ctl->overflow = false;
+		SpinLockRelease(&recovery_undo_capture_ctl->lock);
+	}
 
 	MemSet(&ctl, 0, sizeof(ctl));
 	ctl.keysize = sizeof(OXid);
@@ -2096,6 +2150,15 @@ recovery_finish(int worker_id)
 		replay_start_reached = true;
 	}
 
+	/*
+	 * While aborting the in-progress transactions below, capture their undo
+	 * modify items so o_emit_recovery_finish_undo_wal() can re-emit them as a
+	 * committed cleanup transaction.  In parallel recovery the undo is applied
+	 * by the worker processes, so every process must capture its own items
+	 * into the shared buffer; only the leader later emits the WAL.
+	 */
+	recovery_finish_undo_capturing = true;
+
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
 	while ((cur_state = (RecoveryXidState *) hash_seq_search(&hash_seq)) != NULL)
 	{
@@ -2231,6 +2294,7 @@ recovery_finish(int worker_id)
 		if (cur_state->used_by)
 			pfree(cur_state->used_by);
 	}
+	recovery_finish_undo_capturing = false;
 	HandleStartupProcInterrupts_hook = NULL;
 	hash_destroy(recovery_xid_state_hash);
 	recovery_xid_state_hash = NULL;
@@ -2294,6 +2358,163 @@ recovery_finish(int worker_id)
  * modify targeting the same row spins in o_btree_modify_handle_conflicts
  * (issue #876).
  */
+
+/*
+ * Append one undo modify item to the shared capture buffer, so it can be
+ * re-emitted as WAL once XLog inserts are allowed again.  Called from
+ * modify_undo_callback() (btree/undo.c) while recovery_finish_undo_capturing
+ * is set, i.e. while recovery_finish() aborts the in-progress transactions
+ * in memory.  In parallel recovery this runs in the worker processes, hence
+ * the shared buffer + spinlock.  The key bytes are copied inline so the entry
+ * no longer depends on the undo log buffer (which may be recycled).
+ */
+void
+recovery_finish_capture_undo_row(ORelOids tableOids, OIndexType indexType,
+								 BTreeOperationType action, uint8 formatFlags,
+								 LocationIndex tupleLen, Pointer tupleData)
+{
+	RecoveryUndoCaptureEntry entry;
+	Size		entrySize;
+	uint64		off;
+
+	if (!recovery_finish_undo_capturing)
+		return;
+
+	if (recovery_undo_capture_ctl == NULL)
+		return;
+
+	entry.tableOids = tableOids;
+	entry.indexType = indexType;
+	entry.action = action;
+	entry.formatFlags = formatFlags;
+	entry.keyLen = tupleLen;
+	entrySize = MAXALIGN(sizeof(RecoveryUndoCaptureEntry) + tupleLen);
+
+	SpinLockAcquire(&recovery_undo_capture_ctl->lock);
+	off = recovery_undo_capture_ctl->writeoff;
+	if (off + entrySize > RECOVERY_UNDO_CAPTURE_BUF_SIZE)
+	{
+		recovery_undo_capture_ctl->overflow = true;
+		SpinLockRelease(&recovery_undo_capture_ctl->lock);
+		return;
+	}
+	memcpy(recovery_undo_capture_buf + off, &entry, sizeof(entry));
+	if (tupleLen > 0)
+		memcpy(recovery_undo_capture_buf + off + sizeof(entry), tupleData, tupleLen);
+	recovery_undo_capture_ctl->writeoff = off + entrySize;
+	SpinLockRelease(&recovery_undo_capture_ctl->lock);
+}
+
+/*
+ * Re-emit the undo of the in-progress transactions that recovery_finish()
+ * aborted as a single committed cleanup transaction: one WAL_REC_XID, a
+ * WAL_REC_DELETE per inserted (now-aborted) row, and a WAL_REC_COMMIT.
+ *
+ * On the just-promoted primary this performs no real btree changes -- the
+ * rows were already removed from its btrees by recovery_finish()'s
+ * apply_undo_stack() -- the WAL alone is what matters.  pg_rewind reads these
+ * DELETEs from the post-divergence WAL and puts their keys into the rewind
+ * file; more importantly, the rewound old master has its undo log reset, so
+ * the bare WAL_REC_ROLLBACK markers emitted above have no undo to apply and
+ * leave the pre-divergence in-progress rows in place.  Replaying these
+ * committed DELETEs removes them instead.
+ */
+void
+o_emit_recovery_finish_undo_wal(void)
+{
+	uint64		off,
+				endoff;
+	int			nDeletes = 0;
+	bool		overflow;
+	OXid		cleanupOxid;
+	XLogRecPtr	flushPos;
+
+	if (recovery_undo_capture_ctl == NULL)
+		return;
+
+	SpinLockAcquire(&recovery_undo_capture_ctl->lock);
+	endoff = recovery_undo_capture_ctl->writeoff;
+	overflow = recovery_undo_capture_ctl->overflow;
+	SpinLockRelease(&recovery_undo_capture_ctl->lock);
+
+	elog(LOG, "orioledb: o_emit_recovery_finish_undo_wal: captured %llu bytes%s",
+		 (unsigned long long) endoff, overflow ? " (overflow)" : "");
+
+	/* First pass: count INSERT-on-primary entries we will emit. */
+	for (off = 0; off < endoff; )
+	{
+		RecoveryUndoCaptureEntry *e = (RecoveryUndoCaptureEntry *)
+			(recovery_undo_capture_buf + off);
+		Size		entrySize = MAXALIGN(sizeof(RecoveryUndoCaptureEntry) + e->keyLen);
+
+		if (e->action == BTreeOperationInsert && e->indexType == oIndexPrimary)
+			nDeletes++;
+		off += entrySize;
+	}
+
+	if (nDeletes == 0)
+		return;
+
+	/*
+	 * Allocate a fresh oxid for the cleanup transaction but deliberately do
+	 * NOT run it through get_current_oxid()/current_oxid_commit(): those would
+	 * register the oxid in this primary's xidmap and push runXmin, which jams
+	 * the post-recovery checkpoint on the still-in-flight subtransaction oxids
+	 * and would desynchronise this primary's horizon from the rewound
+	 * standby's.  We only emit WAL here -- the cleanup performs no real btree
+	 * changes on this primary -- so, like wal_emit_recovery_finish_rollback(),
+	 * we assemble the records by hand and flush, leaving the primary's xid
+	 * state untouched.  The standby registers/commits the oxid while replaying
+	 * this WAL, advancing its own horizon in lockstep.
+	 */
+	cleanupOxid = pg_atomic_fetch_add_u64(&xid_meta->nextXid, 1);
+	add_xid_wal_record(cleanupOxid, InvalidTransactionId);
+
+	/*
+	 * Emit a DELETE per inserted (now-aborted) row directly into the local WAL
+	 * buffer.  We cannot use o_fetch_table_descr() here: this runs in the
+	 * startup process at end-of-recovery, where the per-process table
+	 * descriptor hash is empty.  Instead build a minimal BTreeDescr carrying
+	 * the captured table oids and emit the (already key-form) tuple via
+	 * add_modify_wal_record(); the standby resolves the table from the
+	 * WAL_REC_RELATION record we emit alongside.
+	 */
+	for (off = 0; off < endoff; )
+	{
+		RecoveryUndoCaptureEntry *e = (RecoveryUndoCaptureEntry *)
+			(recovery_undo_capture_buf + off);
+		Size		entrySize = MAXALIGN(sizeof(RecoveryUndoCaptureEntry) + e->keyLen);
+		BTreeDescr	bd;
+		OTuple		tup;
+
+		if (e->action == BTreeOperationInsert && e->indexType == oIndexPrimary)
+		{
+			MemSet(&bd, 0, sizeof(bd));
+			bd.oids = e->tableOids;
+			bd.type = oIndexInvalid;	/* primary: stored as table relation */
+			tup.formatFlags = e->formatFlags;
+			tup.data = recovery_undo_capture_buf + off + sizeof(*e);
+			add_modify_wal_record(WAL_REC_DELETE, &bd, tup,
+								  (OffsetNumber) e->keyLen,
+								  REPLICA_IDENTITY_DEFAULT,
+								  O_TABLE_INVALID_VERSION,
+								  O_TABLE_INVALID_VERSION);
+		}
+		off += entrySize;
+	}
+
+	add_finish_wal_record(WAL_REC_COMMIT,
+						  pg_atomic_read_u64(&xid_meta->runXmin));
+	flushPos = flush_local_wal(false, false);
+	set_local_wal_has_material_changes(false);
+	if (!XLogRecPtrIsInvalid(flushPos))
+		XLogFlush(flushPos);
+
+	elog(LOG, "orioledb: emitted cleanup transaction oxid " UINT64_FORMAT
+		 " with %d undo deletes for in-progress transactions aborted by recovery_finish",
+		 cleanupOxid, nDeletes);
+}
+
 void
 o_emit_recovery_finish_rollbacks(void)
 {
@@ -2306,6 +2527,14 @@ o_emit_recovery_finish_rollbacks(void)
 		wal_emit_recovery_finish_rollback(recovery_finish_aborted_oxids[i].oxid,
 										  recovery_finish_aborted_oxids[i].xid);
 	}
+
+	/*
+	 * Re-emit the undo content of the aborted in-progress transactions as a
+	 * committed cleanup transaction, so a pg_rewound standby (whose undo log
+	 * is reset) can remove the pre-divergence in-progress rows by replaying
+	 * these DELETEs.
+	 */
+	o_emit_recovery_finish_undo_wal();
 
 	if (recovery_finish_aborted_oxids != NULL)
 	{
@@ -2415,7 +2644,6 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			else
 				cur_state->used_by = NULL;
 		}
-
 		cur_recovery_xid_state = cur_state;
 		update_proc_retain_undo_location(worker_id);
 	}
@@ -5904,7 +6132,7 @@ workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 /*
  * Sends commit or rollback message to workers with active the oxid in the pool.
  */
-static void
+void
 workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback, bool commit)
 {
 	RecoveryWorkerState *state;
@@ -5957,7 +6185,7 @@ workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback, bool commit)
  * used by workers and synchronize only with needed workers. But we assume that
  * it does not happen too often and we can use this simple solution.
  */
-static void
+void
 workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 {
 	int			i;
@@ -6099,14 +6327,14 @@ worker_queue_flush(int worker_id)
  * Worker can not fetch table description because another worker does not
  * commit transaction yet.
  */
-static bool
-apply_sys_tree_modify_record(int sys_tree_num, uint16 type, OTuple tup,
+bool
+apply_sys_tree_modify_record(int sys_tree_num, RecoveryMsgType recType, OTuple tup,
 							 OXid oxid, CommitSeqNo csn)
 {
 	bool		result;
 
 	result = apply_btree_modify_record(get_sys_tree(sys_tree_num),
-									   type, tup, oxid, csn);
+									   recType, tup, oxid, csn);
 
 	return result;
 }

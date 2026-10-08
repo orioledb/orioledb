@@ -8,11 +8,15 @@ EXTENSION = orioledb
 PGFILEDESC = "orioledb - orioledb transactional storage engine via TableAm"
 SHLIB_LINK += -lzstd -lcurl -lssl -lcrypto
 
+PG_REWIND_EXTENSION = pg_rewind_orioledb$(DLSUFFIX)
+PG_REWIND_EXTENSION_SOURCES = src/pg_rewind_orioledb.c src/recovery/wal_reader.c
+
 DATA_built = $(patsubst %_prod.sql,%.sql,$(wildcard sql/*_prod.sql))
 DATA = $(filter-out $(wildcard sql/*_*.sql) $(DATA_built), $(wildcard sql/*sql))
 
 EXTRA_CLEAN = include/utils/stopevents_defs.h \
-			  include/utils/stopevents_data.h
+			  include/utils/stopevents_data.h \
+              $(PG_REWIND_EXTENSION)
 OBJS = src/btree/btree.o \
 	   src/btree/build.o \
 	   src/btree/check.o \
@@ -57,6 +61,7 @@ OBJS = src/btree/btree.o \
 	   src/orioledb.o \
 	   src/recovery/logical.o \
 	   src/recovery/recovery.o \
+	   src/recovery/pg_rewind.o \
 	   src/recovery/wal.o \
 	   src/recovery/wal_reader.o \
 	   src/recovery/worker.o \
@@ -290,7 +295,8 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/page_pool_test.py \
 						test/t/bitmap_partition_test.py \
 						test/t/undo_image_chain_test.py \
-						test/t/evict_seq_scan_race_test.py
+						test/t/evict_seq_scan_race_test.py \
+						test/t/pg_rewind_test.py
 TESTGRESCHECKS_PART_3 = test/t/relnode_wraparound_test.py \
 						test/t/rewind_time_test.py
 
@@ -303,10 +309,10 @@ PG_ISOLATION_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test/output_is
 ifdef IS_DEV
 override PG_CPPFLAGS += -DIS_DEV
 
-sql/%.sql:
+sql/%.sql: sql/%_prod.sql sql/%_dev.sql
 	@cat sql/$*_prod.sql sql/$*_dev.sql > $@
 else
-sql/%.sql:
+sql/%.sql: sql/%_prod.sql
 	@cat sql/$*_prod.sql > $@
 endif
 
@@ -356,9 +362,9 @@ installcheck: regresscheck isolationcheck testgrescheck
 else
 installcheck:
 	echo "Checks skipped! Build and run installcheck with IS_DEV=1"
-endif
+endif # IS_DEV
 
-else
+else # not USE_PGXS
 subdir = contrib/orioledb
 top_builddir = ../..
 override PG_CPPFLAGS += -I$(top_srcdir)/$(subdir)/include
@@ -395,8 +401,8 @@ check: regresscheck isolationcheck testgrescheck
 else
 check:
 	echo "Checks skipped! Build and run check with IS_DEV=1"
-endif
-endif
+endif # IS_DEV
+endif # USE_PGXS
 
 # Retrieve the current commit hash from the Git repository.
 # If the .git environment does not exist (e.g., in a Docker environment or a non-Git setup),
@@ -414,9 +420,9 @@ override with_temp_install += USE_VALGRIND=1 \
 	--num-callers=20 --suppressions=$(CURDIR)/valgrind.supp --time-stamp=yes \
 	--log-file=$(CURDIR)/pid-%p.log --trace-children=yes \
 	--trace-children-skip=*/initdb
-else
+else # not VALGRIND
 override with_temp_install += PGCTLTIMEOUT=900
-endif
+endif # VALGRIND
 
 ifdef USE_DM_LOG_WRITES
 override with_temp_install += USE_DM_LOG_WRITES=1
@@ -436,6 +442,35 @@ check_patchset_version:
 	@python3 check_patchset_version.py $(MAJORVERSION) $(ORIOLEDB_PATCHSET_VERSION)
 
 $(OBJS): include/utils/stopevents_defs.h check_patchset_version
+
+all: $(PG_REWIND_EXTENSION)
+
+# Based on coresponding src/makefiles/Makefile.(darwin/linux) in pg srcs
+ifeq ($(PORTNAME), darwin)
+    ifdef PGXS
+        $(PG_REWIND_EXTENSION): LINK_FLAGS = -bundle -bundle_loader $(bindir)/pg_rewind
+    else
+        $(PG_REWIND_EXTENSION): LINK_FLAGS = -bundle -bundle_loader $(top_builddir)/src/bin/pg_rewind
+    endif
+    $(PG_REWIND_EXTENSION): PG_REWIND_SHLIB_LINK = $(libpq)
+else
+    $(PG_REWIND_EXTENSION): LINK_FLAGS = -shared $(rpath)
+    $(PG_REWIND_EXTENSION): PG_REWIND_LDFLAGS_SL = $(LDFLAGS_SL)
+    $(PG_REWIND_EXTENSION): PG_REWIND_SHLIB_LINK = $(SHLIB_LINK)
+endif
+
+$(PG_REWIND_EXTENSION): CPPFLAGS += -I$(includedir) -DFRONTEND=1
+$(PG_REWIND_EXTENSION): $(PG_REWIND_EXTENSION_SOURCES)
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(PG_REWIND_LDFLAGS_SL) $^ $(LINK_FLAGS) $(PG_REWIND_SHLIB_LINK) -o $@
+
+install: install-pg-rewind-ext
+install-pg-rewind-ext: $(PG_REWIND_EXTENSION)
+	$(MKDIR_P) '$(DESTDIR)$(pkglibdir)'
+	$(INSTALL_SHLIB) $< '$(DESTDIR)$(pkglibdir)/$(PG_REWIND_EXTENSION)'
+
+uninstall-pg-rewind-ext:
+	rm -f '$(DESTDIR)$(pkglibdir)/$(PG_REWIND_EXTENSION)'
+uninstall: uninstall-pg-rewind-ext
 
 submake-regress:
 	$(MAKE) -C $(top_builddir)/src/test/regress all
