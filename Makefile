@@ -218,6 +218,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/recovery_partial_drop_test.py \
 						test/t/concurrent_index_test.py \
 						test/t/concurrent_index_stopevents_test.py \
+						test/t/stopevent_test.py \
 						test/t/replication_test.py \
 						test/t/fuzzy_checkpoint_test.py \
 						test/t/types_test.py \
