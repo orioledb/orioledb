@@ -84,6 +84,65 @@ class LogicalTest(BaseTest):
 		        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
 		    ))
 
+	def peek_inserts(self, con, only_local):
+		"""Peek the slot, return the decoded INSERT lines."""
+		rows = con.execute(f"""
+			select data
+				from pg_logical_slot_peek_changes(
+					'regression_slot', null, null,
+					'include-xids', '0',
+					'skip-empty-xacts', '1',
+					'only-local', '{int(only_local)}')
+				where data like '%%INSERT%%';
+		""")
+		return [r[0] for r in rows]
+
+	# Loosely based on contrib/test_decoding/sql/replorigin.sql
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_origin_filtering(self):
+		"""
+		Changes made by a session with replication origin are skipped
+		by the 'only-local' filter and kept without it.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test(data text) USING orioledb;
+		""")
+		create_slot(node)
+		node.safe_psql("SELECT pg_replication_origin_create('o_origin');")
+
+		with node.connect() as con:
+			con.execute("INSERT INTO o_test VALUES ('local');")
+			con.commit()
+
+			# Replaying session: its changes carry the origin
+			con.execute(
+			    "SELECT pg_replication_origin_session_setup('o_origin');")
+			con.begin()
+			con.execute("""
+				SELECT pg_replication_origin_xact_setup(
+					'0/aabbccdd', '2013-01-01 00:00');
+			""")
+			con.execute("INSERT INTO o_test VALUES ('replayed');")
+			con.commit()
+			con.execute("SELECT pg_replication_origin_session_reset();")
+
+			self.assertEqual(len(self.peek_inserts(con, only_local=False)), 2)
+
+			local_changes = self.peek_inserts(con, only_local=True)
+			self.assertEqual(len(local_changes), 1)
+			self.assertIn("local", local_changes[0])
+			self.assertNotIn("replayed", local_changes[0])
+
+			# Commit LSN of the replayed xact is recorded for the origin
+			progress = con.execute(
+			    "SELECT pg_replication_origin_progress('o_origin', true);"
+			)[0][0]
+			self.assertIsNotNone(progress)
+
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_simple(self):
