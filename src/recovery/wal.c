@@ -22,6 +22,7 @@
 #include "recovery/wal_record.h"
 #include "tableam/descr.h"
 #include "transam/oxid.h"
+#include "utils/stopevent.h"
 
 #include "replication/message.h"
 #include "replication/origin.h"
@@ -860,6 +861,9 @@ flush_local_wal(bool isCommit, bool withXactTime)
 
 	Assert(!is_recovery_process());
 	Assert(length > 0);
+
+	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH, NULL))
+		elog(ERROR, "stop event \"wal_flush\" fired");
 
 	/*
 	 * Put the xlog location of our commit record to the shared memory.  This

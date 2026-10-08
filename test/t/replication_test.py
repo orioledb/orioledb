@@ -46,6 +46,41 @@ class ReplicationTest(BaseTest):
 				replica.poll_query_until(
 				    "SELECT orioledb_has_retained_undo();", expected=False)
 
+	def test_replication_wal_flush_error_in_abort(self):
+		"""
+		An ERROR while flushing the ROLLBACK record re-runs the abort, which
+		appends a second ROLLBACK to the same local buffer.  Once the flush
+		succeeds, the standby must replay that container.
+		"""
+		with self.node as master:
+			master.append_conf('postgresql.conf',
+			                   "orioledb.enable_stopevents = on\n")
+			master.start()
+			master.execute("CREATE EXTENSION orioledb;")
+			master.execute("CREATE TABLE o_test\n"
+			               "    (id integer NOT NULL PRIMARY KEY, v int)\n"
+			               "USING orioledb;")
+			master.execute("INSERT INTO o_test SELECT i, i FROM "
+			               "generate_series(1, 100) i;")
+
+			with self.getReplica().start() as replica:
+				self.catchup_orioledb(replica)
+
+				con = master.connect()
+				con.begin()
+				con.execute("UPDATE o_test SET v = v + 1 WHERE id <= 10;")
+				con.execute(
+				    "SELECT pg_stopevent_set('wal_flush', '$hits < 2');")
+				with self.assertRaises(Exception):
+					con.execute("SELECT 1 / 0;")
+				con.close()
+
+				master.execute("SELECT pg_stopevent_reset('wal_flush');")
+				master.execute("UPDATE o_test SET v = v + 1 WHERE id > 90;")
+				self.catchup_orioledb(replica)
+				self.assertEqual(master.execute("SELECT sum(v) FROM o_test;"),
+				                 replica.execute("SELECT sum(v) FROM o_test;"))
+
 	def test_replication_in_progress(self):
 		with self.node as master:
 			master.start()
