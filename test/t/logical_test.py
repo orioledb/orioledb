@@ -137,11 +137,11 @@ class LogicalTest(BaseTest):
 			self.assertIn("local", local_changes[0])
 			self.assertNotIn("replayed", local_changes[0])
 
-			# Commit LSN of the replayed xact is recorded for the origin
+			# The replayed xact advanced the origin to its remote LSN
 			progress = con.execute(
 			    "SELECT pg_replication_origin_progress('o_origin', true);"
 			)[0][0]
-			self.assertIsNotNone(progress)
+			self.assertEqual(str(progress).upper(), '0/AABBCCDD')
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
