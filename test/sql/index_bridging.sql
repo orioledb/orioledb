@@ -315,10 +315,24 @@ SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
 DELETE FROM o_bridging_vacuum_test;
 SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
 SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
+ALTER SYSTEM SET autovacuum = off;
+SELECT pg_reload_conf();
+DO $$
+BEGIN
+  WHILE EXISTS (SELECT 1 FROM pg_stat_activity
+                WHERE backend_type = 'autovacuum worker') LOOP
+    PERFORM pg_terminate_backend(pid)
+       FROM pg_stat_activity WHERE backend_type = 'autovacuum worker';
+    PERFORM pg_sleep(0.1);
+  END LOOP;
+END;
+$$;
 VACUUM o_bridging_vacuum_test;
 SELECT * FROM o_bridging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
 SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
 SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
+ALTER SYSTEM RESET autovacuum;
+SELECT pg_reload_conf();
 DROP TABLE o_bridging_vacuum_test;
 
 
