@@ -34,6 +34,9 @@
 #include "tuple/toast.h"
 
 static inline bool FilterByOrigin(LogicalDecodingContext *ctx, RepOriginId origin_id);
+static void o_decoding_startup(LogicalDecodingContext *ctx);
+
+static logical_decoding_startup_hook_type prev_decoding_startup_hook = NULL;
 
 /*
  * Copy identity attributes from srcSlot to dstSlot.
@@ -1377,9 +1380,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	WalParseResult st;
 
-	/* do our best to disable streaming */
-	ctx->streaming = false;
-
 	elog(DEBUG4, "OrioleDB decode started startXLogPtr %X/%X endXLogPtr %X/%X",
 		 LSN_FORMAT_ARGS(startXLogPtr), LSN_FORMAT_ARGS(endXLogPtr));
 
@@ -1396,4 +1396,31 @@ FilterByOrigin(LogicalDecodingContext *ctx, RepOriginId origin_id)
 		return false;
 
 	return filter_by_origin_cb_wrapper(ctx, origin_id);
+}
+
+/*
+ * Install the hook that disables streaming of in-progress transactions.
+ * Done at load time, so it covers every decoding context.
+ */
+void
+o_install_decoding_startup_hook(void)
+{
+	prev_decoding_startup_hook = logical_decoding_startup_hook;
+	logical_decoding_startup_hook = o_decoding_startup;
+}
+
+/*
+ * OrioleDB can't stream in-progress transactions: logical xids are allocated
+ * from a circular buffer.  The output plugin may enable streaming in its
+ * startup callback, so turn it off before any WAL record is decoded.
+ */
+static void
+o_decoding_startup(LogicalDecodingContext *ctx)
+{
+	if (prev_decoding_startup_hook)
+	{
+		prev_decoding_startup_hook(ctx);
+	}
+
+	ctx->streaming = false;
 }

@@ -291,7 +291,8 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/bitmap_partition_test.py \
 						test/t/undo_image_chain_test.py \
 						test/t/evict_seq_scan_race_test.py
-TESTGRESCHECKS_PART_3 = test/t/relnode_wraparound_test.py \
+TESTGRESCHECKS_PART_3 = test/t/logical_streaming_test.py \
+						test/t/relnode_wraparound_test.py \
 						test/t/rewind_time_test.py
 
 # perf/*_perf.py -- see perf/README.md.
