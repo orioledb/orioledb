@@ -2303,7 +2303,6 @@ orioledb_error_cleanup_hook(void)
 	in_nontransactional_truncate = false;
 	reset_saving_inval_messages();
 	reset_filling_descrs();
-	reset_no_invalidation_descrs();
 }
 
 static void

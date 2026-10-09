@@ -640,7 +640,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 									 (Pointer) bound,
 									 BTreeKeyBound);
 		o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
-		o_btree_iterator_set_interruptible(ostate->iterator, true);
+		o_btree_iterator_set_interruptible(ostate->iterator);
 	}
 
 #if PG_VERSION_NUM >= 180000
@@ -771,12 +771,9 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 		bool		tup_is_valid = true;
 
 		/*
-		 * We return to the executor only with a tuple that qualifies.  Until
-		 * then this loop moves on through key ranges (array elements, skip
-		 * scan probes), and the loop below through tuples the scan keys turn
-		 * down, so check for interrupts in both.  An error abandons the scan;
-		 * see reset_no_invalidation_descrs() for the descriptor flag that
-		 * o_index_scan_getnext() holds meanwhile.
+		 * Check for interrupts between key ranges (array elements, skip scan
+		 * probes).  The per-tuple path relies on the per-page-step check
+		 * inside the iterator, matching nbtree's granularity.
 		 */
 		CHECK_FOR_INTERRUPTS();
 
@@ -802,7 +799,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 													ostate->scanDir,
 													tupleCsn, tupleCxt, hint,
 													NULL, NULL, NULL, &ostate->iterator);
-					o_btree_iterator_set_interruptible(ostate->iterator, true);
+					o_btree_iterator_set_interruptible(ostate->iterator);
 				}
 				else
 				{
@@ -822,8 +819,6 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 
 			do
 			{
-				CHECK_FOR_INTERRUPTS();
-
 				tup = o_btree_iterator_fetch(ostate->iterator, tupleCsn,
 											 bound, BTreeKeyBound,
 											 true, hint);
@@ -950,7 +945,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 															   &ostate->oSnapshot,
 															   ostate->scanDir);
 					o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
-					o_btree_iterator_set_interruptible(ostate->iterator, true);
+					o_btree_iterator_set_interruptible(ostate->iterator);
 				}
 				MemoryContextSwitchTo(oldcontext);
 
@@ -981,8 +976,8 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 	OTuple		tup;
 
 	/*
-	 * Cleared below, or by reset_no_invalidation_descrs() if an error, such
-	 * as a query cancel taken in o_iterate_index(), skips that.
+	 * Cleared below, or by reset_filling_descrs() if an error, such as a
+	 * query cancel taken in o_iterate_index(), skips that.
 	 */
 	descr->noInvalidation = true;
 

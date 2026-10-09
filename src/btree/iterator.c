@@ -1330,9 +1330,9 @@ o_btree_iterator_set_callback(BTreeIterator *it,
  * being written out.
  */
 void
-o_btree_iterator_set_interruptible(BTreeIterator *it, bool interruptible)
+o_btree_iterator_set_interruptible(BTreeIterator *it)
 {
-	it->interruptible = interruptible;
+	it->interruptible = true;
 }
 
 /*
