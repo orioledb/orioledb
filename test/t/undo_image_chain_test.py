@@ -264,6 +264,26 @@ class UndoImageChainTest(BaseTest):
 		except Exception:
 			pass
 
+	def _page_undo_used(self):
+		return self.node.execute(
+		    "SELECT lastUsedLocation FROM orioledb_get_undo_meta() "
+		    "WHERE undo_type = 'page'")[0][0]
+
+	def _update_until_page_undo_used(self, table, target):
+		"""Update the leaf of the table, row by row, until it was compacted."""
+		i = 0
+		while self._page_undo_used() < target:
+			i += 1
+			self.assertLess(i, 1000)
+			# The size must change between updates of a row, or the leaf never
+			# compacts.  % 130 bounds payloads to 20..149, which keeps the 50 rows
+			# in one 8 KB leaf.  The 37 scatters consecutive sizes over that range;
+			# with i % 130 every row is large at once and the leaf splits after its
+			# first compaction.
+			self.node.safe_psql(
+			    "UPDATE %s SET payload = repeat('b', 20 + (%d * 37) %% 130) "
+			    "WHERE id = %d;" % (table, i, 1 + i % 50))
+
 	# --------------------------------------------------- split-only chains
 
 	def test_split_diff_above_split_full(self):
@@ -460,6 +480,43 @@ class UndoImageChainTest(BaseTest):
 		defect is not in telling differential records apart.
 		"""
 		self._deep('o_uic_deep_all_full', 'frfrfrfrfrfrfrf')
+
+	# ------------------------------------------------------ restart
+
+	def test_stale_link_after_restart(self):
+		"""
+		The page-level undo log restarts at location 0 on every start, but leaf
+		pages keep the undoLocation they were written with.  A snapshot older
+		than the first compaction after a restart must read its rows from the
+		compaction image, not hit the link the image inherited from the page's
+		previous life.
+		"""
+		table = 'o_uic_restart'
+		self.node.safe_psql(
+		    'postgres', "CREATE TABLE %s ("
+		    "    id int NOT NULL,"
+		    "    payload text NOT NULL,"
+		    "    PRIMARY KEY (id)"
+		    ") USING orioledb;"
+		    "INSERT INTO %s "
+		    "(SELECT id, repeat('a', 100) FROM generate_series(1, 50) id);" %
+		    (table, table))
+
+		# Two compactions give the leaf a nonzero page undo link.
+		self._update_until_page_undo_used(table, 16000)
+		self.node.stop()
+		self.node.start()
+		self.assertEqual(self._page_undo_used(), 0)
+
+		con, view = self._snapshot(table)
+
+		# The first compaction after the restart writes its image at location 0.
+		self._update_until_page_undo_used(table, 1)
+
+		self.assertEqual(
+		    con.execute("SELECT id, payload FROM %s ORDER BY id;" % table),
+		    view)
+		self._close(con)
 
 	# --------------------------------------------------- composed helpers
 
