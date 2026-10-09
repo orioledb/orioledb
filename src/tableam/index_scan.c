@@ -640,6 +640,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 									 (Pointer) bound,
 									 BTreeKeyBound);
 		o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
+		o_btree_iterator_set_interruptible(ostate->iterator, true);
 	}
 
 #if PG_VERSION_NUM >= 180000
@@ -769,6 +770,16 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 		OBTreeKeyBound *bound;
 		bool		tup_is_valid = true;
 
+		/*
+		 * We return to the executor only with a tuple that qualifies.  Until
+		 * then this loop moves on through key ranges (array elements, skip
+		 * scan probes), and the loop below through tuples the scan keys turn
+		 * down, so check for interrupts in both.  An error abandons the scan;
+		 * see reset_no_invalidation_descrs() for the descriptor flag that
+		 * o_index_scan_getnext() holds meanwhile.
+		 */
+		CHECK_FOR_INTERRUPTS();
+
 		if (ostate->exact)
 		{
 			if (hint)
@@ -791,6 +802,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 													ostate->scanDir,
 													tupleCsn, tupleCxt, hint,
 													NULL, NULL, NULL, &ostate->iterator);
+					o_btree_iterator_set_interruptible(ostate->iterator, true);
 				}
 				else
 				{
@@ -810,6 +822,8 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 
 			do
 			{
+				CHECK_FOR_INTERRUPTS();
+
 				tup = o_btree_iterator_fetch(ostate->iterator, tupleCsn,
 											 bound, BTreeKeyBound,
 											 true, hint);
@@ -936,6 +950,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 															   &ostate->oSnapshot,
 															   ostate->scanDir);
 					o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
+					o_btree_iterator_set_interruptible(ostate->iterator, true);
 				}
 				MemoryContextSwitchTo(oldcontext);
 
@@ -965,6 +980,10 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 	OIndexDescr *id = descr->indices[ostate->ixNum];
 	OTuple		tup;
 
+	/*
+	 * Cleared below, or by reset_no_invalidation_descrs() if an error, such
+	 * as a query cancel taken in o_iterate_index(), skips that.
+	 */
 	descr->noInvalidation = true;
 
 	if (!ostate->curKeyRangeIsLoaded)

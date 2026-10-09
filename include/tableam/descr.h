@@ -412,6 +412,7 @@ extern void o_invalidate_comparator_callback(UndoLogType undoType, UndoLocation 
 											 bool changeCountsValid);
 extern void reset_saving_inval_messages(void);
 extern void reset_filling_descrs(void);
+extern void reset_no_invalidation_descrs(void);
 
 extern void ResourceOwnerRememberOTableDescr(ResourceOwner owner, OTableDescr *descr);
 extern void ResourceOwnerForgetOTableDescr(ResourceOwner owner, OTableDescr *descr);
