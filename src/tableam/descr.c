@@ -2810,6 +2810,26 @@ reset_filling_descrs(void)
 }
 
 /*
+ * Clear noInvalidation on every table descriptor.  o_index_scan_getnext() and
+ * orioledb_fetch_row_version() set it for the time they read through the
+ * descriptor, but an error thrown meanwhile, such as a query cancel, skips
+ * the clearing.  The next invalidation of the descriptor would then fail the
+ * assertion in o_invalidate_descrs_internal().  These sections can nest, e.g.
+ * through a comparator running a query, so do not try to track the current
+ * one.  Called from the orioledb error-cleanup hook.
+ */
+void
+reset_no_invalidation_descrs(void)
+{
+	HASH_SEQ_STATUS scan_status;
+	OTableDescr *tableDescr;
+
+	hash_seq_init(&scan_status, oTableDescrHash);
+	while ((tableDescr = (OTableDescr *) hash_seq_search(&scan_status)) != NULL)
+		tableDescr->noInvalidation = false;
+}
+
+/*
  * Find hash function in cache or create new one.
  */
 static OHashFn *
