@@ -1319,10 +1319,13 @@ btree_split_mark_finished(OInMemoryBlkno rightBlkno, bool use_lock, bool success
 		use_lock = false;
 
 	leftBlkno = rightPageDesc->leftBlkno;
-	Assert(OInMemoryBlknoIsValid(leftBlkno));
+
+	/* A concurrent backend may have already completed this split. */
+	if (!OInMemoryBlknoIsValid(leftBlkno))
+		return;
 
 	/*
-	 * Still need to lock th left page even if we're going to just set
+	 * Still need to lock the left page even if we're going to just set
 	 * BROKEN_SPLIT on the right page, because we need to notify waiters in
 	 * o_btree_split_is_incomplete().
 	 */
@@ -1337,7 +1340,8 @@ btree_split_mark_finished(OInMemoryBlkno rightBlkno, bool use_lock, bool success
 
 			unlock_page(leftBlkno);
 			leftBlkno = rightPageDesc->leftBlkno;
-			Assert(OInMemoryBlknoIsValid(leftBlkno));
+			if (!OInMemoryBlknoIsValid(leftBlkno))
+				return;
 		}
 	}
 
