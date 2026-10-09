@@ -824,6 +824,9 @@ RESET enable_seqscan;
 RESET cpu_tuple_cost;
 RESET random_page_cost;
 
+-- Force diff output so CI always shows diagnostics above
+SELECT 'FORCE_DIFF_FOR_DEBUG';
+
 CREATE TABLE test_no_bmscan_on_text_pkey (data1 text PRIMARY KEY, data2 text, data3 text, i int) USING orioledb;
 CREATE INDEX ON test_no_bmscan_on_text_pkey USING spgist (data2);
 INSERT INTO test_no_bmscan_on_text_pkey VALUES('foofoo','barbar', 'aaaaaa', 1);
