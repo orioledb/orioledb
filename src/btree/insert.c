@@ -285,7 +285,13 @@ o_btree_fix_page_split(BTreeDescr *desc, OInMemoryBlkno left_blkno)
 	rightBlkno = RIGHTLINK_GET_BLKNO(header->rightLink);
 	rightHeader = (BTreePageHeader *) O_GET_IN_MEMORY_PAGE(rightBlkno);
 	lock_page(rightBlkno);
-	Assert(O_PAGE_IS(O_GET_IN_MEMORY_PAGE(rightBlkno), BROKEN_SPLIT));
+	if (!O_PAGE_IS(O_GET_IN_MEMORY_PAGE(rightBlkno), BROKEN_SPLIT))
+	{
+		/* Already fixed by a concurrent backend. */
+		unlock_page(rightBlkno);
+		unlock_page(left_blkno);
+		return;
+	}
 	START_CRIT_SECTION();
 	page_block_reads(rightBlkno);
 	rightHeader->flags &= ~O_BTREE_FLAG_BROKEN_SPLIT;
@@ -298,6 +304,8 @@ o_btree_fix_page_split(BTreeDescr *desc, OInMemoryBlkno left_blkno)
 	END_CRIT_SECTION();
 	unlock_page(rightBlkno);
 	unlock_page(left_blkno);
+
+	STOPEVENT(STOPEVENT_SPLIT_FIX_BEFORE_DOWNLINK, NULL);
 
 	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_FIND, 2);
 
@@ -363,6 +371,8 @@ o_btree_split_fix_for_right_page_and_unlock(BTreeDescr *desc, OInMemoryBlkno rig
 
 	unlock_page(rightBlkno);
 
+	STOPEVENT(STOPEVENT_BEFORE_SPLIT_FIX_LEFT_LOCK, NULL);
+
 	lock_page(leftBlkno);
 	leftHeader = (BTreePageHeader *) O_GET_IN_MEMORY_PAGE(leftBlkno);
 	rightLink = leftHeader->rightLink;
@@ -386,16 +396,38 @@ o_btree_insert_stack_push_split_item(BTreeInsertStackItem *insert_item,
 	Page		p = O_GET_IN_MEMORY_PAGE(left_blkno);
 	BTreePageHeader *header = (BTreePageHeader *) p;
 	BTreePageHeader *rightHeader;
-	BTreeInsertStackItem *new_item = palloc(sizeof(BTreeInsertStackItem));
+	BTreeInsertStackItem *new_item;
 	OInMemoryBlkno right_blkno;
 
 	/* Should not be here. */
 	Assert(insert_item->context->index != 0);
 
+	/* Check BROKEN_SPLIT before allocating, to avoid leaked memory. */
+	right_blkno = RIGHTLINK_GET_BLKNO(header->rightLink);
+	lock_page(right_blkno);
+	rightHeader = (BTreePageHeader *) O_GET_IN_MEMORY_PAGE(right_blkno);
+
+	if (!O_PAGE_IS(O_GET_IN_MEMORY_PAGE(right_blkno), BROKEN_SPLIT))
+	{
+		/* Already fixed by a concurrent backend. */
+		unlock_page(right_blkno);
+		unlock_page(left_blkno);
+		insert_item->refind = true;
+		return insert_item;
+	}
+
+	START_CRIT_SECTION();
+	page_block_reads(right_blkno);
+	rightHeader->flags &= ~O_BTREE_FLAG_BROKEN_SPLIT;
+	btree_register_inprogress_split(right_blkno);
+	END_CRIT_SECTION();
+	unlock_page(right_blkno);
+
 	/*
 	 * The incomplete split found. We should fill a new insert item which will
 	 * insert downlink to parent and push it to context.
 	 */
+	new_item = palloc(sizeof(BTreeInsertStackItem));
 	new_item->context = palloc(sizeof(OBTreeFindPageContext));
 	*(new_item->context) = *(insert_item->context);
 	new_item->context->index--;
@@ -406,16 +438,6 @@ o_btree_insert_stack_push_split_item(BTreeInsertStackItem *insert_item,
 
 	o_btree_split_fill_downlink_item(new_item, left_blkno, true);
 
-	/* Removes broken flag and unlock page. */
-	right_blkno = RIGHTLINK_GET_BLKNO(header->rightLink);
-	lock_page(right_blkno);
-	rightHeader = (BTreePageHeader *) O_GET_IN_MEMORY_PAGE(right_blkno);
-	START_CRIT_SECTION();
-	page_block_reads(right_blkno);
-	rightHeader->flags &= ~O_BTREE_FLAG_BROKEN_SPLIT;
-	btree_register_inprogress_split(right_blkno);
-	END_CRIT_SECTION();
-	unlock_page(right_blkno);
 	unlock_page(left_blkno);
 	insert_item->refind = true;
 
@@ -1724,6 +1746,26 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 				/* page is changed, we should refind current tuple */
 				unlock_page(blkno);
 				insert_item->refind = true;
+				continue;
+			}
+
+			/*
+			 * A concurrent fixer may have already inserted the downlink and
+			 * completed this split. Both backends serialize on this parent
+			 * page lock because o_btree_insert_mark_split_finished_if_needed
+			 * runs while the parent page is locked.
+			 */
+			if (insert_item->rightBlkno != OInvalidInMemoryBlkno &&
+				!OInMemoryBlknoIsValid(O_GET_IN_MEMORY_PAGEDESC(insert_item->rightBlkno)->leftBlkno))
+			{
+				unlock_page(blkno);
+				START_CRIT_SECTION();
+				btree_unregister_inprogress_split(insert_item->rightBlkno);
+				END_CRIT_SECTION();
+				insert_item->rightBlkno = OInvalidInMemoryBlkno;
+				insert_item = insert_item->next;
+				if (insert_item != NULL)
+					ppool_reserve_pages(desc->ppool, reserve_kind, 2);
 				continue;
 			}
 		}
