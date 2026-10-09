@@ -114,6 +114,127 @@ class DDLTest(BaseTest):
 			self.assertErrorMessageEquals(e, (f"orioledb tuples does not have "
 			                                  f"system attribute: {field}"))
 
+	def test_alter_access_method_heap_to_orioledb(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE conv_test (
+				id int PRIMARY KEY,
+				v int
+			) USING heap;
+
+			INSERT INTO conv_test SELECT g, g * 2 FROM generate_series(1, 1000) g;
+		""")
+
+		self.assertEqual(
+			node.execute("SELECT a.amname FROM "
+						 "pg_am a INNER JOIN pg_class c ON a.oid = c.relam "
+						 "WHERE c.relname = 'conv_test'")[0][0],
+			"heap"
+		)
+
+		# Now we change access method and check that all values are kept too
+		node.execute("ALTER TABLE conv_test SET ACCESS METHOD orioledb")
+		self.assertEqual(
+			node.execute("SELECT a.amname FROM "
+						 "pg_am a INNER JOIN pg_class c ON a.oid = c.relam "
+						 "WHERE c.relname = 'conv_test'")[0][0],
+			"orioledb"
+		)
+		self.assertEqual(
+			node.execute("SELECT count(*) FROM conv_test WHERE id > 0")[0][0],
+			1000
+		)
+		self.assertEqual(
+			node.execute("SELECT count(*) FROM conv_test WHERE v > 0")[0][0],
+			1000
+		)
+
+	def test_alter_access_method_heap_to_orioledb_brin(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE conv_test (
+				id int PRIMARY KEY,
+				v int
+			) USING heap;
+
+			CREATE INDEX idx_t_brin ON conv_test USING brin(v);
+			INSERT INTO conv_test SELECT g, g * 2 FROM generate_series(1, 1000) g;
+		""")
+
+		self.assertEqual(
+			node.execute("SELECT a.amname FROM "
+						 "pg_am a INNER JOIN pg_class c ON a.oid = c.relam "
+						 "WHERE c.relname = 'conv_test'")[0][0],
+			"heap"
+		)
+
+		# Now we change access method and check that all values are kept too
+		node.execute("ALTER TABLE conv_test SET ACCESS METHOD orioledb")
+		node.execute("SET LOCAL enable_seqscan = OFF;")
+		self.assertEqual(
+			node.execute("SELECT a.amname FROM "
+						 "pg_am a INNER JOIN pg_class c ON a.oid = c.relam "
+						 "WHERE c.relname = 'conv_test'")[0][0],
+			"orioledb"
+		)
+		self.assertEqual(
+			node.execute("SELECT count(*) FROM conv_test WHERE id > 0")[0][0],
+			1000
+		)
+		self.assertEqual(
+			node.execute("SELECT count(*) FROM conv_test WHERE v > 0")[0][0],
+			1000
+		)
+
+	def test_alter_access_method_heap_to_orioledb_hash(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE conv_test (
+				id int PRIMARY KEY,
+				v text
+			) USING heap;
+
+			CREATE INDEX idx_t_hash ON conv_test USING hash(v);
+			INSERT INTO conv_test SELECT g, 'v' || g FROM generate_series(1, 1000) g;
+		""")
+
+		self.assertEqual(
+			node.execute("SELECT a.amname FROM "
+						 "pg_am a INNER JOIN pg_class c ON a.oid = c.relam "
+						 "WHERE c.relname = 'conv_test'")[0][0],
+			"heap"
+		)
+
+		# Now we change access method and check that all values are kept too
+		node.execute("ALTER TABLE conv_test SET ACCESS METHOD orioledb")
+		node.execute("SET LOCAL enable_seqscan = OFF;")
+		self.assertEqual(
+			node.execute("SELECT a.amname FROM "
+						 "pg_am a INNER JOIN pg_class c ON a.oid = c.relam "
+						 "WHERE c.relname = 'conv_test'")[0][0],
+			"orioledb"
+		)
+		self.assertEqual(
+			node.execute("SELECT count(*) FROM conv_test WHERE id > 0")[0][0],
+			1000
+		)
+		self.assertEqual(
+			node.execute("SELECT * FROM conv_test WHERE v = 'v500'")[0],
+			(500, 'v500')
+		)
+
 	def test_non_trx_recreate_expr_index(self):
 
 		node = self.node

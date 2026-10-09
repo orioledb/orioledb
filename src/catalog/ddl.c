@@ -162,6 +162,11 @@ Oid o_am_conversion_newrel = InvalidOid;
 static Oid o_am_conversion_oldrel = InvalidOid;
 static ORelOids o_am_conversion_oids;
 
+/*
+ * Where the table being converted carries the bridge index.
+ */
+static bool o_am_conversion_bridging = false;
+
 static bool in_rewrite = false;
 static bool in_cluster_rebuild = false;
 List	   *reindex_list = NIL;
@@ -2336,7 +2341,7 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 }
 
 static void
-create_o_table_for_rel(Relation rel)
+create_o_table_for_rel(Relation rel, bool bridging)
 {
 	ORelOids	oids;
 	TupleDesc	tupdesc;
@@ -2357,7 +2362,7 @@ create_o_table_for_rel(Relation rel)
 									 rel->rd_rel->relpersistence,
 									 RelationGetFillFactor(rel, BTREE_DEFAULT_FILLFACTOR),
 									 rel->rd_rel->reltablespace,
-									 false);
+									 bridging);
 	o_cache_table_types(o_table);
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
@@ -3422,6 +3427,34 @@ remove_symlink:
 
 
 /*
+ * Check if relation has any non-btree index (bridge indexes).
+ */
+static bool
+o_rel_needs_bridging(Relation rel)
+{
+	ListCell *lc;
+	List *index_list;
+	bool res = false;
+
+	index_list = RelationGetIndexList(rel);
+	foreach(lc, index_list)
+	{
+		Relation ind = relation_open(lfirst_oid(lc), AccessShareLock);
+		Oid indexam = ind->rd_rel->relam;
+		relation_close(ind, AccessShareLock);
+		if (indexam != BTREE_AM_OID)
+		{
+			res = true;
+			break;
+		}
+	}
+
+	list_free(index_list);
+
+	return res;
+}
+
+/*
  * get_collation		- fetch qualified name of a collation
  *
  * If collation is InvalidOid or is the default for the given actual_datatype,
@@ -3954,7 +3987,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			{
 				if (!OidIsValid(rel->rd_rel->relrewrite))
 				{
-					create_o_table_for_rel(rel);
+					create_o_table_for_rel(rel, false);
 				}
 				else
 				{
@@ -3975,13 +4008,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						 * destination (see o_am_conversion_newrel).
 						 */
 						bool old_has_toast = OidIsValid(old_rel->rd_rel->reltoastrelid);
+						o_am_conversion_bridging = o_rel_needs_bridging(old_rel);
 						relation_close(old_rel, AccessShareLock);
 
 						o_am_conversion_oldrel = rel->rd_rel->relrewrite;
 						o_am_conversion_newrel = RelationGetRelid(rel);
 						ORelOidsSetFromRel(o_am_conversion_oids, rel);
 
-						create_o_table_for_rel(rel);
+						create_o_table_for_rel(rel, o_am_conversion_bridging);
 
 						/*
 						 * ACHTUNG: currently every orioledb's table keeps TOAST.  Probably,
@@ -4013,7 +4047,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 				if (tbl && is_orioledb_rel(tbl))
 				{
-					set_toast_oids_and_options(tbl, rel, false, false);
+					set_toast_oids_and_options(tbl, rel, false,
+								   tbl_oid == o_am_conversion_newrel &&
+								   o_am_conversion_bridging);
 				}
 				if (tbl)
 					table_close(tbl, AccessShareLock);
@@ -4600,7 +4636,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					old_o_table = o_tables_get(saved_oids);
 					Assert(old_o_table != NULL);
 
-					create_o_table_for_rel(tbl);
+					create_o_table_for_rel(tbl, false);
 
 					set_toast_oids_and_options(tbl, rel, false, old_o_table->index_bridging);
 
@@ -4685,7 +4721,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						old_o_table = o_tables_get(saved_oids);
 						Assert(old_o_table != NULL);
 
-						create_o_table_for_rel(tbl);
+						create_o_table_for_rel(tbl, false);
 
 						set_toast_oids_and_options(tbl, rel, false, old_o_table->index_bridging);
 
@@ -5597,6 +5633,7 @@ o_ddl_cleanup(void)
 		o_am_conversion_newrel = InvalidOid;
 		o_am_conversion_oldrel = InvalidOid;
 		ORelOidsSetInvalid(o_am_conversion_oids);
+		o_am_conversion_bridging = false;
 	}
 	if (o_alter_generated_column_id)
 	{
@@ -5950,6 +5987,15 @@ o_table_adopt_rewritten(Relation rel)
 	o_invalidate_oids(old_oids);
 	o_invalidate_oids(o_table->oids);
 	orioledb_free_rd_amcache(rel);
+
+
+	/*
+	 * swap_relation_files() leaves reloptions as-is, so
+	 * index_bridging must be set on this relation manually.
+	 */
+	if (o_am_conversion_bridging)
+		change_bridging_option(rel, true, false);
+
 	o_table_free(o_table);
 
 	/*
