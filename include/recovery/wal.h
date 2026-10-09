@@ -28,7 +28,7 @@
  * ORIOLEDB_COMPRESS_VERSION (see big comment on versioning
  * in include/orioledb.h)
  */
-#define ORIOLEDB_WAL_VERSION (20)
+#define ORIOLEDB_WAL_VERSION (21)
 
 /*
  * Value has been fixed at the moment of introducing WAL versioning.
@@ -291,6 +291,9 @@ extern void wal_emit_recovery_finish_rollback(OXid oxid,
 											  TransactionId logicalXid);
 extern void o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version);
 extern void o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident, uint32 version);
+extern void o_wal_update_row(OIndexDescr *primary, OTuple tuple,
+							 OTuple oldTuple, OTuple oldWalTuple,
+							 char relreplident, uint32 version);
 extern void o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version);
 extern void o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index, uint32 version);
 extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relreplident, uint32 version);

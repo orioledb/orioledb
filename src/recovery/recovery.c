@@ -29,6 +29,7 @@
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
 #include "recovery/wal.h"
+#include "recovery/wal_partial.h"
 #include "recovery/wal_reader.h"
 #include "replication/walreceiver.h"
 #include "storage/itemptr.h"
@@ -885,6 +886,8 @@ static inline bool apply_sys_tree_modify_record(int sys_tree_num, uint16 type,
 static inline void spread_idx_modify(BTreeDescr *desc,
 									 RecoveryMsgType recType,
 									 OTuple rec);
+static void spread_partial_update(BTreeDescr *desc, OTuple payload,
+								  int length);
 
 static inline RecoveryMsgType recovery_msg_from_wal_record(WalRecordType rec_type);
 static void recovery_send_init(int worker_num);
@@ -5281,6 +5284,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_UPDATE:
 		case WAL_REC_DELETE:
 		case WAL_REC_REINSERT:
+		case WAL_REC_UPDATE_PARTIAL:
 			{
 				OFixedTuple tuple1,
 							tuple2;
@@ -5437,7 +5441,19 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 					if (ctx->single)
 					{
 						recovery_switch_to_oxid(rec->oxid, -1);
+						if (type == RecoveryMsgTypeUpdatePartial)
+						{
+							ctx->descr = recovery_partial_update_descr(ctx->descr,
+																	   tuple1.tuple);
+							ctx->indexDescr = GET_PRIMARY(ctx->descr);
+						}
 						apply_modify_record(ctx->descr, ctx->indexDescr, type, tuple1.tuple);
+					}
+					else if (type == RecoveryMsgTypeUpdatePartial)
+					{
+						spread_partial_update(&ctx->indexDescr->desc,
+											  tuple1.tuple,
+											  rec->u.modify.len1);
 					}
 					else
 					{
@@ -5711,6 +5727,7 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 
 	Assert(recType == RecoveryMsgTypeInsert ||
 		   recType == RecoveryMsgTypeUpdate ||
+		   recType == RecoveryMsgTypeUpdatePartial ||
 		   recType == RecoveryMsgTypeDelete ||
 		   recType == RecoveryMsgTypeBridgeErase);
 
@@ -6153,6 +6170,23 @@ spread_idx_modify(BTreeDescr *desc, RecoveryMsgType recType, OTuple rec)
 }
 
 /*
+ * Sends a WAL_REC_UPDATE_PARTIAL payload to the worker owning its key.
+ */
+static void
+spread_partial_update(BTreeDescr *desc, OTuple payload, int length)
+{
+	OTuple		key;
+	uint32		hash;
+
+	Assert(desc->type == oIndexPrimary);
+	key = o_wal_partial_update_get_key(payload.data);
+	hash = o_btree_hash(desc, key, BTreeKeyNonLeafKey);
+	pfree(key.data);
+	worker_send_modify(GET_WORKER_ID(hash), desc,
+					   RecoveryMsgTypeUpdatePartial, payload, length);
+}
+
+/*
  * Converts wal record type to recovery message type.
  */
 static inline RecoveryMsgType
@@ -6166,6 +6200,8 @@ recovery_msg_from_wal_record(WalRecordType rec_type)
 			return RecoveryMsgTypeDelete;
 		case WAL_REC_UPDATE:
 			return RecoveryMsgTypeUpdate;
+		case WAL_REC_UPDATE_PARTIAL:
+			return RecoveryMsgTypeUpdatePartial;
 		case WAL_REC_BRIDGE_ERASE:
 			return RecoveryMsgTypeBridgeErase;
 		case WAL_REC_REINSERT:
