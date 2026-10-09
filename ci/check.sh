@@ -268,6 +268,49 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         fi
     fi
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log stop
+elif [ $CHECK_TYPE = "ext_tests" ]; then
+	# Extension compatibility: run the regression suites that contrib modules
+	# and pinned third-party extensions ship, unmodified, against a server
+	# whose default table access method is orioledb.  Informational: the
+	# product is the report (ci/ext/work/results/report.md, also appended to
+	# the step summary); a failing suite does not fail the job.
+	ext_pgdata=$GITHUB_WORKSPACE/pgsql/ext_pgdata
+	# Toolchains the external builds need beyond ci/prerequisites.sh: PostGIS
+	# (autotools + GEOS/PROJ/GDAL/SFCGAL/protobuf-c), pgsodium/vault
+	# (libsodium), pgaudit (gssapi), and cargo-pgrx for the Rust extensions
+	# (run.py installs the exact cargo-pgrx version each crate pins).
+	sudo apt-get -y install -qq autoconf automake libtool gettext xsltproc docbook-xsl \
+		libgeos-dev libproj-dev libgdal-dev libxml2-dev libjson-c-dev libprotobuf-c-dev protobuf-c-compiler \
+		libsfcgal-dev libpcre2-dev libsodium-dev libkrb5-dev
+	# Ubuntu's cargo predates edition 2024, which cargo-pgrx 0.16 needs.
+	curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+	export PATH=$HOME/.cargo/bin:$PATH
+	# Ubuntu's libsodium predates the ipcrypt API current pgsodium uses.
+	(curl -fsSL https://download.libsodium.org/libsodium/releases/LATEST.tar.gz | tar -xz -C /tmp \
+		&& cd /tmp/libsodium-stable && ./configure --prefix=/usr >/dev/null && make -j$(nproc) >/dev/null && sudo make install >/dev/null)
+	initdb -N --encoding=UTF-8 --locale=C -D $ext_pgdata
+	cp $ext_pgdata/postgresql.conf $ext_pgdata/postgresql.conf.initdb
+	ci/ext/fetch.sh --pg-major $PG_VERSION
+	# Third-party extensions are built and installed first (dependencies
+	# first): a suite's server may have to preload them.
+	python3 ci/ext/run.py --build-only || echo "ext_tests: some external builds failed"
+	# Suites that need the same start-time settings (shared_preload_libraries,
+	# wal_level, ...: whatever their own temp-config asks for) share a server;
+	# each distinct set gets a fresh start, the way `make check` gives those
+	# modules their own temp instance.  Everything else run.py applies per
+	# suite with ALTER SYSTEM and resets afterwards.
+	for gid in $(python3 ci/ext/run.py --list-groups \
+			| python3 -c 'import json,sys; print(" ".join(str(g["id"]) for g in json.load(sys.stdin)))'); do
+		cp $ext_pgdata/postgresql.conf.initdb $ext_pgdata/postgresql.conf
+		rm -f $ext_pgdata/postgresql.auto.conf
+		python3 ci/ext/run.py --config-only --group $gid | grep -v '^#' \
+			| sed "s/^\([^=]*\)=\(.*\)$/\1 = '\2'/" >> $ext_pgdata/postgresql.conf
+		pg_ctl -D $ext_pgdata -l ext_pg.log start
+		python3 ci/ext/run.py --group $gid || echo "ext_tests: group $gid exited with $?"
+		pg_ctl -D $ext_pgdata -l ext_pg.log stop
+		mv ext_pg.log ci/ext/work/results/server-group$gid.log
+	done
+	python3 ci/ext/report.py --step-summary || status=$?
 elif [ $CHECK_TYPE = "dm_log_writes" ]; then
 	# Run only the recovery tests with OS buffer loss simulation enabled.
 	# Each crash point uses dm-log-writes: only writes that reached the
