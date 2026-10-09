@@ -2,6 +2,7 @@ name: pg_upgrade
 
 on:
   push:
+    branches: ["main"]
     paths-ignore:
       - "test/antithesis/**"
       - "test/integration/**"
