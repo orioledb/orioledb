@@ -24,6 +24,10 @@ class IndexScanInterruptTest(BaseTest):
 	"""
 
 	ROWS = 100000
+	# Shorter scans make the timeout too close to timer granularity.
+	MIN_SCAN_MS = 200
+	CALIBRATION_RUNS = 3
+	TIMEOUT_DIVISOR = 10
 
 	def setUp(self):
 		super().setUp()
@@ -63,23 +67,37 @@ class IndexScanInterruptTest(BaseTest):
 		    row[0] for row in con.execute("EXPLAIN (COSTS OFF) " + query))
 		self.assertIn("index only scan of: o_scan_intr_pkey", plan)
 
+	def scan_ms(self, con, query):
+		"""Fastest of a few runs of the query, in ms; skips slow outliers."""
+		runs = []
+		for _ in range(self.CALIBRATION_RUNS):
+			start = time.time()
+			self.assertEqual(con.execute(query), [])
+			runs.append((time.time() - start) * 1000.0)
+		return min(runs)
+
 	def assert_times_out(self, con, query):
 		"""The query, which returns no rows, must end on statement_timeout.
 
 		The query is a plain SELECT on purpose: an aggregate on top would check
 		for interrupts on its own once the scan is over, and would report the
 		timeout late instead of not at all.  The timeout is a small fraction
-		of the time the whole scan takes, so it fires while the scan runs.
+		of the fastest scan, so it fires while the scan runs.
 		"""
-		self.assertEqual(con.execute(query), [])
+		ms = self.scan_ms(con, query)
+		self.assertGreaterEqual(
+		    ms, self.MIN_SCAN_MS,
+		    "scan too short for a reliable timeout, raise ROWS")
+		con.execute("SET statement_timeout = %d;" %
+		            int(ms / self.TIMEOUT_DIVISOR))
 		start = time.time()
-		self.assertEqual(con.execute(query), [])
-		scan_ms = (time.time() - start) * 1000.0
-		con.execute("SET statement_timeout = %d;" % max(1, int(scan_ms / 10)))
 		with self.assertRaises(Exception) as e:
 			con.execute(query)
+		elapsed = (time.time() - start) * 1000.0
 		self.assertIn("canceling statement due to statement timeout",
 		              str(e.exception))
+		# The timeout fired during the scan, not after it.
+		self.assertLess(elapsed, ms)
 		# The timeout must not be left pending for the next statement.
 		con.execute("SET statement_timeout = 0;")
 		self.assertEqual(con.execute("SELECT 1;"), [(1, )])
