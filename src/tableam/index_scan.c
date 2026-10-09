@@ -640,6 +640,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 									 (Pointer) bound,
 									 BTreeKeyBound);
 		o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
+		o_btree_iterator_set_interruptible(ostate->iterator);
 	}
 
 #if PG_VERSION_NUM >= 180000
@@ -769,6 +770,13 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 		OBTreeKeyBound *bound;
 		bool		tup_is_valid = true;
 
+		/*
+		 * Check for interrupts between key ranges (array elements, skip scan
+		 * probes).  The per-tuple path relies on the per-page-step check
+		 * inside the iterator, matching nbtree's granularity.
+		 */
+		CHECK_FOR_INTERRUPTS();
+
 		if (ostate->exact)
 		{
 			if (hint)
@@ -791,6 +799,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 													ostate->scanDir,
 													tupleCsn, tupleCxt, hint,
 													NULL, NULL, NULL, &ostate->iterator);
+					o_btree_iterator_set_interruptible(ostate->iterator);
 				}
 				else
 				{
@@ -936,6 +945,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 															   &ostate->oSnapshot,
 															   ostate->scanDir);
 					o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
+					o_btree_iterator_set_interruptible(ostate->iterator);
 				}
 				MemoryContextSwitchTo(oldcontext);
 
@@ -965,6 +975,10 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 	OIndexDescr *id = descr->indices[ostate->ixNum];
 	OTuple		tup;
 
+	/*
+	 * Cleared below, or by reset_filling_descrs() if an error, such as a
+	 * query cancel taken in o_iterate_index(), skips that.
+	 */
 	descr->noInvalidation = true;
 
 	if (!ostate->curKeyRangeIsLoaded)

@@ -2789,14 +2789,24 @@ reset_saving_inval_messages(void)
 }
 
 /*
- * Clear the "being filled" flag on any descriptor whose get_index_descr() /
- * create_table_descr() was interrupted by an error longjmp, so it is not left
- * permanently exempt from invalidation.  Called from the orioledb
- * error-cleanup hook.
+ * Reset descriptor flags left set by an error longjmp.  Called from the
+ * orioledb error-cleanup hook.
+ *
+ * fill_in_progress: cleared so a half-built descriptor is not permanently
+ * exempt from invalidation.
+ *
+ * noInvalidation: o_index_scan_getnext() and orioledb_fetch_row_version() set
+ * it while reading through a descriptor; an error (e.g. query cancel) skips
+ * the clearing.  The next invalidation would then fail the assertion in
+ * o_invalidate_descrs_internal().  These sections can nest, e.g. through a
+ * comparator running a query, so do not try to track the current one.
  */
 void
 reset_filling_descrs(void)
 {
+	HASH_SEQ_STATUS scan_status;
+	OTableDescr *tableDescr;
+
 	if (filling_index_descr != NULL)
 	{
 		filling_index_descr->fill_in_progress = false;
@@ -2807,6 +2817,10 @@ reset_filling_descrs(void)
 		filling_table_descr->fill_in_progress = false;
 		filling_table_descr = NULL;
 	}
+
+	hash_seq_init(&scan_status, oTableDescrHash);
+	while ((tableDescr = (OTableDescr *) hash_seq_search(&scan_status)) != NULL)
+		tableDescr->noInvalidation = false;
 }
 
 /*
