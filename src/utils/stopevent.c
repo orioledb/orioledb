@@ -45,6 +45,7 @@ typedef struct
 {
 	char		condition[QUERY_BUFFER_SIZE];
 	bool		enabled;
+	int			hits;			/* matches since pg_stopevent_set() */
 	int			nWaiters;
 	uint32		flags;
 	slock_t		lock;
@@ -137,6 +138,7 @@ pg_stopevent_set(PG_FUNCTION_ARGS)
 
 	SpinLockAcquire(&event->lock);
 	event->enabled = true;
+	event->hits = 0;
 	event->flags = flags;
 	memcpy(&event->condition, condition, VARSIZE_ANY(condition));
 	SpinLockRelease(&event->lock);
@@ -278,7 +280,7 @@ pid_is_waiting_for_stopevent(int pid)
 }
 
 static Jsonb *
-make_process_params(void)
+make_process_params(int hits)
 {
 	JsonbParseState *state = NULL;
 	Jsonb	   *res;
@@ -308,16 +310,23 @@ make_process_params(void)
 	else
 		jsonb_push_null_key(&state, "backendType");
 	jsonb_push_string_key(&state, "applicationName", application_name);
+	jsonb_push_int8_key(&state, "hits", hits);
 	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
 	MemoryContextSwitchTo(mctx);
 
 	return res;
 }
 
+/*
+ * *hits < 0 marks a new arrival: it sees the current count and a match adds
+ * a hit.  A waiter passes back its arrival's count, so re-checks add none.
+ */
 static bool
-check_stopevent_condition(StopEvent *event, Jsonb *params)
+check_stopevent_condition(StopEvent *event, Jsonb *params, int *hits)
 {
 	Datum		res;
+	bool		match;
+	bool		counted = (*hits < 0);
 
 	SpinLockAcquire(&event->lock);
 	if (!event->enabled)
@@ -326,15 +335,21 @@ check_stopevent_condition(StopEvent *event, Jsonb *params)
 		return false;
 	}
 
+	if (counted)
+		*hits = event->hits;
+
 	res = DirectFunctionCall4(jsonb_path_match,
 							  PointerGetDatum(params),
 							  PointerGetDatum(&event->condition),
-							  PointerGetDatum(make_process_params()),
+							  PointerGetDatum(make_process_params(*hits)),
 							  BoolGetDatum(false));
+	match = DatumGetBool(res);
+	if (match && counted)
+		event->hits++;
 
 	SpinLockRelease(&event->lock);
 
-	return DatumGetBool(res);
+	return match;
 }
 
 static Jsonb *
@@ -370,13 +385,14 @@ void
 handle_stopevent(int event_id, Jsonb *params)
 {
 	StopEvent  *event = &stopevents[event_id];
+	int			hits = -1;
 
 	Assert(event_id >= 0 && event_id < STOPEVENTS_COUNT);
 
 	if (!params)
 		params = make_empty_params();
 
-	if (event->enabled && check_stopevent_condition(event, params))
+	if (event->enabled && check_stopevent_condition(event, params, &hits))
 	{
 		SpinLockAcquire(&event->lock);
 		event->nWaiters++;
@@ -392,7 +408,7 @@ handle_stopevent(int event_id, Jsonb *params)
 						break;
 				}
 
-				if (!check_stopevent_condition(event, params))
+				if (!check_stopevent_condition(event, params, &hits))
 					break;
 
 				/*
@@ -439,16 +455,24 @@ bool
 check_stopevent(int event_id, Jsonb *params)
 {
 	StopEvent  *event = &stopevents[event_id];
+	bool		result;
+	int			hits = -1;
 
 	Assert(event_id >= 0 && event_id < STOPEVENTS_COUNT);
 
-	if (!params)
-		params = make_empty_params();
+	if (!event->enabled)
+		return false;
 
-	if (event->enabled && check_stopevent_condition(event, params))
-		return true;
+	if (params)
+		return check_stopevent_condition(event, params, &hits);
 
-	return false;
+	params = make_empty_params();
+	result = check_stopevent_condition(event, params, &hits);
+
+	/* stopevents_cxt can outlive the transaction, so reset explicitly */
+	MemoryContextReset(stopevents_cxt);
+
+	return result;
 }
 
 void
