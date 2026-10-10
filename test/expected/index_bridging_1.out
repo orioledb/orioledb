@@ -4112,26 +4112,53 @@ NOTICE:  index bridging is enabled for orioledb table 'bitmap_test'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
 CREATE INDEX bitmap_test_ix4 ON bitmap_test (h);
 ANALYZE bitmap_test;
+-- DEBUG: page counts right after ANALYZE
+SELECT pg_relation_size('bitmap_test') / 8192 AS tbl_pages,
+       pg_relation_size('bitmap_test_ix1') / 8192 AS ix1_pages,
+       pg_relation_size('bitmap_test_ix2') / 8192 AS ix2_pages,
+       pg_relation_size('bitmap_test_ix3') / 8192 AS ix3_pages,
+       pg_relation_size('bitmap_test_ix4') / 8192 AS ix4_pages,
+       c.relpages AS pg_class_relpages,
+       c.reltuples AS pg_class_reltuples
+  FROM pg_class c WHERE c.relname = 'bitmap_test';
+ tbl_pages | ix1_pages | ix2_pages | ix3_pages | ix4_pages | pg_class_relpages | pg_class_reltuples 
+-----------+-----------+-----------+-----------+-----------+-------------------+--------------------
+        36 |        19 |        19 |        16 |        19 |                36 |               5000
+(1 row)
+
+-- DEBUG: index pg_class stats
+SELECT c.relname, c.relpages, c.reltuples
+  FROM pg_class c
+  WHERE c.relname IN ('bitmap_test_ix1','bitmap_test_ix2','bitmap_test_ix3','bitmap_test_ix4')
+  ORDER BY c.relname;
+     relname     | relpages | reltuples 
+-----------------+----------+-----------
+ bitmap_test_ix1 |        0 |      5000
+ bitmap_test_ix2 |        0 |      5000
+ bitmap_test_ix3 |       16 |      5000
+ bitmap_test_ix4 |        1 |      5000
+(4 rows)
+
 SET enable_seqscan = off;
 SET cpu_tuple_cost = 0.5;
 SET random_page_cost = 1.0;
 CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND h < 100 OR j < 100 LIMIT 20);
-EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
- Aggregate
-   ->  Limit
-         ->  Result
-               ->  Custom Scan (o_scan) on bitmap_test
+EXPLAIN (COSTS ON) SELECT count(*) FROM bitmap_test_mv;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=43.97..44.47 rows=1 width=8)
+   ->  Limit  (cost=11.00..33.92 rows=20 width=20)
+         ->  Result  (cost=11.00..313.49 rows=264 width=20)
+               ->  Custom Scan (o_scan) on bitmap_test  (cost=11.00..181.49 rows=264 width=0)
                      Bitmap heap scan
                      Recheck Cond: (((i < 100) AND (h < 100)) OR (j < 100))
-                     ->  BitmapOr
-                           ->  BitmapAnd
-                                 ->  Bitmap Index Scan on bitmap_test_ix1
+                     ->  BitmapOr  (cost=11.00..11.00 rows=265 width=0)
+                           ->  BitmapAnd  (cost=7.76..7.76 rows=13 width=0)
+                                 ->  Bitmap Index Scan on bitmap_test_ix1  (cost=0.00..3.09 rows=241 width=0)
                                        Index Cond: (i < 100)
-                                 ->  Bitmap Index Scan on bitmap_test_ix4
+                                 ->  Bitmap Index Scan on bitmap_test_ix4  (cost=0.00..4.29 rows=268 width=0)
                                        Index Cond: (h < 100)
-                           ->  Bitmap Index Scan on bitmap_test_ix2
+                           ->  Bitmap Index Scan on bitmap_test_ix2  (cost=0.00..3.17 rows=252 width=0)
                                  Index Cond: (j < 100)
 (14 rows)
 
@@ -4168,22 +4195,22 @@ SELECT * FROM bitmap_test_mv;
 
 DROP VIEW bitmap_test_mv;
 CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND j < 100 OR h < 100 LIMIT 20);
-EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
- Aggregate
-   ->  Limit
-         ->  Result
-               ->  Custom Scan (o_scan) on bitmap_test
+EXPLAIN (COSTS ON) SELECT count(*) FROM bitmap_test_mv;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=43.79..44.29 rows=1 width=8)
+   ->  Limit  (cost=11.02..33.74 rows=20 width=20)
+         ->  Result  (cost=11.02..329.12 rows=280 width=20)
+               ->  Custom Scan (o_scan) on bitmap_test  (cost=11.02..189.12 rows=280 width=0)
                      Bitmap heap scan
                      Recheck Cond: (((i < 100) AND (j < 100)) OR (h < 100))
-                     ->  BitmapOr
-                           ->  BitmapAnd
-                                 ->  Bitmap Index Scan on bitmap_test_ix1
+                     ->  BitmapOr  (cost=11.02..11.02 rows=280 width=0)
+                           ->  BitmapAnd  (cost=6.65..6.65 rows=12 width=0)
+                                 ->  Bitmap Index Scan on bitmap_test_ix1  (cost=0.00..3.09 rows=241 width=0)
                                        Index Cond: (i < 100)
-                                 ->  Bitmap Index Scan on bitmap_test_ix2
+                                 ->  Bitmap Index Scan on bitmap_test_ix2  (cost=0.00..3.17 rows=252 width=0)
                                        Index Cond: (j < 100)
-                           ->  Bitmap Index Scan on bitmap_test_ix4
+                           ->  Bitmap Index Scan on bitmap_test_ix4  (cost=0.00..4.29 rows=268 width=0)
                                  Index Cond: (h < 100)
 (14 rows)
 
@@ -4219,25 +4246,36 @@ SELECT * FROM bitmap_test_mv;
 (20 rows)
 
 DROP VIEW bitmap_test_mv;
+-- DEBUG: page counts right before the flaky third query
+SELECT pg_relation_size('bitmap_test') / 8192 AS tbl_pages,
+       pg_relation_size('bitmap_test_ix1') / 8192 AS ix1_pages,
+       pg_relation_size('bitmap_test_ix2') / 8192 AS ix2_pages,
+       pg_relation_size('bitmap_test_ix3') / 8192 AS ix3_pages,
+       pg_relation_size('bitmap_test_ix4') / 8192 AS ix4_pages;
+ tbl_pages | ix1_pages | ix2_pages | ix3_pages | ix4_pages 
+-----------+-----------+-----------+-----------+-----------
+        36 |        19 |        19 |        16 |        19
+(1 row)
+
 CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND j < 100 AND k < 200 OR h < 100 LIMIT 20);
-EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Aggregate
-   ->  Limit
-         ->  Result
-               ->  Custom Scan (o_scan) on bitmap_test
+EXPLAIN (COSTS ON) SELECT count(*) FROM bitmap_test_mv;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=50.11..50.61 rows=1 width=8)
+   ->  Limit  (cost=17.19..40.06 rows=20 width=20)
+         ->  Result  (cost=17.19..325.89 rows=270 width=20)
+               ->  Custom Scan (o_scan) on bitmap_test  (cost=17.19..190.89 rows=270 width=0)
                      Bitmap heap scan
                      Recheck Cond: (((i < 100) AND (j < 100) AND (k < 200)) OR (h < 100))
-                     ->  BitmapOr
-                           ->  BitmapAnd
-                                 ->  Bitmap Index Scan on bitmap_test_ix1
+                     ->  BitmapOr  (cost=17.19..17.19 rows=270 width=0)
+                           ->  BitmapAnd  (cost=12.83..12.83 rows=1 width=0)
+                                 ->  Bitmap Index Scan on bitmap_test_ix1  (cost=0.00..3.09 rows=241 width=0)
                                        Index Cond: (i < 100)
-                                 ->  Bitmap Index Scan on bitmap_test_ix2
+                                 ->  Bitmap Index Scan on bitmap_test_ix2  (cost=0.00..3.17 rows=252 width=0)
                                        Index Cond: (j < 100)
-                                 ->  Bitmap Index Scan on bitmap_test_ix3
+                                 ->  Bitmap Index Scan on bitmap_test_ix3  (cost=0.00..5.86 rows=511 width=0)
                                        Index Cond: (k < 200)
-                           ->  Bitmap Index Scan on bitmap_test_ix4
+                           ->  Bitmap Index Scan on bitmap_test_ix4  (cost=0.00..4.29 rows=268 width=0)
                                  Index Cond: (h < 100)
 (16 rows)
 
