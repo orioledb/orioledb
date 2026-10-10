@@ -44,8 +44,6 @@ typedef struct
 	OFixedKey	lokey;
 	/* a base undo location, from the data page header */
 	UndoLocation baseLoc;
-	/* undo location of the `image` in this struct */
-	UndoLocation imageUndoLoc;
 	/* is the image leftmost on the base location */
 	bool		leftmost;
 	/* is the image rightmost on the base location */
@@ -2307,7 +2305,6 @@ undo_it_create(UndoIterator *undoIt, BTreeIterator *it)
 	undoIt->rightmost = true;
 	undoIt->leftmost = true;
 	undoIt->baseLoc = InvalidUndoLocation;
-	undoIt->imageUndoLoc = InvalidUndoLocation;
 }
 
 /*
@@ -2321,6 +2318,32 @@ undo_it_init(UndoIterator *undoIt, UndoLocation location, void *key, BTreeKeyTyp
 }
 
 /*
+ * Is the undo iterator's image the same historical page as the one described
+ * by the arguments?
+ *
+ * The undo record the chain walk stopped on cannot say: both halves of a
+ * differential split walk back to the same older record, so two different
+ * pages stop on one record.  Compare hikeys instead, as
+ * img_is_same_historical_page() does -- every image of one walk is at one csn,
+ * and at one moment equal hikeys are the same page.
+ */
+static bool
+undo_it_image_is_same_page(BTreeDescr *desc, UndoIterator *undoIt,
+						   bool rightmost, OTuple hikey)
+{
+	OTuple		imageHikey;
+
+	if (O_PAGE_IS(undoIt->image, RIGHTMOST) != rightmost)
+		return false;
+	if (rightmost)
+		return true;
+
+	BTREE_PAGE_GET_HIKEY(imageHikey, undoIt->image);
+	return o_btree_cmp(desc, &imageHikey, BTreeKeyNonLeafKey,
+					   &hikey, BTreeKeyNonLeafKey) == 0;
+}
+
+/*
  * Tries to switch to next undo page from the same baseLoc
  */
 static bool
@@ -2328,7 +2351,8 @@ undo_it_next_page(BTreeDescr *desc, UndoIterator *undoIt)
 {
 	BTreeKeyType kind;
 	OFixedKey	key;
-	UndoLocation prevLoc;
+	OFixedKey	prevHikey;
+	bool		prevRightmost;
 
 	if (!UndoLocationIsValid(undoIt->baseLoc))
 		return false;
@@ -2351,21 +2375,22 @@ undo_it_next_page(BTreeDescr *desc, UndoIterator *undoIt)
 
 	Assert(!IS_LAST_PAGE(undoIt->image, undoIt->it));
 
-	prevLoc = undoIt->imageUndoLoc;
+	clear_fixed_key(&prevHikey);
+	prevRightmost = O_PAGE_IS(undoIt->image, RIGHTMOST);
+	if (!prevRightmost)
+		copy_fixed_hikey(desc, &prevHikey, undoIt->image);
 
 	/* Find undo page corresponding to the key from the undoIt->baseLoc */
 	undo_it_find_internal(undoIt, &key.tuple, kind);
 
-	/* Did we manage to find another page? */
-	if (prevLoc != undoIt->imageUndoLoc)
-	{
-		return true;
-	}
-	else
-	{
-		Assert(undoIt->rightmost || undoIt->leftmost);
-		return false;
-	}
+	/*
+	 * Did we manage to find another page?  Finding the same one again is not
+	 * limited to the edges: a differential split reconstructs the side from
+	 * the seed page, not from the key, so both halves of a split that was
+	 * itself split again land on the same image.
+	 */
+	return !undo_it_image_is_same_page(desc, undoIt, prevRightmost,
+									   prevHikey.tuple);
 }
 
 /*
@@ -2496,7 +2521,6 @@ undo_it_find_internal(UndoIterator *undoIt, void *key, BTreeKeyType kind)
 
 		undoIt->rightmost = (undoIt->rightmost && right) || O_PAGE_IS(undoIt->image, RIGHTMOST);
 		undoIt->leftmost = (undoIt->leftmost && left) || O_PAGE_IS(undoIt->image, LEFTMOST);
-		undoIt->imageUndoLoc = O_UNDO_GET_IMAGE_LOCATION(undoLocation, left);
 		Assert(UNDO_REC_EXISTS(undoType, undoLocation));
 
 		header = (BTreePageHeader *) undoIt->image;
