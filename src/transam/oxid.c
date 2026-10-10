@@ -463,11 +463,16 @@ acquire_logical_xid(bool *isValidHeapXid)
 				sub;
 	int			itemsCount = logical_xid_buffers_guc * (BLCKSZ / sizeof(pg_atomic_uint32));
 	uint32		divider = itemsCount * 32;
-	int			i = MYPROCNUMBER % itemsCount,
+	int			i,
 				mynum = 0;
 	int			nloops = 0;
 
-	Assert(i >= 0 && i < max_procs);
+	/*
+	 * Start on a cache line of our own: backends that share one take it from
+	 * each other on every acquire and release.
+	 */
+	i = (MYPROCNUMBER * (int) (PG_CACHE_LINE_SIZE / sizeof(pg_atomic_uint32))) % itemsCount;
+	Assert(i >= 0 && i < itemsCount);
 
 	/*
 	 * Check whether any valid heap xid is present at the moment of allocation
@@ -897,6 +902,10 @@ void
 set_oxid_xlog_ptr(OXid oxid, XLogRecPtr ptr)
 {
 	Assert(!XLOG_PTR_IS_SPECIAL(ptr));
+
+	/* Only snapshots of logical decoding look commit LSNs up */
+	if (wal_level < WAL_LEVEL_LOGICAL && !is_recovery_process())
+		return;
 
 	set_oxid_xlog_ptr_internal(oxid, ptr);
 }
@@ -1909,6 +1918,9 @@ void
 current_oxid_xlog_precommit(void)
 {
 	if (!OXidIsValid(curOxid))
+		return;
+
+	if (wal_level < WAL_LEVEL_LOGICAL)
 		return;
 
 	/*

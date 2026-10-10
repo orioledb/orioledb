@@ -528,6 +528,18 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 
 	heapXid = GetTopTransactionIdIfAny();
 
+	/* Only logical decoding reads the logical xid */
+	if (wal_level < WAL_LEVEL_LOGICAL && !TransactionIdIsValid(heapXid))
+	{
+		WALRecXidShort *srec;
+
+		srec = (WALRecXidShort *) (&local_wal.buffer[local_wal.buffer_offset]);
+		srec->recType = WAL_REC_XID_SHORT;
+		memcpy(srec->oxid, &oxid, sizeof(OXid));
+		local_wal.buffer_offset += sizeof(*srec);
+		return;
+	}
+
 	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_XID;
 	memcpy(rec->oxid, &oxid, sizeof(OXid));
@@ -577,6 +589,28 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_v
 
 	Assert(!is_recovery_process());
 	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	/*
+	 * xmin, csn, cid, version and base_version are only read by logical
+	 * decoding, and without wal_level = logical no slot can decode this WAL:
+	 * a slot only reads WAL written after it is created.  Leaving them out
+	 * saves 28 bytes on every relation switch of every transaction.
+	 */
+	if (wal_level < WAL_LEVEL_LOGICAL)
+	{
+		WALRecRelationShort *srec = (WALRecRelationShort *) rec;
+
+		srec->recType = WAL_REC_RELATION_SHORT;
+		srec->treeType = type;
+		memcpy(srec->datoid, &oids.datoid, sizeof(Oid));
+		memcpy(srec->reloid, &oids.reloid, sizeof(Oid));
+		memcpy(srec->relnode, &oids.relnode, sizeof(Oid));
+		memcpy(srec->tablespace, &oids.spcoid, sizeof(Oid));
+		local_wal.buffer_offset += sizeof(*srec);
+		local_wal.ix_type = type;
+		local_wal.oids = oids;
+		return;
+	}
 
 	rec->recType = WAL_REC_RELATION;
 	rec->treeType = type;
