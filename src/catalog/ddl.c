@@ -1195,9 +1195,18 @@ orioledb_utility_command(PlannedStmt *pstmt,
 											alter_table_type_to_string(cmd->subtype))));
 							break;
 						case AT_SetAccessMethod:
-							ereport(ERROR,
-									(errcode(ERRCODE_SYNTAX_ERROR),
-									 errmsg("changing access method is not supported for OrioleDB tables")));
+							/*
+							 * Allow no-op change of AM.
+							 *
+							 * cmd->name == NULL means the user used ALTER TABLE ... SET ACCESS METHOD DEFAULT.  Check that default is
+							 * orioledb and allow it.
+							 */
+							if (!(cmd->name == NULL ?
+								(strcmp(default_table_access_method, "orioledb") == 0) :
+								(strcmp(cmd->name, "orioledb") == 0)))
+								ereport(ERROR,
+										(errcode(ERRCODE_SYNTAX_ERROR),
+										 errmsg("changing access method is not supported for OrioleDB tables")));
 							break;
 						case AT_SetCompression:
 						default:
