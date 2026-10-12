@@ -29,6 +29,10 @@ No-backpatch: <reason>
 Do not backpatch the commit, and say why. For example:
 `No-backpatch: the code it fixes is new in main`.
 
+Like a git trailer, the declaration starts at the beginning of its line,
+usually in the last paragraph of the message. An indented line only mentions
+the convention and is not a declaration.
+
 A pull request labeled `bug` must declare the decision in every commit. A
 pull request that is not a fix declares nothing. The **Backpatch sanity
 check** workflow enforces this on every pull request outside the release

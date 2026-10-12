@@ -97,7 +97,7 @@ while read -r sha; do
 		fi
 	elif [ "$n_none" -eq 1 ]; then
 		declared+=("$short")
-		reason=$(sed -nE 's/^[[:space:]]*No-backpatch:[[:space:]]*//p' <<< "$none" | xargs)
+		reason=$(sed -nE 's/^No-backpatch:[[:space:]]*//p' <<< "$none" | xargs)
 		if [ -z "$reason" ]; then
 			fail "$short ($subject): No-backpatch needs a reason."
 			errors=$((errors + 1))
