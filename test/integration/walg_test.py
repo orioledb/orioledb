@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # coding: utf-8
 """
-wal-g v2.0.1 integration test using orioledb as the default table access
-method: full/incremental backups, standby restore/promotion, and PITR by
-time and by named restore point.
+wal-g integration test using orioledb as the default table access method:
+full/incremental backups, standby restore/promotion, and PITR by time and
+by named restore point.
 """
 
 import json
@@ -58,6 +58,15 @@ class WalGTest(BaseBackupTest):
 	@staticmethod
 	def _walg_bin():
 		return shutil.which('wal-g') or 'wal-g'
+
+	@staticmethod
+	def _walg_major_version():
+		"""
+		Our custom v3 build isn't built from a release tag, so `wal-g
+		--version` can't be parsed reliably; the CI job sets this env var
+		instead of relying on runtime version detection.
+		"""
+		return os.environ.get('WALG_MAJOR_VERSION', '2')
 
 	@staticmethod
 	def _walg_env_prefix(repo_prefix, extra=''):
@@ -352,7 +361,7 @@ class WalGTest(BaseBackupTest):
 			self.assertEqual(churn_fingerprint_restored, churn_fingerprint_1)
 			scratch.stop()
 		finally:
-			scratch.cleanup()
+			self.cleanupNode(scratch)
 
 		# ------------------------------------------------------------------
 		# Second incremental backup: 2-deep chain (full -> delta -> delta)
@@ -382,7 +391,7 @@ class WalGTest(BaseBackupTest):
 			self.assertEqual(churn_fingerprint_chain, churn_fingerprint_2)
 			scratch.stop()
 		finally:
-			scratch.cleanup()
+			self.cleanupNode(scratch)
 
 		# ------------------------------------------------------------------
 		# Fetch repeatability: wal-g backup-fetch is always a fresh full
@@ -405,7 +414,7 @@ class WalGTest(BaseBackupTest):
 			        "FROM churn_tbl")[0][0], churn_fingerprint_2)
 			scratch_twice.stop()
 		finally:
-			scratch_twice.cleanup()
+			self.cleanupNode(scratch_twice)
 
 		scratch_once = self._restore_to_new_node(
 		    'fetchonce', backup_name=incr_backup_2['backup_name'])
@@ -416,7 +425,7 @@ class WalGTest(BaseBackupTest):
 			        "FROM churn_tbl")[0][0], churn_fingerprint_2)
 			scratch_once.stop()
 		finally:
-			scratch_once.cleanup()
+			self.cleanupNode(scratch_once)
 
 		# ------------------------------------------------------------------
 		# Time target setup
@@ -515,7 +524,7 @@ class WalGTest(BaseBackupTest):
 			self.assertEqual(restored_fingerprint, concurrent_fingerprint)
 			scratch.stop()
 		finally:
-			scratch.cleanup()
+			self.cleanupNode(scratch)
 
 		# ------------------------------------------------------------------
 		# Cleanup
@@ -523,16 +532,11 @@ class WalGTest(BaseBackupTest):
 		node.stop()
 		self._walg('delete', 'everything', 'FORCE', '--confirm')
 
-	def test_delta_backup_ships_whole_orioledb_file(self):
-		# wal-g's page-level delta diffing (isPagedFile() in
-		# internal/databases/postgres/pagefile.go) only applies to files
-		# whose path contains "base/" or "pg_tblspc/". OrioleDB's files
-		# live under orioledb_data/ instead, so they never qualify: a
-		# changed OrioleDB file is re-shipped in full by the delta backup,
-		# rather than just its changed pages. This pins that behavior down
-		# by touching a tiny fraction of a large single-file OrioleDB
-		# table and checking the delta backup's size tracks the whole
-		# file, not the tiny changed fraction.
+	def test_delta_backup_orioledb_file_diffing(self):
+		# v2's page-level diffing (isPagedFile() in pagefile.go) never
+		# matches orioledb_data/ paths, so it re-ships a changed OrioleDB
+		# file in full. v3 added OrioleDB-specific page diffing, so it
+		# ships only the changed pages instead.
 		node = self.node
 		node.start()
 
@@ -570,12 +574,57 @@ class WalGTest(BaseBackupTest):
 		delta_backup = self._backup_list()[-1]
 		self.assertTrue(self._is_delta_backup(delta_backup))
 
-		# If wal-g truly diffed pages, the delta would be a tiny
-		# fraction of data_file_size. Instead it re-ships (close to)
-		# the whole file, because isPagedFile() never matches
-		# orioledb_data/ paths.
-		self.assertGreater(delta_backup['uncompressed_size'],
-		                   0.7 * data_file_size)
+		if self._walg_major_version() >= '3':
+			# v3's OrioleDB-aware page diffing ships only the touched
+			# pages, a small fraction of data_file_size.
+			self.assertLess(delta_backup['uncompressed_size'],
+			                0.3 * data_file_size)
+		else:
+			# v2 has no OrioleDB awareness, so it re-ships (close to) the
+			# whole file instead of just the tiny changed fraction.
+			self.assertGreater(delta_backup['uncompressed_size'],
+			                   0.7 * data_file_size)
+
+		node.stop()
+		self._walg('delete', 'everything', 'FORCE', '--confirm')
+
+	def test_delta_backup_compressed_table_restores_correctly(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("CREATE TABLE compressed_tbl (id int PRIMARY KEY, "
+		               "val text) USING orioledb WITH (compress = 1)")
+		node.safe_psql("INSERT INTO compressed_tbl SELECT i, repeat('a', 800) "
+		               "FROM generate_series(1, 20000) i")
+		node.safe_psql("CHECKPOINT")
+		node.safe_psql("SELECT pg_switch_wal()")
+
+		self._walg('backup-push', node.data_dir, '--full')
+		self.assertEqual(self._backup_count(), 1)
+
+		node.safe_psql("UPDATE compressed_tbl SET val = repeat('b', 800) "
+		               "WHERE id % 500 = 0")
+		node.safe_psql("CHECKPOINT")
+
+		fingerprint = node.execute(
+		    'postgres', "SELECT md5(string_agg(val, '' ORDER BY id)) "
+		    "FROM compressed_tbl")[0][0]
+
+		self._walg('backup-push', node.data_dir)
+		delta_backup = self._backup_list()[-1]
+		self.assertTrue(self._is_delta_backup(delta_backup))
+
+		scratch = self._restore_to_new_node(
+		    'compresseddelta', backup_name=delta_backup['backup_name'])
+		try:
+			restored_fingerprint = scratch.execute(
+			    'postgres', "SELECT md5(string_agg(val, '' ORDER BY id)) "
+			    "FROM compressed_tbl")[0][0]
+			self.assertEqual(restored_fingerprint, fingerprint)
+			scratch.stop()
+		finally:
+			self.cleanupNode(scratch)
 
 		node.stop()
 		self._walg('delete', 'everything', 'FORCE', '--confirm')
