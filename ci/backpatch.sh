@@ -223,14 +223,27 @@ for release in $(release_branches); do
 
 	commits_line="Commits: $(for c in "${picks[@]}"; do printf '%s ' "${c:0:9}"; done)"
 	if [ -n "$conflict" ]; then
+		# The commits the conflict stopped: the developer must not lose them.
+		if [ ${#left[@]} -gt 0 ]; then
+			left_text="**Not applied yet**, because they come after the conflicting commit:"$'\n'
+			for c in "${left[@]}"; do
+				left_text+=$'\n'"- \`${c:0:9}\` $(git log -1 --format=%s "$c")"
+			done
+			left_text+=$'\n\n'"After resolving the conflict, apply them with:"$'\n\n'
+			left_text+='```'$'\n'"git cherry-pick -x ${left[*]}"$'\n''```'
+			left_short=$(for c in "${left[@]}"; do printf '%s ' "${c:0:9}"; done | xargs)
+		else
+			left_text="**Not applied yet:** none, the conflicting commit is the last one to backpatch to \`$release\`."
+			left_short=none
+		fi
 		# shellcheck disable=SC2016
 		body=$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n' \
 			"Backpatch of $pr_url to \`$release\`." \
 			"$commits_line" \
 			"**${conflict:0:9} $(git log -1 --format=%s "$conflict") did not apply cleanly.** It is committed with the conflict markers in:" \
 			"$(sed 's/^/- `/; s/$/`/' <<< "$conflict_files")" \
-			"$(if [ ${#left[@]} -gt 0 ]; then printf 'Not applied yet, after it: %s' "$(for c in "${left[@]}"; do printf '%s ' "${c:0:9}"; done)"; fi)" \
-			"Resolve the conflicts in branch \`$branch\`, and remove the \`[skip ci]\` line and the line about the conflicts from the commit message: CI does not run on this pull request until then.  Cherry-pick the rest with \`git cherry-pick -x\`, and mark the pull request ready for review." \
+			"$left_text" \
+			"Resolve the conflicts in branch \`$branch\`, and remove the \`[skip ci]\` line and the line about the conflicts from the commit message: CI does not run on this pull request until then.  Apply the commits not applied yet, if any, and mark the pull request ready for review." \
 			"$NOTE")
 		labels=backpatch,backpatch-conflict
 		draft=--draft
@@ -261,7 +274,7 @@ for release in $(release_branches); do
 	fi
 
 	if [ -n "$conflict" ]; then
-		conflicted+=("$release: $status, draft: ${conflict:0:9} $(git log -1 --format=%s "$conflict") conflicts in $(xargs <<< "$conflict_files")")
+		conflicted+=("$release: $status, draft: ${conflict:0:9} $(git log -1 --format=%s "$conflict") conflicts in $(xargs <<< "$conflict_files"); not applied yet: $left_short")
 	else
 		created+=("$release: $status")
 	fi
