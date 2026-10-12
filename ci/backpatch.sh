@@ -220,7 +220,7 @@ for release in $(release_branches); do
 	commits_line="Commits: $(for c in "${picks[@]}"; do printf '%s ' "${c:0:9}"; done)"
 	if [ -n "$conflict" ]; then
 		# shellcheck disable=SC2016
-		body=$(printf '%s\n\n%s\n\n%s\n\n%s\n%s\n\n%s\n\n%s\n' \
+		body=$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n' \
 			"Backpatch of $pr_url to \`$release\`." \
 			"$commits_line" \
 			"**${conflict:0:9} $(git log -1 --format=%s "$conflict") did not apply cleanly.** It is committed with the conflict markers in:" \
