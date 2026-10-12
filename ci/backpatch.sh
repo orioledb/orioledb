@@ -5,8 +5,13 @@
 # Every commit the pull request brought into its base branch that says
 # "Backpatch-through: vX" is cherry-picked into vX and every later release
 # branch.  For each release branch that gets commits, a pull request is opened
-# from the branch backpatch/pr-<number>-<release>.  Commits that don't apply
-# cleanly are reported on the original pull request instead.
+# from the branch backpatch/pr-<number>-<release>.
+#
+# A commit that does not apply cleanly still gets its pull request, so the
+# backpatch is not forgotten: the commit is made with the conflict markers in
+# it, the commits after it are left out, and the pull request is a draft
+# labeled backpatch-conflict that says what is left to do.  The run then
+# fails, and the results are commented on the original pull request.
 #
 # Run from a clone with full history and the release branches fetched.
 # Environment: GH_TOKEN, GH_REPO (owner/name), PR_NUMBER.
@@ -85,7 +90,7 @@ git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
 created=()
-failed=()
+conflicted=()
 
 for release in $(release_branches); do
 	n=${release#v}
@@ -101,54 +106,93 @@ for release in $(release_branches); do
 	git fetch -q origin "$release"
 	git checkout -q -B "$branch" FETCH_HEAD
 
-	ok=true
 	applied=0
+	conflict=""			# the commit that did not apply
+	conflict_files=""
+	left=()				# commits after it, not applied
 	for c in "${picks[@]}"; do
-		if ! git cherry-pick -x "$c" > /dev/null 2>&1; then
-			if [ -z "$(git ls-files -u)" ] && git diff --cached --quiet; then
-				# Nothing left to apply: the release already has the change.
-				git cherry-pick --skip
-				continue
-			fi
-			git cherry-pick --abort
-			failed+=("$release: ${c:0:9} $(git log -1 --format=%s "$c") does not apply cleanly")
-			ok=false
-			break
+		if [ -n "$conflict" ]; then
+			left+=("$c")
+			continue
 		fi
-		git commit -q --amend -m "$(git log -1 --format=%B HEAD)" -m "$NOTE"
+		if git cherry-pick -x "$c" > /dev/null 2>&1; then
+			git commit -q --amend -m "$(git log -1 --format=%B HEAD)" -m "$NOTE"
+			applied=$((applied + 1))
+			continue
+		fi
+		if [ -z "$(git ls-files -u)" ] && git diff --cached --quiet; then
+			# Nothing left to apply: the release already has the change.
+			git cherry-pick --skip
+			continue
+		fi
+
+		# Keep the conflict for whoever resolves it.
+		conflict=$c
+		conflict_files=$(git diff --name-only --diff-filter=U)
+		git add -A
+		git -c core.editor=true commit -q --no-verify \
+			-m "$(git log -1 --format=%B "$c")" \
+			-m "(cherry picked from commit $c)" \
+			-m "This commit has unresolved conflicts in: $(xargs <<< "$conflict_files")" \
+			-m "$NOTE"
+		git cherry-pick --quit 2> /dev/null || true
 		applied=$((applied + 1))
 	done
-	$ok || continue
 	if [ "$applied" -eq 0 ]; then
 		summary "$release already has every commit to backpatch."
 		continue
 	fi
 
 	git push -q --force origin "$branch"
-	existing=$(gh pr list --repo "$GH_REPO" --head "$branch" --base "$release" \
-				--state open --json url --jq '.[0].url')
-	if [ -n "$existing" ]; then
-		created+=("$release: $existing (updated)")
-		continue
+
+	commits_line="Commits: $(for c in "${picks[@]}"; do printf '%s ' "${c:0:9}"; done)"
+	if [ -n "$conflict" ]; then
+		# shellcheck disable=SC2016
+		body=$(printf '%s\n\n%s\n\n%s\n\n%s\n%s\n\n%s\n\n%s\n' \
+			"Backpatch of $pr_url to \`$release\`." \
+			"$commits_line" \
+			"**${conflict:0:9} $(git log -1 --format=%s "$conflict") did not apply cleanly.** It is committed with the conflict markers in:" \
+			"$(sed 's/^/- `/; s/$/`/' <<< "$conflict_files")" \
+			"$(if [ ${#left[@]} -gt 0 ]; then printf 'Not applied yet, after it: %s' "$(for c in "${left[@]}"; do printf '%s ' "${c:0:9}"; done)"; fi)" \
+			"Resolve the conflicts in branch \`$branch\`, cherry-pick the rest with \`git cherry-pick -x\`, and mark the pull request ready for review." \
+			"$NOTE")
+		labels=backpatch,backpatch-conflict
+		draft=--draft
+	else
+		body=$(printf '%s\n\n%s\n\n%s\n' \
+			"Backpatch of $pr_url to \`$release\`." "$commits_line" "$NOTE")
+		labels=backpatch
+		draft=
 	fi
-	body=$(printf '%s\n\n%s\n\n%s\n' \
-		"Backpatch of $pr_url to \`$release\`." \
-		"Commits: $(for c in "${picks[@]}"; do printf '%s ' "${c:0:9}"; done)" \
-		"$NOTE")
-	url=$(gh pr create --repo "$GH_REPO" --base "$release" --head "$branch" \
-			--title "[$release] $title" --body "$body")
-	gh pr edit "$url" --repo "$GH_REPO" --add-label backpatch > /dev/null 2>&1 || true
-	created+=("$release: $url")
+
+	url=$(gh pr list --repo "$GH_REPO" --head "$branch" --base "$release" \
+			--state open --json url --jq '.[0].url')
+	if [ -n "$url" ]; then
+		gh pr edit "$url" --repo "$GH_REPO" --body "$body" > /dev/null
+		status="$url (updated)"
+	else
+		# shellcheck disable=SC2086
+		url=$(gh pr create --repo "$GH_REPO" --base "$release" --head "$branch" \
+				--title "[$release] $title" --body "$body" $draft)
+		status=$url
+	fi
+	gh pr edit "$url" --repo "$GH_REPO" --add-label "$labels" > /dev/null 2>&1 || true
+
+	if [ -n "$conflict" ]; then
+		conflicted+=("$release: $status, draft: ${conflict:0:9} $(git log -1 --format=%s "$conflict") conflicts in $(xargs <<< "$conflict_files")")
+	else
+		created+=("$release: $status")
+	fi
 done
 
 report="Backpatch workflow results for this pull request:"
 for line in "${created[@]}"; do
 	report+=$'\n'"- $line"
 done
-for line in "${failed[@]}"; do
-	report+=$'\n'"- **$line**: backpatch it by hand with \`git cherry-pick -x\`"
+for line in "${conflicted[@]}"; do
+	report+=$'\n'"- **$line**: resolve them in that pull request"
 done
 summary "$report"
 gh pr comment "$PR_NUMBER" --repo "$GH_REPO" --body "$report"
 
-[ ${#failed[@]} -eq 0 ]
+[ ${#conflicted[@]} -eq 0 ]
