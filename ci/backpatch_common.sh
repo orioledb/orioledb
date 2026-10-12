@@ -8,6 +8,8 @@
 #   Backpatch-through: vX     backpatch to vX and every later release branch
 #   No-backpatch: <reason>    the commit is not backpatched, and why
 #
+# Like a git trailer, a declaration starts at the beginning of its line.  An
+# indented one, such as the two above, only mentions the convention.
 
 # Is the branch name a release branch?
 is_release_branch() {
@@ -35,12 +37,12 @@ release_branches() {
 
 # "Backpatch-through:" lines of a commit message read from stdin.
 backpatch_through_lines() {
-	grep -E '^[[:space:]]*Backpatch-through:' || true
+	grep -E '^Backpatch-through:' || true
 }
 
 # "No-backpatch:" lines of a commit message read from stdin.
 no_backpatch_lines() {
-	grep -E '^[[:space:]]*No-backpatch:' || true
+	grep -E '^No-backpatch:' || true
 }
 
 # The oldest release named by "Backpatch-through: vX" lines of a commit
@@ -48,6 +50,6 @@ no_backpatch_lines() {
 # gather several such lines; the oldest one wins.
 backpatch_through_version() {
 	backpatch_through_lines |
-		sed -nE 's/^[[:space:]]*Backpatch-through:[[:space:]]*v([0-9]+)[[:space:]]*$/\1/p' |
+		sed -nE 's/^Backpatch-through:[[:space:]]*v([0-9]+)[[:space:]]*$/\1/p' |
 		sort -n | head -n 1
 }
