@@ -67,7 +67,9 @@ A commit that the release branch already has is skipped.
 A backpatch that does not apply cleanly still gets its pull request, so it is
 not forgotten:
 
-- the conflicting commit is committed with the conflict markers in it;
+- the conflicting commit is committed with the conflict markers in it, and
+  with `[skip ci]` in its message: CI would only fail on the markers, so it
+  does not run on the pull request until the conflicts are resolved;
 - the commits after it are left out;
 - the pull request is a draft labeled `backpatch-conflict`. Its description
   lists the conflicting files and the commits that are not applied yet.
@@ -75,7 +77,8 @@ not forgotten:
 To finish the backpatch:
 
 1. Check out its branch.
-2. Resolve the conflicts and amend that commit.
+2. Resolve the conflicts and amend that commit. Remove the `[skip ci]` line
+   and the line about the conflicts from its message, or CI stays off.
 3. Cherry-pick the remaining commits with `git cherry-pick -x`.
 4. Mark the pull request ready for review.
 
