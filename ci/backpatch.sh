@@ -12,8 +12,8 @@
 #
 # A commit that does not apply cleanly still gets its pull request, so the
 # backpatch is not forgotten: the commit is made with the conflict markers in
-# it, the commits after it are left out, and the pull request is a draft
-# labeled backpatch-conflict that says what is left to do.  The run then
+# it and with [skip ci], the commits after it are left out, and the pull
+# request is a draft labeled backpatch-conflict that says what is left to do.  The run then
 # fails, and the results are commented on the original pull request.
 #
 # Run from a clone with full history.
@@ -199,10 +199,14 @@ for release in $(release_branches); do
 		conflict=$c
 		conflict_files=$(git diff --name-only --diff-filter=U)
 		git add -A
+		# It is the last commit of the branch, so [skip ci] keeps CI off the
+		# pull request until the conflicts are resolved: the markers would
+		# only fail it.
 		git -c core.editor=true commit -q --no-verify \
 			-m "$(git log -1 --format=%B "$c")" \
 			-m "(cherry picked from commit $c)" \
 			-m "This commit has unresolved conflicts in: $(xargs <<< "$conflict_files")" \
+			-m "[skip ci]" \
 			-m "$NOTE"
 		git cherry-pick --quit 2> /dev/null || true
 		applied=$((applied + 1))
@@ -226,7 +230,7 @@ for release in $(release_branches); do
 			"**${conflict:0:9} $(git log -1 --format=%s "$conflict") did not apply cleanly.** It is committed with the conflict markers in:" \
 			"$(sed 's/^/- `/; s/$/`/' <<< "$conflict_files")" \
 			"$(if [ ${#left[@]} -gt 0 ]; then printf 'Not applied yet, after it: %s' "$(for c in "${left[@]}"; do printf '%s ' "${c:0:9}"; done)"; fi)" \
-			"Resolve the conflicts in branch \`$branch\`, cherry-pick the rest with \`git cherry-pick -x\`, and mark the pull request ready for review." \
+			"Resolve the conflicts in branch \`$branch\`, and remove the \`[skip ci]\` line and the line about the conflicts from the commit message: CI does not run on this pull request until then.  Cherry-pick the rest with \`git cherry-pick -x\`, and mark the pull request ready for review." \
 			"$NOTE")
 		labels=backpatch,backpatch-conflict
 		draft=--draft
