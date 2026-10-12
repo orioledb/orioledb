@@ -44,6 +44,8 @@ if grep -qxF "$BUG_LABEL" <<< "$labels"; then
 fi
 
 errors=0
+n_through_commits=0
+n_skip_commits=0
 declared=()
 undeclared=()
 
@@ -90,6 +92,7 @@ while read -r sha; do
 			errors=$((errors + 1))
 			summary "| $short $subject | Backpatch-through: v$version, no such branch |"
 		else
+			n_through_commits=$((n_through_commits + 1))
 			summary "| $short $subject | Backpatch-through: v$version |"
 		fi
 	elif [ "$n_none" -eq 1 ]; then
@@ -100,6 +103,7 @@ while read -r sha; do
 			errors=$((errors + 1))
 			summary "| $short $subject | No-backpatch without a reason |"
 		else
+			n_skip_commits=$((n_skip_commits + 1))
 			summary "| $short $subject | No-backpatch: $reason |"
 		fi
 	else
@@ -119,6 +123,11 @@ fi
 if [ ${#declared[@]} -eq 0 ] && $is_bug; then
 	fail "The pull request is labeled \"$BUG_LABEL\", so every commit must say \"Backpatch-through: vX\" or \"No-backpatch: <reason>\"."
 	errors=$((errors + 1))
+fi
+
+if [ "$errors" -eq 0 ] && [ "$n_through_commits" -gt 0 ] && [ "$n_skip_commits" -gt 0 ]; then
+	echo "::warning::Some commits are backpatched and some are not: merge with \"Rebase and merge\".  A squash merge backpatches the changes of the No-backpatch commits too."
+	summary "**Warning:** some commits are backpatched and some are not: merge with \"Rebase and merge\".  A squash merge backpatches the changes of the No-backpatch commits too."
 fi
 
 if [ "$errors" -gt 0 ]; then

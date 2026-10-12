@@ -7,6 +7,9 @@
 # branch.  For each release branch that gets commits, a pull request is opened
 # from the branch backpatch/pr-<number>-<release>.
 #
+# A squash commit takes the declarations of the pull request's commits, not its
+# own message, which is the pull request description here.
+#
 # A commit that does not apply cleanly still gets its pull request, so the
 # backpatch is not forgotten: the commit is made with the conflict markers in
 # it, the commits after it are left out, and the pull request is a draft
@@ -53,11 +56,13 @@ git fetch -q origin "$merge_sha"
 #   rebase merge: as many first-parent commits as the pull request had,
 #                 if their subjects match the pull request's commits;
 #   squash merge: the single squashed commit.
-pr_subjects=$(gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/commits" \
-				--jq '.[] | select((.parents | length) == 1) | .commit.message | split("\n")[0]')
+pr_commits=$(gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/commits" \
+				--jq '.[] | select((.parents | length) == 1) | .commit.message | @base64')
+pr_subjects=$(for m in $pr_commits; do base64 -d <<< "$m" | head -n 1; done)
 n_pr_commits=$(grep -c . <<< "$pr_subjects" || true)
 n_parents=$(($(git rev-list --parents -n 1 "$merge_sha" | wc -w) - 1))
 
+squashed=false
 if [ "$n_parents" -gt 1 ]; then
 	landed=$(git rev-list --reverse --no-merges "$merge_sha^1..$merge_sha^2")
 else
@@ -67,19 +72,41 @@ else
 		landed=$candidates
 	else
 		landed=$merge_sha
+		squashed=true
 	fi
 fi
 
 # Release branch number each landed commit goes back to.
+#
+# A squash commit's message is whatever the merge made of it -- here the
+# pull request description -- so its declarations are those of the pull
+# request's commits, which the sanity check verified.  It goes back as far as
+# the oldest release any of them names.  The squash cannot leave out the
+# changes of a No-backpatch commit, so they go along; the report says so.
 declare -A through
 any=false
-for c in $landed; do
-	version=$(git log -1 --format=%B "$c" | backpatch_through_version)
+warnings=()
+if $squashed; then
+	version=$(for m in $pr_commits; do base64 -d <<< "$m" | backpatch_through_version; done |
+				sort -n | head -n 1)
 	if [ -n "$version" ]; then
-		through[$c]=$version
+		through[$merge_sha]=$version
 		any=true
+		n_skip=$(for m in $pr_commits; do base64 -d <<< "$m" | no_backpatch_lines | head -n 1; done |
+					grep -c . || true)
+		if [ "$n_skip" -gt 0 ]; then
+			warnings+=("The pull request was squashed, so the changes of its $n_skip No-backpatch commit(s) are backpatched too.  Merge with \"Rebase and merge\" to backpatch only the commits that ask for it.")
+		fi
 	fi
-done
+else
+	for c in $landed; do
+		version=$(git log -1 --format=%B "$c" | backpatch_through_version)
+		if [ -n "$version" ]; then
+			through[$c]=$version
+			any=true
+		fi
+	done
+fi
 
 if ! $any; then
 	echo "No commit of #$PR_NUMBER says Backpatch-through: nothing to backpatch."
@@ -186,6 +213,9 @@ for release in $(release_branches); do
 done
 
 report="Backpatch workflow results for this pull request:"
+for line in "${warnings[@]}"; do
+	report+=$'\n'"- **Warning:** $line"
+done
 for line in "${created[@]}"; do
 	report+=$'\n'"- $line"
 done
