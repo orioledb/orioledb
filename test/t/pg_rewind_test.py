@@ -23,7 +23,7 @@ from .base_test import BaseTest, generate_string
 
 REWIND_KEYS_WARNING = "Target and source servers don't have the OrioleDB rewind keys"
 
-class RewindTest(BaseTest):
+class PgRewindTest(BaseTest):
 
     def pg_rewind(self,
                    target,
@@ -1268,17 +1268,17 @@ class RewindTest(BaseTest):
                         FROM o_test
                 """), [(100, 100)])
 
-    def test_rewind_keys_crash_before_ready(self):
+    def test_pg_rewind_keys_crash_before_ready(self):
         self.check_rewind_keys_promotion_crash('rewind_keys_before_ready')
 
-    def test_rewind_keys_crash_after_ready(self):
+    def test_pg_rewind_keys_crash_after_ready(self):
         self.check_rewind_keys_promotion_crash('rewind_keys_after_ready')
 
-    def test_rewind_keys_crash_after_wal_flush(self):
+    def test_pg_rewind_keys_crash_after_wal_flush(self):
         self.check_rewind_keys_promotion_crash(
             'rewind_keys_after_wal_flush')
 
-    def test_rewind_keys_missing_part_stops_promotion(self):
+    def test_pg_rewind_keys_missing_part_stops_promotion(self):
         with self.node as master:
             self.enable_archive(master)
             master.start()
@@ -1397,7 +1397,7 @@ class RewindTest(BaseTest):
                 wal = os.path.join(replica.data_dir, 'pg_wal')
                 self.assertEqual(self.rewind_keys_files(replica), [])
 
-    def test_rewind_keys_removed_with_wal(self):
+    def test_pg_rewind_keys_removed_with_wal(self):
         """
         Without WAL archiving the keys of a promotion go away together with
         the WAL around its switchpoint: nobody could catch up from it.
@@ -1790,7 +1790,7 @@ class RewindTest(BaseTest):
                         obj1[key] = obj2[key]
         return obj1
 
-    class _RewindTest:
+    class _PgRewindTest:
 
         def __init__(self, test_case: BaseTest):
             self.test_case = test_case
@@ -1813,7 +1813,7 @@ class RewindTest(BaseTest):
         def after_rewind(self):
             pass
 
-    class _SecondaryIndexRevivalTest(_RewindTest):
+    class _SecondaryIndexRevivalTest(_PgRewindTest):
 
         def before_promote(self):
             self.master.safe_psql("""
@@ -1880,7 +1880,7 @@ class RewindTest(BaseTest):
                                              (5, 3), (10, 3), (1, 4), (6, 4),
                                              (2, 5), (7, 5)])
 
-    class _PrimaryIndexRevivalTest(_RewindTest):
+    class _PrimaryIndexRevivalTest(_PgRewindTest):
 
         def before_promote(self):
             self.master.safe_psql("""
@@ -1954,7 +1954,7 @@ class RewindTest(BaseTest):
                                               (5, 3), (10, 3), (1, 4), (6, 4),
                                               (2, 5), (7, 5)])
 
-    class _TableRevivalTest(_RewindTest):
+    class _TableRevivalTest(_PgRewindTest):
 
         def before_promote(self):
             self.master.safe_psql("""
@@ -1993,7 +1993,7 @@ class RewindTest(BaseTest):
             self.test_case.assertEqual(
                 self.master.execute("SELECT COUNT(*) FROM test1a")[0][0], 5)
 
-    class _RewindSysTreesInProgressTest(_RewindTest):
+    class _RewindSysTreesInProgressTest(_PgRewindTest):
 
         def before_promote(self):
             self.master.safe_psql("""
@@ -2076,7 +2076,7 @@ class RewindTest(BaseTest):
                 self.master.execute("SELECT COUNT(*) FROM test2")[0][0], 5)
             return {}
 
-    class _ReplicaTableDropTest(_RewindTest):
+    class _ReplicaTableDropTest(_PgRewindTest):
 
         def before_promote(self):
             self.master.safe_psql("""
@@ -2111,7 +2111,7 @@ class RewindTest(BaseTest):
                 }
             }
 
-    class _NewTablesOnTargetAfterPromoteTest(_RewindTest):
+    class _NewTablesOnTargetAfterPromoteTest(_PgRewindTest):
 
         def after_promote(self):
             self.master.safe_psql("""
@@ -2143,7 +2143,7 @@ class RewindTest(BaseTest):
                 }
             }
 
-    class _ToastAfterSysTreeRevivalTest(_RewindTest):
+    class _ToastAfterSysTreeRevivalTest(_PgRewindTest):
 
         def before_promote(self):
             self.master.safe_psql("""
