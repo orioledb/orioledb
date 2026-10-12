@@ -1,0 +1,49 @@
+name: Backpatch
+
+# Once a pull request is merged, cherry-pick each of its commits that says
+# "Backpatch-through: vX" into vX and every later release branch, and open a
+# pull request per release branch.  See ci/backpatch.sh.
+#
+# pull_request_target runs with the base repository's token even for pull
+# requests from forks, and checks out the base branch, so no code of the pull
+# request runs here.
+#
+# Pull requests opened with the default GITHUB_TOKEN don't trigger other
+# workflows, so the backpatch pull requests would get no CI.  Set the
+# BACKPATCH_TOKEN secret to a token that may push branches and open pull
+# requests to make them run CI.
+
+on:
+  pull_request_target:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Merged pull request to backpatch"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: backpatch-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  backpatch:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BACKPATCH_TOKEN || github.token }}
+      - name: Backpatch
+        env:
+          GH_TOKEN: ${{ secrets.BACKPATCH_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+        run: ci/backpatch.sh
