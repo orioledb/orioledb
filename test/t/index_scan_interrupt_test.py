@@ -155,8 +155,8 @@ class IndexScanInterruptTest(BaseTest):
 		query = "SELECT * FROM o_scan_intr WHERE a > 0;"
 		self.assert_index_scan(con, query)
 		self.assert_times_out(
-		    con, query, lambda first, count: writer.execute(
-		        self.insert_sql(first, count)))
+		    con, query,
+		    lambda first, count: writer.execute(self.insert_sql(first, count)))
 		writer.rollback()
 		writer.close()
 		con.close()
