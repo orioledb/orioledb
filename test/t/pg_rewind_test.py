@@ -151,7 +151,7 @@ class PgRewindTest(BaseTest):
         # Return all rewind_keys file names
         return glob.glob(
             os.path.join(node.data_dir, 'orioledb_data', 'rewind_keys_*'))
- 
+
     def test_pg_rewind_remove_rows(self):
         with self.node as master:
             self.enable_archive(master)

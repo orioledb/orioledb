@@ -1917,7 +1917,7 @@ replay_rewind(uint32 chkp_num, bool single)
 		found = *((uint8 *) (read_buf + sizeof(uint32) +
 							 sizeof(Oid) * 4));
 
-		elog(LOG, "REWIND TREE: %u %u %u: %c", 
+		elog(LOG, "REWIND TREE: %u %u %u: %c",
 			 cur_oids.datoid,
 			 cur_oids.reloid,
 			 cur_oids.relnode,
