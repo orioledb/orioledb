@@ -16,8 +16,10 @@
 # labeled backpatch-conflict that says what is left to do.  The run then
 # fails, and the results are commented on the original pull request.
 #
-# Run from a clone with full history and the release branches fetched.
-# Environment: GH_TOKEN, GH_REPO (owner/name), PR_NUMBER.
+# Run from a clone with full history.
+# Environment: GH_TOKEN, GH_REPO (owner/name), and either PR_NUMBER, or
+# PUSH_SHA: the head of a push to a development branch, to backpatch the pull
+# request whose merge it is.
 #
 set -euo pipefail
 
@@ -32,6 +34,22 @@ summary() {
 		echo "$*" >> "$GITHUB_STEP_SUMMARY"
 	fi
 }
+
+if [ -z "${PR_NUMBER:-}" ]; then
+	# The pull request merged by the push.  The API may take a moment to
+	# associate the merge commit with it.
+	for _ in 1 2 3 4 5 6; do
+		PR_NUMBER=$(gh api "repos/$GH_REPO/commits/$PUSH_SHA/pulls" \
+						--jq "[.[] | select(.merged_at != null and .merge_commit_sha == \"$PUSH_SHA\")][0].number // empty")
+		[ -n "$PR_NUMBER" ] && break
+		sleep "${PR_LOOKUP_DELAY:-10}"
+	done
+	if [ -z "$PR_NUMBER" ]; then
+		echo "Push of ${PUSH_SHA:0:9} is not the merge of a pull request: nothing to backpatch."
+		exit 0
+	fi
+	echo "Push of ${PUSH_SHA:0:9} merged pull request #$PR_NUMBER."
+fi
 
 pr_json=$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER")
 merged=$(jq -r '.merged' <<< "$pr_json")
