@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import math
 import time
 
 from .base_test import BaseTest
@@ -24,6 +25,10 @@ class IndexScanInterruptTest(BaseTest):
 	"""
 
 	ROWS = 100000
+	# Optimized builds scan ROWS fast; grow the table up to MAX_ROWS until
+	# the scan lasts TARGET_SCAN_MS.
+	MAX_ROWS = 6400000
+	TARGET_SCAN_MS = 400
 	# Shorter scans make the timeout too close to timer granularity.
 	MIN_SCAN_MS = 200
 	CALIBRATION_RUNS = 3
@@ -43,14 +48,21 @@ class IndexScanInterruptTest(BaseTest):
 		    "  PRIMARY KEY (a, b)\n"
 		    ") USING orioledb;\n")
 		if fill:
-			node.safe_psql(
-			    'postgres', "INSERT INTO o_scan_intr "
-			    "SELECT g, g FROM generate_series(1, %d) g;" % self.ROWS)
+			node.safe_psql('postgres', self.insert_sql(0, self.ROWS))
+
+	def insert_sql(self, first, count):
+		"""INSERT of rows (g, g) for g in (first, first + count]."""
+		return ("INSERT INTO o_scan_intr "
+		        "SELECT g, g FROM generate_series(%d, %d) g;" %
+		        (first + 1, first + count))
 
 	def connect_index_scan(self, node):
 		con = node.connect(autocommit=True)
 		con.execute("SET enable_seqscan = off;")
 		con.execute("SET enable_bitmapscan = off;")
+		# A parallel index scan reads through BTreeSeqScan, not the
+		# iterator under test.
+		con.execute("SET max_parallel_workers_per_gather = 0;")
 		return con
 
 	def wait_parked(self, node, pid, timeout):
@@ -76,18 +88,31 @@ class IndexScanInterruptTest(BaseTest):
 			runs.append((time.time() - start) * 1000.0)
 		return min(runs)
 
-	def assert_times_out(self, con, query):
+	def assert_times_out(self, con, query, add_rows):
 		"""The query, which returns no rows, must end on statement_timeout.
 
 		The query is a plain SELECT on purpose: an aggregate on top would check
 		for interrupts on its own once the scan is over, and would report the
 		timeout late instead of not at all.  The timeout is a small fraction
 		of the fastest scan, so it fires while the scan runs.
+
+		add_rows(first, count) adds rows the query skips; it is used to make
+		the scan long enough, e.g. 100k rows scan in 100 ms on CI.
 		"""
+		rows = self.ROWS
 		ms = self.scan_ms(con, query)
+		while ms < self.TARGET_SCAN_MS and rows < self.MAX_ROWS:
+			# Scan time is linear in rows: aim at the target in one step.
+			factor = max(2, math.ceil(self.TARGET_SCAN_MS / max(ms, 1.0)))
+			count = min(rows * (factor - 1), self.MAX_ROWS - rows)
+			add_rows(rows, count)
+			rows += count
+			ms = self.scan_ms(con, query)
+		# The plan may change with the table size.
+		self.assert_index_scan(con, query)
 		self.assertGreaterEqual(
 		    ms, self.MIN_SCAN_MS,
-		    "scan too short for a reliable timeout, raise ROWS")
+		    "scan of %d rows too short for a reliable timeout" % rows)
 		con.execute("SET statement_timeout = %d;" %
 		            int(ms / self.TIMEOUT_DIVISOR))
 		start = time.time()
@@ -111,7 +136,9 @@ class IndexScanInterruptTest(BaseTest):
 		# index and o_iterate_index() turns down every row.
 		query = "SELECT * FROM o_scan_intr WHERE b < 0;"
 		self.assert_index_scan(con, query)
-		self.assert_times_out(con, query)
+		self.assert_times_out(
+		    con, query, lambda first, count: node.safe_psql(
+		        'postgres', self.insert_sql(first, count)))
 		con.close()
 		node.stop()
 
@@ -123,13 +150,13 @@ class IndexScanInterruptTest(BaseTest):
 		# sessions; the iterator steps over them page after page without
 		# returning a tuple.
 		writer = node.connect()
-		writer.execute("INSERT INTO o_scan_intr "
-		               "SELECT g, g FROM generate_series(1, %d) g;" %
-		               self.ROWS)
+		writer.execute(self.insert_sql(0, self.ROWS))
 		con = self.connect_index_scan(node)
 		query = "SELECT * FROM o_scan_intr WHERE a > 0;"
 		self.assert_index_scan(con, query)
-		self.assert_times_out(con, query)
+		self.assert_times_out(
+		    con, query, lambda first, count: writer.execute(
+		        self.insert_sql(first, count)))
 		writer.rollback()
 		writer.close()
 		con.close()
