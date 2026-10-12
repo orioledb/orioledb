@@ -1,0 +1,113 @@
+---
+id: backpatching
+sidebar_label: Backpatching
+---
+
+# Backpatching fixes to release branches
+
+## Release branches
+
+Each major release has its own branch: `v1`, `v2`, `v3`, ... Development
+happens in `main`. Fixes are merged into `main` first and then backpatched to
+the release branches that need them.
+
+## Declaring the backpatch decision
+
+Every commit of a fix says how far back it goes, with one of these lines in
+its message:
+
+```
+Backpatch-through: v2
+```
+
+Backpatch the commit to `v2` and every later release branch: `v3`, `v4`, ...
+
+```
+No-backpatch: <reason>
+```
+
+Do not backpatch the commit, and say why. For example:
+`No-backpatch: the code it fixes is new in main`.
+
+A pull request labeled `bug` must declare the decision in every commit. A
+pull request that is not a fix declares nothing. The **Backpatch sanity
+check** workflow enforces this on every pull request outside the release
+branches. It passes when either:
+
+- every commit has exactly one declaration, naming a release branch that
+  exists, or giving a reason; or
+- no commit has a declaration, and the pull request is not labeled `bug`.
+
+Merge commits inside a pull request are not checked.
+
+## What happens after the merge
+
+The **Backpatch** workflow runs on the push that merges a pull request into
+`main`. For each release branch that needs at least one commit, it:
+
+- creates the branch `backpatch/pr-<number>-<release>` from the release
+  branch;
+- cherry-picks the commits with `git cherry-pick -x`, in their original
+  order. Their authors are kept, and the message gets the line
+  `This commit was automatically created by backpatch workflow.`;
+- opens a pull request `[<release>] <title>` into the release branch, labeled
+  `backpatch`.
+
+The workflow also comments on the original pull request with the list of
+backpatch pull requests.
+
+A commit that the release branch already has is skipped.
+
+### Conflicts
+
+A backpatch that does not apply cleanly still gets its pull request, so it is
+not forgotten:
+
+- the conflicting commit is committed with the conflict markers in it;
+- the commits after it are left out;
+- the pull request is a draft labeled `backpatch-conflict`. Its description
+  lists the conflicting files and the commits that are not applied yet.
+
+To finish the backpatch:
+
+1. Check out its branch.
+2. Resolve the conflicts and amend that commit.
+3. Cherry-pick the remaining commits with `git cherry-pick -x`.
+4. Mark the pull request ready for review.
+
+The workflow run is marked as failed, so whoever merged the original pull
+request gets notified.
+
+### Squash and rebase merges
+
+With **Rebase and merge**, every commit is backpatched according to its own
+declaration.
+
+With **Squash and merge**, `main` gets a single commit. Its message is the
+pull request description, so the declarations are taken from the pull
+request's commits instead. The squashed commit goes back as far as the oldest
+release any of them names. A squash cannot leave out the changes of a
+`No-backpatch` commit, so they are backpatched too. The workflow and the
+sanity check warn about this. Use **Rebase and merge** for a pull request that
+mixes `Backpatch-through` and `No-backpatch` commits.
+
+## Running a backpatch by hand
+
+To backpatch a merged pull request again, for example after adding a release
+branch, run the **Backpatch** workflow from the Actions tab with the pull
+request number. An open backpatch pull request for the same release branch is
+updated rather than duplicated.
+
+## Setup
+
+The workflow pushes and opens pull requests with the token of a GitHub App,
+because:
+
+- the repository does not let `GITHUB_TOKEN` open pull requests;
+- pull requests opened with `GITHUB_TOKEN` would not run CI.
+
+The app needs read and write access to *Contents*, *Pull requests* and
+*Issues*. Its credentials are in two repository secrets:
+
+- `BACKPATCH_APP_ID`: the app ID;
+- `BACKPATCH_APP_PRIVATE_KEY`: the app's private key.
