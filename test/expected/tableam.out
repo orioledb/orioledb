@@ -1957,37 +1957,29 @@ SELECT * FROM db_o_tables;
 (1 row)
 
 SELECT * FROM db_o_indices;
-    relname     |      name      |                      description                       
-----------------+----------------+--------------------------------------------------------
- pg_toast_NNN   | toast          |    Column |     Type | Collation | Nullable | Dropped +
-                |                |      ctid |      tid |    (null) |    false |   false +
-                |                |    attnum | smallint |    (null) |    false |   false +
-                |                |  chunknum |  integer |    (null) |    false |   false +
-                |                |      data |    bytea |    (null) |    false |   false +
-                |                |                                                       +
-                |                | Key fields: (ctid, attnum, chunknum)                  +
+    relname     |      name      |                    description                     
+----------------+----------------+----------------------------------------------------
+ o_tableam4     | ctid_primary   |  Column |   Type | Collation | Nullable | Dropped +
+                |                |    ctid |    tid |    (null) |    false |   false +
+                |                |     key | bigint |    (null) |    false |   false +
+                |                |   value | bigint |    (null) |     true |   false +
+                |                |  value2 | bigint |    (null) |     true |   false +
+                |                |                                                   +
+                |                | Key fields: (ctid)                                +
                 |                | 
- o_tableam4     | ctid_primary   |  Column |   Type | Collation | Nullable | Dropped     +
-                |                |    ctid |    tid |    (null) |    false |   false     +
-                |                |     key | bigint |    (null) |    false |   false     +
-                |                |   value | bigint |    (null) |     true |   false     +
-                |                |  value2 | bigint |    (null) |     true |   false     +
-                |                |                                                       +
-                |                | Key fields: (ctid)                                    +
+ o_tableam4_ix1 | o_tableam4_ix1 |  Column |   Type | Collation | Nullable | Dropped +
+                |                |     key | bigint |    (null) |    false |   false +
+                |                |    ctid |    tid |    (null) |    false |   false +
+                |                |                                                   +
+                |                | Key fields: (key), ctid                           +
                 |                | 
- o_tableam4_ix1 | o_tableam4_ix1 |  Column |   Type | Collation | Nullable | Dropped     +
-                |                |     key | bigint |    (null) |    false |   false     +
-                |                |    ctid |    tid |    (null) |    false |   false     +
-                |                |                                                       +
-                |                | Key fields: (key), ctid                               +
+ o_tableam4_ix2 | o_tableam4_ix2 |  Column |   Type | Collation | Nullable | Dropped +
+                |                |   value | bigint |    (null) |     true |   false +
+                |                |    ctid |    tid |    (null) |    false |   false +
+                |                |                                                   +
+                |                | Key fields: (value, ctid)                         +
                 |                | 
- o_tableam4_ix2 | o_tableam4_ix2 |  Column |   Type | Collation | Nullable | Dropped     +
-                |                |   value | bigint |    (null) |     true |   false     +
-                |                |    ctid |    tid |    (null) |    false |   false     +
-                |                |                                                       +
-                |                | Key fields: (value, ctid)                             +
-                |                | 
-(4 rows)
+(3 rows)
 
 SELECT orioledb_tbl_indices('o_tableam4'::regclass);
               orioledb_tbl_indices               

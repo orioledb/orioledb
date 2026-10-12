@@ -263,7 +263,6 @@ SELECT orioledb_tbl_structure('o_test_include_pk3'::regclass, 'ne');
      Item 2: deleted, offset = 328, tuple = ('7', '2', '1')         +
      Item 3: offset = 360, tuple = ('8', '2', '2')                  +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 

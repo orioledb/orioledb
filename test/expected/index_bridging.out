@@ -683,11 +683,6 @@ SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
      Leaf tuple size: 2, non-leaf tuple size: 1                     +
      Non-leaf tuple fields: index_bridging_ctid                     +
      Leaf tuple fields: index_bridging_ctid, ctid                   +
- Index toast                                                        +
-     Index type: secondary                                          +
-     Leaf tuple size: 4, non-leaf tuple size: 3                     +
-     Non-leaf tuple fields: ctid, attnum, chunknum                  +
-     Leaf tuple fields: ctid, attnum, chunknum, data                +
  
 (1 row)
 
@@ -753,7 +748,6 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
      Item 1: offset = 296, tuple = ('(0,2)', '(0,2)')                                       +
      Item 2: offset = 328, tuple = ('(0,3)', '(0,3)')                                       +
                                                                                             +
- Index toast: not loaded                                                                    +
  
 (1 row)
 
@@ -771,11 +765,6 @@ SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
      Leaf tuple size: 2, non-leaf tuple size: 1                        +
      Non-leaf tuple fields: index_bridging_ctid                        +
      Leaf tuple fields: index_bridging_ctid, ctid                      +
- Index toast                                                           +
-     Index type: secondary                                             +
-     Leaf tuple size: 4, non-leaf tuple size: 3                        +
-     Non-leaf tuple fields: ctid, attnum, chunknum                     +
-     Leaf tuple fields: ctid, attnum, chunknum, data                   +
  
 (1 row)
 
@@ -826,7 +815,6 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
      Item 1: offset = 296, tuple = ('(0,2)', '(0,2)')                                             +
      Item 2: offset = 328, tuple = ('(0,3)', '(0,3)')                                             +
                                                                                                   +
- Index toast: not loaded                                                                          +
  
 (1 row)
 
@@ -867,7 +855,6 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
      Item 1: offset = 296, tuple = ('(0,2)', '(0,2)')                                              +
      Item 2: offset = 328, tuple = ('(0,3)', '(0,3)')                                              +
                                                                                                    +
- Index toast: not loaded                                                                           +
  
 (1 row)
 
@@ -923,7 +910,6 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
      Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                 +
      Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                 +
                                                                                                       +
- Index toast: not loaded                                                                              +
  
 (1 row)
 
@@ -1001,11 +987,6 @@ SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
      Leaf tuple size: 2, non-leaf tuple size: 1                        +
      Non-leaf tuple fields: index_bridging_ctid                        +
      Leaf tuple fields: index_bridging_ctid, ctid                      +
- Index toast                                                           +
-     Index type: secondary                                             +
-     Leaf tuple size: 4, non-leaf tuple size: 3                        +
-     Non-leaf tuple fields: ctid, attnum, chunknum                     +
-     Leaf tuple fields: ctid, attnum, chunknum, data                   +
  
 (1 row)
 
@@ -1059,7 +1040,6 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
      Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                 +
      Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                 +
                                                                                                       +
- Index toast: not loaded                                                                              +
  
 (1 row)
 
@@ -1090,7 +1070,6 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
      Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                       +
      Item 6: offset = 464, tuple = ('(0,7)', '(0,4)')                                                       +
                                                                                                             +
- Index toast: not loaded                                                                                    +
  
 (1 row)
 
@@ -1154,11 +1133,6 @@ SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
      Leaf tuple size: 2, non-leaf tuple size: 1                        +
      Non-leaf tuple fields: index_bridging_ctid                        +
      Leaf tuple fields: index_bridging_ctid, ctid                      +
- Index toast                                                           +
-     Index type: secondary                                             +
-     Leaf tuple size: 4, non-leaf tuple size: 3                        +
-     Non-leaf tuple fields: ctid, attnum, chunknum                     +
-     Leaf tuple fields: ctid, attnum, chunknum, data                   +
  
 (1 row)
 
@@ -1260,7 +1234,6 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
      Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                       +
      Item 6: offset = 464, tuple = ('(0,7)', '(0,4)')                                                       +
                                                                                                             +
- Index toast: not loaded                                                                                    +
  
 (1 row)
 
@@ -1533,7 +1506,6 @@ SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
      Item 3: offset = 440, tuple = ('4', null, '(0.04,0.08)')       +
      Item 4: offset = 496, tuple = ('5', null, '(0.05,0.1)')        +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -1559,7 +1531,6 @@ SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
      Item 4: offset = 552, tuple = ('(0,5)', '5', null, '(0.05,0.1)')      +
                                                                            +
  Index index_bridge: not loaded                                            +
- Index toast: not loaded                                                   +
  
 (1 row)
 
@@ -1607,7 +1578,6 @@ SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
    Chunk 4: offset = 4, location = 416, hikey location = 112                   +
      Item 4: deleted, offset = 424, tuple = ('(0,5)', '5')                     +
                                                                                +
- Index toast: not loaded                                                       +
  
 (1 row)
 
@@ -1668,7 +1638,6 @@ SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
      Leftmost, Rightmost                                                       +
    Chunk 0: offset = 0, location = 256, hikey location = 64                    +
                                                                                +
- Index toast: not loaded                                                       +
  
 (1 row)
 
@@ -1765,7 +1734,6 @@ SELECT orioledb_tbl_structure('o_test_bridging_with_regular_no_pkey'::regclass, 
      Item 8: offset = 536, tuple = ('(0,9)', '(0,9)')               +
      Item 9: offset = 568, tuple = ('(0,10)', '(0,10)')             +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -1826,7 +1794,6 @@ SELECT orioledb_tbl_structure('o_test_bridging_with_regular_no_pkey'::regclass, 
      Item 10: deleted, offset = 600, tuple = ('(0,11)', '(0,4)')          +
      Item 11: deleted, offset = 632, tuple = ('(0,12)', '(0,8)')          +
                                                                           +
- Index toast: not loaded                                                  +
  
 (1 row)
 
@@ -1895,7 +1862,6 @@ SELECT orioledb_tbl_structure('o_test_bridging_with_regular_pkey'::regclass, 'ne
      Item 8: offset = 536, tuple = ('(0,9)', '9673')                +
      Item 9: offset = 568, tuple = ('(0,10)', '10673')              +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -4270,11 +4236,6 @@ SELECT orioledb_tbl_indices('brin_test_multi'::regclass, true);
      Leaf tuple size: 2, non-leaf tuple size: 1        +
      Non-leaf tuple fields: index_bridging_ctid        +
      Leaf tuple fields: index_bridging_ctid, ctid      +
- Index toast                                           +
-     Index type: secondary                             +
-     Leaf tuple size: 4, non-leaf tuple size: 3        +
-     Non-leaf tuple fields: ctid, attnum, chunknum     +
-     Leaf tuple fields: ctid, attnum, chunknum, data   +
  
 (1 row)
 
@@ -4302,11 +4263,6 @@ SELECT orioledb_tbl_indices('brin_test_multi'::regclass, true);
      Leaf tuple size: 2, non-leaf tuple size: 1        +
      Non-leaf tuple fields: index_bridging_ctid        +
      Leaf tuple fields: index_bridging_ctid, ctid      +
- Index toast                                           +
-     Index type: secondary                             +
-     Leaf tuple size: 4, non-leaf tuple size: 3        +
-     Non-leaf tuple fields: ctid, attnum, chunknum     +
-     Leaf tuple fields: ctid, attnum, chunknum, data   +
  
 (1 row)
 

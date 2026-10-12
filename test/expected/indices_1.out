@@ -7730,7 +7730,6 @@ SELECT orioledb_tbl_structure('o_test_pkey_mixed'::regclass, 'nue');
      Item 1: offset = 312, tuple = ('40', '10', '90', '20', '80', '50', '60', '70')               +
      Item 2: offset = 360, tuple = ('400', '100', '900', '200', '800', '500', '600', '700')       +
                                                                                                   +
- Index toast: not loaded                                                                          +
  
 (1 row)
 
@@ -7857,7 +7856,6 @@ SELECT orioledb_tbl_structure('o_test_pkey_include_box'::regclass, 'nue');
      Item 1: offset = 328, tuple = ('10', '(40,50),(20,30)', '60')      +
      Item 2: offset = 392, tuple = ('100', '(400,500),(200,300)', '600')+
                                                                         +
- Index toast: not loaded                                                +
  
 (1 row)
 
@@ -7934,7 +7932,6 @@ SELECT orioledb_tbl_structure('o_test_include_box'::regclass, 'nue');
      Item 1: offset = 328, tuple = ('10', '(40,50),(20,30)', '(0,2)')     +
      Item 2: offset = 392, tuple = ('100', '(400,500),(200,300)', '(0,3)')+
                                                                           +
- Index toast: not loaded                                                  +
  
 (1 row)
 
@@ -8033,7 +8030,6 @@ SELECT orioledb_tbl_structure('o_test_include_box_with_pkey'::regclass, 'nue');
      Item 1: offset = 288, tuple = ('30', '10')                                +
      Item 2: offset = 312, tuple = ('300', '100')                              +
                                                                                +
- Index toast: not loaded                                                       +
  
 (1 row)
 
@@ -8392,7 +8388,6 @@ SELECT orioledb_tbl_structure('o_test_row_searchkey_pkey_include'::regclass,
      Item 3: offset = 392, tuple = ('4', null)                      +
      Item 4: offset = 432, tuple = ('5', null)                      +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -8609,7 +8604,6 @@ SELECT orioledb_tbl_structure('o_test_equal_but_binary_not_equal'::regclass,
      Item 0: offset = 264, tuple = ('0', '4')                       +
      Item 1: offset = 288, tuple = ('NaN', '2')                     +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -8629,7 +8623,6 @@ SELECT orioledb_tbl_structure('o_test_equal_but_binary_not_equal'::regclass,
      Item 0: offset = 264, tuple = ('-0', '3')                      +
      Item 1: offset = 296, tuple = ('NaN', '3')                     +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 

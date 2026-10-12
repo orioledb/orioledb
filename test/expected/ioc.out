@@ -431,7 +431,6 @@ SELECT orioledb_tbl_structure('o_test_ioc_change_pkey'::regclass, 'ne');
      Item 0: offset = 264, tuple = ('1', '2')                       +
      Item 1: offset = 288, tuple = ('2', '3')                       +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -456,7 +455,6 @@ SELECT orioledb_tbl_structure('o_test_ioc_change_pkey'::regclass, 'ne');
      Item 1: offset = 288, tuple = ('2', '3')                           +
      Item 2: mode = update, offset = 312, tuple = ('13', '2')           +
                                                                         +
- Index toast: not loaded                                                +
  
 (1 row)
 
