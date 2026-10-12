@@ -37,7 +37,7 @@ fail() {
 }
 
 releases=$(release_branches)
-labels=$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/labels" --jq '.[].name')
+labels=$(gh_retry gh api "repos/$GH_REPO/issues/$PR_NUMBER/labels" --jq '.[].name')
 is_bug=false
 if grep -qxF "$BUG_LABEL" <<< "$labels"; then
 	is_bug=true
@@ -57,7 +57,7 @@ summary "|---|---|"
 # Merge commits only bring in other branches, and are not backpatched
 # themselves.
 while read -r sha; do
-	message=$(gh api "repos/$GH_REPO/commits/$sha" --jq '.commit.message')
+	message=$(gh_retry gh api "repos/$GH_REPO/commits/$sha" --jq '.commit.message')
 	subject=$(head -n 1 <<< "$message")
 	short=${sha:0:9}
 	through=$(backpatch_through_lines <<< "$message")
@@ -110,7 +110,7 @@ while read -r sha; do
 		undeclared+=("$short")
 		summary "| $short $subject | none |"
 	fi
-done < <(gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/commits" \
+done < <(gh_retry gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/commits" \
 			--jq '.[] | select((.parents | length) == 1) | .sha')
 
 summary ""

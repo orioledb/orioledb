@@ -14,10 +14,23 @@ is_release_branch() {
 	[[ "$1" =~ ^v[0-9]+$ ]]
 }
 
+# Run a command, retrying what GitHub fails now and then (5xx, timeouts).
+gh_retry() {
+	local i
+	for i in 1 2 3 4; do
+		if "$@"; then
+			return 0
+		fi
+		[ "$i" -lt 4 ] && sleep $((i * ${GH_RETRY_DELAY:-5}))
+	done
+	return 1
+}
+
 # Release branches of the repository, oldest first, one per line.
 release_branches() {
-	gh api --paginate "repos/$GH_REPO/branches" --jq '.[].name' |
-		grep -E '^v[0-9]+$' | sort -t v -k 2 -n || true
+	local names
+	names=$(gh_retry gh api --paginate "repos/$GH_REPO/branches" --jq '.[].name')
+	grep -E '^v[0-9]+$' <<< "$names" | sort -t v -k 2 -n || true
 }
 
 # "Backpatch-through:" lines of a commit message read from stdin.

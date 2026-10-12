@@ -35,11 +35,34 @@ summary() {
 	fi
 }
 
+# Open pull request from head into base, or find the one already there: a
+# create that failed on the client may still have been done on the server.
+# Prints the URL.
+open_pr() {
+	local base=$1 head=$2 title=$3 body=$4 draft=$5 url i
+	for i in 1 2 3 4; do
+		url=$(gh pr list --repo "$GH_REPO" --head "$head" --base "$base" \
+				--state open --json url --jq '.[0].url // empty' 2> /dev/null) || url=
+		if [ -n "$url" ]; then
+			echo "$url"
+			return 0
+		fi
+		# shellcheck disable=SC2086
+		if url=$(gh pr create --repo "$GH_REPO" --base "$base" --head "$head" \
+					--title "$title" --body "$body" $draft); then
+			echo "$url"
+			return 0
+		fi
+		[ "$i" -lt 4 ] && sleep $((i * ${GH_RETRY_DELAY:-5}))
+	done
+	return 1
+}
+
 if [ -z "${PR_NUMBER:-}" ]; then
 	# The pull request merged by the push.  The API may take a moment to
 	# associate the merge commit with it.
 	for _ in 1 2 3 4 5 6; do
-		PR_NUMBER=$(gh api "repos/$GH_REPO/commits/$PUSH_SHA/pulls" \
+		PR_NUMBER=$(gh_retry gh api "repos/$GH_REPO/commits/$PUSH_SHA/pulls" \
 						--jq "[.[] | select(.merged_at != null and .merge_commit_sha == \"$PUSH_SHA\")][0].number // empty")
 		[ -n "$PR_NUMBER" ] && break
 		sleep "${PR_LOOKUP_DELAY:-10}"
@@ -51,7 +74,7 @@ if [ -z "${PR_NUMBER:-}" ]; then
 	echo "Push of ${PUSH_SHA:0:9} merged pull request #$PR_NUMBER."
 fi
 
-pr_json=$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER")
+pr_json=$(gh_retry gh api "repos/$GH_REPO/pulls/$PR_NUMBER")
 merged=$(jq -r '.merged' <<< "$pr_json")
 base_ref=$(jq -r '.base.ref' <<< "$pr_json")
 merge_sha=$(jq -r '.merge_commit_sha' <<< "$pr_json")
@@ -74,7 +97,7 @@ git fetch -q origin "$merge_sha"
 #   rebase merge: as many first-parent commits as the pull request had,
 #                 if their subjects match the pull request's commits;
 #   squash merge: the single squashed commit.
-pr_commits=$(gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/commits" \
+pr_commits=$(gh_retry gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/commits" \
 				--jq '.[] | select((.parents | length) == 1) | .commit.message | @base64')
 pr_subjects=$(for m in $pr_commits; do base64 -d <<< "$m" | head -n 1; done)
 n_pr_commits=$(grep -c . <<< "$pr_subjects" || true)
@@ -136,6 +159,7 @@ git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
 created=()
 conflicted=()
+errors=()
 
 for release in $(release_branches); do
 	n=${release#v}
@@ -188,7 +212,10 @@ for release in $(release_branches); do
 		continue
 	fi
 
-	git push -q --force origin "$branch"
+	if ! gh_retry git push -q --force origin "$branch"; then
+		errors+=("$release: could not push \`$branch\`")
+		continue
+	fi
 
 	commits_line="Commits: $(for c in "${picks[@]}"; do printf '%s ' "${c:0:9}"; done)"
 	if [ -n "$conflict" ]; then
@@ -210,18 +237,24 @@ for release in $(release_branches); do
 		draft=
 	fi
 
-	url=$(gh pr list --repo "$GH_REPO" --head "$branch" --base "$release" \
-			--state open --json url --jq '.[0].url')
-	if [ -n "$url" ]; then
-		gh pr edit "$url" --repo "$GH_REPO" --body "$body" > /dev/null
+	existing=$(gh_retry gh pr list --repo "$GH_REPO" --head "$branch" --base "$release" \
+				--state open --json url --jq '.[0].url // empty') || existing=
+	if [ -n "$existing" ]; then
+		url=$existing
+		gh_retry gh pr edit "$url" --repo "$GH_REPO" --body "$body" > /dev/null ||
+			echo "::warning::could not update the description of $url"
 		status="$url (updated)"
-	else
-		# shellcheck disable=SC2086
-		url=$(gh pr create --repo "$GH_REPO" --base "$release" --head "$branch" \
-				--title "[$release] $title" --body "$body" $draft)
+	elif url=$(open_pr "$release" "$branch" "[$release] $title" "$body" "$draft"); then
 		status=$url
+	else
+		errors+=("$release: branch \`$branch\` is pushed, but its pull request could not be opened")
+		continue
 	fi
-	gh pr edit "$url" --repo "$GH_REPO" --add-label "$labels" > /dev/null 2>&1 || true
+	gh_retry gh pr edit "$url" --repo "$GH_REPO" --add-label "$labels" > /dev/null ||
+		echo "::warning::could not label $url"
+	if [ -n "$draft" ] && [ -n "$existing" ]; then
+		gh_retry gh pr ready "$url" --repo "$GH_REPO" --undo > /dev/null 2>&1 || true
+	fi
 
 	if [ -n "$conflict" ]; then
 		conflicted+=("$release: $status, draft: ${conflict:0:9} $(git log -1 --format=%s "$conflict") conflicts in $(xargs <<< "$conflict_files")")
@@ -240,7 +273,11 @@ done
 for line in "${conflicted[@]}"; do
 	report+=$'\n'"- **$line**: resolve them in that pull request"
 done
+for line in "${errors[@]}"; do
+	report+=$'\n'"- **Error, $line**: open it by hand"
+done
 summary "$report"
-gh pr comment "$PR_NUMBER" --repo "$GH_REPO" --body "$report"
+gh_retry gh pr comment "$PR_NUMBER" --repo "$GH_REPO" --body "$report" ||
+	echo "::error::could not comment on #$PR_NUMBER"
 
-[ ${#conflicted[@]} -eq 0 ]
+[ ${#conflicted[@]} -eq 0 ] && [ ${#errors[@]} -eq 0 ]
