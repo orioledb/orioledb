@@ -72,14 +72,18 @@ not forgotten:
   does not run on the pull request until the conflicts are resolved;
 - the commits after it are left out;
 - the pull request is a draft labeled `backpatch-conflict`. Its description
-  lists the conflicting files and the commits that are not applied yet.
+  lists the conflicting files and, always, the commits that are not applied
+  yet because they come after the conflicting one, with the
+  `git cherry-pick -x` command that applies them. The comment on the original
+  pull request lists them too.
 
 To finish the backpatch:
 
 1. Check out its branch.
 2. Resolve the conflicts and amend that commit. Remove the `[skip ci]` line
    and the line about the conflicts from its message, or CI stays off.
-3. Cherry-pick the remaining commits with `git cherry-pick -x`.
+3. Apply the commits that are not applied yet, with the command from the
+   description.
 4. Mark the pull request ready for review.
 
 The workflow run is marked as failed, so whoever merged the original pull
