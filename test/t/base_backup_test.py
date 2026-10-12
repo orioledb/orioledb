@@ -88,6 +88,20 @@ class BaseBackupTest(BaseTest):
 		    f"timeline history file for timeline {timeline:08X} was not "
 		    f"archived")
 
+	def cleanupNode(self, node, attempts=5, delay=1):
+		"""
+		testgres' node.cleanup() retry logic never actually retries (its
+		rmdirs() has a bug: `if attempt < attempt` is always False).
+		"""
+		for attempt in range(attempts):
+			try:
+				node.cleanup()
+				return
+			except OSError:
+				if attempt == attempts - 1:
+					raise
+				time.sleep(delay)
+
 	def _next_scratch_port(self):
 		"""
 		Ports beyond the primary (basePort) and standby (basePort + 1),
