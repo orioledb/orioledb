@@ -78,6 +78,7 @@ extern void o_btree_iterator_set_tuple_ctx(BTreeIterator *it,
 extern void o_btree_iterator_set_callback(BTreeIterator *it,
 										  TupleFetchCallback callback,
 										  void *arg);
+extern void o_btree_iterator_set_interruptible(BTreeIterator *it);
 extern OTuple o_btree_iterator_fetch(BTreeIterator *it,
 									 CommitSeqNo *tuple_csn,
 									 void *endKey, BTreeKeyType endKind,
