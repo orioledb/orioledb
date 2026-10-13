@@ -1,8 +1,8 @@
 name: Backpatch
 
 # Once a pull request is merged, cherry-pick each of its commits that says
-# "Backpatch-through: vX" into vX and every later release branch, and open a
-# pull request per release branch.  See ci/backpatch.sh.
+# "Backpatch: stable" into the supported release branch, and open a pull
+# request.  See ci/backpatch.sh.
 #
 # The merge is a push to the development branch, which is what starts the
 # workflow.  So it runs from the development branch itself, with secrets,

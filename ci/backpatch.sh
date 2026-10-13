@@ -3,12 +3,12 @@
 # Backpatch a merged pull request.
 #
 # Every commit the pull request brought into its base branch that says
-# "Backpatch-through: vX" is cherry-picked into vX and every later release
-# branch.  For each release branch that gets commits, a pull request is opened
-# from the branch backpatch/pr-<number>-<release>.
+# "Backpatch: stable" is cherry-picked into the supported release branch,
+# and a pull request is opened from the branch
+# backpatch/pr-<number>.
 #
-# A squash commit takes the declarations of the pull request's commits, not its
-# own message, which is the pull request description here.
+# A squash commit takes the declarations of the pull request's commits, not
+# its own message, which is the pull request description here.
 #
 # A commit that does not apply cleanly still gets its pull request, so the
 # backpatch is not forgotten: the commit is made with the conflict markers in
@@ -117,40 +117,32 @@ else
 	fi
 fi
 
-# Release branch number each landed commit goes back to.
+# Whether each landed commit should be backpatched.
 #
-# A squash commit's message is whatever the merge made of it -- here the
-# pull request description -- so its declarations are those of the pull
-# request's commits, which the sanity check verified.  It goes back as far as
-# the oldest release any of them names.  The squash cannot leave out the
-# changes of a No-backpatch commit, so they go along; the report says so.
-declare -A through
+# A squash commit's message is whatever the merge made of it; here the
+# pull request description; so its declarations are those of the pull
+# request's commits, which the sanity check verified.  Since the sanity
+# check rejects mixed declarations, all commits agree.
+declare -A should_backpatch
 any=false
-warnings=()
 if $squashed; then
-	version=$(for m in $pr_commits; do base64 -d <<< "$m" | backpatch_through_version; done |
-				sort -n | head -n 1)
-	if [ -n "$version" ]; then
-		through[$merge_sha]=$version
+	bp=$(for m in $pr_commits; do base64 -d <<< "$m" | has_backpatch; done | head -n 1)
+	if [ -n "$bp" ]; then
+		should_backpatch[$merge_sha]=true
 		any=true
-		n_skip=$(for m in $pr_commits; do base64 -d <<< "$m" | no_backpatch_lines | head -n 1; done |
-					grep -c . || true)
-		if [ "$n_skip" -gt 0 ]; then
-			warnings+=("The pull request was squashed, so the changes of its $n_skip No-backpatch commit(s) are backpatched too.  Merge with \"Rebase and merge\" to backpatch only the commits that ask for it.")
-		fi
 	fi
 else
 	for c in $landed; do
-		version=$(git log -1 --format=%B "$c" | backpatch_through_version)
-		if [ -n "$version" ]; then
-			through[$c]=$version
+		bp=$(git log -1 --format=%B "$c" | has_backpatch)
+		if [ -n "$bp" ]; then
+			should_backpatch[$c]=true
 			any=true
 		fi
 	done
 fi
 
 if ! $any; then
-	echo "No commit of #$PR_NUMBER says Backpatch-through: nothing to backpatch."
+	echo "No commit of #$PR_NUMBER says Backpatch: nothing to backpatch."
 	exit 0
 fi
 
@@ -161,17 +153,16 @@ created=()
 conflicted=()
 errors=()
 
-for release in $(release_branches); do
-	n=${release#v}
+for release in $(stable_branch); do
 	picks=()
 	for c in $landed; do
-		if [ -n "${through[$c]:-}" ] && [ "${through[$c]}" -le "$n" ]; then
+		if [ "${should_backpatch[$c]:-}" = true ]; then
 			picks+=("$c")
 		fi
 	done
 	[ ${#picks[@]} -eq 0 ] && continue
 
-	branch="backpatch/pr-$PR_NUMBER-$release"
+	branch="backpatch/pr-$PR_NUMBER"
 	git fetch -q origin "$release"
 	git checkout -q -B "$branch" FETCH_HEAD
 
@@ -281,9 +272,6 @@ for release in $(release_branches); do
 done
 
 report="Backpatch workflow results for this pull request:"
-for line in "${warnings[@]}"; do
-	report+=$'\n'"- **Warning:** $line"
-done
 for line in "${created[@]}"; do
 	report+=$'\n'"- $line"
 done

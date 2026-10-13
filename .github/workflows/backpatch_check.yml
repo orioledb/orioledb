@@ -1,7 +1,7 @@
 name: Backpatch sanity check
 
-# Either every commit of a pull request says "Backpatch-through: vX" or
-# "No-backpatch: <reason>", or none does and the pull request has no "bug"
+# Either every commit of a pull request says "Backpatch: stable" or
+# "Backpatch: no <reason>", or none does and the pull request has no "bug"
 # label.  See ci/backpatch_check.sh.
 
 on:
