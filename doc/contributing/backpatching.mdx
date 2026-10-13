@@ -7,27 +7,37 @@ sidebar_label: Backpatching
 
 ## Release branches
 
-Each major release has its own branch: `v1`, `v2`, `v3`, ... Development
-happens in `main`. Fixes are merged into `main` first and then backpatched to
-the release branches that need them.
+Release branches are named after the OrioleDB SQL version: `v1.10`, `v1.11`,
+`v1.12`, `v2.0`, and so on.  Release tags use the form
+`v<major>.<minor>.<patch>`: `v1.10.0`, `v1.10.1`, `v1.11.0`, etc.  The first
+stable release of a branch is always tagged `v<major>.<minor>.0`.
+
+Development happens in `main`.  At any given time, only the most recent
+release branch is supported.  Once a new release branch is created, the
+previously supported branch reaches end of life.  Fixes are merged into
+`main` first and then backpatched to the supported release branch.
+
+The supported release branch is recorded in `.backpatch-target` at the
+repository root.  When a new release branch is created, update this file
+to point to it.
 
 ## Declaring the backpatch decision
 
-Every commit of a fix says how far back it goes, with one of these lines in
-its message:
+Every commit of a fix says whether to backpatch it, with one of these lines
+in its message:
 
 ```
-Backpatch-through: v2
+Backpatch: stable
 ```
 
-Backpatch the commit to `v2` and every later release branch: `v3`, `v4`, ...
+Backpatch the commit to the supported release branch.
 
 ```
-No-backpatch: <reason>
+Backpatch: no <reason>
 ```
 
 Do not backpatch the commit, and say why. For example:
-`No-backpatch: the code it fixes is new in main`.
+`Backpatch: no, the code it fixes is new in main`.
 
 Like a git trailer, the declaration starts at the beginning of its line,
 usually in the last paragraph of the message. An indented line only mentions
@@ -38,18 +48,24 @@ pull request that is not a fix declares nothing. The **Backpatch sanity
 check** workflow enforces this on every pull request outside the release
 branches. It passes when either:
 
-- every commit has exactly one declaration, naming a release branch that
-  exists, or giving a reason; or
+- every commit has exactly one declaration: `Backpatch: stable` or
+  `Backpatch: no` with a reason; or
 - no commit has a declaration, and the pull request is not labeled `bug`.
+
+All commits in a pull request must agree: mixing `Backpatch: stable` and
+`Backpatch: no` in the same pull request is an error.
+
+When a commit says `Backpatch: stable`, the check also verifies that the
+release branch named in `.backpatch-target` exists.
 
 Merge commits inside a pull request are not checked.
 
 ## What happens after the merge
 
 The **Backpatch** workflow runs on the push that merges a pull request into
-`main`. For each release branch that needs at least one commit, it:
+`main`. For the supported release branch, it:
 
-- creates the branch `backpatch/pr-<number>-<release>` from the release
+- creates the branch `backpatch/pr-<number>` from the release
   branch;
 - cherry-picks the commits with `git cherry-pick -x`, in their original
   order. Their authors are kept, and the message gets the line
@@ -57,8 +73,8 @@ The **Backpatch** workflow runs on the push that merges a pull request into
 - opens a pull request `[<release>] <title>` into the release branch, labeled
   `backpatch`.
 
-The workflow also comments on the original pull request with the list of
-backpatch pull requests.
+The workflow also comments on the original pull request with the backpatch
+pull request.
 
 A commit that the release branch already has is skipped.
 
@@ -91,16 +107,11 @@ request gets notified.
 
 ### Squash and rebase merges
 
-With **Rebase and merge**, every commit is backpatched according to its own
-declaration.
-
-With **Squash and merge**, `main` gets a single commit. Its message is the
-pull request description, so the declarations are taken from the pull
-request's commits instead. The squashed commit goes back as far as the oldest
-release any of them names. A squash cannot leave out the changes of a
-`No-backpatch` commit, so they are backpatched too. The workflow and the
-sanity check warn about this. Use **Rebase and merge** for a pull request that
-mixes `Backpatch-through` and `No-backpatch` commits.
+Both **Rebase and merge** and **Squash and merge** are supported.  With a
+squash merge, `main` gets a single commit whose declarations are taken from
+the pull request's commits.  Since all commits must agree (mixing
+`Backpatch: stable` and `Backpatch: no` is an error), the squashed commit
+inherits the same decision.
 
 ## Running a backpatch by hand
 

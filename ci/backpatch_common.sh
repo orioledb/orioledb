@@ -2,18 +2,20 @@
 #
 # Helpers shared by backpatch.sh and backpatch_check.sh.
 #
-# Release branches are named v1, v2, v3, ...  A commit says how far back it
-# goes with one of these lines in its message:
+# Release branches are named v<major>.<minor>: v1.10, v1.11, v2.0, ...
+# At any given time, only the most recent release branch is supported.
+# A commit says whether to backpatch it with one of these lines in its
+# message:
 #
-#   Backpatch-through: vX     backpatch to vX and every later release branch
-#   No-backpatch: <reason>    the commit is not backpatched, and why
+#   Backpatch: stable           backpatch to the supported release branch
+#   Backpatch: no <reason>      the commit is not backpatched, and why
 #
 # Like a git trailer, a declaration starts at the beginning of its line.  An
 # indented one, such as the two above, only mentions the convention.
 
 # Is the branch name a release branch?
 is_release_branch() {
-	[[ "$1" =~ ^v[0-9]+$ ]]
+	[[ "$1" =~ ^v[0-9]+\.[0-9]+$ ]]
 }
 
 # Run a command, retrying what GitHub fails now and then (5xx, timeouts).
@@ -28,28 +30,31 @@ gh_retry() {
 	return 1
 }
 
-# Release branches of the repository, oldest first, one per line.
-release_branches() {
-	local names
-	names=$(gh_retry gh api --paginate "repos/$GH_REPO/branches" --jq '.[].name')
-	grep -E '^v[0-9]+$' <<< "$names" | sort -t v -k 2 -n || true
+# The supported release branch, read from .backpatch-target at the repo root.
+stable_branch() {
+	local f=.backpatch-target
+	if [ -f "$f" ]; then
+		head -n 1 "$f" | tr -d '[:space:]'
+	fi
 }
 
-# "Backpatch-through:" lines of a commit message read from stdin.
-backpatch_through_lines() {
-	grep -E '^Backpatch-through:' || true
+# "Backpatch:" lines of a commit message read from stdin.
+backpatch_lines() {
+	grep -E '^Backpatch:' || true
 }
 
-# "No-backpatch:" lines of a commit message read from stdin.
-no_backpatch_lines() {
-	grep -E '^No-backpatch:' || true
+# Whether the commit message read from stdin says "Backpatch: stable".
+# Prints "stable" if so, nothing otherwise.
+has_backpatch() {
+	backpatch_lines |
+		sed -nE 's/^Backpatch:[[:space:]]*stable[[:space:]]*$/stable/p' |
+		head -n 1
 }
 
-# The oldest release named by "Backpatch-through: vX" lines of a commit
-# message read from stdin, as the number X, or nothing.  A squash merge can
-# gather several such lines; the oldest one wins.
-backpatch_through_version() {
-	backpatch_through_lines |
-		sed -nE 's/^Backpatch-through:[[:space:]]*v([0-9]+)[[:space:]]*$/\1/p' |
-		sort -n | head -n 1
+# Whether the commit message read from stdin says "Backpatch: no ...".
+# Prints the reason if so, nothing otherwise.
+no_backpatch_reason() {
+	backpatch_lines |
+		sed -nE 's/^Backpatch:[[:space:]]*no[[:space:]]+//p' |
+		head -n 1
 }
