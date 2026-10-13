@@ -2,7 +2,7 @@ name: check
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "v[0-9]*.[0-9]*"]
     paths-ignore:
       - "test/antithesis/**"
       - "test/integration/**"
@@ -59,7 +59,7 @@ jobs:
           SEL_CT: ${{ github.event.inputs.check_type || 'all' }}
           REPEATS: ${{ github.event.inputs.repeats || '1' }}
         run: |
-          import os, json, itertools
+          import os, json, itertools, re
 
           event_name = os.environ["GITHUB_EVENT_NAME"]
           ref        = os.environ.get("GITHUB_REF_NAME", "")
@@ -191,7 +191,7 @@ jobs:
               base_repo = pr_event["pull_request"]["base"]["repo"]["full_name"]
               # Fork PRs get the full matrix; same-repo PRs get the complementary set
               combos = full_combos if head_repo != base_repo else pr_combos
-          elif ref == "main":
+          elif ref == "main" or re.fullmatch(r"v\d+\.\d+", ref):
               combos = full_combos
           else:
               combos = branch_combos
