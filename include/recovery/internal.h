@@ -61,7 +61,8 @@ typedef enum
 	RecoveryMsgTypeLeaderParallelIndexBuild,
 	RecoveryMsgTypeWorkerParallelIndexBuild,
 	RecoveryMsgTypeInit,
-	RecoveryMsgTypeReinsert
+	RecoveryMsgTypeReinsert,
+	RecoveryMsgTypeUpdatePartial
 } RecoveryMsgType;
 
 #define RECOVERY_MODIFY_OXID (0x0100)
@@ -195,6 +196,8 @@ extern void DestroyParallelRecoveryContext(ParallelRecoveryContext *context);
 /*
  * Recovery utility.
  */
+extern OTableDescr *recovery_partial_update_descr(OTableDescr *descr,
+												  OTuple payload);
 extern void apply_modify_record(OTableDescr *descr, OIndexDescr *id,
 								uint16 type, OTuple p);
 extern bool apply_btree_modify_record(BTreeDescr *tree,
