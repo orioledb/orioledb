@@ -1041,7 +1041,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 	*freezeXid = InvalidTransactionId;
 	*minmulti = InvalidMultiXactId;
 
-	srel = RelationCreateStorage(*newrnode, persistence, false);
+	srel = RelationCreateStorage(*newrnode, persistence, true);
 	smgrclose(srel);
 }
 
