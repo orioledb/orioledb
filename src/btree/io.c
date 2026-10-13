@@ -1802,6 +1802,15 @@ load_page(OBTreeFindPageContext *context)
 		if (orioledb_s3_mode)
 			chkpNum = S3_GET_CHKP_NUM(page_desc->fileExtent.off);
 
+		/*
+		 * Nothing refers to the page taken for the read, so hand it back.
+		 * Error cleanup would only release its lock: the page would stay at
+		 * UCM_INVALID_LEVEL, which neither the clock sweep nor
+		 * ucm_occupy_free_page() ever picks, and be lost to the pool for
+		 * good.
+		 */
+		ppool_free_page(desc->ppool, blkno, true);
+
 		if (read_result == OReadPageResultChecksumFailed)
 			ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
 							errmsg("invalid page with file offset " UINT64_FORMAT " in %s",
