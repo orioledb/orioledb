@@ -168,6 +168,28 @@ class TablespaceTest(BaseTest):
 		    500)
 		node.stop()
 
+	def test_rolled_back_tablespace_drop(self):
+		tbsp_dir = tempfile.mkdtemp(prefix='oriole_relnode_abort_')
+		self.addCleanup(shutil.rmtree, tbsp_dir, ignore_errors=True)
+
+		node = self.node
+		node.start()
+
+		node.safe_psql('postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql('postgres',
+		               f"CREATE TABLESPACE ots LOCATION '{tbsp_dir}';")
+
+		node.safe_psql(
+		    'postgres', """
+				BEGIN;
+				CREATE TABLE o_rolled_back (k int PRIMARY KEY)
+					USING orioledb TABLESPACE ots;
+				ROLLBACK;
+		""")
+
+		node.safe_psql('postgres', "DROP TABLESPACE ots;")
+		node.stop()
+
 	def test_startup_skips_tablespace_without_version_directory(self):
 		"""
 		Replaying a DROP TABLESPACE can leave its pg_tblspc entry behind
