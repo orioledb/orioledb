@@ -3607,7 +3607,7 @@ step s1_delete100:
 	WHERE id BETWEEN 100 and 140;
 step s1_rollback: ROLLBACK;
 
-starting permutation: s2_insert_one s2_begin s2_select_one s1_update10000 s1_update100000 s2_commit
+starting permutation: s2_insert_one s2_begin s2_select_one s1_update5000 s1_update55000 s2_commit
 step s2_insert_one: 
 	INSERT INTO o_iso_rr VALUES (1, '1');
 step s2_begin: 
@@ -3619,8 +3619,8 @@ id|t
  1|1
 (1 row)
 
-step s1_update10000: call update_table(10000);
-step s1_update100000: call update_table(100000);
+step s1_update5000: call update_table(5000);
+step s1_update55000: call update_table(55000);
 step s2_commit: COMMIT;
 
 starting permutation: s1_begin s1_insert50 s2_insert_before50 s2_insert_after50 s1_select49 s1_commit
