@@ -42,10 +42,8 @@ typedef struct
 
 static LocalWal local_wal;
 
-static void add_finish_wal_record(uint8 rec_type, OXid xmin);
 static void add_joint_commit_wal_record(TransactionId xid, OXid xmin,
 										bool subTransaction);
-static void add_xid_wal_record(OXid oxid, TransactionId logicalXid);
 static void add_xid_wal_record_if_needed(void);
 static void flush_local_wal_if_needed(int required_length);
 static inline void add_local_modify(uint8 record_type, OTuple record, uint32 length, OTuple record2, uint32 length2);
@@ -70,6 +68,10 @@ static inline void add_local_modify_header(uint8 record_type, OTuple record1,
 										   uint32 length2);
 
 #define XID_RESERVED_LENGTH ((local_wal.contains_xid) ? 0 : sizeof(WALRecXid))
+
+#ifdef IS_DEV
+PG_FUNCTION_INFO_V1(orioledb_flush_local_wal);
+#endif
 
 void
 add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
@@ -151,7 +153,6 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 
 	flush_local_wal_if_needed(required_length);
 	Assert(local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
-
 	add_xid_wal_record_if_needed();
 
 	if (!ORelOidsIsEqual(local_wal.oids, oids) || type != local_wal.ix_type)
@@ -455,7 +456,7 @@ wal_emit_recovery_finish_rollback(OXid oxid, TransactionId logicalXid)
 	XLogFlush(wait_pos);
 }
 
-static void
+void
 add_finish_wal_record(uint8 rec_type, OXid xmin)
 {
 	WALRecFinish *rec;
@@ -521,7 +522,7 @@ add_joint_commit_wal_record(TransactionId xid, OXid xmin, bool subTransaction)
 /*
  * Returns size of a new record.
  */
-static void
+void
 add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 {
 	WALRecXid  *rec;
@@ -1218,3 +1219,15 @@ set_local_wal_has_material_changes(bool value)
 {
 	local_wal.has_material_changes = value;
 }
+
+#ifdef IS_DEV
+Datum
+orioledb_flush_local_wal(PG_FUNCTION_ARGS)
+{
+	XLogRecPtr	pos;
+
+	pos = flush_local_wal(false, false);
+	XLogFlush(pos);
+	PG_RETURN_VOID();
+}
+#endif
