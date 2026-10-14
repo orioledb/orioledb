@@ -4,7 +4,9 @@ from collections import Counter
 import os
 from shutil import rmtree
 import socket
+import struct
 import subprocess
+import time
 from tempfile import mkdtemp
 from typing import List
 from unittest import result
@@ -24,12 +26,13 @@ REWIND_KEYS_WARNING = "Target and source servers don't have the OrioleDB rewind 
 class RewindTest(BaseTest):
 
     def pg_rewind(self,
-                  target,
-                  source_port,
-                  verbose=False,
-                  rewind_log_file=None,
-                  extension_option="--extension",
-                  source_pgdata=None):
+                   target,
+                   source_port,
+                   verbose=False,
+                   rewind_log_file=None,
+                   extension_option="--extension",
+                   source_pgdata=None,
+                   expect_error=False):
         if platform == "darwin":
             dlsuffix = 'dylib'
         elif platform == "win32":
@@ -72,7 +75,10 @@ class RewindTest(BaseTest):
         elif (process.returncode != 0):
             print(out.decode("utf-8"))
             print(err.decode("utf-8"))
-        self.assertEqual(process.returncode, 0)
+        if expect_error:
+            self.assertNotEqual(process.returncode, 0)
+        else:
+            self.assertEqual(process.returncode, 0)
         return process.returncode, out, err
 
     def pg_rewind_master(self,
@@ -1000,7 +1006,8 @@ class RewindTest(BaseTest):
     def check_in_progress_trx_rewind(self,
                                      trx_sql,
                                      committed_sql=None,
-                                     orig_rows=1000):
+                                     orig_rows=1000,
+                                     recovery_pool_size=None):
         # One transaction changes an OrioleDB table and a heap table the same
         # way.  It is in progress after common checkpoint: the promoted replica
         # aborts it, the master commits it.  After the rewind both tables must
@@ -1011,25 +1018,41 @@ class RewindTest(BaseTest):
             with self.getReplica() as replica:
                 tables = ['o_test', 'h_test']
 
+                if recovery_pool_size is not None:
+                    replica.append_conf(
+                        f'orioledb.recovery_pool_size = {recovery_pool_size}')
+
                 def each(sql):
                     return sql and "".join(sql.format(t=t) for t in tables)
 
                 _, _, err = self.rewind_in_progress_trx(
                     master, replica,
                     self.create_table_sql('o_test', 1000) +
-                    self.create_table_sql('h_test', 1000, 'heap'),
+                    self.create_table_sql('h_test', 1000, 'heap') +
+                    "CREATE INDEX o_test_val_idx ON o_test (val);" +
+                    "CREATE INDEX h_test_val_idx ON h_test (val);",
                     each(trx_sql), each(committed_sql))
                 self.assertNotIn(REWIND_KEYS_WARNING, err.decode())
                 result = {}
                 for name, node in [('replica', replica), ('master', master)]:
                     for table in tables:
                         result[(name, table)] = node.execute(f"""
-                            SELECT count(*), count(*) FILTER (WHERE val = 'orig')
+                            SELECT count(*),
+                                   count(*) FILTER (WHERE val = 'orig'),
+                                   sum(id)
                                 FROM {table}
                         """)[0]
                 self.assertEqual(result,
-                                 {key: (1000, orig_rows)
+                                 {key: (1000, orig_rows, 500500)
                                   for key in result})
+                for node in (replica, master):
+                    con = node.connect()
+                    con.execute("SET enable_seqscan = off")
+                    for table in tables:
+                        plan = con.execute(
+                            f"EXPLAIN SELECT * FROM {table} WHERE val = 'orig'")
+                        self.assertTrue(any('Index' in row[0] for row in plan))
+                    con.close()
 
     def test_pg_rewind_in_progress_target_trx_update(self):
         """
@@ -1048,6 +1071,39 @@ class RewindTest(BaseTest):
         self.check_in_progress_trx_rewind(
             "DELETE FROM {t} WHERE mod(id, 10) = 2;")
 
+    def test_pg_rewind_in_progress_primary_key_update_single_worker(self):
+        self.check_in_progress_trx_rewind(
+            "UPDATE {t} SET id = id + 10000 WHERE mod(id, 10) = 4;",
+            recovery_pool_size=1)
+
+    def test_pg_rewind_in_progress_toast_update(self):
+        self.check_in_progress_trx_rewind(
+            "UPDATE {t} SET val = repeat('unfinished', 2000) "
+            "WHERE mod(id, 10) = 5;")
+
+    def test_pg_rewind_more_than_four_mb_of_keys(self):
+        with self.node as master:
+            self.enable_archive(master)
+            master.start()
+            with self.getReplica() as replica:
+                self.rewind_in_progress_trx(
+                    master, replica, """
+                        CREATE TABLE o_large_keys (
+                            id text PRIMARY KEY,
+                            val text
+                        ) USING orioledb;
+                        INSERT INTO o_large_keys
+                            SELECT lpad(id::text, 2000, 'x'), 'orig'
+                                FROM generate_series(1, 2500) id;
+                    """, "UPDATE o_large_keys SET val = 'unfinished'")
+                expected = [(2500, 2500)]
+                query = """
+                    SELECT count(*), count(*) FILTER (WHERE val = 'orig')
+                        FROM o_large_keys
+                """
+                self.assertEqual(master.execute(query), expected)
+                self.assertEqual(replica.execute(query), expected)
+
     def test_pg_rewind_in_progress_target_trx_drop(self):
         """
         The master commits DROP TABLE, but the promoted replica rolls it back.
@@ -1064,6 +1120,216 @@ class RewindTest(BaseTest):
             "UPDATE {t} SET val = 'trx' WHERE mod(id, 10) = 1;",
             "UPDATE {t} SET val = 'committed' WHERE mod(id, 10) = 3;",
             orig_rows=900)
+
+    def check_invalid_rewind_keys(self, failure):
+        with self.node as master:
+            self.enable_archive(master)
+            master.start()
+            with self.getReplica() as replica:
+                master.safe_psql("""
+                    CREATE EXTENSION orioledb;
+                    CREATE TABLE o_test (
+                        id integer PRIMARY KEY,
+                        val text
+                    ) USING orioledb;
+                    INSERT INTO o_test SELECT id, 'orig'
+                        FROM generate_series(1, 100) id;
+                    SELECT pg_create_physical_replication_slot('replica');
+                """)
+                replica.append_conf(primary_slot_name='replica')
+                replica.start()
+                self.catchup_orioledb(replica)
+
+                con = master.connect()
+                con.begin()
+                con.execute("UPDATE o_test SET val = 'unfinished'")
+                con.execute("SELECT orioledb_flush_local_wal()")
+                master.safe_psql("CHECKPOINT")
+                self.catchup_orioledb(replica)
+                replica.promote()
+                replica.safe_psql("CHECKPOINT")
+                con.commit()
+                con.close()
+
+                files = self.rewind_keys_files(replica)
+                self.assertEqual(len(files), 1)
+                if failure == 'checksum':
+                    with open(files[0], 'r+b') as rewind_file:
+                        rewind_file.seek(-1, os.SEEK_END)
+                        byte = rewind_file.read(1)
+                        rewind_file.seek(-1, os.SEEK_END)
+                        rewind_file.write(bytes([byte[0] ^ 0xff]))
+                elif failure == 'missing':
+                    os.remove(files[0])
+
+                replica.safe_psql(
+                    "SELECT pg_create_physical_replication_slot('origin')")
+                _, _, err = self.pg_rewind_master(master,
+                                                   replica.port,
+                                                   'origin',
+                                                   expect_error=True)
+                message = err.decode()
+                if failure == 'checksum':
+                    self.assertIn('checksum mismatch', message)
+                elif failure == 'missing':
+                    self.assertIn('do not have the OrioleDB rewind keys',
+                                  message)
+
+    def test_pg_rewind_missing_rewind_keys_fails(self):
+        self.check_invalid_rewind_keys('missing')
+
+    def test_pg_rewind_corrupt_rewind_keys_fails(self):
+        self.check_invalid_rewind_keys('checksum')
+
+    def test_pg_rewind_zero_entry_file(self):
+        with self.node as master:
+            self.enable_archive(master)
+            master.start()
+            with self.getReplica() as replica:
+                master.safe_psql("""
+                    CREATE EXTENSION orioledb;
+                    CREATE TABLE o_test (id integer PRIMARY KEY) USING orioledb;
+                    INSERT INTO o_test VALUES (1);
+                    SELECT pg_create_physical_replication_slot('replica');
+                """)
+                replica.append_conf(primary_slot_name='replica')
+                replica.start()
+                master.safe_psql("CHECKPOINT")
+                self.catchup_orioledb(replica)
+                replica.promote()
+                replica.safe_psql("CHECKPOINT")
+
+                files = self.rewind_keys_files(replica)
+                self.assertEqual(len(files), 1)
+                with open(files[0], 'rb') as rewind_file:
+                    header = rewind_file.read(36)
+                magic, version, header_len, _, count, length, _ = \
+                    struct.unpack('!IHHQQQI', header)
+                self.assertEqual(magic, 0x4f524b32)
+                self.assertEqual(version, 1)
+                self.assertEqual(header_len, 36)
+                self.assertEqual(count, 0)
+                self.assertEqual(length, 0)
+
+                replica.safe_psql("INSERT INTO o_test VALUES (2)")
+                master.safe_psql("INSERT INTO o_test VALUES (3)")
+                self.rewind_and_follow(master, replica)
+                self.assertEqual(master.execute("SELECT * FROM o_test ORDER BY id"),
+                                 [(1, ), (2, )])
+
+    def check_rewind_keys_promotion_crash(self, event):
+        with self.node as master:
+            self.enable_archive(master)
+            master.start()
+            with self.getReplica() as replica:
+                replica.append_conf("orioledb.enable_stopevents = true\n"
+                                    "orioledb.restart_after_crash = off")
+                master.safe_psql("""
+                    CREATE EXTENSION orioledb;
+                    CREATE TABLE o_test (
+                        id integer PRIMARY KEY,
+                        val text
+                    ) USING orioledb;
+                    INSERT INTO o_test SELECT id, 'orig'
+                        FROM generate_series(1, 100) id;
+                    SELECT pg_create_physical_replication_slot('replica');
+                """)
+                replica.append_conf(primary_slot_name='replica')
+                replica.start()
+                self.catchup_orioledb(replica)
+
+                con = master.connect()
+                con.begin()
+                con.execute("UPDATE o_test SET val = 'unfinished'")
+                con.execute("SELECT orioledb_flush_local_wal()")
+                master.safe_psql("CHECKPOINT")
+                self.catchup_orioledb(replica)
+                replica.safe_psql(
+                    f"SELECT pg_stopevent_set('{event}', 'true')")
+                subprocess.run([
+                    get_bin_path('pg_ctl'), '-D', replica.data_dir, '-W',
+                    'promote'
+                ], check=True)
+                replica.poll_query_until(
+                    "SELECT coalesce(array_length(waiter_pids, 1), 0) > 0 "
+                    "FROM pg_stopevents() "
+                    f"WHERE stopevent = '{event}'",
+                    expected=True)
+                replica.stop(['-m', 'immediate'])
+                replica.start()
+                if replica.execute("SELECT pg_is_in_recovery()")[0][0]:
+                    replica.promote()
+                con.commit()
+                con.close()
+
+                self.assertEqual(len(self.rewind_keys_files(replica)), 1)
+                self.assertEqual(replica.execute("""
+                    SELECT count(*), count(*) FILTER (WHERE val = 'orig')
+                        FROM o_test
+                """), [(100, 100)])
+
+    def test_rewind_keys_crash_before_ready(self):
+        self.check_rewind_keys_promotion_crash('rewind_keys_before_ready')
+
+    def test_rewind_keys_crash_after_ready(self):
+        self.check_rewind_keys_promotion_crash('rewind_keys_after_ready')
+
+    def test_rewind_keys_crash_after_wal_flush(self):
+        self.check_rewind_keys_promotion_crash(
+            'rewind_keys_after_wal_flush')
+
+    def test_rewind_keys_missing_part_stops_promotion(self):
+        with self.node as master:
+            self.enable_archive(master)
+            master.start()
+            with self.getReplica() as replica:
+                replica.append_conf("orioledb.enable_stopevents = true\n"
+                                    "orioledb.restart_after_crash = off")
+                master.safe_psql("""
+                    CREATE EXTENSION orioledb;
+                    CREATE TABLE o_test (id integer PRIMARY KEY) USING orioledb;
+                    INSERT INTO o_test SELECT generate_series(1, 100);
+                    SELECT pg_create_physical_replication_slot('replica');
+                """)
+                replica.append_conf(primary_slot_name='replica')
+                replica.start()
+                self.catchup_orioledb(replica)
+
+                con = master.connect()
+                con.begin()
+                con.execute("DELETE FROM o_test")
+                con.execute("SELECT orioledb_flush_local_wal()")
+                master.safe_psql("CHECKPOINT")
+                self.catchup_orioledb(replica)
+                replica.safe_psql(
+                    "SELECT pg_stopevent_set('rewind_keys_before_ready', "
+                    "'true')")
+                subprocess.run([
+                    get_bin_path('pg_ctl'), '-D', replica.data_dir, '-W',
+                    'promote'
+                ], check=True)
+                replica.poll_query_until(
+                    "SELECT coalesce(array_length(waiter_pids, 1), 0) > 0 "
+                    "FROM pg_stopevents() "
+                    "WHERE stopevent = 'rewind_keys_before_ready'",
+                    expected=True)
+                parts = glob.glob(os.path.join(replica.data_dir,
+                                               'orioledb_data',
+                                               'rewind_keys.*.part'))
+                self.assertGreater(len(parts), 0)
+                os.remove(parts[0])
+                replica.safe_psql(
+                    "SELECT pg_stopevent_reset('rewind_keys_before_ready')")
+                for _ in range(100):
+                    if replica.status() != NodeStatus.Running:
+                        break
+                    time.sleep(0.1)
+                self.assertNotEqual(replica.status(), NodeStatus.Running)
+                with open(replica.pg_log_file, 'r') as log_file:
+                    self.assertIn('missing or invalid rewind keys part',
+                                  log_file.read())
+                con.rollback()
+                con.close()
 
     def test_pg_rewind_in_progress_trx_promoted_target(self):
         """
@@ -2086,4 +2352,3 @@ class RewindTest(BaseTest):
                         SELECT name FROM orioledb_index
                             ORDER BY name COLLATE "C"
                     """), replica_indices)
-

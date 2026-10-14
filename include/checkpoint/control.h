@@ -78,7 +78,14 @@ typedef struct
 #define CONTROL_FILENAME    ORIOLEDB_DATA_DIR"/control"
 
 #define REWIND_KEYS_FILENAME_FORMAT	ORIOLEDB_DATA_DIR"/rewind_keys_%08X%08X"
-#define REWIND_KEYS_MAGIC	0x4F524B31	/* "ORK1" */
+#define REWIND_KEYS_READY_FORMAT		ORIOLEDB_DATA_DIR"/rewind_keys.%08X%08X.ready"
+#define REWIND_KEYS_PART_FORMAT		ORIOLEDB_DATA_DIR"/rewind_keys.%08X%08X.%d.part"
+#define REWIND_KEYS_WRITING_FORMAT	ORIOLEDB_DATA_DIR"/rewind_keys.%08X%08X.%d.writing"
+#define REWIND_KEYS_MAGIC			0x4F524B32U	/* "ORK2" */
+#define REWIND_KEYS_PART_MAGIC		0x4F525032U	/* "ORP2" */
+#define REWIND_KEYS_FORMAT_VERSION	1
+#define REWIND_KEYS_FINAL_HEADER_SIZE	36
+#define REWIND_KEYS_PART_HEADER_SIZE	48
 
 #define GetCheckpointableUndoLog(i) \
 	(AssertMacro((i) >= 0 && (i) < 2), \
