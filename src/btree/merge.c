@@ -345,6 +345,8 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	if (level >= ORIOLEDB_MAX_DEPTH)
 	{
 		unlock_page(blkno);
+		if (needsUndo)
+			release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
 		Assert(!have_locked_pages());
 		return false;
 	}
@@ -407,7 +409,11 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 * page is locked and nothing has been modified yet.
 	 */
 	if (findResult != OFindPageResultSuccess)
+	{
+		if (needsUndo)
+			release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
 		return false;
+	}
 	parent_blkno = find_context.items[find_context.index].blkno;
 	parent_change_count = find_context.items[find_context.index].pageChangeCount;
 
