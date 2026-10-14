@@ -464,8 +464,10 @@ else
 endif
 
 $(PG_REWIND_EXTENSION): CPPFLAGS += -I$(includedir) -DFRONTEND=1
-$(PG_REWIND_EXTENSION): $(PG_REWIND_EXTENSION_SOURCES)
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(PG_REWIND_LDFLAGS_SL) $^ $(LINK_FLAGS) $(PG_REWIND_SHLIB_LINK) -o $@
+# Keep LDFLAGS_SL after sources so --as-needed retains sanitizer runtimes.
+$(PG_REWIND_EXTENSION): $(PG_REWIND_EXTENSION_SOURCES) \
+	$(wildcard include/*.h include/*/*.h)
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(filter %.c,$^) $(LINK_FLAGS) $(PG_REWIND_LDFLAGS_SL) $(PG_REWIND_SHLIB_LINK) -o $@
 
 install: install-pg-rewind-ext
 install-pg-rewind-ext: $(PG_REWIND_EXTENSION)

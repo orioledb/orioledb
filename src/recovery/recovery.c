@@ -2271,7 +2271,9 @@ recovery_finish(int worker_id)
 		if (cur_state->used_by)
 			pfree(cur_state->used_by);
 	}
-	rewind_keys_finish_process(worker_id);
+	/* Index-build children have no state independent of their leader. */
+	if (worker_id <= index_build_leader)
+		rewind_keys_finish_process(worker_id);
 	HandleStartupProcInterrupts_hook = NULL;
 	hash_destroy(recovery_xid_state_hash);
 	recovery_xid_state_hash = NULL;

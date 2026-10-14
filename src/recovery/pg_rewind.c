@@ -14,6 +14,7 @@
 #include "postgres.h"
 
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "orioledb.h"
 
@@ -499,7 +500,7 @@ create_key_iterator(BTreeDescr *td,
 					KeyArrayElement *last)
 {
 	KeyIterator *result = palloc0(sizeof(KeyIterator));
-	OSnapshot committed_snapshot = {
+	OSnapshot	committed_snapshot = {
 		pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo),
 		InvalidXLogRecPtr, 0, 0
 	};
@@ -743,17 +744,17 @@ ereport_rewind_error(File rewind_file, OIndexDescr *indexDescr,
 	OIndexType	err_ix_type;
 	ORelOids	err_oids;
 
-	if (sys_tree_num > 0)
+	if (indexDescr != NULL)
+	{
+		err_ix_type = indexDescr->desc.type;
+		err_oids = indexDescr->oids;
+	}
+	else
 	{
 		err_ix_type = oIndexPrimary;
 		err_oids.datoid = SYS_TREES_DATOID;
 		err_oids.reloid = sys_tree_num;
 		err_oids.relnode = sys_tree_num;
-	}
-	else
-	{
-		err_ix_type = indexDescr->desc.type;
-		err_oids = indexDescr->oids;
 	}
 	ereport(FATAL, (errcode_for_file_access(),
 					errmsg("could not read "
@@ -881,17 +882,16 @@ rewind_keys_capture(BTreeDescr *desc, BTreeOperationType action, OTuple tuple)
 	{
 		/*
 		 * Record only the rows of the trees whose changes go to WAL, and name
-		 * their trees just like WAL do, so pg_rewind takes these keys just like
-		 * the ones it finds it at WAL.
+		 * their trees just like WAL do, so pg_rewind takes these keys just
+		 * like the ones it finds it at WAL.
 		 *
-		 * Callers of add_modify_wal_record_extended logs:
-		 *  - Primary index as a table row.
-		 *	  - TOAST and bridge index rows are logged by records on their own.  They
-		 *		are registered under their own oids, so neither follows from the table
-		 *		rows, so the rewind needs their keys too.
-		 *  - Secondary index rows are not logged at all.  A table row is applied
-		 *	  via apply_tbl_modify_record() -- this function updates the secondary
-		 *	  indexes too.
+		 * Callers of add_modify_wal_record_extended logs: - Primary index as
+		 * a table row. - TOAST and bridge index rows are logged by records on
+		 * their own.  They are registered under their own oids, so neither
+		 * follows from the table rows, so the rewind needs their keys too. -
+		 * Secondary index rows are not logged at all.  A table row is applied
+		 * via apply_tbl_modify_record() -- this function updates the
+		 * secondary indexes too.
 		 */
 		if (type == oIndexPrimary)
 		{
@@ -965,7 +965,7 @@ rewind_keys_pread_all(int fd, const char *path, char *data, uint64 len,
 	while (done < len)
 	{
 		ssize_t		read_len = pg_pread(fd, data + done, len - done,
-									 offset + done);
+										offset + done);
 
 		if (read_len < 0 && errno == EINTR)
 			continue;
@@ -992,7 +992,7 @@ rewind_keys_pwrite_all(int fd, const char *path, const char *data, uint64 len,
 	while (done < len)
 	{
 		ssize_t		written = pg_pwrite(fd, data + done, len - done,
-									 offset + done);
+										offset + done);
 
 		if (written < 0 && errno == EINTR)
 			continue;
@@ -1069,8 +1069,8 @@ rewind_keys_final_header(XLogRecPtr switchpoint, uint64 count,
 
 static void
 rewind_keys_validate_final_file(int fd, const char *path,
-							XLogRecPtr switchpoint, uint64 file_length,
-							uint64 *entry_count, uint32 *whole_checksum)
+								XLogRecPtr switchpoint, uint64 file_length,
+								uint64 *entry_count, uint32 *whole_checksum)
 {
 	char		header[REWIND_KEYS_FINAL_HEADER_SIZE];
 	char		entry_header[REWIND_KEY_ENTRY_HEADER_SIZE];
@@ -1156,7 +1156,7 @@ rewind_keys_validate_final_file(int fd, const char *path,
 		while (key_offset < key_length)
 		{
 			uint32		chunk = Min((uint64) sizeof(buffer),
-								 key_length - key_offset);
+									key_length - key_offset);
 
 			rewind_keys_pread_all(fd, path, buffer, chunk,
 								  sizeof(header) + offset + key_offset);
@@ -1207,8 +1207,8 @@ rewind_keys_finish_process(int worker_id)
 	if (participants <= 0)
 		elog(FATAL, "invalid rewind key participant count %d", participants);
 	header = rewind_keys_part_header(generation, worker_id, participants,
-								 rewind_keys_count, payload_length,
-								 rewind_keys_checksum(payload, payload_length));
+									 rewind_keys_count, payload_length,
+									 rewind_keys_checksum(payload, payload_length));
 	file = makeStringInfo();
 	appendBinaryStringInfoNT(file, header->data, header->len);
 	appendBinaryStringInfoNT(file, payload, payload_length);
@@ -1268,7 +1268,7 @@ rewind_keys_prepare(XLogRecPtr generation, int participants)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not open rewind keys ready file \"%s\": %m", ready)));
 		rewind_keys_validate_final_file(fd, ready, generation, st.st_size,
-									NULL, NULL);
+										NULL, NULL);
 		if (CloseTransientFile(fd) != 0)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not close rewind keys ready file \"%s\": %m", ready)));
@@ -1281,11 +1281,11 @@ rewind_keys_prepare(XLogRecPtr generation, int participants)
 					 LSN_FORMAT_ARGS(generation), participant);
 			if (unlink(part) < 0 && errno != ENOENT)
 				ereport(WARNING, (errcode_for_file_access(),
-								errmsg("could not remove rewind keys part \"%s\": %m", part)));
+								  errmsg("could not remove rewind keys part \"%s\": %m", part)));
 		}
 		return;
 	}
-	STOPEVENT(STOPEVENT_REWIND_KEYS_BEFORE_READY, NULL);
+	STOPEVENT(STOPEVENT_PG_REWIND_KEYS_BEFORE_READY, NULL);
 	snprintf(newpath, sizeof(newpath), "%s.new", ready);
 	if (unlink(newpath) < 0 && errno != ENOENT)
 		ereport(FATAL, (errcode_for_file_access(),
@@ -1393,7 +1393,7 @@ rewind_keys_prepare(XLogRecPtr generation, int participants)
 								errmsg("invalid entry in rewind keys part \"%s\"", part)));
 
 			rewind_keys_write_all(output, newpath, entry_header,
-							  sizeof(entry_header));
+								  sizeof(entry_header));
 			COMP_CRC32C(part_crc, entry_header, sizeof(entry_header));
 			COMP_CRC32C(total_crc, entry_header, sizeof(entry_header));
 			part_offset += sizeof(entry_header);
@@ -1401,7 +1401,7 @@ rewind_keys_prepare(XLogRecPtr generation, int participants)
 			while (key_offset < key_length)
 			{
 				uint32		chunk = Min((uint64) sizeof(copy_buffer),
-									 key_length - key_offset);
+										key_length - key_offset);
 
 				rewind_keys_pread_all(input, part, copy_buffer, chunk,
 									  REWIND_KEYS_PART_HEADER_SIZE +
@@ -1429,11 +1429,11 @@ rewind_keys_prepare(XLogRecPtr generation, int participants)
 	FIN_CRC32C(total_crc);
 	{
 		StringInfo	header = rewind_keys_final_header(generation, total_count,
-											   total_length,
-											   (uint32) total_crc);
+													  total_length,
+													  (uint32) total_crc);
 
 		rewind_keys_pwrite_all(output, newpath, header->data, header->len, 0,
-							  FATAL);
+							   FATAL);
 		pfree(header->data);
 		pfree(header);
 	}
@@ -1446,7 +1446,7 @@ rewind_keys_prepare(XLogRecPtr generation, int participants)
 	if (durable_rename(newpath, ready, ERROR) != 0)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not publish rewind keys ready file \"%s\": %m", ready)));
-	STOPEVENT(STOPEVENT_REWIND_KEYS_AFTER_READY, NULL);
+	STOPEVENT(STOPEVENT_PG_REWIND_KEYS_AFTER_READY, NULL);
 
 	for (part_no = 0; part_no < participants; part_no++)
 	{
@@ -1457,7 +1457,7 @@ rewind_keys_prepare(XLogRecPtr generation, int participants)
 				 LSN_FORMAT_ARGS(generation), participant);
 		if (unlink(part) < 0 && errno != ENOENT)
 			ereport(WARNING, (errcode_for_file_access(),
-							errmsg("could not remove rewind keys part \"%s\": %m", part)));
+							  errmsg("could not remove rewind keys part \"%s\": %m", part)));
 	}
 }
 
@@ -1485,7 +1485,7 @@ rewind_keys_resume_prepare(void)
 		if (namelen < strlen(".-1.part") ||
 			strcmp(de->d_name + namelen - strlen(".-1.part"),
 				   ".-1.part") != 0 ||
-			sscanf(de->d_name, "rewind_keys.%08X%08X.-1.part%c",
+			sscanf(de->d_name, "pg_rewind_keys.%08X%08X.-1.part%c",
 				   &hi, &lo, &stop) != 2)
 			continue;
 		generation = ((uint64) hi << 32) | lo;
@@ -1534,12 +1534,12 @@ log_rewind_keys(XLogRecPtr switchpoint, int fd, const char *path, uint64 len,
 		rec_data.offset = offset;
 		rec_data.chunk_length = chunk;
 		rec_data.flags = (offset == 0 ? REWIND_KEYS_FIRST : 0) |
-					((offset + chunk) == len ? REWIND_KEYS_LAST : 0);
+			((offset + chunk) == len ? REWIND_KEYS_LAST : 0);
 		rewind_keys_wal_encode(&rec, &rec_data);
 		rewind_keys_pread_all(fd, path, data, chunk, offset);
 
 		XLogBeginInsert();
-		XLogRegisterData((char *)&rec, sizeof(rec));
+		XLogRegisterData((char *) &rec, sizeof(rec));
 		XLogRegisterData(data, chunk);
 		lsn = XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_REWIND_KEYS);
 		offset += chunk;
@@ -1560,11 +1560,11 @@ rewind_keys_redo(XLogReaderState *record)
 {
 	WALRecRewindKeys rec;
 	RewindKeysWalData rec_data;
-	char *data;
-	int len;
-	char path [MAXPGPATH];
-	char tmppath [MAXPGPATH];
-	int fd;
+	char	   *data;
+	int			len;
+	char		path[MAXPGPATH];
+	char		tmppath[MAXPGPATH];
+	int			fd;
 	struct stat st;
 
 	if (XLogRecGetDataLen(record) < sizeof(rec))
@@ -1573,7 +1573,7 @@ rewind_keys_redo(XLogReaderState *record)
 				 errmsg("truncated OrioleDB rewind keys WAL record")));
 	data = XLogRecGetData(record) + sizeof(rec);
 	len = XLogRecGetDataLen(record) - sizeof(rec);
-	memcpy(&rec, XLogRecGetData(record), sizeof (rec));
+	memcpy(&rec, XLogRecGetData(record), sizeof(rec));
 	rewind_keys_wal_decode(&rec, &rec_data);
 	if (rec_data.version != REWIND_KEYS_FORMAT_VERSION ||
 		rec_data.chunk_length != len ||
@@ -1587,15 +1587,15 @@ rewind_keys_redo(XLogReaderState *record)
 		ereport(PANIC,
 				(errcode(ERRCODE_DATA_CORRUPTED),
 				 errmsg("invalid OrioleDB rewind keys WAL record")));
-	snprintf(path, sizeof (path), REWIND_KEYS_FILENAME_FORMAT,
+	snprintf(path, sizeof(path), REWIND_KEYS_FILENAME_FORMAT,
 			 LSN_FORMAT_ARGS(rec_data.switchpoint));
 	snprintf(tmppath, sizeof(tmppath), "%s.new", path);
 
 	if (rec_data.flags & REWIND_KEYS_FIRST)
 	{
 		/*
-		 * Start the file over: it may be left over from an earlier replay
-		 * of this record.
+		 * Start the file over: it may be left over from an earlier replay of
+		 * this record.
 		 */
 		fd = OpenTransientFile(tmppath, O_WRONLY | O_CREAT | O_TRUNC | PG_BINARY);
 		rewind_keys_redo_state.active = true;
@@ -1654,6 +1654,7 @@ rewind_keys_redo(XLogReaderState *record)
 	if (rec_data.flags & REWIND_KEYS_LAST)
 	{
 		uint32		whole_checksum;
+
 		fd = OpenTransientFile(tmppath, O_RDONLY | PG_BINARY);
 		if (fd < 0 || fstat(fd, &st) != 0 ||
 			st.st_size != rec_data.total_length)
@@ -1661,7 +1662,7 @@ rewind_keys_redo(XLogReaderState *record)
 					(errcode(ERRCODE_DATA_CORRUPTED),
 					 errmsg("invalid rewind keys redo file \"%s\"", tmppath)));
 		rewind_keys_validate_final_file(fd, tmppath, rec_data.switchpoint,
-									st.st_size, NULL, &whole_checksum);
+										st.st_size, NULL, &whole_checksum);
 		if (whole_checksum != rec_data.total_checksum)
 			ereport(PANIC,
 					(errcode(ERRCODE_DATA_CORRUPTED),
@@ -1695,7 +1696,7 @@ rewind_keys_publish_ready(const char *ready, XLogRecPtr switchpoint)
 									NULL, &whole_checksum);
 
 	log_rewind_keys(switchpoint, fd, ready, st.st_size, whole_checksum);
-	STOPEVENT(STOPEVENT_REWIND_KEYS_AFTER_WAL_FLUSH, NULL);
+	STOPEVENT(STOPEVENT_PG_REWIND_KEYS_AFTER_WAL_FLUSH, NULL);
 	if (CloseTransientFile(fd) != 0)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not close rewind keys ready file \"%s\": %m", ready)));
@@ -1731,7 +1732,7 @@ rewind_keys_save(XLogRecPtr switchpoint)
 
 		if (namelen < strlen(".ready") ||
 			strcmp(de->d_name + namelen - strlen(".ready"), ".ready") != 0 ||
-			sscanf(de->d_name, "rewind_keys.%08X%08X.ready%c",
+			sscanf(de->d_name, "pg_rewind_keys.%08X%08X.ready%c",
 				   &hi, &lo, &stop) != 2)
 			continue;
 		pending_switchpoint = ((uint64) hi << 32) | lo;
@@ -1743,12 +1744,32 @@ rewind_keys_save(XLogRecPtr switchpoint)
 
 	if (!ArchiveRecoveryRequested)
 		return;
+	if (!XLogRecPtrIsValid(pg_atomic_read_u64(recovery_rewind_keys_generation)))
+	{
+		/*
+		 * Recovery replayed no records at all: RmgrCleanup() never ran, no
+		 * capture generation was published and no participant wrote a part.
+		 * Publish a valid zero-entry manifest for this switchpoint.
+		 */
+		StringInfo	header;
+		char		ready[MAXPGPATH];
+
+		header = rewind_keys_final_header(switchpoint, 0, 0,
+										  rewind_keys_checksum("", 0));
+		snprintf(ready, sizeof(ready), REWIND_KEYS_READY_FORMAT,
+				 LSN_FORMAT_ARGS(switchpoint));
+		rewind_keys_write_file(ready, header->data, header->len);
+		pfree(header->data);
+		pfree(header);
+		rewind_keys_publish_ready(ready, switchpoint);
+		return;
+	}
 	if (switchpoint != pg_atomic_read_u64(recovery_rewind_keys_generation))
 		ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
 						errmsg("rewind key switchpoint changed from %X/%X to %X/%X",
 							   LSN_FORMAT_ARGS(pg_atomic_read_u64(recovery_rewind_keys_generation)),
 							   LSN_FORMAT_ARGS(switchpoint))));
-	snprintf(path, sizeof (path), REWIND_KEYS_FILENAME_FORMAT,
+	snprintf(path, sizeof(path), REWIND_KEYS_FILENAME_FORMAT,
 			 LSN_FORMAT_ARGS(switchpoint));
 	if (access(path, F_OK) != 0)
 		ereport(FATAL, (errcode_for_file_access(),
@@ -1768,14 +1789,14 @@ rewind_keys_save(XLogRecPtr switchpoint)
 void
 rewind_keys_cleanup(void)
 {
-	TimeLineID tli;
-	List *history;
-	XLogSegNo lastRemovedSegNo = XLogGetLastRemovedSegno();
-	DIR *dir;
+	TimeLineID	tli;
+	List	   *history;
+	XLogSegNo	lastRemovedSegNo = XLogGetLastRemovedSegno();
+	DIR		   *dir;
 	struct dirent *de;
 
 	if (RecoveryInProgress())
-		(void)GetXLogReplayRecPtr(&tli);
+		(void) GetXLogReplayRecPtr(&tli);
 	else
 		tli = GetWALInsertionTimeLine();
 
@@ -1785,28 +1806,30 @@ rewind_keys_cleanup(void)
 	dir = AllocateDir(ORIOLEDB_DATA_DIR);
 	while ((de = ReadDir(dir, ORIOLEDB_DATA_DIR)) != NULL)
 	{
-		uint32 hi, lo;
-		char stop_sym;
-		XLogRecPtr switchpoint;
-		ListCell *lc;
-		bool in_history = false;
+		uint32		hi,
+					lo;
+		char		stop_sym;
+		XLogRecPtr	switchpoint;
+		ListCell   *lc;
+		bool		in_history = false;
 		const char *reason = NULL;
-		char path [MAXPGPATH];
-		XLogSegNo segno;
+		char		path[MAXPGPATH];
+		XLogSegNo	segno;
 
 		/*
 		 * Here we intentionally skip rewind_keys_<switchpoint>.{new, tmp}.
 		 * The final version is rewind_keys_<switchpoint> format.
 		 */
-		if (sscanf(de->d_name, "rewind_keys_%08X%08X%c", &hi, &lo, &stop_sym) != 2)
+		if (sscanf(de->d_name, "pg_rewind_keys_%08X%08X%c", &hi, &lo, &stop_sym) != 2)
 			continue;
 
 		/* Check that this switchpoint is still actual.  */
-		switchpoint = ((uint64)hi << 32) | lo;
+		switchpoint = ((uint64) hi << 32) | lo;
 
 		foreach(lc, history)
 		{
-			TimeLineHistoryEntry *entry = (TimeLineHistoryEntry *)lfirst(lc);
+			TimeLineHistoryEntry *entry = (TimeLineHistoryEntry *) lfirst(lc);
+
 			if (entry->begin == switchpoint)
 				in_history = true;
 		}
@@ -1823,7 +1846,7 @@ rewind_keys_cleanup(void)
 
 		snprintf(path, sizeof(path), ORIOLEDB_DATA_DIR "/%s", de->d_name);
 		if (unlink(path) == 0)
-			elog(LOG,  "OrioleDB: removed rewind keys file \"%s\": %s",
+			elog(LOG, "OrioleDB: removed rewind keys file \"%s\": %s",
 				 path, reason);
 		else if (errno != ENOENT)
 			ereport(WARNING, (errcode_for_file_access(),
@@ -1917,7 +1940,7 @@ replay_rewind(void)
 		found = *((uint8 *) (read_buf + sizeof(uint32) +
 							 sizeof(Oid) * 4));
 
-		elog(LOG, "REWIND TREE: %u %u %u: %c", 
+		elog(LOG, "REWIND TREE: %u %u %u: %c",
 			 cur_oids.datoid,
 			 cur_oids.reloid,
 			 cur_oids.relnode,
@@ -2027,21 +2050,21 @@ replay_rewind(void)
 	Assert(OXidIsValid(lastXid));
 
 	/*
-	 * Seed the xid horizons from divXid (lastXid).  divXid is the lowest
-	 * xid the source's WAL will reference (see pg_rewind_orioledb.c), so it
-	 * is both the runXmin / globalXmin floor and the nextXid to assign:
-	 * the first replayed transaction carries exactly this oxid, and
-	 * advance_oxids() only initialises a slot to INPROGRESS when the
-	 * incoming oxid is >= nextXid.  Seeding nextXid at divXid (rather
-	 * than divXid + 1) is what lets the first replayed transaction get a
-	 * fresh INPROGRESS slot instead of inheriting the stale FROZEN slot
-	 * the target's own xidmap left behind.
+	 * Seed the xid horizons from divXid (lastXid).  divXid is the lowest xid
+	 * the source's WAL will reference (see pg_rewind_orioledb.c), so it is
+	 * both the runXmin / globalXmin floor and the nextXid to assign: the
+	 * first replayed transaction carries exactly this oxid, and
+	 * advance_oxids() only initialises a slot to INPROGRESS when the incoming
+	 * oxid is >= nextXid.  Seeding nextXid at divXid (rather than divXid + 1)
+	 * is what lets the first replayed transaction get a fresh INPROGRESS slot
+	 * instead of inheriting the stale FROZEN slot the target's own xidmap
+	 * left behind.
 	 *
-	 * checkpointRetainXmin == checkpointRetainXmax == divXid makes the
-	 * xidmap range loaded by checkpoint_shmem_init() empty, so no target
-	 * xidmap slots are trusted: every oxid < divXid is settled below the
-	 * floor (handled via the o_buffers write path, which never trips the
-	 * FROZEN assert), and every oxid >= divXid is initialised fresh by
+	 * checkpointRetainXmin == checkpointRetainXmax == divXid makes the xidmap
+	 * range loaded by checkpoint_shmem_init() empty, so no target xidmap
+	 * slots are trusted: every oxid < divXid is settled below the floor
+	 * (handled via the o_buffers write path, which never trips the FROZEN
+	 * assert), and every oxid >= divXid is initialised fresh by
 	 * advance_oxids() as WAL_REC_XID arrives.
 	 */
 	pg_atomic_init_u64(&xid_meta->nextXid, lastXid);

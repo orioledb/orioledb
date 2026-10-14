@@ -15,8 +15,10 @@
 #include "access/xlogreader.h"
 #include "common/file_perm.h"
 #include "common/logging.h"
+#include "fe_utils/string_utils.h"
 #include "fmgr.h"
 #include "libpq-fe.h"
+#include "pqexpbuffer.h"
 #include "pg_rewind_ext.h"
 #include "replication/message.h"
 
@@ -49,12 +51,13 @@ typedef struct OrioledbKeyMap
 	int			ntrees;
 	int			allocated;
 	OXid		divXid;
+
 	/*
-	 * Smallest OXid carried by a WAL_REC_XID record in the replayed WAL
-	 * range (i.e. the source's first transaction after the divergence
-	 * point).  It is the lowest xid recovery will ever reference during
-	 * replay, so it is a safe -- and tight -- floor for seeding
-	 * globalXmin / checkpointRetainXmin after rewind.
+	 * Smallest OXid carried by a WAL_REC_XID record in the replayed WAL range
+	 * (i.e. the source's first transaction after the divergence point).  It
+	 * is the lowest xid recovery will ever reference during replay, so it is
+	 * a safe -- and tight -- floor for seeding globalXmin /
+	 * checkpointRetainXmin after rewind.
 	 */
 	OXid		minReplayXid;
 	OrioledbTree *trees;
@@ -325,11 +328,10 @@ serialize_key_map(StringInfo str, OrioledbKeyMap *map)
 static void
 run_pg_ctl(const char *argv0, const char *target_args[])
 {
-#define MAXCMDLEN (4 * MAXPGPATH)
 #define PGCTL_VERSIONSTR "pg_ctl (PostgreSQL) " PG_VERSION "\n"
+	PQExpBuffer cmd;
 	int			ret;
 	char		exec_path[MAXPGPATH + 1];
-	char		cmd[MAXCMDLEN + 1];
 	const char *progname;
 	const char **target_arg;
 
@@ -356,20 +358,18 @@ run_pg_ctl(const char *argv0, const char *target_args[])
 					 "postgres", full_path, progname);
 	}
 
-	cmd[0] = '\0';
-	strncat(cmd, exec_path, MAXCMDLEN);
-	strncat(cmd, " ", MAXCMDLEN);
-	target_arg = target_args;
-	while (*target_arg)
+	cmd = createPQExpBuffer();
+	appendShellString(cmd, exec_path);
+	for (target_arg = target_args; *target_arg; target_arg++)
 	{
-		strncat(cmd, *target_arg, MAXCMDLEN);
-		strncat(cmd, " ", MAXCMDLEN);
-		target_arg++;
+		appendPQExpBufferChar(cmd, ' ');
+		appendShellString(cmd, *target_arg);
 	}
-	pg_log_debug("executing \"%s\"", cmd);
-	if (system(cmd) != 0)
-		pg_fatal("Failed command: %s", cmd);
-	return;
+
+	pg_log_debug("executing \"%s\"", cmd->data);
+	if (system(cmd->data) != 0)
+		pg_fatal("failed command: %s", cmd->data);
+	destroyPQExpBuffer(cmd);
 }
 
 static void
@@ -983,7 +983,7 @@ add_rewind_keys(OrioledbKeyMap *map, char *ptr, char *end,
 
 	while (ptr < end)
 	{
-		OrioledbTreeKey tree_key = { 0 };
+		OrioledbTreeKey tree_key = {0};
 		ORelOids	tree_oids;
 		uint8		formatFlags;
 		uint32		len;
@@ -1020,7 +1020,7 @@ add_rewind_keys(OrioledbKeyMap *map, char *ptr, char *end,
 			orioledb_key_map_add_tree(map, tree_key);
 			map->tree_key = tree_key;
 			orioledb_key_map_add_key(map,
-								 create_orioledb_key(len, ptr, formatFlags));
+									 create_orioledb_key(len, ptr, formatFlags));
 		}
 		ptr += len;
 		nkeys++;
@@ -1113,7 +1113,7 @@ add_divergence_rewind_keys(OrioledbKeyMap *orioledb_map, PGconn *conn,
 		if (found)
 		{
 			(void) add_rewind_keys(orioledb_map, buf, buf + st.st_size, what,
-								 divergerec, false, &target_info);
+								   divergerec, false, &target_info);
 			if (source_info.payload_length != target_info.payload_length ||
 				source_info.count != target_info.count ||
 				source_info.checksum != target_info.checksum)
@@ -1293,28 +1293,29 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 				   restoreCommand, extract_row_info, orioledb_map);
 	add_divergence_rewind_keys(orioledb_map, source_conn, datadir_target,
 							   divergerec);
+
 	/*
 	 * Choose the xid floor (divXid) used to seed globalXmin /
 	 * checkpointRetainXmin after rewind.  Recovery pins recovery_xmin to
-	 * checkpointRetainXmin and asserts that runXmin / globalXmin never
-	 * move below their seed, so divXid must be a true floor: it has to be
-	 * <= every xid recovery will reference.
+	 * checkpointRetainXmin and asserts that runXmin / globalXmin never move
+	 * below their seed, so divXid must be a true floor: it has to be <= every
+	 * xid recovery will reference.
 	 *
 	 * The lowest WAL_REC_XID oxid seen in the replayed range (minReplayXid)
 	 * is exactly that floor: it is the source's first transaction after the
 	 * divergence point, so no replayed xid is below it.  It is also strictly
-	 * above every in-progress oxid named by the common checkpoint's xids
-	 * file (those started before the divergence point), which lets recovery
-	 * drain them via the fast-path-abort path in update_run_xmin().
+	 * above every in-progress oxid named by the common checkpoint's xids file
+	 * (those started before the divergence point), which lets recovery drain
+	 * them via the fast-path-abort path in update_run_xmin().
 	 *
 	 * The target's own checkpoint lastXid (nextXid at the target's last
 	 * checkpoint) is NOT a safe floor in general: if the target
-	 * auto-checkpointed after divergence, its nextXid advances past xids
-	 * that the source's WAL still references, which would trip the
-	 * monotonicity invariant.  It is only used as a fallback when the
-	 * replayed range carries no orioledb transactions at all -- then no
-	 * replayed xid can violate the invariant, and the (necessarily higher)
-	 * lastXid still lets recovery drain any in-progress checkpoint oxids.
+	 * auto-checkpointed after divergence, its nextXid advances past xids that
+	 * the source's WAL still references, which would trip the monotonicity
+	 * invariant.  It is only used as a fallback when the replayed range
+	 * carries no orioledb transactions at all -- then no replayed xid can
+	 * violate the invariant, and the (necessarily higher) lastXid still lets
+	 * recovery drain any in-progress checkpoint oxids.
 	 */
 	if (OXidIsValid(orioledb_map->minReplayXid))
 		orioledb_map->divXid = orioledb_map->minReplayXid;
