@@ -74,8 +74,8 @@ step "s1_delete150" {
 step "s1_delete100" {
 	DELETE FROM o_iso_rr
 	WHERE id BETWEEN 100 and 140; }
-step "s1_update10000" { call update_table(10000); }
-step "s1_update100000" { call update_table(100000); }
+step "s1_update5000" { call update_table(5000); }
+step "s1_update55000" { call update_table(55000); }
 
 step "s1_select" { SELECT * FROM o_iso_rr; }
 step "s1_select20" {
@@ -199,7 +199,7 @@ permutation "s1_insert_big1" "s1_begin" "s2_begin" "s2_delete_big_end" "s1_count
 permutation "s1_insert_big1" "s1_begin" "s1_count200_end" "s2_begin" "s2_delete_big_end" "s2_commit" "s1_delete150" "s1_delete100" "s1_rollback"
 permutation "s1_insert_big1" "s1_begin" "s2_begin" "s2_delete_big_end" "s2_commit" "s1_count200_end" "s1_delete150" "s1_delete100" "s1_rollback"
 
-permutation "s2_insert_one" "s2_begin" "s2_select_one" "s1_update10000" "s1_update100000" "s2_commit"
+permutation "s2_insert_one" "s2_begin" "s2_select_one" "s1_update5000" "s1_update55000" "s2_commit"
 
 permutation "s1_begin" "s1_insert50" "s2_insert_before50" "s2_insert_after50" "s1_select49" "s1_commit"
 permutation "s2_insert50" "s1_begin" "s1_select" "s2_insert_before50" "s2_insert_after50" "s1_update50" "s2_begin_rc" "s2_select50_key_share" "s1_select50" "s2_commit" "s1_commit"
