@@ -1845,6 +1845,8 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapsho
 		if (descr->indices[cur_ix] == NULL)
 			return false;
 		descr->indices[cur_ix]->refcnt++;
+		if (!descr->indices[cur_ix]->valid)
+			return false;
 	}
 
 	if (ORelOidsIsValid(table->bridge_oids))
@@ -2516,6 +2518,13 @@ recreate_table_descr(OTableDescr *descr)
 	o_table = o_tables_get(descr->oids);
 	if (!o_table)
 		return false;
+
+	if (old_enable_stopevents)
+	{
+		enable_stopevents = true;
+		STOPEVENT(STOPEVENT_RECREATE_TABLE_DESCR, NULL);
+		enable_stopevents = false;
+	}
 
 	saved_ea_counters = ea_counters;
 	ea_counters = NULL;
