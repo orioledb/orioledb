@@ -1584,10 +1584,16 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 			 * every o_indices_update() call site writes the OTable right
 			 * after, so the two rows carry equal versions once both writes
 			 * have landed and unequal ones for exactly the window in between.
-			 * A caller that supplies the OTable it holds fetched the OIndex
-			 * by that same version (see o_table_descr_fill_indices()) and
-			 * oIndicesFetchCallback() returns only an exact version match, so
-			 * the equality holds there by construction.
+			 *
+			 * Both caller kinds can see a torn pair.  An OID-only caller
+			 * re-reads the OTable here and can land between the two writes. A
+			 * caller that supplies its own OTable read the OTable and OIndex
+			 * in separate sys-tree fetches; a concurrent DDL that commits
+			 * between those fetches updates both rows, and the OIndex fetch
+			 * returns the committed newer version under
+			 * o_non_deleted_snapshot even though a specific older version was
+			 * requested, because o_find_tuple_version() accepts any committed
+			 * row when the snapshot CSN is INPROGRESS.
 			 */
 			if (descr->version == oTable->primary_ixversion)
 			{
@@ -1597,7 +1603,6 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 			}
 			else
 			{
-				Assert(source == oTableSourceContext);
 				descr->valid = false;
 			}
 			if (free_oTable)
