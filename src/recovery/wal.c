@@ -391,6 +391,12 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	}
 
 	Assert(!is_recovery_process());
+
+	/*
+	 * An ERROR after the ROLLBACK is buffered would re-run the abort and
+	 * buffer a second one.
+	 */
+	START_CRIT_SECTION();
 	flush_local_wal_if_needed(sizeof(WALRecFinish));
 	Assert(local_wal.buffer_offset + sizeof(WALRecFinish) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
@@ -407,6 +413,7 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 
 	if (synchronous_commit > SYNCHRONOUS_COMMIT_OFF)
 		XLogFlush(wait_pos);
+	END_CRIT_SECTION();
 }
 
 /*
