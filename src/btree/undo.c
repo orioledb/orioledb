@@ -898,6 +898,7 @@ retry:
 	{
 		/* We can try to merge this page */
 		btree_try_merge_and_unlock(context.desc, blkno, true, true);
+		Assert(get_reserved_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType)) == 0);
 	}
 	else
 		unlock_page(blkno);
