@@ -11,7 +11,7 @@ from tempfile import mkdtemp
 from testgres.utils import get_bin_path
 from testgres.exceptions import StartNodeException, QueryException
 
-from .base_test import BaseTest
+from .base_test import BaseTest, ThreadQueryExecutor, wait_stopevent
 
 
 def clear_table(
@@ -3051,3 +3051,189 @@ COMMIT\n""")
 			    "table public.o_data: INSERT: id[integer]:11 data[text]:'after'"
 			])
 
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_rewrite_crash_relrewrite_clean(self):
+		"""
+		Crash the publisher mid-rewrite while relrewrite is set.
+		After recovery relrewrite must be 0, and subsequent changes
+		must still be decoded.
+		"""
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "orioledb.enable_stopevents = true\n")
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_data(id int primary key, n int, data text)
+				USING orioledb;
+			INSERT INTO o_data
+				SELECT g, g, 'row' || g FROM generate_series(1, 10) g;
+		""")
+		create_slot(node)
+		node.safe_psql("CHECKPOINT;")
+
+		con1 = node.connect()
+		con2 = node.connect()
+		con2_pid = con2.pid
+
+		con1.execute("SELECT pg_stopevent_set('index_insert', 'true');")
+
+		t = ThreadQueryExecutor(
+		    con2, "ALTER TABLE o_data ALTER COLUMN n TYPE bigint;")
+		t.start()
+		wait_stopevent(node, con2_pid)
+
+		node.stop(['-m', 'immediate'])
+		# The ALTER was in progress; the transaction did not commit.
+		# ThreadQueryExecutor will raise on join; that is expected.
+		try:
+			t.join()
+		except Exception:
+			pass
+
+		node.start()
+
+		# relrewrite must be clean after recovery
+		self.assertEqual(
+		    node.execute(
+		        "SELECT relrewrite FROM pg_class WHERE relname = 'o_data';")[0]
+		    [0], 0)
+
+		# Redo the ALTER now that the node is back
+		node.safe_psql("ALTER TABLE o_data ALTER COLUMN n TYPE bigint;")
+		node.safe_psql("INSERT INTO o_data VALUES (100, 100, 'after');")
+
+		# The slot must still work; only the post-recovery insert is new
+		with node.connect() as con:
+			self.assertListEqual(self.peek_inserts(con, only_local=False), [
+			    "table public.o_data: INSERT: id[integer]:100 n[bigint]:100 data[text]:'after'"
+			])
+
+	def test_rewrite_crash_after_commit_subscription(self):
+		"""
+		Publisher crashes right after a committed ALTER that rewrites the
+		table.  After recovery the subscriber must catch up and have the
+		correct data, including a row inserted after the restart.
+		"""
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+				setup_sql = "CREATE EXTENSION IF NOT EXISTS orioledb;"
+				publisher.safe_psql(setup_sql)
+				subscriber.safe_psql(setup_sql)
+
+				pub = publisher.publish('test_pub')
+				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
+
+				create_sql = """
+					CREATE TABLE o_data(id int primary key, n int, data text)
+						USING orioledb;
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+				sub.refresh()
+				wait_ready(subscriber)
+
+				publisher.safe_psql("""
+					INSERT INTO o_data
+						SELECT g, g, 'row' || g FROM generate_series(1, 10) g;
+				""")
+				sub.catchup()
+
+				alter_sql = "ALTER TABLE o_data ALTER COLUMN n TYPE bigint;"
+				publisher.safe_psql(alter_sql)
+				subscriber.safe_psql(alter_sql)
+
+				publisher.stop(['-m', 'immediate'])
+				publisher.start()
+
+				publisher.safe_psql(
+				    "INSERT INTO o_data VALUES (100, 100, 'after');")
+				sub.catchup()
+
+				self.assertListEqual(
+				    subscriber.execute(
+				        'SELECT id, n, md5(data) FROM o_data ORDER BY id'),
+				    publisher.execute(
+				        'SELECT id, n, md5(data) FROM o_data ORDER BY id'))
+
+	def test_rewrite_crash_mid_rewrite_subscription(self):
+		"""
+		Crash the publisher mid-rewrite (uncommitted ALTER) using a
+		stopevent, restart, redo the ALTER, and verify the subscriber
+		converges.
+		"""
+		with self.node as publisher:
+			publisher.append_conf('postgresql.conf',
+			                      "orioledb.enable_stopevents = true\n")
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+				setup_sql = "CREATE EXTENSION IF NOT EXISTS orioledb;"
+				publisher.safe_psql(setup_sql)
+				subscriber.safe_psql(setup_sql)
+
+				pub = publisher.publish('test_pub')
+				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
+
+				create_sql = """
+					CREATE TABLE o_data(id int primary key, n int, data text)
+						USING orioledb;
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+				sub.refresh()
+				wait_ready(subscriber)
+
+				publisher.safe_psql("""
+					INSERT INTO o_data
+						SELECT g, g, 'row' || g FROM generate_series(1, 10) g;
+				""")
+				sub.catchup()
+				publisher.safe_psql("CHECKPOINT;")
+
+				con1 = publisher.connect()
+				con2 = publisher.connect()
+				con2_pid = con2.pid
+
+				con1.execute(
+				    "SELECT pg_stopevent_set('index_insert', 'true');")
+
+				t = ThreadQueryExecutor(
+				    con2, "ALTER TABLE o_data ALTER COLUMN n TYPE bigint;")
+				t.start()
+				wait_stopevent(publisher, con2_pid)
+
+				publisher.stop(['-m', 'immediate'])
+				try:
+					t.join()
+				except Exception:
+					pass
+
+				publisher.start()
+
+				# relrewrite must be clean
+				self.assertEqual(
+				    publisher.execute("SELECT relrewrite FROM pg_class"
+				                      " WHERE relname = 'o_data';")[0][0], 0)
+
+				# Redo ALTER on publisher and subscriber
+				alter_sql = "ALTER TABLE o_data ALTER COLUMN n TYPE bigint;"
+				publisher.safe_psql(alter_sql)
+				subscriber.safe_psql(alter_sql)
+
+				publisher.safe_psql(
+				    "INSERT INTO o_data VALUES (100, 100, 'after');")
+				sub.catchup()
+
+				self.assertListEqual(
+				    subscriber.execute(
+				        'SELECT id, n, md5(data) FROM o_data ORDER BY id'),
+				    publisher.execute(
+				        'SELECT id, n, md5(data) FROM o_data ORDER BY id'))
