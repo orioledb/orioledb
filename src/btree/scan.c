@@ -416,6 +416,7 @@ load_first_historical_page(BTreeSeqScan *scan)
 	OFixedKey	lokey,
 			   *lokeyPtr = &lokey;
 	OFixedKey	hikey;
+	UndoLocation imageLoc = InvalidUndoLocation;
 
 	scan->haveHistImg = false;
 	if (!COMMITSEQNO_IS_NORMAL(scan->oSnapshot.csn))
@@ -445,6 +446,11 @@ load_first_historical_page(BTreeSeqScan *scan)
 					(errcode(ERRCODE_INTERNAL_ERROR),
 					 errmsg("snapshot too old")));
 		}
+
+		/* Check the link from the previous image, which we follow */
+		if (UndoLocationIsValid(imageLoc))
+			check_page_undo_link(imageLoc, header->undoLocation);
+		imageLoc = header->undoLocation;
 
 		(void) get_page_from_undo(scan->desc, header->undoLocation, key, kind,
 								  scan->histImg, NULL, NULL, NULL,
@@ -488,6 +494,7 @@ load_next_historical_page(BTreeSeqScan *scan)
 {
 	BTreePageHeader *header = (BTreePageHeader *) scan->leafImg;
 	OFixedKey	prevHikey;
+	UndoLocation imageLoc = InvalidUndoLocation;
 
 	copy_fixed_hikey(scan->desc, &prevHikey, scan->histImg);
 
@@ -510,6 +517,12 @@ load_next_historical_page(BTreeSeqScan *scan)
 					(errcode(ERRCODE_INTERNAL_ERROR),
 					 errmsg("snapshot too old")));
 		}
+
+		/* Check the link from the previous image, which we follow */
+		if (UndoLocationIsValid(imageLoc))
+			check_page_undo_link(imageLoc, header->undoLocation);
+		imageLoc = header->undoLocation;
+
 		(void) get_page_from_undo(scan->desc, header->undoLocation,
 								  (Pointer) &prevHikey.tuple, BTreeKeyNonLeafKey,
 								  scan->histImg, NULL, NULL, NULL,

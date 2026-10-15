@@ -223,6 +223,8 @@ extern UndoLocation make_undo_record(BTreeDescr *desc, OTuple tuple,
 extern void make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno,
 									int pgprocno,
 									OPageWaiterShmemState *lockerState);
+extern void check_page_undo_link(UndoLocation undoLocation,
+								 UndoLocation next);
 extern void get_page_from_undo(BTreeDescr *desc, UndoLocation undo_loc, Pointer key,
 							   BTreeKeyType kind, Pointer dest,
 							   bool *is_left, bool *is_right, OFixedKey *lokey,
