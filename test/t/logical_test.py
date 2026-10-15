@@ -3,6 +3,7 @@
 
 import json
 import subprocess
+import shutil
 import testgres
 import unittest
 
@@ -1138,7 +1139,8 @@ class LogicalTest(BaseTest):
 			#print(result)
 
 			expected1 = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
-			expected2 = f"""'\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:unchanged-toast-datum data_3[bigint]:0\n"""
+			# The rewrite's copy of row 1 is not decoded
+			expected2 = "'\n"
 			expected3 = f"""table public.{o_relname}: INSERT: id[integer]:2 data[text]:'"""
 			expected_tail = "' data_3[bigint]:1\nCOMMIT\n"
 
@@ -1237,7 +1239,7 @@ class LogicalTest(BaseTest):
 			#print(result)
 
 			expected_begin = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
-			expected_added = f"""'\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:unchanged-toast-datum data_3[bigint]:0\n"""
+			expected_added = "'\n"
 			expected_update1 = f"""table public.{o_relname}: UPDATE: old-key: id[integer]:1 new-tuple: id[integer]:1 data[text]:'"""
 			expected_tail1 = "' data_3[bigint]:1\n"
 			expected_update2 = f"""table public.{o_relname}: UPDATE: old-key: id[integer]:1 new-tuple: id[integer]:1 data[text]:'"""
@@ -2930,3 +2932,122 @@ COMMIT\n""")
 				self.assertListEqual(
 				    subscriber.execute('SELECT a FROM tab1 ORDER BY a'),
 				    [(2, )])
+
+	def check_rewrite_replication(self, sub_sql, *pub_sqls):
+		"""
+		Subscribe, then create the tables and fill them on the publisher.
+		Change the schema with sub_sql on the subscriber and pub_sqls on
+		the publisher, insert one more row, and check that the subscriber
+		has exactly the publisher's rows.
+		"""
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+				setup_sql = "CREATE EXTENSION IF NOT EXISTS orioledb;"
+				publisher.safe_psql(setup_sql)
+				subscriber.safe_psql(setup_sql)
+
+				pub = publisher.publish('test_pub')
+				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
+
+				# DDL is not replicated, so both sides create the tables
+				create_sql = """
+					CREATE TABLE o_data(id int primary key, n int, data text)
+						USING orioledb;
+					CREATE TABLE o_other(id int primary key) USING orioledb;
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+				sub.refresh()
+				wait_ready(subscriber)
+
+				publisher.safe_psql("""
+					INSERT INTO o_data
+						SELECT g, g, 'row' || g FROM generate_series(1, 10) g;
+					INSERT INTO o_data
+						SELECT 11, 11, string_agg(md5(g::text), '')
+						FROM generate_series(1, 300) g;
+				""")
+				sub.catchup()
+
+				if sub_sql:
+					subscriber.safe_psql(sub_sql)
+				for sql in pub_sqls:
+					publisher.safe_psql(sql)
+				publisher.safe_psql(
+				    "INSERT INTO o_data VALUES (100, 100, 'after');")
+
+				sub.catchup()
+
+				for query in [
+				    'SELECT id, n, md5(data) FROM o_data ORDER BY id',
+				    'SELECT id FROM o_other ORDER BY id'
+				]:
+					self.assertListEqual(subscriber.execute(query),
+					                     publisher.execute(query))
+
+	def test_logical_subscription_rewrite_alter_type(self):
+		alter_sql = "ALTER TABLE o_data ALTER COLUMN n TYPE bigint;"
+		self.check_rewrite_replication(alter_sql, alter_sql)
+
+	def test_logical_subscription_rewrite_volatile_default(self):
+		alter_sql = "ALTER TABLE o_data ADD COLUMN r float8 DEFAULT random();"
+		self.check_rewrite_replication(alter_sql, alter_sql)
+
+	def test_logical_subscription_rewrite_generated_column(self):
+		alter_sql = """
+			ALTER TABLE o_data
+				ADD COLUMN g int GENERATED ALWAYS AS (n * 2) STORED;
+		"""
+		self.check_rewrite_replication(alter_sql, alter_sql)
+
+	def test_logical_subscription_rewrite_set_tablespace(self):
+		ts_dir = mkdtemp(prefix=self.myName + '_ts_')
+		self.addCleanup(shutil.rmtree, ts_dir, ignore_errors=True)
+		create_ts_sql = f"CREATE TABLESPACE o_ts LOCATION '{ts_dir}';"
+		alter_sql = "ALTER TABLE o_data SET TABLESPACE o_ts;"
+		# The tablespace is local to the publisher
+		self.check_rewrite_replication(None, create_ts_sql, alter_sql)
+
+	def test_logical_subscription_rewrite_in_transaction(self):
+		"""
+		Real changes before and after the rewrite, in the same
+		transaction and on both tables, must still be replicated
+		"""
+		alter_sql = "ALTER TABLE o_data ALTER COLUMN n TYPE bigint;"
+		xact_sql = f"""
+			BEGIN;
+			INSERT INTO o_other VALUES (1);
+			{alter_sql}
+			INSERT INTO o_data VALUES (50, 50, 'in transaction');
+			INSERT INTO o_other VALUES (2);
+			COMMIT;
+		"""
+		self.check_rewrite_replication(alter_sql, xact_sql)
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_rewrite_matview_not_decoded(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_data(id int primary key, data text) USING orioledb;
+			INSERT INTO o_data SELECT g, 'row' || g FROM generate_series(1, 10) g;
+			CREATE MATERIALIZED VIEW o_mv USING orioledb
+				AS SELECT * FROM o_data;
+		""")
+		create_slot(node)
+
+		node.safe_psql("REFRESH MATERIALIZED VIEW o_mv;")
+		node.safe_psql("INSERT INTO o_data VALUES (11, 'after');")
+
+		# Only the row inserted afterwards, none of the copied matview rows
+		with node.connect() as con:
+			self.assertListEqual(self.peek_inserts(con, only_local=False), [
+			    "table public.o_data: INSERT: id[integer]:11 data[text]:'after'"
+			])
+
