@@ -443,6 +443,9 @@ class FilesTest(BaseTest):
 		reloids = node.execute('postgres',
 		                       "SELECT * FROM orioledb_table_oids();")
 		reloids = [item[1] for item in reloids if item[1] not in deleted]
+		t_db_oid = node.execute(
+		    'postgres',
+		    "SELECT oid FROM pg_database WHERE datname = 't';")[0][0]
 		node.safe_psql('postgres', "DROP DATABASE t;")
 		new_reloids = node.execute('postgres',
 		                           "SELECT * FROM orioledb_table_oids();")
@@ -463,6 +466,7 @@ class FilesTest(BaseTest):
 		self.assertFalse(bool(re.match(r".*\.tmp", all_files)))
 		self.assertFalse(bool(re.match(r".*evt", all_files)))
 		self.assertFalse(bool(re.match(r"[0-9]*_[0-9]*_[0-9]*", all_files)))
+		self.assertFalse(str(t_db_oid) in all_files)
 
 	def test_evt_cleanup(self):
 		node = self.node
