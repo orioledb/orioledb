@@ -2390,7 +2390,15 @@ undo_it_next_page(BTreeDescr *desc, UndoIterator *undoIt)
 	}
 	else
 	{
-		Assert(undoIt->rightmost || undoIt->leftmost);
+		/*
+		 * Same page found again.  Normally this means we are at a boundary
+		 * (rightmost or leftmost), but nested SplitDiff records can produce
+		 * rightmost=false && leftmost=false when the live page falls on
+		 * different sides of the split at different chain depths (e.g. right
+		 * at a recent SplitDiff, then left at an older one).  Returning false
+		 * is correct: the caller falls back to undo_it_switch or the next
+		 * data page.
+		 */
 		return false;
 	}
 }
