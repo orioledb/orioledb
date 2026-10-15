@@ -2470,9 +2470,86 @@ o_drop_table(ORelOids oids)
 	o_table_free(table);
 }
 
+/*
+ * Set pg_class.relrewrite of relid to rewrittenRelid unless it is set
+ * already.  Returns true if it was changed.
+ */
+static bool
+o_mark_relrewrite(Oid relid, Oid rewrittenRelid)
+{
+	Relation	classRel;
+	HeapTuple	tuple;
+	Form_pg_class relform;
+	bool		changed = false;
+
+	classRel = table_open(RelationRelationId, RowExclusiveLock);
+	tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for relation %u", relid);
+	relform = (Form_pg_class) GETSTRUCT(tuple);
+	if (!OidIsValid(relform->relrewrite))
+	{
+		relform->relrewrite = rewrittenRelid;
+		CatalogTupleUpdate(classRel, &tuple->t_self, tuple);
+		changed = true;
+	}
+	heap_freetuple(tuple);
+	table_close(classRel, RowExclusiveLock);
+
+	return changed;
+}
+
+typedef struct ORewriteCopyState
+{
+	Oid			relid;
+	Oid			toastRelid;
+	bool		relMarked;
+	bool		toastMarked;
+} ORewriteCopyState;
+
+/*
+ * Mark rel and its TOAST table as being rewritten while the rewrite copies
+ * the rows.
+ *
+ * The copy goes to WAL as ordinary inserts into rel, which physical replicas
+ * and recovery need, but which logical decoding would emit as new rows.  Heap
+ * copies into a transient table with pg_class.relrewrite set, and
+ * ReorderBufferProcessTXN() skips changes of such tables.  Setting relrewrite
+ * on rel for the duration of the copy gets the same behavior.
+ */
+static void
+rewrite_copy_begin(Relation rel, ORewriteCopyState *state)
+{
+	/* Changes made before the copy must not be decoded under the mark */
+	if (!local_wal_is_empty())
+		flush_local_wal(false, false);
+
+	state->relid = RelationGetRelid(rel);
+	state->toastRelid = rel->rd_rel->reltoastrelid;
+	state->relMarked = o_mark_relrewrite(state->relid, state->relid);
+	state->toastMarked = OidIsValid(state->toastRelid) &&
+		o_mark_relrewrite(state->toastRelid, state->relid);
+	CommandCounterIncrement();
+}
+
+static void
+rewrite_copy_end(ORewriteCopyState *state)
+{
+	/* The decoder must meet the copied rows while the mark is still set */
+	if (!local_wal_is_empty())
+		flush_local_wal(false, false);
+
+	if (state->relMarked)
+		ResetRelRewrite(state->relid);
+	if (state->toastMarked)
+		ResetRelRewrite(state->toastRelid);
+	CommandCounterIncrement();
+}
+
 static void
 rewrite_matview(Relation rel, OTable *old_o_table, OTable *new_o_table)
 {
+	ORewriteCopyState copyState;
 	DestReceiver *dest = CreateOrioledbDestReceiver(rel);
 	List	   *rewritten;
 	PlannedStmt *plan;
@@ -2513,6 +2590,8 @@ rewrite_matview(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	/* call ExecutorStart to prepare the plan for execution */
 	ExecutorStart(queryDesc, 0);
 
+	rewrite_copy_begin(rel, &copyState);
+
 	/* run the plan */
 #if PG_VERSION_NUM < 180000
 	ExecutorRun(queryDesc, ForwardScanDirection, 0, true);
@@ -2524,6 +2603,7 @@ rewrite_matview(Relation rel, OTable *old_o_table, OTable *new_o_table)
 
 	/* and clean up */
 	ExecutorFinish(queryDesc);
+	rewrite_copy_end(&copyState);
 	ExecutorEnd(queryDesc);
 
 	FreeQueryDesc(queryDesc);
@@ -2551,6 +2631,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	EState	   *check_estate = NULL;
 	ExprState **check_exprs = NULL;
 	ExprContext *check_econtext = NULL;
+	ORewriteCopyState copyState;
 
 	if (!old_o_table->has_primary)
 		primary_init_nfields--;
@@ -2639,6 +2720,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			check_exprs[i] = ExecPrepareExpr(checkconstexpr, check_estate);
 		}
 	}
+
+	rewrite_copy_begin(rel, &copyState);
 
 	while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(sscan, old_slot->tts_mcxt, &tupleCsn, &hint)))
 	{
@@ -2894,6 +2977,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	ExecDropSingleTupleTableSlot(old_slot);
 	ExecDropSingleTupleTableSlot(new_slot);
 	free_btree_seq_scan(sscan);
+	rewrite_copy_end(&copyState);
 	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
 	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, old_descr);
 
