@@ -171,6 +171,19 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 retry:
 
 	/*
+	 * Release the tuple-hash heavyweight lock from a previous wait.  Holding
+	 * it across retries can create false deadlock cycles: after
+	 * oxid_notify_all() wakes us on savepoint rollback, the conflict target
+	 * may change, and another waiter on the same tuple that is blocked on our
+	 * heavyweight lock would form a cycle with our new wait_for_oxid().
+	 */
+	if (context.hwLockMode != NoLock)
+	{
+		LockRelease(&context.hwLockTag, context.hwLockMode, false);
+		context.hwLockMode = NoLock;
+	}
+
+	/*
 	 * Both describe the undo chain as it is right now, and the chain changes
 	 * while we wait, so they must not survive a retry.  row_lock_conflicts()
 	 * only ever raises lockStatus (Max()), so a stale value would claim we
