@@ -2533,6 +2533,7 @@ undo_it_find_internal(UndoIterator *undoIt, void *key, BTreeKeyType kind)
 		/* Check if we need to visit next page-level undo item */
 		if (COMMITSEQNO_IS_NORMAL(rec_csn) && rec_csn >= undoIt->it->oSnapshot.csn)
 		{
+			check_page_undo_link(undoLocation, rec_undo_loc);
 			undoLocation = rec_undo_loc;
 			continue;
 		}

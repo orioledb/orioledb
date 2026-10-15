@@ -1804,13 +1804,14 @@ reconstruct_split_diff(BTreeDescr *desc, UndoLocation undoLocation,
 
 /*
  * Page-image undo chains only ever move backwards; a cycle means corruption.
- * Checked once here so every get_page_from_undo() caller is covered.
+ * Callers check only the links they follow: page-level undo restarts from
+ * zero after a restart, while pages read from disk keep their old undo
+ * location.  So an image made after a restart may link to a larger location,
+ * but its csn is older than any snapshot and the walk stops there.
  */
-static inline void
-check_page_undo_link(UndoLocation undoLocation, Pointer dest)
+void
+check_page_undo_link(UndoLocation undoLocation, UndoLocation next)
 {
-	UndoLocation next = ((BTreePageHeader *) dest)->undoLocation;
-
 	if (UndoLocationIsValid(next) && next >= undoLocation)
 		elog(PANIC,
 			 "corrupted undo chain: location " UINT64_FORMAT " links to non-decreasing location " UINT64_FORMAT,
@@ -1848,7 +1849,6 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 	{
 		reconstruct_merge_diff_half(desc, undoLocation, key, kind, dest,
 									is_left, is_right, lokey);
-		check_page_undo_link(undoLocation, dest);
 		return;
 	}
 
@@ -1856,7 +1856,6 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 	{
 		reconstruct_split_diff(desc, undoLocation, dest,
 							   is_left, is_right, lokey, page_lokey);
-		check_page_undo_link(undoLocation, dest);
 		return;
 	}
 
@@ -1907,7 +1906,6 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 							&splitKey.tuple, BTreeKeyNonLeafKey) > 0)
 				copy_fixed_key(desc, page_lokey, splitKey.tuple);
 		}
-		check_page_undo_link(undoLocation, dest);
 		return;
 	}
 
@@ -1967,8 +1965,6 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 		default:
 			Assert(false);
 	}
-
-	check_page_undo_link(undoLocation, dest);
 }
 
 /*
