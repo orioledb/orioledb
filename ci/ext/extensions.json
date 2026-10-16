@@ -1,0 +1,485 @@
+{
+  "_comment": "Extension compatibility manifest. contrib entries are fetched from the patched PostgreSQL tree at the .pgtags tag; external entries are cloned from their upstream repo at `tag`: \"latest\" (the default) resolves to the newest stable release at fetch time (optionally restricted by `tag_match`, ${PG_MAJOR} expands), a tag name or a 40-hex commit pins. The resolved version is recorded in the results. Nothing in any suite is modified.",
+  "pg_source": {
+    "repo": "orioledb/postgres",
+    "tag_from": ".pgtags"
+  },
+  "extensions": [
+    {
+      "name": "amcheck",
+      "kind": "contrib",
+      "notes": "verify_heapam is heap-specific; btree checks apply to bridged/heap indexes only"
+    },
+    {
+      "name": "auto_explain",
+      "kind": "contrib"
+    },
+    {
+      "name": "basic_archive",
+      "kind": "contrib",
+      "notes": "needs archive_mode and archive_library (taken from its temp-config)"
+    },
+    {
+      "name": "bloom",
+      "kind": "contrib"
+    },
+    {
+      "name": "bool_plperl",
+      "kind": "contrib"
+    },
+    {
+      "name": "btree_gin",
+      "kind": "contrib"
+    },
+    {
+      "name": "btree_gist",
+      "kind": "contrib"
+    },
+    {
+      "name": "citext",
+      "kind": "contrib"
+    },
+    {
+      "name": "cube",
+      "kind": "contrib"
+    },
+    {
+      "name": "dblink",
+      "kind": "contrib",
+      "notes": "suite loads regress.so via --dlpath; that library is only built inside the PostgreSQL source tree"
+    },
+    {
+      "name": "dict_int",
+      "kind": "contrib"
+    },
+    {
+      "name": "dict_xsyn",
+      "kind": "contrib"
+    },
+    {
+      "name": "earthdistance",
+      "kind": "contrib"
+    },
+    {
+      "name": "file_fdw",
+      "kind": "contrib"
+    },
+    {
+      "name": "fuzzystrmatch",
+      "kind": "contrib"
+    },
+    {
+      "name": "hstore",
+      "kind": "contrib"
+    },
+    {
+      "name": "hstore_plperl",
+      "kind": "contrib"
+    },
+    {
+      "name": "hstore_plpython",
+      "kind": "contrib"
+    },
+    {
+      "name": "intarray",
+      "kind": "contrib"
+    },
+    {
+      "name": "isn",
+      "kind": "contrib"
+    },
+    {
+      "name": "jsonb_plperl",
+      "kind": "contrib"
+    },
+    {
+      "name": "jsonb_plpython",
+      "kind": "contrib"
+    },
+    {
+      "name": "lo",
+      "kind": "contrib"
+    },
+    {
+      "name": "ltree",
+      "kind": "contrib"
+    },
+    {
+      "name": "ltree_plpython",
+      "kind": "contrib"
+    },
+    {
+      "name": "pageinspect",
+      "kind": "contrib",
+      "notes": "reads heap page layout; expected to diverge on OrioleDB tables"
+    },
+    {
+      "name": "passwordcheck",
+      "kind": "contrib"
+    },
+    {
+      "name": "pg_buffercache",
+      "kind": "contrib"
+    },
+    {
+      "name": "pg_freespacemap",
+      "kind": "contrib",
+      "notes": "reads heap free space map; expected to diverge on OrioleDB tables"
+    },
+    {
+      "name": "pg_prewarm",
+      "kind": "contrib"
+    },
+    {
+      "name": "pg_stat_statements",
+      "kind": "contrib",
+      "notes": "needs shared_preload_libraries (taken from its temp-config)"
+    },
+    {
+      "name": "pg_surgery",
+      "kind": "contrib",
+      "notes": "heap tuple surgery by TID; expected to diverge on OrioleDB tables"
+    },
+    {
+      "name": "pg_trgm",
+      "kind": "contrib"
+    },
+    {
+      "name": "pg_visibility",
+      "kind": "contrib",
+      "notes": "reads heap visibility map; expected to diverge on OrioleDB tables"
+    },
+    {
+      "name": "pg_walinspect",
+      "kind": "contrib",
+      "notes": "needs wal_level=replica (taken from its temp-config)"
+    },
+    {
+      "name": "pgcrypto",
+      "kind": "contrib"
+    },
+    {
+      "name": "pgstattuple",
+      "kind": "contrib",
+      "notes": "tuple-level heap statistics; expected to diverge on OrioleDB tables"
+    },
+    {
+      "name": "postgres_fdw",
+      "kind": "contrib"
+    },
+    {
+      "name": "seg",
+      "kind": "contrib"
+    },
+    {
+      "name": "sepgsql",
+      "kind": "contrib",
+      "notes": "requires SELinux; not installable in the test images",
+      "skip": "requires SELinux; not installable in the test images"
+    },
+    {
+      "name": "tablefunc",
+      "kind": "contrib"
+    },
+    {
+      "name": "test_decoding",
+      "kind": "contrib",
+      "notes": "logical decoding through OrioleDB rm_decode; needs wal_level=logical (taken from its temp-config)"
+    },
+    {
+      "name": "tsm_system_rows",
+      "kind": "contrib"
+    },
+    {
+      "name": "tsm_system_time",
+      "kind": "contrib"
+    },
+    {
+      "name": "unaccent",
+      "kind": "contrib"
+    },
+    {
+      "name": "uuid-ossp",
+      "kind": "contrib"
+    },
+    {
+      "name": "xml2",
+      "kind": "contrib"
+    },
+    {
+      "name": "pgvector",
+      "kind": "external",
+      "extension": "vector",
+      "repo": "https://github.com/pgvector/pgvector",
+      "tag": "latest",
+      "build": "pgxs",
+      "build_args": [
+        "OPTFLAGS="
+      ],
+      "notes": "hnsw/ivfflat index AMs run through OrioleDB index bridging; same tag ci/post_build_prerequisites.sh installs"
+    },
+    {
+      "name": "wal2json",
+      "kind": "external",
+      "repo": "https://github.com/eulerto/wal2json",
+      "tag": "latest",
+      "build": "pgxs",
+      "server_config": {
+        "wal_level": "logical",
+        "max_replication_slots": "4",
+        "max_wal_senders": "4",
+        "output_plugin_libraries": "pgoutput,test_decoding,wal2json"
+      },
+      "notes": "logical decoding output plugin; exercises OrioleDB rm_decode. The patched server has an output_plugin_libraries allow-list, so the plugin is listed there; same tag ci/post_build_prerequisites.sh installs",
+      "tag_match": "^wal2json_[0-9]+_[0-9]+$"
+    },
+    {
+      "name": "hypopg",
+      "kind": "external",
+      "repo": "https://github.com/HypoPG/hypopg",
+      "tag": "latest",
+      "build": "pgxs",
+      "notes": "hypothetical indexes; also index_advisor's dependency"
+    },
+    {
+      "name": "index_advisor",
+      "kind": "external",
+      "repo": "https://github.com/supabase/index_advisor",
+      "tag": "latest",
+      "build": "pgxs",
+      "depends_on": [
+        "hypopg"
+      ],
+      "pre_dirs": [
+        "/tmp/tests"
+      ],
+      "pre_sql": [
+        {
+          "sql": "CREATE TABLESPACE testts LOCATION '/tmp/tests'"
+        }
+      ],
+      "notes": "suite is --use-existing; its CI creates contrib_regression and tablespace testts first (.github/workflows/test.yml)"
+    },
+    {
+      "name": "http",
+      "kind": "external",
+      "repo": "https://github.com/pramsey/pgsql-http",
+      "tag": "latest",
+      "build": "pgxs",
+      "notes": "suite talks to httpbin.org / postgis.net / localhost:9080; network-dependent by design upstream"
+    },
+    {
+      "name": "plpgsql_check",
+      "kind": "external",
+      "repo": "https://github.com/okbob/plpgsql_check",
+      "tag": "latest",
+      "build": "pgxs",
+      "notes": "tests LOAD the library themselves; not preloaded, as upstream installcheck"
+    },
+    {
+      "name": "pg_cron",
+      "kind": "external",
+      "repo": "https://github.com/citusdata/pg_cron",
+      "tag": "latest",
+      "build": "pgxs",
+      "notes": "shared_preload_libraries=pg_cron comes from its pg_cron.conf temp-config"
+    },
+    {
+      "name": "pgaudit",
+      "kind": "external",
+      "repo": "https://github.com/pgaudit/pgaudit",
+      "tag": "latest",
+      "build": "pgxs",
+      "notes": "shared_preload_libraries=pgaudit comes from its pgaudit.conf temp-config; upstream pg_regress suite runs as-is; releases are per PostgreSQL major, so the newest tag for the server major is used",
+      "tag_match": "^${PG_MAJOR}\\.[0-9]+$"
+    },
+    {
+      "name": "pg_partman",
+      "kind": "external",
+      "repo": "https://github.com/pgpartman/pg_partman",
+      "tag": "latest",
+      "build": "pgxs",
+      "runner": "pgtap",
+      "notes": "pgTAP suite as its test/README_test.md describes: pg_prove over the top-level test-*.sql (each BEGIN...ROLLBACK), pgtap in public and pg_partman in schema partman, max_locks_per_transaction raised to 128 because the subpartitioning tests create hundreds of tables in one transaction; test_pg17plus/ and test_no_search_path/ run under the same rules. test_bgw/, test_procedure/, test_tablespace/, test_nonsuperuser/, test_manual/ need manual staging per that README and are not run. Also pgmq's dependency",
+      "tap_tests": [
+        "test/test-*.sql",
+        "test/test_pg17plus/*.sql",
+        "test/test_no_search_path/*.sql"
+      ],
+      "pre_sql": [
+        {
+          "sql": "CREATE EXTENSION pgtap"
+        },
+        {
+          "sql": "CREATE SCHEMA partman"
+        },
+        {
+          "sql": "CREATE EXTENSION pg_partman SCHEMA partman"
+        }
+      ],
+      "depends_on": [
+        "pgtap"
+      ],
+      "server_config": {
+        "max_locks_per_transaction": "128"
+      }
+    },
+    {
+      "name": "pgmq",
+      "kind": "external",
+      "repo": "https://github.com/tembo-io/pgmq",
+      "tag": "latest",
+      "subdir": "pgmq-extension",
+      "build": "pgxs",
+      "depends_on": [
+        "pg_partman"
+      ],
+      "notes": "pure-SQL queue; partitioned-queue tests use pg_partman; also ships isolation specs that this harness does not run"
+    },
+    {
+      "name": "pgtap",
+      "kind": "external",
+      "repo": "https://github.com/theory/pgtap",
+      "tag": "latest",
+      "build": "pgxs",
+      "runner": "installcheck",
+      "notes": "its own `make installcheck` (generated parallel schedule under test/build/, every test wrapped by test/setup.sql); EXTRA_REGRESS_OPTS carries --load-extension=orioledb as pgxs allows. extension.sql needs contrib citext/isn/ltree, present in the image. Also the test dependency of pg_partman, pgjwt, pgsodium, vault"
+    },
+    {
+      "name": "pgsodium",
+      "kind": "external",
+      "repo": "https://github.com/michelp/pgsodium",
+      "tag": "latest",
+      "build": "pgxs",
+      "runner": "pgtap",
+      "notes": "pgTAP suite as its test.sh runs it: pg_prove test/test.sql (one file that \\ir-includes the others, BEGIN...ROLLBACK). Upstream runs it under three server configs; this is the plain one (no preload), the preloaded one is exercised by supabase_vault's server. Also vault's dependency (libsodium)",
+      "tap_tests": [
+        "test/test.sql"
+      ],
+      "depends_on": [
+        "pgtap"
+      ]
+    },
+    {
+      "name": "pgjwt",
+      "kind": "external",
+      "repo": "https://github.com/michelp/pgjwt",
+      "tag": "f3d82fd30151e754e19ce5d6a06c71c20689ce3d",
+      "build": "pgxs",
+      "runner": "pgtap",
+      "tap_tests": [
+        "test.sql"
+      ],
+      "depends_on": [
+        "pgtap"
+      ],
+      "notes": "pure-SQL JWT; pgTAP suite as its test.sh runs it: pg_prove test.sql (creates pgcrypto, pgtap, pgjwt itself). Upstream has no release tags, so pinned to a commit"
+    },
+    {
+      "name": "supabase_vault",
+      "kind": "external",
+      "repo": "https://github.com/supabase/vault",
+      "tag": "latest",
+      "build": "pgxs",
+      "depends_on": [
+        "pgsodium",
+        "pgtap"
+      ],
+      "preload": [
+        "pgsodium",
+        "supabase_vault"
+      ],
+      "server_config": {
+        "pgsodium.getkey_script": "${EXT_DIR}/getkey.sh",
+        "vault.getkey_script": "${EXT_DIR}/getkey.sh"
+      },
+      "pre_sql": [
+        {
+          "file": "test/fixtures.sql"
+        }
+      ],
+      "notes": "mirrors its CI (nix/withTmpDb.sh.in): preload pgsodium+supabase_vault with a zero-key getkey script, createdb contrib_regression, load test/fixtures.sql, then installcheck (a pgTAP test run through pg_regress)"
+    },
+    {
+      "name": "pg_graphql",
+      "kind": "external",
+      "repo": "https://github.com/supabase/pg_graphql",
+      "tag": "latest",
+      "build": "pgrx",
+      "regress": {
+        "tests": "glob:test/sql/*.sql",
+        "opts": "--use-existing --dbname=contrib_regression --inputdir=test"
+      },
+      "pre_sql": [
+        {
+          "file": "test/fixtures.sql"
+        }
+      ],
+      "notes": "Rust/pgrx (cargo-pgrx 0.16.1); runs the suite exactly as its bin/installcheck does: createdb contrib_regression, psql test/fixtures.sql, pg_regress --use-existing over test/sql"
+    },
+    {
+      "name": "pg_jsonschema",
+      "kind": "external",
+      "repo": "https://github.com/supabase/pg_jsonschema",
+      "tag": "latest",
+      "build": "pgrx",
+      "runner": "smoke",
+      "regress": {
+        "tests": [
+          "pg_jsonschema"
+        ],
+        "opts": "--inputdir=${EXT_DIR}/smoke --dbname=contrib_regression"
+      },
+      "notes": "Rust/pgrx; upstream tests are #[pg_test] functions that start their own server, so this is a smoke check from ci/ext/smoke/ (CREATE EXTENSION plus each documented function over an orioledb table)"
+    },
+    {
+      "name": "wrappers",
+      "kind": "external",
+      "repo": "https://github.com/supabase/wrappers",
+      "tag": "latest",
+      "subdir": "wrappers",
+      "build": "pgrx",
+      "build_args": [
+        "helloworld_fdw"
+      ],
+      "runner": "smoke",
+      "regress": {
+        "tests": [
+          "wrappers"
+        ],
+        "opts": "--inputdir=${EXT_DIR}/smoke --dbname=contrib_regression"
+      },
+      "notes": "Rust/pgrx workspace built with only the helloworld_fdw feature; no SQL suite upstream, so this is a smoke check from ci/ext/smoke/ following its helloworld_fdw README"
+    },
+    {
+      "name": "pg_net",
+      "kind": "external",
+      "repo": "https://github.com/supabase/pg_net",
+      "tag": "latest",
+      "build": "pgxs",
+      "preload": [
+        "pg_net"
+      ],
+      "runner": "smoke",
+      "regress": {
+        "tests": [
+          "pg_net"
+        ],
+        "opts": "--inputdir=${EXT_DIR}/smoke --dbname=contrib_regression"
+      },
+      "notes": "async HTTP worker (libcurl, shared_preload_libraries=pg_net). Upstream suite is pytest behind nix-provisioned nginx and pathod servers, so this is a smoke check from ci/ext/smoke/: a request to a closed local port, the worker writing its response row into the orioledb-backed net tables; the worker serves one database (pg_net.database_name), so it is pointed at the suite's database",
+      "server_config": {
+        "pg_net.database_name": "contrib_regression"
+      }
+    },
+    {
+      "name": "postgis",
+      "kind": "external",
+      "repo": "https://github.com/postgis/postgis",
+      "tag": "latest",
+      "build": "postgis",
+      "runner": "postgis",
+      "notes": "autotools build against the image's GEOS/PROJ/GDAL/SFCGAL/protobuf-c, then its own `make installcheck-base` (regress/run_test.pl --extension over core, loader, dumper, raster, topology, sfcgal, followed by the upgrade pass upstream runs after it, reported as upgrade__*). GiST indexes go through OrioleDB index bridging"
+    }
+  ]
+}
