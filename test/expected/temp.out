@@ -34,7 +34,6 @@ SELECT orioledb_tbl_structure('o_test_temp_indices'::regclass, 'nue');
      Item 3: offset = 368, tuple = ('40', '(0,4)')                  +
      Item 4: offset = 400, tuple = ('50', '(0,5)')                  +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -118,7 +117,6 @@ SELECT orioledb_tbl_structure('o_test_temp_indices'::regclass, 'nue');
    Chunk 4: offset = 4, location = 416, hikey location = 144                          +
      Item 4: offset = 424, tuple = ('500', '(0,5)')                                   +
                                                                                       +
- Index toast: not loaded                                                              +
  
 (1 row)
 
@@ -174,7 +172,6 @@ SELECT orioledb_tbl_structure('o_test_temp_indices'::regclass, 'nue');
      Item 8: offset = 560, tuple = ('1200', '(0,4)')                                  +
      Item 9: offset = 592, tuple = ('1500', '(0,5)')                                  +
                                                                                       +
- Index toast: not loaded                                                              +
  
 (1 row)
 
@@ -266,7 +263,6 @@ SELECT orioledb_tbl_structure('o_test_temp_indices'::regclass, 'nue');
    Chunk 4: offset = 4, location = 384, hikey location = 112                       +
      Item 4: offset = 392, tuple = ('1500', '5')                                   +
                                                                                    +
- Index toast: not loaded                                                           +
  
 (1 row)
 
@@ -334,7 +330,6 @@ SELECT orioledb_tbl_structure('o_test_temp_indices'::regclass, 'nue');
      Item 8: deleted, offset = 488, tuple = ('1500', '5')                          +
      Item 9: offset = 512, tuple = ('1500', '30')                                  +
                                                                                    +
- Index toast: not loaded                                                           +
  
 (1 row)
 
@@ -426,7 +421,6 @@ SELECT orioledb_tbl_structure('o_test_temp_indices'::regclass, 'nue');
    Chunk 4: offset = 4, location = 416, hikey location = 144                           +
      Item 4: offset = 424, tuple = ('1500', '(0,5)')                                   +
                                                                                        +
- Index toast: not loaded                                                               +
  
 (1 row)
 
@@ -479,7 +473,6 @@ SELECT orioledb_tbl_structure('o_test_temp_indices'::regclass, 'nue');
    Chunk 4: offset = 4, location = 416, hikey location = 144                           +
      Item 4: offset = 424, tuple = ('1500', '(0,5)')                                   +
                                                                                        +
- Index toast: not loaded                                                               +
  
 (1 row)
 

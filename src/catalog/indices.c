@@ -50,6 +50,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
+#include "catalog/toasting.h"
 #include "commands/defrem.h"
 #include "commands/event_trigger.h"
 #include "commands/tablecmds.h"
@@ -1139,8 +1140,10 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	 */
 	Assert(MyBackendType == B_BACKEND || in_recovery);
 
-	/* All indices plus TOAST index */
-	nallindices = buildstate->spool->descr->nIndices + 1;
+	nallindices = buildstate->spool->descr->nIndices;
+
+	if (btspool->descr->toast)
+		nallindices += 1;
 
 	if (btspool->descr->bridge)
 		nallindices += 1;
@@ -1206,7 +1209,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	estsort = tuplesort_estimate_shared(scantuplesortstates);
 	if (buildstate->isrebuild)	/* Rebuild indices */
 	{
-		/* All indices plus TOAST sort states */
+		/* Native indices and the optional TOAST and bridge sort states. */
 		shm_toc_estimate_chunk(estimator, mul_size(BUFFERALIGN(estsort), nallindices));
 		shm_toc_estimate_keys(estimator, nallindices);
 	}
@@ -1729,7 +1732,14 @@ _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 		o_fill_tmp_table_descr(btspool->old_descr, btspool->old_o_table);
 	}
 
-	nallindices = btspool->descr->nIndices + 1;
+	/*
+	 * Match the leader's DSM layout: a table without TOAST has no extra
+	 * tuplesort at nIndices.  Its bridge tree, if any, occupies that slot.
+	 */
+	nallindices = btspool->descr->nIndices;
+
+	if (btspool->descr->toast)
+		nallindices += 1;
 
 	if (btspool->descr->bridge)
 		nallindices += 1;
@@ -2728,12 +2738,61 @@ drop_primary_index(Relation rel, OTable *o_table)
 
 	o_tables_table_meta_lock(NULL);
 	old_descr = o_fetch_table_descr(old_o_table->oids);
+
+	/*
+	 * Keep the old descriptor referenced until rebuild_indices() has read
+	 * the old trees.  o_fetch_table_descr() does not take a reference, and
+	 * NewRelationCreateToastTable() below can process invalidations through
+	 * its DDL hooks after we have replaced the old table metadata.  Without
+	 * this reference, invalidation could free old_descr before the rebuild
+	 * uses it.  The ResourceOwner also releases the reference on ERROR;
+	 * on success we explicitly forget it after rebuild_indices().
+	 */
+	ResourceOwnerRememberOTableDescr(CurrentResourceOwner, old_descr);
+
 	recreate_o_table(old_o_table, o_table);
 	descr = o_fetch_table_descr(o_table->oids);
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
 
+	/*
+	 * Removing the primary key makes its varlena fields toastable and adds
+	 * ctid to every leaf tuple.  A row that just fit the old primary tuple
+	 * can therefore require TOAST during this rebuild, before PostgreSQL's
+	 * end-of-ALTER TOAST check runs.  Publish the new primary metadata first
+	 * so relation_needs_toast_table no longer excludes the old key fields.
+	 * Release the meta lock before invoking the TOAST creation hook, which
+	 * acquires that lock itself.  Existing trees already have placeholders.
+	 */
+	if (!OidIsValid(rel->rd_rel->reltoastrelid))
+	{
+		NewRelationCreateToastTable(RelationGetRelid(rel), (Datum) 0);
+		if (OidIsValid(rel->rd_rel->reltoastrelid))
+		{
+			ORelOids	oids = o_table->oids;
+
+			/*
+			 * The creation hook updated OTable and invalidated its
+			 * descriptor.
+			 */
+			o_table_free(o_table);
+			o_table = o_tables_get(oids);
+			descr = o_fetch_table_descr(oids);
+			Assert(descr->toast);
+			o_tables_table_meta_lock(o_table);
+
+			/* See rebuild_indices_insert_placeholders for the details. */
+			if (descr->toast->desc.storageType != BTreeStorageTemporary)
+				o_insert_shared_root_placeholder(descr->toast->oids.datoid,
+												 descr->toast->oids.relnode,
+												 descr->toast->oids.spcoid);
+
+			o_tables_table_meta_unlock(o_table, InvalidOid);
+		}
+	}
+
 	rebuild_indices(old_o_table, old_descr, o_table, descr, false, NULL);
+	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, old_descr);
 
 }
 

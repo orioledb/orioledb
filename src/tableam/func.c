@@ -423,7 +423,8 @@ orioledb_tbl_structure(PG_FUNCTION_ARGS)
 		tree_structure(&buf, descr->indices[treen], printOptions, depth);
 	if (descr->bridge)
 		tree_structure(&buf, descr->bridge, printOptions, depth);
-	tree_structure(&buf, descr->toast, printOptions, depth);
+	if (descr->toast)
+		tree_structure(&buf, descr->toast, printOptions, depth);
 
 	result = cstring_to_text(buf.data);
 	relation_close(rel, AccessShareLock);
@@ -938,7 +939,8 @@ orioledb_tbl_bin_structure(PG_FUNCTION_ARGS)
 	/* index trees + toast tree */
 	for (treen = 0; treen < descr->nIndices; treen++)
 		tree_bin_structure(&buf, descr->indices[treen], print_bytes, depth);
-	tree_bin_structure(&buf, descr->toast, print_bytes, depth);
+	if (descr->toast)
+		tree_bin_structure(&buf, descr->toast, print_bytes, depth);
 
 	result = cstring_to_text(buf.data);
 	relation_close(rel, AccessShareLock);
@@ -993,7 +995,7 @@ orioledb_idx_structure(PG_FUNCTION_ARGS)
 		if (!strcmp(treeName, NameStr(descr->indices[treen]->name)))
 			tree_structure(&buf, descr->indices[treen], printOptions, depth);
 	}
-	if (!strcmp(treeName, NameStr(descr->toast->name)))
+	if (descr->toast && !strcmp(treeName, NameStr(descr->toast->name)))
 		tree_structure(&buf, descr->toast, printOptions, depth);
 	if (descr->bridge && !strcmp(treeName, NameStr(descr->bridge->name)))
 		tree_structure(&buf, descr->bridge, printOptions, depth);
@@ -1204,7 +1206,7 @@ orioledb_table_pages(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 				 errmsg("relation oid %u is not orioledb", relid)));
 
-	for (treen = 0; treen < descr->nIndices + 1; treen++)
+	for (treen = 0; treen < descr->nIndices + (descr->toast ? 1 : 0); treen++)
 	{
 		BTreeDescr *td;
 		SharedRootInfoKey key = {0};
@@ -1497,7 +1499,7 @@ orioledb_tbl_compression_check(PG_FUNCTION_ARGS)
 
 	/* collect stats for each BTree loop */
 	initStringInfo(&result);
-	for (i = 0; i <= descr->nIndices; i++)
+	for (i = 0; i < descr->nIndices + (descr->toast ? 1 : 0); i++)
 	{
 		BTreeDescr *td;
 		const char *treeName;

@@ -2222,30 +2222,14 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field, Oid ob
 }
 
 static void
-set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfactor, bool index_bridging)
+set_o_table_options(OTable *o_table, Relation rel, bool only_fillfactor,
+					bool index_bridging)
 {
-	ORelOids	oids,
-				toastOids;
-	OIndexKey  *trees;
-	int			numTrees;
-	OTable	   *o_table;
 	ORelOptions *options = (ORelOptions *) rel->rd_options;
 	OCompress	compress = default_compress,
 				primary_compress = default_primary_compress,
 				toast_compress = default_toast_compress;
 	uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
-	OXid		oxid = InvalidOXid;
-	OSnapshot	oSnapshot;
-	bool		is_temp;
-
-	Assert(RelIsInMyDatabase(rel));
-	ORelOidsSetFromRel(oids, rel);
-	ORelOidsSetFromRel(toastOids, toast_rel);
-
-	o_table = o_tables_get(oids);
-
-	if (!only_fillfactor)
-		o_table->toast_oids = toastOids;
 
 	if (options)
 	{
@@ -2310,7 +2294,15 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 		o_table->primary_compress = primary_compress;
 		o_table->index_bridging = index_bridging;
 
-		if (index_bridging)
+		/*
+		 * create_o_table_for_rel() initializes options and allocates the
+		 * bridge OIDs before TOAST creation, then registers the initial trees
+		 * in undo.  Attaching TOAST calls this function again through
+		 * set_toast_oids_and_options().  Preserve an already initialized
+		 * bridge: allocating another relnode here would replace its OIDs,
+		 * while the initial undo record would still refer to the old ones.
+		 */
+		if (index_bridging && !ORelOidsIsValid(o_table->bridge_oids))
 		{
 			o_table->bridge_oids.datoid = MyDatabaseId;
 			/* A bridge index lives in its table's tablespace. */
@@ -2330,6 +2322,32 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 	}
 
 	o_table->fillfactor = fillfactor;
+}
+
+static void
+set_toast_oids_and_options(Relation rel, Relation toast_rel,
+						   bool only_fillfactor, bool index_bridging)
+{
+	ORelOids	oids;
+	OTable	   *o_table;
+	OIndexKey  *old_trees,
+			   *trees;
+	int			old_num_trees,
+				numTrees,
+				nnew = 0;
+	OXid		oxid = InvalidOXid;
+	OSnapshot	oSnapshot;
+
+	Assert(RelIsInMyDatabase(rel));
+	ORelOidsSetFromRel(oids, rel);
+
+	o_table = o_tables_get(oids);
+	old_trees = o_table_make_index_keys(o_table, &old_num_trees);
+
+	if (!only_fillfactor && toast_rel)
+		ORelOidsSetFromRel(o_table->toast_oids, toast_rel);
+
+	set_o_table_options(o_table, rel, only_fillfactor, index_bridging);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
@@ -2339,9 +2357,38 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 	o_tables_after_update(o_table, oxid, oSnapshot.csn);
 
 	trees = o_table_make_index_keys(o_table, &numTrees);
-	is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
-	add_undo_create_relnode(oids, trees, numTrees, !is_temp);
+
+	/*
+	 * create_o_table_for_rel() now registers the initial trees with
+	 * add_undo_create_relnode(), independently of TOAST creation.  Otherwise,
+	 * tables without TOAST would never get an undo record for their creation,
+	 * because their TOAST post-create hook does not run.  The primary tree
+	 * and any bridge tree initialized there are therefore already registered
+	 * when we reach this function.
+	 *
+	 * Register only trees added by this call, such as the newly attached TOAST
+	 * tree.  Passing the entire updated tree list would register the existing
+	 * primary and bridge trees a second time.  Comparing against the list
+	 * captured before updating TOAST OIDs and options also handles calls that
+	 * only change fillfactor: they create no trees and must not register
+	 * existing trees as newly created.
+	 */
+	for (int i = 0; i < numTrees; i++)
+	{
+		int			j;
+
+		for (j = 0; j < old_num_trees; j++)
+			if (ORelOidsIsEqual(trees[i].oids, old_trees[j].oids))
+				break;
+		if (j == old_num_trees)
+			trees[nnew++] = trees[i];
+	}
+	if (nnew > 0)
+		add_undo_create_relnode(oids, trees, nnew,
+								o_table->persistence != RELPERSISTENCE_TEMP);
+
 	o_tables_rel_meta_unlock(rel, InvalidOid);
+	pfree(old_trees);
 	pfree(trees);
 	o_table_free(o_table);
 }
@@ -2356,7 +2403,11 @@ create_o_table_for_rel(Relation rel)
 	OXid		oxid = InvalidOXid;
 	XLogRecPtr	cur_lsn;
 	Oid			datoid;
+	OIndexKey  *trees;
+	int			num_trees;
 
+	/* The post-create hook can still see a relcache entry without reloptions. */
+	CommandCounterIncrement();
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
 	Assert(RelIsInMyDatabase(rel));
@@ -2369,12 +2420,18 @@ create_o_table_for_rel(Relation rel)
 									 RelationGetFillFactor(rel, BTREE_DEFAULT_FILLFACTOR),
 									 rel->rd_rel->reltablespace,
 									 false);
+	/* No TOAST creation hook runs for tables whose tuples always fit inline. */
+	set_o_table_options(o_table, rel, false, false);
 	o_cache_table_types(o_table);
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_database_cache_add_if_needed(datoid, datoid, cur_lsn, NULL);
 
 	o_tables_add(o_table, oxid, oSnapshot.csn);
+	trees = o_table_make_index_keys(o_table, &num_trees);
+	add_undo_create_relnode(oids, trees, num_trees,
+							o_table->persistence != RELPERSISTENCE_TEMP);
+	pfree(trees);
 	o_tables_rel_meta_unlock(rel, InvalidOid);
 	o_table_free(o_table);
 }
@@ -2992,7 +3049,8 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary, Oid oldRelnode
 		updated_o_table = o_tables_get(oids);
 		Assert(updated_o_table != NULL);
 
-		if (!updated_o_table->has_primary)
+		if (!updated_o_table->has_primary &&
+			OidIsValid(rel->rd_rel->reltoastrelid))
 		{
 			Oid			toast_relid;
 			Relation	toast_rel;
@@ -3499,6 +3557,141 @@ get_opclass(Oid opclass, Oid actual_datatype)
 	return result;
 }
 
+/*
+ * Rebuild the table independently of the existence of a TOAST relation.
+ * During a rewrite, call this only after PostgreSQL's reindex_relation(),
+ * so core cannot replace the index relfilenodes after we have built our
+ * trees: from the TOAST post-alter hook when both tables have TOAST, or from
+ * the transient table's drop hook when either table has no TOAST.  A
+ * tablespace move does not run that index rebuild and is completed
+ * separately by the relevant post-alter hook.
+ */
+static Relation
+rebuild_o_table(Relation tbl, Relation toast_rel, bool tablespace_move)
+{
+	ORelOids	oids;
+	OTable	   *old_o_table,
+			   *new_o_table;
+	Oid			tbl_oid = RelationGetRelid(tbl);
+	Oid			old_relnode;
+
+	Assert(ORelOidsIsValid(saved_oids));
+	old_o_table = o_tables_get(saved_oids);
+	Assert(old_o_table != NULL);
+	old_relnode = tablespace_move ? old_o_table->oids.relnode : InvalidOid;
+
+	create_o_table_for_rel(tbl);
+
+	set_toast_oids_and_options(tbl, toast_rel, false, old_o_table->index_bridging);
+
+	ORelOidsSetFromRel(oids, tbl);
+	new_o_table = o_tables_get(oids);
+	Assert(new_o_table != NULL);
+
+	relation_close(tbl, AccessShareLock);
+	CommandCounterIncrement();
+	tbl = relation_open(tbl_oid, AccessShareLock);
+
+	/* Define the primary key before copying rows to avoid a second rebuild. */
+	redefine_indices(tbl, new_o_table, true, old_relnode);
+
+	o_table_free(new_o_table);
+	new_o_table = o_tables_get(oids);
+	Assert(new_o_table != NULL);
+
+	if (tbl->rd_rel->relkind == RELKIND_MATVIEW && !tablespace_move)
+	{
+		o_saved_relrewrite = InvalidOid;
+		if (savedDataQuery != NULL)
+			rewrite_matview(tbl, old_o_table, new_o_table);
+		o_drop_table(old_o_table->oids);
+	}
+	else
+	{
+		/* A tablespace move copies materialized rows without evaluating them. */
+		Assert(!tablespace_move || alter_type_exprs == NIL);
+		rewrite_table(tbl, old_o_table, new_o_table);
+	}
+
+	redefine_indices(tbl, new_o_table, false, old_relnode);
+	o_table_free(old_o_table);
+	o_table_free(new_o_table);
+
+	o_saved_relrewrite = InvalidOid;
+	if (tablespace_move)
+		ORelOidsSetInvalid(saved_oids);
+
+	return tbl;
+}
+
+/* Table options must also be applied when no TOAST relation exists. */
+static void
+alter_o_table_options(Relation tbl, Relation toast_rel)
+{
+	ORelOids	oids;
+	OTableDescr *descr;
+	ORelOptions *options = (ORelOptions *) tbl->rd_options;
+	uint8		new_fillfactor;
+	bool		new_index_bridging;
+
+	ORelOidsSetFromRel(oids, tbl);
+	descr = o_fetch_table_descr(oids);
+	Assert(descr);
+	ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
+
+	if (options)
+		new_fillfactor = options->std_options.fillfactor;
+	else
+		new_fillfactor = BTREE_DEFAULT_FILLFACTOR;
+
+	if (options)
+		new_index_bridging = options->index_bridging;
+	else
+		new_index_bridging = false;
+
+	if (GET_PRIMARY(descr)->bridging != new_index_bridging)
+	{
+		OTable	   *o_table;
+		ORelOids	table_oids;
+		ListCell   *index;
+		bool		has_bridged = false;
+
+		foreach(index, RelationGetIndexList(tbl))
+		{
+			Oid			indexOid = lfirst_oid(index);
+			Relation	ind = relation_open(indexOid, AccessShareLock);
+			OBTOptions *options = (OBTOptions *) ind->rd_options;
+
+			if (ind->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))
+				has_bridged = true;
+			relation_close(ind, AccessShareLock);
+			if (has_bridged)
+				break;
+		}
+
+		ORelOidsSetFromRel(table_oids, tbl);
+		o_table = o_tables_get(table_oids);
+		if (o_table == NULL)
+		{
+			elog(ERROR, "orioledb table %s not found",
+				 RelationGetRelationName(tbl));
+		}
+
+		if (!has_bridged)
+		{
+			if (new_index_bridging)
+				add_bridge_index(tbl, o_table, true, InvalidOid);
+			else
+				drop_bridge_index(tbl, o_table);
+		}
+		else
+			elog(ERROR, "cannot disable 'index_bridging' for a table with bridged indices");
+	}
+	if (GET_PRIMARY(descr)->fillfactor != new_fillfactor)
+		set_toast_oids_and_options(tbl, toast_rel, true, false);
+	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
+}
+
 static void
 orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							int subId, void *arg)
@@ -3559,7 +3752,58 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			if ((rel->rd_rel->relkind == RELKIND_RELATION ||
 				 rel->rd_rel->relkind == RELKIND_MATVIEW) &&
 				(subId == 0) && is_orioledb_rel(rel) &&
-				!OidIsValid(rel->rd_rel->relrewrite))
+				OidIsValid(o_saved_relrewrite) &&
+				rel->rd_rel->relrewrite == o_saved_relrewrite &&
+				(drop_arg->dropflags & PERFORM_DELETION_INTERNAL))
+			{
+				Relation	tbl = table_open(o_saved_relrewrite, AccessShareLock);
+				OTable	   *old_o_table = o_tables_get(saved_oids);
+
+				Assert(old_o_table != NULL);
+				if (!OidIsValid(tbl->rd_rel->reltoastrelid) ||
+					!ORelOidsIsValid(old_o_table->toast_oids))
+				{
+					Relation	toast_rel = NULL;
+
+					/*
+					 * finish_heap_swap() swaps the table files, reindexes the
+					 * surviving table, drops this transient relation, and
+					 * finally renames the new TOAST relation.  When both old
+					 * and new tables have TOAST, that rename's post-alter hook
+					 * completes our rewrite.  If either has no TOAST, that
+					 * hook cannot be relied on, so complete it at this drop.
+					 * Unlike the table's file-swap hook, this point is AFTER
+					 * PostgreSQL's reindex_relation(): core will no longer
+					 * replace index relfilenodes after we build our trees,
+					 * and o_saved_relrewrite has kept ambuild from rebuilding
+					 * OrioleDB data during the core REINDEX.
+					 * Completing earlier would clear that flag and make the
+					 * primary index's ambuild drop/recreate the primary key,
+					 * copying the table twice more.  Simply skipping those
+					 * later ambuild calls would instead leave our secondary
+					 * trees bound to obsolete index relfilenodes.
+					 *
+					 * The transient relation still has relrewrite pointing
+					 * to the surviving table, even after their files swap.
+					 * Match that OID and the internal-drop flag so an ordinary
+					 * DROP cannot finish a pending rewrite.  This hook is
+					 * also reached by REFRESH MATERIALIZED VIEW, which has no
+					 * final post-alter hook on the surviving relation.
+					 */
+					if (OidIsValid(tbl->rd_rel->reltoastrelid))
+						toast_rel = relation_open(tbl->rd_rel->reltoastrelid,
+												  AccessShareLock);
+					tbl = rebuild_o_table(tbl, toast_rel, false);
+					if (toast_rel)
+						relation_close(toast_rel, AccessShareLock);
+				}
+				o_table_free(old_o_table);
+				table_close(tbl, AccessShareLock);
+			}
+			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
+					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
+					 (subId == 0) && is_orioledb_rel(rel) &&
+					 !OidIsValid(rel->rd_rel->relrewrite))
 			{
 				ListCell   *lc;
 				ORelOids	oids;
@@ -4091,51 +4335,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 						if (add_bridging)
 						{
-							/*
-							 * Ensure the table has a toast relation before
-							 * adding the bridge index.  The bridge rebuild
-							 * path recreates all indices including the toast
-							 * tree, so the toast OIDs must already be set.
-							 * During CREATE TABLE the toast table may not
-							 * exist yet if table inherits indices from parent
-							 * table.
-							 */
-							if (!ORelOidsIsValid(o_table->toast_oids))
-							{
-								Datum		toast_options;
-#if PG_VERSION_NUM < 180000
-								static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
-#else
-								const char *validnsps[] = HEAP_RELOPT_NAMESPACES;
-#endif
-
-								Assert(create_stmt != NULL);
-
-								toast_options = transformRelOptions((Datum) 0,
-																	create_stmt->options,
-																	"toast",
-																	validnsps,
-																	true, false);
-								(void) heap_reloptions(RELKIND_TOASTVALUE,
-													   toast_options,
-													   true);
-
-								relation_close(tbl, AccessShareLock);
-
-								/*
-								 * NewRelationCreateToastTable ends with
-								 * CommandCounterIncrement(), so that the
-								 * TOAST table will be visible for
-								 * add_bridge_index().
-								 */
-								NewRelationCreateToastTable(rel->rd_index->indrelid, toast_options);
-
-								tbl = relation_open(rel->rd_index->indrelid, AccessShareLock);
-
-								ORelOidsSetFromRel(table_oids, tbl);
-								o_table_free(o_table);
-								o_table = o_tables_get(table_oids);
-							}
 							add_bridge_index(tbl, o_table, false, rel->rd_rel->relam);
 						}
 						else
@@ -4528,6 +4727,17 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						o_saved_reltablespace = old_reltablespace;
 						saved_oids = old_oids;
 					}
+
+					if (!OidIsValid(rel->rd_rel->reltoastrelid) &&
+						!OidIsValid(rel->rd_rel->relrewrite) &&
+						!OidIsValid(o_saved_relrewrite) &&
+						!in_cluster_rebuild)
+					{
+						if (OidIsValid(o_saved_reltablespace))
+							rel = rebuild_o_table(rel, NULL, true);
+						else
+							alter_o_table_options(rel, NULL);
+					}
 				}
 			}
 			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
@@ -4540,58 +4750,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				tbl = table_open(o_saved_relrewrite, AccessShareLock);
 				if (is_orioledb_rel(tbl))
 				{
-					ORelOids	new_oids;
-					OTable	   *old_o_table,
-							   *new_o_table;
-
 					CommandCounterIncrement();
-
-					old_o_table = o_tables_get(saved_oids);
-					Assert(old_o_table != NULL);
-
-					create_o_table_for_rel(tbl);
-
-					set_toast_oids_and_options(tbl, rel, false, old_o_table->index_bridging);
-
-					ORelOidsSetFromRel(new_oids, tbl);
-					new_o_table = o_tables_get(new_oids);
-					Assert(new_o_table != NULL);
-
-					relation_close(tbl, AccessShareLock);
-					CommandCounterIncrement();
-					tbl = relation_open(o_saved_relrewrite, AccessShareLock);
-
-					/*
-					 * Redefinig primary key here to not do rebuild after
-					 * rewrite_table
-					 */
-					redefine_indices(tbl, new_o_table, true, InvalidOid);
-
-					o_table_free(new_o_table);
-					new_o_table = o_tables_get(new_oids);
-					Assert(new_o_table != NULL);
-
-					switch (tbl->rd_rel->relkind)
-					{
-						case RELKIND_RELATION:
-							rewrite_table(tbl, old_o_table, new_o_table);
-							break;
-						case RELKIND_MATVIEW:
-							o_saved_relrewrite = InvalidOid;
-							if (savedDataQuery != NULL)
-								rewrite_matview(tbl, old_o_table, new_o_table);
-							o_drop_table(old_o_table->oids);
-							break;
-						default:
-							Assert(false);
-							break;
-					}
-
-					redefine_indices(tbl, new_o_table, false, InvalidOid);
-
-					o_table_free(old_o_table);
-					o_table_free(new_o_table);
-					o_saved_relrewrite = InvalidOid;
+					tbl = rebuild_o_table(tbl, rel, false);
 				}
 				table_close(tbl, AccessShareLock);
 			}
@@ -4609,137 +4769,22 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				tbl = try_table_open(tbl_oid, AccessShareLock);
 				if (tbl && is_orioledb_rel(tbl))
 				{
-					ORelOids	oids;
-					OTableDescr *descr;
-					ORelOptions *options = (ORelOptions *) tbl->rd_options;
-					uint8		new_fillfactor;
-					bool		new_index_bridging;
 					Oid			reltablespace = rel->rd_rel->reltablespace;
 
 					if (reltablespace == 0)
 						reltablespace = MyDatabaseTableSpace;
 					CommandCounterIncrement();
-					ORelOidsSetFromRel(oids, tbl);
 					if (OidIsValid(o_saved_reltablespace) &&
 						o_saved_reltablespace != reltablespace)
 					{
-						/*
-						 * We come here during "ALTER TABLE ... SET
-						 * TABLESPACE"
-						 */
-						OTable	   *old_o_table,
-								   *new_o_table;
-
-						Assert(ORelOidsIsValid(saved_oids));
-						old_o_table = o_tables_get(saved_oids);
-						Assert(old_o_table != NULL);
-
-						create_o_table_for_rel(tbl);
-
-						set_toast_oids_and_options(tbl, rel, false, old_o_table->index_bridging);
-
-						new_o_table = o_tables_get(oids);
-						Assert(new_o_table != NULL);
-
-						relation_close(tbl, AccessShareLock);
-						CommandCounterIncrement();
-						tbl = relation_open(tbl_oid, AccessShareLock);
-
-						/*
-						 * Redefinig primary key here to not do rebuild after
-						 * rewrite_table
-						 */
-						redefine_indices(tbl, new_o_table, true, old_o_table->oids.relnode);
-
-						o_table_free(new_o_table);
-						new_o_table = o_tables_get(oids);
-						Assert(new_o_table != NULL);
-
-						switch (tbl->rd_rel->relkind)
-						{
-							case RELKIND_RELATION:
-							case RELKIND_MATVIEW:
-
-								/*
-								 * for matview we just copy data to not
-								 * recalculate expressions
-								 */
-								Assert(alter_type_exprs == NIL);
-								rewrite_table(tbl, old_o_table, new_o_table);
-								break;
-							default:
-								Assert(false);
-								break;
-						}
-
-						redefine_indices(tbl, new_o_table, false, old_o_table->oids.relnode);
-
-						o_table_free(old_o_table);
-						o_table_free(new_o_table);
-
-						o_saved_reltablespace = InvalidOid;
-						ORelOidsSetInvalid(saved_oids);
+						tbl = rebuild_o_table(tbl, rel, true);
 					}
 					else
 					{
 						/*
 						 * We come here during "ALTER TABLE ... SET <OPTION>"
 						 */
-						descr = o_fetch_table_descr(oids);
-						Assert(descr);
-						ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
-
-						if (options)
-							new_fillfactor = options->std_options.fillfactor;
-						else
-							new_fillfactor = BTREE_DEFAULT_FILLFACTOR;
-
-						if (options)
-							new_index_bridging = options->index_bridging;
-						else
-							new_index_bridging = false;
-
-						if (GET_PRIMARY(descr)->bridging != new_index_bridging)
-						{
-							OTable	   *o_table;
-							ORelOids	table_oids;
-							ListCell   *index;
-							bool		has_bridged = false;
-
-							foreach(index, RelationGetIndexList(tbl))
-							{
-								Oid			indexOid = lfirst_oid(index);
-								Relation	ind = relation_open(indexOid, AccessShareLock);
-								OBTOptions *options = (OBTOptions *) ind->rd_options;
-
-								if (ind->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))
-									has_bridged = true;
-								relation_close(ind, AccessShareLock);
-								if (has_bridged)
-									break;
-							}
-
-							ORelOidsSetFromRel(table_oids, tbl);
-							o_table = o_tables_get(table_oids);
-							if (o_table == NULL)
-							{
-								elog(ERROR, "orioledb table %s not found",
-									 RelationGetRelationName(tbl));
-							}
-
-							if (!has_bridged)
-							{
-								if (new_index_bridging)
-									add_bridge_index(tbl, o_table, true, InvalidOid);
-								else
-									drop_bridge_index(tbl, o_table);
-							}
-							else
-								elog(ERROR, "cannot disable 'index_bridging' for a table with bridged indices");
-						}
-						if (GET_PRIMARY(descr)->fillfactor != new_fillfactor)
-							set_toast_oids_and_options(tbl, rel, true, false);
-						ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
+						alter_o_table_options(tbl, rel);
 					}
 				}
 				if (tbl)

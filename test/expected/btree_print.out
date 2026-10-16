@@ -3604,7 +3604,6 @@ SELECT orioledb_tbl_structure('o_test_is_null_assert'::regclass, 'nue');
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
      Item 0: offset = 264, tuple = ('2', '0', '0', null)            +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -3622,7 +3621,6 @@ SELECT orioledb_tbl_structure('o_test_is_null_assert'::regclass, 'nue');
        Undo item: mode = noKeyUpdate, undoLocation = 0, tuple = ('2', '0', '0', null)         +
        Undo item: tuple = ('2', '0', '0', null)                                               +
                                                                                               +
- Index toast: not loaded                                                                      +
  
 (1 row)
 

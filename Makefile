@@ -145,6 +145,7 @@ REGRESSCHECKS = btree_sys_check \
 				tablespace \
 				temp \
 				toast \
+				toast_optional \
 				toast_column_compress \
 				trigger \
 				truncate \
@@ -284,6 +285,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/temp_local_pool_test.py \
 						test/t/wal_savepoint_buffer_test.py \
 						test/t/toast_index_test.py \
+						test/t/toast_optional_test.py \
 						test/t/trigger_test.py \
 						test/t/undo_cleanup_test.py \
 						test/t/undo_reserved_race_test.py \

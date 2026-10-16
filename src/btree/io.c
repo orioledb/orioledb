@@ -3683,8 +3683,11 @@ write_relation_pages(Oid relid, int maxLevel, bool evict)
 		td = &descr->indices[treen]->desc;
 		write_tree_pages(td, maxLevel, evict);
 	}
-	td = &descr->toast->desc;
-	write_tree_pages(td, maxLevel, evict);
+	if (descr->toast)
+	{
+		td = &descr->toast->desc;
+		write_tree_pages(td, maxLevel, evict);
+	}
 
 	relation_close(rel, AccessShareLock);
 }
