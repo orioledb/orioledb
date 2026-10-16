@@ -782,7 +782,7 @@ INSERT INTO bitmap_test (i, j, k, h)
 		(v * 5011 + 2159) % 2000,
 		(v * 5011 + 2102) % 2000,
 		(v * 4102 + 5857) % 2000
-		FROM generate_series(1,5000) v;
+		FROM generate_series(1,20000) v;
 
 CREATE INDEX bitmap_test_ix1 ON bitmap_test (i);
 CREATE INDEX bitmap_test_ix2 ON bitmap_test (j);

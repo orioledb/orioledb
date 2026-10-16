@@ -168,6 +168,31 @@ class TablespaceTest(BaseTest):
 		    500)
 		node.stop()
 
+	def test_rolled_back_tablespace_drop(self):
+		tbsp_dir = tempfile.mkdtemp(prefix='oriole_relnode_abort_')
+		self.addCleanup(shutil.rmtree, tbsp_dir, ignore_errors=True)
+
+		node = self.node
+		node.start()
+
+		node.safe_psql('postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql('postgres',
+		               f"CREATE TABLESPACE ots LOCATION '{tbsp_dir}';")
+
+		con = node.connect()
+		con.execute("""
+			CREATE TABLE o_rolled_back (k int PRIMARY KEY)
+				USING orioledb TABLESPACE ots;
+		""")
+		self.assertGreater(self._count_files(tbsp_dir), 0,
+		                   "CREATE TABLE must create relfilenode files")
+
+		con.rollback()
+		con.close()
+
+		node.safe_psql('postgres', "DROP TABLESPACE ots;")
+		node.stop()
+
 	def test_startup_skips_tablespace_without_version_directory(self):
 		"""
 		Replaying a DROP TABLESPACE can leave its pg_tblspc entry behind
@@ -212,4 +237,72 @@ class TablespaceTest(BaseTest):
 		self.assertEqual(
 		    node.execute('postgres', "SELECT count(*) FROM o_test;")[0][0],
 		    100)
+		node.stop()
+
+	def _count_files(self, tbsp_dir):
+		"""Count regular files under tbsp_dir (recursive)."""
+		n = 0
+		for _dirpath, _dirnames, filenames in os.walk(tbsp_dir):
+			n += len(filenames)
+		return n
+
+	def test_savepoint_rollback_cleans_relfilenode_in_tablespace(self):
+		tbsp_dir = tempfile.mkdtemp(prefix='oriole_relnode_svp_')
+		self.addCleanup(shutil.rmtree, tbsp_dir, ignore_errors=True)
+
+		node = self.node
+		node.start()
+
+		node.safe_psql('postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql('postgres',
+		               f"CREATE TABLESPACE ots LOCATION '{tbsp_dir}';")
+
+		con = node.connect()
+		con.execute("SAVEPOINT sp;")
+		con.execute("""
+			CREATE TABLE o_svp_rolled_back (k int PRIMARY KEY)
+				USING orioledb TABLESPACE ots;
+		""")
+		self.assertGreater(self._count_files(tbsp_dir), 0,
+		                   "CREATE TABLE must create relfilenode files")
+
+		con.execute("ROLLBACK TO sp;")
+		con.commit()
+		con.close()
+
+		node.safe_psql('postgres', "DROP TABLESPACE ots;")
+		node.stop()
+
+	def test_truncate_rollback_cleans_relfilenode_in_tablespace(self):
+		tbsp_dir = tempfile.mkdtemp(prefix='oriole_relnode_trunc_')
+		self.addCleanup(shutil.rmtree, tbsp_dir, ignore_errors=True)
+
+		node = self.node
+		node.start()
+
+		node.safe_psql('postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql('postgres',
+		               f"CREATE TABLESPACE ots LOCATION '{tbsp_dir}';")
+		node.safe_psql(
+		    'postgres', """
+				CREATE TABLE o_trunc_target (k int PRIMARY KEY)
+					USING orioledb TABLESPACE ots;
+				INSERT INTO o_trunc_target VALUES (1);
+		""")
+
+		before = self._count_files(tbsp_dir)
+
+		con = node.connect()
+		con.execute("TRUNCATE o_trunc_target;")
+		self.assertGreater(self._count_files(tbsp_dir), before,
+		                   "TRUNCATE must create new relfilenode files")
+
+		con.rollback()
+		con.close()
+
+		self.assertEqual(
+		    node.execute('postgres', "SELECT * FROM o_trunc_target;")[0][0], 1)
+
+		node.safe_psql('postgres', "DROP TABLE o_trunc_target;")
+		node.safe_psql('postgres', "DROP TABLESPACE ots;")
 		node.stop()

@@ -517,6 +517,40 @@ class UndoImageChainTest(BaseTest):
 		    con.execute("SELECT id, payload FROM %s ORDER BY id;" % table),
 		    view)
 		self._close(con)
+	# --------------------------------------------------- restart
+
+	def test_link_across_restart(self):
+		"""
+		Page-level undo locations restart from zero after a restart, but leaves
+		read from disk keep their old, larger undo location.  So an image made
+		after the restart links to a larger location.  Its csn is older than any
+		new snapshot, so the walk stops there and must not report corruption.
+		"""
+		table = 'o_uic_restart'
+		self._make(table, step=2)
+
+		# Grow page-level undo well past what the split below writes
+		con, _ = self._snapshot(table)
+		for i in range(20):
+			self._rewrite_by(table, 'w%d' % (i % 10), PAD + 10 * i)
+		self._close(con)
+
+		self.node.safe_psql('postgres', "CHECKPOINT;")
+		self.node.stop()
+		self.node.start()
+
+		# Split the leaves under a pinned snapshot.  An insert, not an update:
+		# an update reads its own new images, so the reads would not be reached.
+		con, view = self._snapshot(table)
+		try:
+			self._interleave(table, 1, 2, 'x0')
+			self._verify(con, table, view, 'after-restart')
+		finally:
+			self._close(con)
+		self.assertTrue(
+		    self.node.execute(
+		        "SELECT orioledb_tbl_check('%s'::regclass, true)" %
+		        table)[0][0])
 
 	# --------------------------------------------------- composed helpers
 

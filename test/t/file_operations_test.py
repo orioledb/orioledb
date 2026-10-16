@@ -117,3 +117,32 @@ class FileOperationsTest(BaseTest):
 			self.assertIn("could not read rootPageBlkno page from", log)
 			# With the fix the shutdown is FATAL, not an Assert crash.
 			self.assertNotIn("TRAP", log)
+
+	def test_load_page_read_error_releases_page(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test (id int PRIMARY KEY, val text) USING orioledb;
+			INSERT INTO o_test
+				SELECT i, repeat('x', 200) FROM generate_series(1, 5000) i;
+			CHECKPOINT;
+			SELECT orioledb_evict_pages('o_test'::regclass, 0);
+		""")
+
+		# The leaves are on disk only now: empty the data file, so that
+		# reading one back in load_page() fails.
+		datoid = node.execute(
+		    "SELECT oid FROM pg_database WHERE datname = 'postgres';")[0][0]
+		db_dir = os.path.join(self.getOrioleDBDir(), str(datoid))
+		for f in os.listdir(db_dir):
+			if f.isdigit():
+				os.truncate(os.path.join(db_dir, f), 0)
+
+		free_pages = ("SELECT free_pages FROM orioledb_page_stats() "
+		              "WHERE pool_name = 'main';")
+		before = node.execute(free_pages)
+		with self.assertRaisesRegex(Exception, "could not read page"):
+			node.safe_psql("SELECT * FROM o_test WHERE id = 1;")
+		# The page taken for the failed read must be back in the pool
+		self.assertEqual(node.execute(free_pages), before)

@@ -1,0 +1,27 @@
+name: Backpatch sanity check
+
+# Either every commit of a pull request says "Backpatch: stable" or
+# "Backpatch: no <reason>", or none does and the pull request has no "bug"
+# label.  See ci/backpatch_check.sh.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  backpatch_check:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Check backpatch declarations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: ci/backpatch_check.sh

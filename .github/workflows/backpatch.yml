@@ -1,0 +1,59 @@
+name: Backpatch
+
+# Once a pull request is merged, cherry-pick each of its commits that says
+# "Backpatch: stable" into the supported release branch, and open a pull
+# request.  See ci/backpatch.sh.
+#
+# The merge is a push to the development branch, which is what starts the
+# workflow.  So it runs from the development branch itself, with secrets,
+# even for pull requests from forks, whose code is merged by then and not run
+# as workflow code.  (pull_request_target would take the workflow from the
+# default branch only.)  A push that is not a merged pull request is skipped.
+#
+# The token is of the backpatch GitHub App: the repository does not let
+# GITHUB_TOKEN open pull requests, and pull requests opened with it would not
+# run CI.  The app needs Contents, Pull requests and Issues read and write;
+# its id and private key are the BACKPATCH_APP_ID and
+# BACKPATCH_APP_PRIVATE_KEY secrets.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Merged pull request to backpatch"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backpatch-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  backpatch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Get a token of the backpatch app
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.BACKPATCH_APP_ID }}
+          private-key: ${{ secrets.BACKPATCH_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Backpatch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PUSH_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
+        run: ci/backpatch.sh

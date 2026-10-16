@@ -20,7 +20,7 @@ jobs:
       COMPILER: gcc
     steps:
       - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1    # v7.0.1
         with:
           path: orioledb
 
@@ -30,7 +30,7 @@ jobs:
           echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
 
       - name: Checkout PostgreSQL code into workspace directory
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1    # v7.0.1
         with:
           repository: orioledb/postgres
           ref: ${{ env.PGTAG }}
@@ -68,7 +68,7 @@ jobs:
           python3 -W ignore::DeprecationWarning -m unittest -v test.integration.pgbackrest_test
 
       - name: Upload test logs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9    # v7.0.2
         if: ${{ failure() }}
         with:
           name: ${{ matrix.pg_version }}_pgbackrest_test.logs
@@ -78,7 +78,7 @@ jobs:
           retention-days: 2
           if-no-files-found: ignore
 
-  walg-test:
+  walg-v2-test:
     strategy:
       fail-fast: false
       matrix:
@@ -92,7 +92,7 @@ jobs:
       COMPILER: gcc
     steps:
       - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1    # v7.0.1
         with:
           path: orioledb
 
@@ -102,7 +102,7 @@ jobs:
           echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
 
       - name: Checkout PostgreSQL code into workspace directory
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1    # v7.0.1
         with:
           repository: orioledb/postgres
           ref: ${{ env.PGTAG }}
@@ -130,16 +130,115 @@ jobs:
 
       - name: Run wal-g test
         timeout-minutes: 100
+        env:
+          WALG_MAJOR_VERSION: "2"
         run: |
           export PATH="$GITHUB_WORKSPACE/pgsql/bin:$GITHUB_WORKSPACE/python3-venv/bin:$PATH"
           cd orioledb
           python3 -W ignore::DeprecationWarning -m unittest -v test.integration.walg_test
 
       - name: Upload test logs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9    # v7.0.2
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_walg_test.logs
+          name: ${{ matrix.pg_version }}_walg_v2_test.logs
+          path: |
+            ./orioledb/test/tmp_check_t/*/logs/*log
+          retention-days: 2
+          if-no-files-found: ignore
+
+  walg-v3-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: [17, 18]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    env:
+      LLVM_VER: 18
+      CPU: amd64
+      CHECK_TYPE: normal
+      PG_VERSION: ${{ matrix.pg_version }}
+      COMPILER: gcc
+    steps:
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1    # v7.0.1
+        with:
+          path: orioledb
+
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+
+      - name: Checkout PostgreSQL code into workspace directory
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1    # v7.0.1
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PGTAG }}
+          path: postgresql
+
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+
+      - name: Checkout wal-g code into workspace directory
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1    # v7.0.1
+        with:
+          repository: wal-g/wal-g
+          # includes the OrioleDB page-header fix (PR #2502), not yet released
+          ref: a22147e6a3605ce23f0507fd9be23673f7eb6918
+          path: wal-g
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e    # v7.0.0
+        with:
+          go-version-file: wal-g/go.mod
+          cache-dependency-path: wal-g/go.sum
+
+      - name: Install wal-g build dependencies
+        run: |
+          sudo apt-get -y install -qq liblzo2-dev brotli libsodium-dev cmake
+
+      - name: Build wal-g from source
+        env:
+          USE_BROTLI: 1
+          USE_LIBSODIUM: 1
+          USE_LZO: 1
+          # avoids flaky proxy.golang.org HTTP/2 errors on this dependency graph
+          GOPROXY: direct
+        run: |
+          cd wal-g
+          for i in 1 2 3; do
+            make deps && break
+            if [ "$i" = 3 ]; then
+              echo "make deps failed after $i attempts" >&2
+              exit 1
+            fi
+            echo "make deps failed (attempt $i), retrying..." >&2
+            sleep 10
+          done
+          make pg_build
+          sudo install -m 0755 main/pg/wal-g /usr/local/bin/wal-g
+
+      - name: Build
+        run: bash ./orioledb/ci/build.sh
+
+      - name: Install post build prerequisites
+        run: bash ./orioledb/ci/post_build_prerequisites.sh
+
+      - name: Run wal-g test
+        timeout-minutes: 100
+        env:
+          WALG_MAJOR_VERSION: "3"
+        run: |
+          export PATH="$GITHUB_WORKSPACE/pgsql/bin:$GITHUB_WORKSPACE/python3-venv/bin:$PATH"
+          cd orioledb
+          python3 -W ignore::DeprecationWarning -m unittest -v test.integration.walg_test
+
+      - name: Upload test logs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9    # v7.0.2
+        if: ${{ failure() }}
+        with:
+          name: ${{ matrix.pg_version }}_walg_v3_test.logs
           path: |
             ./orioledb/test/tmp_check_t/*/logs/*log
           retention-days: 2

@@ -158,6 +158,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_print_backend_id \
 				  btree_scan \
 				  concurrent_update_delete \
+				  descr_torn_pair \
 				  fkeys \
 				  include_pk_wait \
 				  included \
@@ -219,6 +220,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/concurrent_index_test.py \
 						test/t/concurrent_index_stopevents_test.py \
 						test/t/replication_test.py \
+						test/t/replident_full_physical_test.py \
 						test/t/fuzzy_checkpoint_test.py \
 						test/t/types_test.py \
 						test/t/sys_cache_delete_test.py \
@@ -261,6 +263,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/parallel_ordered_scan_test.py \
 						test/t/parallel_bitmap_scan_test.py \
 						test/t/parallel_scan_load_error_test.py \
+						test/t/index_scan_interrupt_test.py \
 						test/t/pending_truncates_test.py \
 						test/t/recovery_heap_verdict_test.py \
 						test/t/recovery_heap_xid_binding_test.py \

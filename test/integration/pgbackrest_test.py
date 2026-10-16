@@ -552,7 +552,7 @@ class PgBackRestTest(BaseBackupTest):
 
 	def test_incr_backup_block_diffs_orioledb_file(self):
 		"""
-		Unlike wal-g (see test_delta_backup_ships_whole_orioledb_file in
+		Unlike wal-g v2 (see test_delta_backup_orioledb_file_diffing in
 		walg_test.py), pgBackRest's block-incremental eligibility
 		(manifestBuildBlockIncrSize() in
 		src/info/manifest/build.c.inc) is decided purely from a file's

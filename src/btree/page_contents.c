@@ -104,6 +104,7 @@ read_page_from_undo(BTreeDescr *desc, Page img, UndoLocation undo_loc,
 		/* Continue traversing undo chain if needed */
 		if (COMMITSEQNO_IS_NORMAL(page_csn) && page_csn >= csn)
 		{
+			check_page_undo_link(undo_loc, rec_undo_location);
 			undo_loc = rec_undo_location;
 			continue;
 		}
