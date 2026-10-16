@@ -35,6 +35,16 @@
 #define IsRelationTree(desc) (ORelOidsIsValid(desc->oids) && !IS_SYS_TREE_OIDS(desc->oids))
 
 /*
+ * Insert meets a live row with the same key.  Like heap, that is a unique
+ * violation even when the snapshot can't see the row, so skip the
+ * serialization check.  ON CONFLICT checks visibility itself, in
+ * o_insert_with_arbiter_modify_callback().
+ */
+#define IS_INSERT_DUPLICATE(context, tuphdr) \
+	((context)->action == BTreeOperationInsert && \
+	 (tuphdr)->deleted == BTreeLeafTupleNonDeleted)
+
+/*
  * Context for o_btree_modify_internal()
  */
 /*
@@ -646,7 +656,8 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 * TODO: check for such conflicts in page-level undo as well.
 				 */
 				if (csn >= context->opCsn && IsolationUsesXactSnapshot() &&
-					IsRelationTree(desc))
+					IsRelationTree(desc) &&
+					!IS_INSERT_DUPLICATE(context, tuphdr))
 				{
 					ereport(ERROR,
 							(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
@@ -753,7 +764,8 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, loc);
 		}
 	}
-	else if (IsolationUsesXactSnapshot() && IsRelationTree(desc))
+	else if (IsolationUsesXactSnapshot() && IsRelationTree(desc) &&
+			 !IS_INSERT_DUPLICATE(context, tuphdr))
 	{
 		/*
 		 * Check for serialization conflicts.
