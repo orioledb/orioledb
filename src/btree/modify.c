@@ -192,6 +192,8 @@ retry:
 	context.lockStatus = BTreeModifyNoLock;
 	context.haveRedundantRowLocks = false;
 
+	STOPEVENT(STOPEVENT_MODIFY_CONFLICT_RETRY, NULL);
+
 	/*
 	 * Keep the modify retry loop interruptible.  A row-lock conflict against
 	 * a concurrent transaction can livelock here:
