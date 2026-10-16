@@ -1162,6 +1162,10 @@ clear_my_logical_wal_retain_location(void)
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 
+	/* Nothing set it: see add_rel_wal_record() */
+	if (wal_level < WAL_LEVEL_LOGICAL)
+		return;
+
 	pg_atomic_write_u64(&curProcData->undoRetainLocations[UndoLogSystem].logicalWalRetainUndoLocation,
 						InvalidUndoLocation);
 }
@@ -3646,26 +3650,26 @@ undo_snapshot_deregister_hook(Snapshot snapshot)
 		pairingheap_remove(&retainUndoLocHeaps[UndoLogSystem], &snapshot->undoSystemLocationPhNode.ph_node);
 }
 
-void
-orioledb_snapshot_hook(Snapshot snapshot)
+/*
+ * Advance the minimal undo locations of a log once its lastUsedLocation has
+ * run more than a tenth of its circular buffer past the last update.
+ *
+ * The check reads lastUsedLocation of every undo log, a cache line that every
+ * undo reservation writes, so doing it on each snapshot is a cross-socket
+ * cache miss per log for every backend.  It is only a hint: reserving undo
+ * space updates the minimal locations itself when the buffer runs out.  So
+ * the snapshot hook samples it.
+ */
+#define SNAPSHOT_UNDO_CHECK_INTERVAL 16
+
+static uint32 snapshot_undo_check_counter = 0;
+
+static void
+maybe_update_min_undo_locations(void)
 {
 	UndoLocation lastUsedLocation,
 				lastUsedUndoLocationWhenUpdatedMinLocation;
-	OXid		curXmin,
-				xmin;
-	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	int			i;
-
-	/*
-	 * It means that there was a crash recovery and we need to cleanup. This
-	 * is probably not the best place for this kind of work, but here we can
-	 * do truncate of unlogged tables.
-	 */
-	if (*was_in_recovery &&
-		!pg_atomic_exchange_u32(after_recovery_cleaned, true))
-	{
-		o_tables_truncate_all_unlogged();
-	}
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
@@ -3680,7 +3684,7 @@ orioledb_snapshot_hook(Snapshot snapshot)
 			 * Every backend taking a snapshot arrives here at once, and each
 			 * one would then contend for minUndoLocationsMutex to compute the
 			 * same answer.  An odd changecount means somebody is already
-			 * doing the scan, so skip it -- this is only a hint, and the next
+			 * doing the scan, so skip it -- this is only a hint, and a later
 			 * snapshot re-checks.
 			 */
 			pg_read_barrier();
@@ -3688,6 +3692,28 @@ orioledb_snapshot_hook(Snapshot snapshot)
 				update_min_undo_locations(undoType, false, true);
 		}
 	}
+}
+
+void
+orioledb_snapshot_hook(Snapshot snapshot)
+{
+	OXid		curXmin,
+				xmin;
+	ODBProcData *curProcData = GET_CUR_PROCDATA();
+
+	/*
+	 * It means that there was a crash recovery and we need to cleanup. This
+	 * is probably not the best place for this kind of work, but here we can
+	 * do truncate of unlogged tables.
+	 */
+	if (*was_in_recovery &&
+		!pg_atomic_exchange_u32(after_recovery_cleaned, true))
+	{
+		o_tables_truncate_all_unlogged();
+	}
+
+	if ((++snapshot_undo_check_counter % SNAPSHOT_UNDO_CHECK_INTERVAL) == 0)
+		maybe_update_min_undo_locations();
 
 
 	snapshot->undoRegularRowLocationPhNode.undoLocation = set_my_snapshot_retain_location(UndoLogRegular);
