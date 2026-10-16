@@ -142,7 +142,8 @@ class FileOperationsTest(BaseTest):
 		free_pages = ("SELECT free_pages FROM orioledb_page_stats() "
 		              "WHERE pool_name = 'main';")
 		before = node.execute(free_pages)
-		with self.assertRaisesRegex(Exception, "could not read page"):
+		with self.assertRaisesRegex(
+		    Exception, "could not read page .*: unexpected end of file"):
 			node.safe_psql("SELECT * FROM o_test WHERE id = 1;")
 		# The page taken for the failed read must be back in the pool
 		self.assertEqual(node.execute(free_pages), before)
