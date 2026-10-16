@@ -496,6 +496,49 @@ class UndoImageChainTest(BaseTest):
 		        "SELECT orioledb_tbl_check('%s'::regclass, true)" %
 		        table)[0][0])
 
+	# ---------------------------------------- combined-iteration edge cases
+
+	def test_nested_split_diff_both_sides(self):
+		"""
+		Two SplitDiff records where a page falls on opposite sides:
+		right of the older split, left of the newer one.
+
+		After the first split at key B, a right child P_right is itself
+		split at key C.  Leaf P_right_left (range [B, C)) is the left
+		half of the second split and the right half of the first.  The
+		chain walk clears both rightmost (at SplitDiff #2, left half)
+		and leftmost (at SplitDiff #1, right half).
+
+		undo_it_next_page re-finds the same page and must return false
+		even with both flags cleared.
+
+		The combined-iteration path that calls undo_it_next_page is only
+		entered when have_current_undo() is true in the reading backend,
+		so the snapshot connection writes to an auxiliary table.
+
+		Pre-fix: Assert(undoIt->rightmost || undoIt->leftmost) fired.
+		"""
+		table = 'o_uic_nested_sd_sides'
+		self._make(table, step=8)
+		self.node.safe_psql(
+		    'postgres', "CREATE TABLE o_uic_aux"
+		    " (id int NOT NULL PRIMARY KEY) USING orioledb;")
+
+		self._parked_interleave(table, 1, 8, 'v1')
+
+		con, view = self._snapshot(table)
+		try:
+			con.execute("INSERT INTO o_uic_aux VALUES (1);")
+			self._interleave(table, 2, 8, 'v2')
+			self._interleave(table, 3, 8, 'v3')
+			self._verify(con, table, view, 'nested-sd-sides')
+		finally:
+			self._close(con)
+		self.assertTrue(
+		    self.node.execute(
+		        "SELECT orioledb_tbl_check('%s'::regclass, true)" %
+		        table)[0][0])
+
 	# --------------------------------------------------- composed helpers
 
 	def _parked_interleave(self, table, offset, step, payload):
