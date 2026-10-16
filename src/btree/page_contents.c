@@ -881,7 +881,7 @@ page_fits_hikey(Page p, LocationIndex newHikeySize)
 				hikeyLocation,
 				dataLocation;
 
-	Assert(newHikeySize = MAXALIGN(newHikeySize));
+	Assert(newHikeySize == MAXALIGN(newHikeySize));
 	Assert(header->chunksCount == 1);
 
 	hikeyLocation = SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
@@ -901,7 +901,7 @@ page_resize_hikey(Page p, LocationIndex newHikeySize)
 				hikeyLocation,
 				dataLocation;
 
-	Assert(newHikeySize = MAXALIGN(newHikeySize));
+	Assert(newHikeySize == MAXALIGN(newHikeySize));
 	Assert(header->chunksCount == 1);
 
 	hikeyLocation = SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
