@@ -12,6 +12,7 @@ checkpoint_before_replay_start
 index_build_leader_participate
 index_insert
 ioc_before_update
+modify_conflict_retry
 modify_start
 page_read
 page_split

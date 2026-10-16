@@ -34,9 +34,34 @@ step "forkeyshare_2" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR KEY SHARE;
 step "fornokeyupd_2" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR NO KEY UPDATE; }
 step "for_update_2" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR UPDATE; }
 step "rollback_2" { ROLLBACK; }
+step "arm_retry_2" {
+	SELECT pg_stopevent_set('modify_conflict_retry',
+							'$applicationName == "s3"');
+}
+step "check_hwlock_2" {
+	DO $$
+	BEGIN
+		WHILE NOT EXISTS (
+			SELECT 1 FROM pg_stopevents()
+			WHERE stopevent = 'modify_conflict_retry'
+			  AND array_length(waiter_pids, 1) > 0
+		) LOOP
+			PERFORM pg_sleep(0.1);
+		END LOOP;
+	END$$;
+	SELECT count(*) AS stale_tuple_locks
+	FROM pg_locks WHERE locktype = 'tuple' AND granted = true;
+}
+step "reset_retry_2" {
+	SELECT pg_stopevent_reset('modify_conflict_retry');
+}
 
 session s3
 step "begin_3" { BEGIN; }
+step "setup_3" {
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's3';
+}
 step "key_share_3" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR KEY SHARE; }
 step "share_3" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR SHARE; }
 step "for_update_3" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR UPDATE; }
@@ -51,3 +76,9 @@ permutation "begin_1" "begin_2" "begin_3" "key_share_1" "for_update_2" "key_shar
 permutation "begin_1" "begin_2" "begin_3" "key_share_1" "for_update_2" "key_share_3"  "delete_3" "rollback_1" "rollback_3" "rollback_2"
 permutation "begin_1" "begin_2" "begin_3" "key_share_1" "for_update_2" "key_share_3"  "delete_3" "rollback_1" "commit_3" "rollback_2"
 permutation "begin_1" "begin_2" "begin_3" "key_share_1" "for_update_3" "forkeyshare_2" "savepoint_1_b" "share_1" "savepoint_1_b" "fornokeyupd_1" "fornokeyupd_2" "rollback_1_b" "rollback_1_a" "rollback_1" "rollback_2" "rollback_3"
+
+# Verify that the tuple-hash heavyweight lock acquired during
+# wait_for_tuple() is released before the retry loop re-evaluates
+# conflicts.  Without the fix, the stale lock persists at the retry
+# point and pg_locks shows it; with the fix, it is gone.
+permutation "begin_1" "begin_2" "begin_3" "setup_3" "key_share_1" "for_update_3" "arm_retry_2" "savepoint_1_b" "fornokeyupd_1" "rollback_1_b" "check_hwlock_2" "reset_retry_2" "rollback_1" "rollback_2" "rollback_3"

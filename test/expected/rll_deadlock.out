@@ -202,3 +202,72 @@ val_1
 (1 row)
 
 step rollback_3: ROLLBACK;
+
+starting permutation: begin_1 begin_2 begin_3 setup_3 key_share_1 for_update_3 arm_retry_2 savepoint_1_b fornokeyupd_1 rollback_1_b check_hwlock_2 reset_retry_2 rollback_1 rollback_2 rollback_3
+step begin_1: BEGIN;
+step begin_2: BEGIN;
+step begin_3: BEGIN;
+step setup_3: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's3';
+
+step key_share_1: SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR KEY SHARE;
+val_1
+-----
+    1
+(1 row)
+
+step for_update_3: SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR UPDATE; <waiting ...>
+step arm_retry_2: 
+	SELECT pg_stopevent_set('modify_conflict_retry',
+							'$applicationName == "s3"');
+
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step savepoint_1_b: savepoint b;
+step fornokeyupd_1: SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR NO KEY UPDATE;
+val_1
+-----
+    1
+(1 row)
+
+step rollback_1_b: ROLLBACK to b;
+step check_hwlock_2: 
+	DO $$
+	BEGIN
+		WHILE NOT EXISTS (
+			SELECT 1 FROM pg_stopevents()
+			WHERE stopevent = 'modify_conflict_retry'
+			  AND array_length(waiter_pids, 1) > 0
+		) LOOP
+			PERFORM pg_sleep(0.1);
+		END LOOP;
+	END$$;
+	SELECT count(*) AS stale_tuple_locks
+	FROM pg_locks WHERE locktype = 'tuple' AND granted = true;
+
+stale_tuple_locks
+-----------------
+                0
+(1 row)
+
+step reset_retry_2: 
+	SELECT pg_stopevent_reset('modify_conflict_retry');
+
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step rollback_1: ROLLBACK;
+step for_update_3: <... completed>
+val_1
+-----
+    1
+(1 row)
+
+step rollback_2: ROLLBACK;
+step rollback_3: ROLLBACK;
