@@ -106,7 +106,7 @@ s3_queue_put_task(Pointer data, uint32 len)
 	bool		slept = false;
 	uint32		totallen = len + sizeof(uint32);
 
-	Assert(totallen = INTALIGN(totallen));
+	Assert(totallen == INTALIGN(totallen));
 
 	/* Pick the insert location */
 	insertLocation = pg_atomic_fetch_add_u64(&s3_queue_meta->insertLocation, totallen);
