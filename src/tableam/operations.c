@@ -3019,13 +3019,17 @@ o_insert_with_arbiter_modify_callback(BTreeDescr *descr,
 									  void *arg)
 {
 	InsertOnConflictCallbackArg *ioc_arg = (InsertOnConflictCallbackArg *) arg;
+	bool		modified = false;
+
+	/*
+	 * Raises a serialization failure when the conflicting row is invisible to
+	 * our snapshot.  Needed for DO NOTHING too (no scanSlot).
+	 */
+	if (ioc_arg->conflictIxNum != InvalidIndexNumber)
+		modified = o_callback_is_modified(ioc_arg->oxid, ioc_arg->csn, xactInfo);
 
 	if (ioc_arg->scanSlot && ioc_arg->conflictIxNum != InvalidIndexNumber)
 	{
-		bool		modified;
-
-		modified = o_callback_is_modified(ioc_arg->oxid, ioc_arg->csn, xactInfo);
-
 		/* Updates current csn */
 		if (XACT_INFO_IS_FINISHED(xactInfo))
 		{
