@@ -61,6 +61,8 @@ typedef enum
 	OReadPageResultOk,
 	/* the page could not be read from the disk at all */
 	OReadPageResultIOError,
+	/* the file ended before the page did */
+	OReadPageResultShortRead,
 	/* the page was read, but its checksum didn't match */
 	OReadPageResultChecksumFailed
 } OReadPageResult;
