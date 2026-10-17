@@ -176,6 +176,7 @@ static void maybe_auto_upgrade_refresh(void);
 
 static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 								Relation rel);
+static bool sync_rewrite_missing_values(OTable *o_table, TupleDesc tupdesc);
 static void o_fill_new_slot(OTable *new_o_table, Relation rel, int attidx,
 							Node *expr, TupleTableSlot *old_slot,
 							TupleTableSlot *new_slot, TupleTableSlot *scan_slot);
@@ -2481,6 +2482,20 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 		OTable	   *old_o_tbl = o_tables_get(old_oids);
 
 		bridging = old_o_tbl ? old_o_tbl->index_bridging : false;
+		if (old_o_tbl != NULL &&
+			sync_rewrite_missing_values(old_o_tbl, RelationGetDescr(oldrel)))
+		{
+			OSnapshot	oSnapshot;
+			OXid		oxid;
+
+			fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+			o_tables_rel_meta_lock(oldrel);
+			o_indices_update(old_o_tbl, PrimaryIndexNumber, oxid, oSnapshot.csn);
+			o_tables_update(old_o_tbl, oxid, oSnapshot.csn);
+			o_tables_after_update(old_o_tbl, oxid, oSnapshot.csn);
+			o_tables_rel_meta_unlock(oldrel, InvalidOid);
+			orioledb_free_rd_amcache(oldrel);
+		}
 		o_table_free(old_o_tbl);
 	}
 	o_rewrite_bridging = bridging;
@@ -2507,6 +2522,16 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 	o_rewrite_primary_relnode = primary_relnode;
 
 	old_pk_oid = find_primary_index_oid(oldrel);
+	if (OidIsValid(old_pk_oid) && bridging)
+	{
+		Relation	oldpk = index_open(old_pk_oid, AccessShareLock);
+		OBTOptions *options = (OBTOptions *) oldpk->rd_options;
+
+		if (oldpk->rd_rel->relam != BTREE_AM_OID ||
+			(options && !options->orioledb_index))
+			old_pk_oid = InvalidOid;
+		index_close(oldpk, AccessShareLock);
+	}
 	o_rewrite_old_pk_oid = old_pk_oid;
 
 	if (OidIsValid(old_pk_oid))
@@ -2554,13 +2579,11 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 		 * maintains the bridge tree inline and stamps bridge_ctids;
 		 * finish_heap_swap_body then carries Btrans across the adoption.
 		 */
-		ORelOids	npk_oids;
 		OTable	   *o_table;
 		OSnapshot	oSnapshot;
 		OXid		oxid;
 
-		npk_oids = new_oids;
-		o_table = o_table_tableam_create(npk_oids, RelationGetDescr(newrel),
+		o_table = o_table_tableam_create(new_oids, RelationGetDescr(newrel),
 										 newrel->rd_rel->relpersistence,
 										 RelationGetFillFactor(newrel,
 															   BTREE_DEFAULT_FILLFACTOR),
@@ -2584,7 +2607,6 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 		o_tables_add(o_table, oxid, oSnapshot.csn);
 		o_tables_table_meta_unlock(NULL, InvalidOid);
 		o_table_free(o_table);
-		recreate_table_descr_by_oids(npk_oids);
 	}
 
 	/*
@@ -2718,9 +2740,50 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 	 */
 	o_skip_primary_ambuild = true;
 
-	recreate_table_descr_by_oids(old_oids);
 	orioledb_free_rd_amcache(oldrel);
 
+}
+
+/*
+ * PostgreSQL expects a table AM scan to expand attributes represented by
+ * pg_attribute.attmissingval.  OrioleDB stores the equivalent values in its
+ * OTable metadata, which can lag behind PostgreSQL for fast defaults.  A full
+ * rewrite materializes every column, so synchronize the source descriptor
+ * immediately before PostgreSQL scans it.
+ */
+static bool
+sync_rewrite_missing_values(OTable *o_table, TupleDesc tupdesc)
+{
+	AttrMissing *missing = tupdesc->constr ? tupdesc->constr->missing : NULL;
+	MemoryContext oldcxt;
+	bool		changed = false;
+	int			i;
+
+	Assert(o_table->nfields == tupdesc->natts);
+	oldcxt = MemoryContextSwitchTo(OGetTableContext(o_table));
+	for (i = 0; i < o_table->nfields; i++)
+	{
+		Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+		bool		present = attr->atthasmissing && missing != NULL &&
+			missing[i].am_present;
+
+		if (present &&
+			(!o_table->fields[i].hasmissing ||
+			 !o_table->missing[i].am_present ||
+			 !datumIsEqual(o_table->missing[i].am_value,
+						   missing[i].am_value,
+						   attr->attbyval, attr->attlen)))
+		{
+			o_table->fields[i].hasmissing = true;
+			o_table->missing[i].am_present = true;
+			o_table->missing[i].am_value =
+				datumCopy(missing[i].am_value, attr->attbyval, attr->attlen);
+			changed = true;
+		}
+	}
+	MemoryContextSwitchTo(oldcxt);
+
+	return changed;
 }
 
 static void

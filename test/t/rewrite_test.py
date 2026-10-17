@@ -3,6 +3,66 @@ import unittest
 
 
 class RewriteTest(BaseTest):
+
+	def test_fast_default_rewrite(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE DOMAIN o_rw_domain_constant AS int DEFAULT 11;
+			CREATE DOMAIN o_rw_domain_volatile AS int
+				DEFAULT random(min => 10, max => 100);
+			CREATE TABLE o_rw_fast_default(a o_rw_domain_constant)
+				USING orioledb;
+			INSERT INTO o_rw_fast_default VALUES (1), (2);
+			ALTER TABLE o_rw_fast_default
+				ADD COLUMN b o_rw_domain_constant DEFAULT 3;
+		""")
+		node.safe_psql("""
+			ALTER TABLE o_rw_fast_default
+				ADD COLUMN c text DEFAULT left(random()::text, 3);
+		""")
+		self.assertEqual(
+		    node.execute("""
+			SELECT a, b, length(c) = 3
+			FROM o_rw_fast_default ORDER BY a
+		"""), [(1, 3, True), (2, 3, True)])
+
+		node.safe_psql("""
+			ALTER TABLE o_rw_fast_default
+				ADD COLUMN d o_rw_domain_volatile;
+		""")
+		self.assertEqual(
+		    node.execute("""
+			SELECT a, b, length(c) = 3, d >= 10
+			FROM o_rw_fast_default ORDER BY a
+		"""), [(1, 3, True, True), (2, 3, True, True)])
+
+	@unittest.skipIf(BaseTest.get_pg_version() < 18,
+	                 "WITHOUT OVERLAPS requires PostgreSQL 18")
+	def test_rewrite_without_overlaps_primary(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_rw_temporal(
+				id int4range,
+				valid_at daterange,
+				CONSTRAINT o_rw_temporal_pk
+					PRIMARY KEY (id, valid_at WITHOUT OVERLAPS)
+			) USING orioledb;
+			ALTER TABLE o_rw_temporal
+				ALTER COLUMN valid_at TYPE tstzrange
+				USING tstzrange(lower(valid_at), upper(valid_at));
+		""")
+		self.assertEqual(
+		    node.execute("""
+			SELECT atttypid::regtype::text
+			FROM pg_attribute
+			WHERE attrelid = 'o_rw_temporal'::regclass
+				AND attname = 'valid_at'
+		"""), [('tstzrange', )])
+
 	# The native tableam rewrite (ALTER COLUMN TYPE on a non-bridged table,
 	# and CREATE/REFRESH MATERIALIZED VIEW) adopts the filled primary tree by
 	# creating it directly under the permanent relation identity and fresh
@@ -60,23 +120,22 @@ class RewriteTest(BaseTest):
 				self.assertEqual(
 				    replica.execute(
 				        f"{set_scan.format('off', 'on', 'on')} "
-				        "SELECT val_1, val_2 FROM o_rw_1 WHERE val_1 = 500;"
-				    ), [(500, 1000)])
+				        "SELECT val_1, val_2 FROM o_rw_1 WHERE val_1 = 500;"),
+				    [(500, 1000)])
 
 				# Secondary (val_2) lookup: data type is now bigint.
 				self.assertEqual(
 				    replica.execute(
 				        f"{set_scan.format('off', 'on', 'on')} "
-				        "SELECT val_1 FROM o_rw_1 WHERE val_2 = 1000;"
-				    ), [(500,)])
+				        "SELECT val_1 FROM o_rw_1 WHERE val_2 = 1000;"),
+				    [(500, )])
 
 				# Secondary (val_3) lookup unchanged.
 				self.assertEqual(
-				    replica.execute(
-				        f"{set_scan.format('off', 'on', 'on')} "
-				        "SELECT val_1, val_2 FROM o_rw_1 "
-				        "WHERE val_3 = 'test_data500';"
-				    ), [(500, 1000)])
+				    replica.execute(f"{set_scan.format('off', 'on', 'on')} "
+				                    "SELECT val_1, val_2 FROM o_rw_1 "
+				                    "WHERE val_3 = 'test_data500';"),
+				    [(500, 1000)])
 
 				# Row counts must match between master and replica.
 				self.assertEqual(
@@ -135,16 +194,16 @@ class RewriteTest(BaseTest):
 				self.assertEqual(
 				    replica.execute(
 				        f"{set_scan.format('off', 'on', 'on')} "
-				        "SELECT pk, j FROM o_rw_bridge WHERE pk = 500;"
-				    ), [(500, 1000)])
+				        "SELECT pk, j FROM o_rw_bridge WHERE pk = 500;"),
+				    [(500, 1000)])
 
 				# The bridged stock-PG btree index must read correctly on the
 				# replica through the carried bridge tree.
 				self.assertEqual(
 				    replica.execute(
 				        f"{set_scan.format('off', 'on', 'off')} "
-				        "SELECT pk FROM o_rw_bridge WHERE j = 1000;"
-				    ), [(500,)])
+				        "SELECT pk FROM o_rw_bridge WHERE j = 1000;"),
+				    [(500, )])
 
 				# Row counts must match between master and replica.
 				self.assertEqual(
@@ -156,8 +215,8 @@ class RewriteTest(BaseTest):
 				self.assertEqual(
 				    replica.execute(
 				        f"{set_scan.format('off', 'on', 'off')} "
-				        "SELECT count(*) FROM o_rw_bridge WHERE j > 0;"
-				    ), [(1000,)])
+				        "SELECT count(*) FROM o_rw_bridge WHERE j > 0;"),
+				    [(1000, )])
 
 	def test_replication_alter_type_bridged_no_pk(self):
 		"""
@@ -207,14 +266,14 @@ class RewriteTest(BaseTest):
 				self.assertEqual(
 				    replica.execute(
 				        f"{set_scan.format('off', 'on', 'off')} "
-				        "SELECT pk FROM o_rw_bridge_nopk WHERE j = 1000;"
-				    ), [(500,)])
+				        "SELECT pk FROM o_rw_bridge_nopk WHERE j = 1000;"),
+				    [(500, )])
 
 				self.assertEqual(
 				    master.execute(
 				        "SELECT count(*) FROM o_rw_bridge_nopk;")[0][0],
-				    replica.execute(
-				        "SELECT count(*) FROM o_rw_bridge_nopk;")[0][0])
+				    replica.execute("SELECT count(*) FROM o_rw_bridge_nopk;")
+				    [0][0])
 
 	def test_alter_type_no_pk_rollback(self):
 		node = self.node
@@ -230,19 +289,22 @@ class RewriteTest(BaseTest):
 		with node.connect() as con:
 			con.begin()
 			con.execute("ALTER TABLE o_rw_nopk ALTER v TYPE bigint")
-			self.assertEqual(con.execute(
-			    "SELECT v FROM o_rw_nopk WHERE v = 100"), [(100,)])
+			self.assertEqual(
+			    con.execute("SELECT v FROM o_rw_nopk WHERE v = 100"),
+			    [(100, )])
 			con.rollback()
 
-		self.assertEqual(node.execute("""
+		self.assertEqual(
+		    node.execute("""
 			SELECT atttypid::regtype::text
 			FROM pg_attribute
 			WHERE attrelid = 'o_rw_nopk'::regclass AND attname = 'v'
-		"""), [('integer',)])
-		self.assertEqual(node.execute("""
+		"""), [('integer', )])
+		self.assertEqual(
+		    node.execute("""
 			SET enable_seqscan = off;
 			SELECT k FROM o_rw_nopk WHERE v = 100
-		"""), [(50,)])
+		"""), [(50, )])
 
 	def test_vacuum_full(self):
 		node = self.node
@@ -259,10 +321,11 @@ class RewriteTest(BaseTest):
 		""")
 
 		node.safe_psql("VACUUM FULL o_rw_maintenance")
-		self.assertEqual(node.execute("""
+		self.assertEqual(
+		    node.execute("""
 			SET enable_seqscan = off;
 			SELECT k FROM o_rw_maintenance WHERE v = 950
-		"""), [(50,)])
+		"""), [(50, )])
 
 	def test_replication_refresh_matview(self):
 		"""
@@ -293,8 +356,9 @@ class RewriteTest(BaseTest):
 
 				# Add rows that should appear after refresh, then REFRESH drives
 				# make_new_heap -> native fill -> adoption on the master.
-				master.execute("INSERT INTO o_mv_src "
-				               "SELECT g, g * g FROM generate_series(101, 200) g;")
+				master.execute(
+				    "INSERT INTO o_mv_src "
+				    "SELECT g, g * g FROM generate_series(101, 200) g;")
 				master.execute("REFRESH MATERIALIZED VIEW o_mv_1 WITH DATA;")
 
 				self.catchup_orioledb(replica)
@@ -305,10 +369,9 @@ class RewriteTest(BaseTest):
 
 				# The refreshed matview on the replica must reflect the new rows.
 				self.assertEqual(
-				    replica.execute(
-				        f"{set_scan.format('off', 'on', 'on')} "
-				        "SELECT count(*) FROM o_mv_1;")[0][0], 200)
+				    replica.execute(f"{set_scan.format('off', 'on', 'on')} "
+				                    "SELECT count(*) FROM o_mv_1;")[0][0], 200)
 				self.assertEqual(
-				    replica.execute(
-				        f"{set_scan.format('off', 'on', 'on')} "
-				        "SELECT v FROM o_mv_1 WHERE k = 125;"), [(125 * 125,)])
+				    replica.execute(f"{set_scan.format('off', 'on', 'on')} "
+				                    "SELECT v FROM o_mv_1 WHERE k = 125;"),
+				    [(125 * 125, )])
