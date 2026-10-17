@@ -2391,12 +2391,16 @@ undo_it_next_page(BTreeDescr *desc, UndoIterator *undoIt)
 	else
 	{
 		/*
-		 * Same page found again.  Normally this means we are at a boundary
-		 * (rightmost or leftmost), but nested SplitDiff records can produce
-		 * rightmost=false && leftmost=false when the live page falls on
-		 * different sides of the split at different chain depths (e.g. right
-		 * at a recent SplitDiff, then left at an older one).  Returning false
-		 * is correct: the caller falls back to undo_it_switch or the next
+		 * Same page found again: there are no more pages in this direction,
+		 * even if neither rightmost nor leftmost is set.  The flags only say
+		 * that another page may exist.  A SplitDiff record reports the side
+		 * of the split the live page is on, which keeps the two halves' image
+		 * locations distinct, yet its image never extends beyond the live
+		 * page's key range.  So a left half clears rightmost and a right half
+		 * clears leftmost with nothing beyond them.  The other flag gets
+		 * cleared by another record down the chain: an older SplitDiff that
+		 * the page is on the other side of, or a Merge whose other half we
+		 * moved to.  The caller falls back to undo_it_switch() or the next
 		 * data page.
 		 */
 		return false;
