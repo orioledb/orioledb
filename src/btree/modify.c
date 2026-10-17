@@ -90,6 +90,8 @@ BTreeModifyCallbackInfo nullCallbackInfo =
 	.arg = NULL
 };
 
+extern bool dbg1384_enabled(void);
+
 static const LOCKMODE hwLockModes[] = {AccessShareLock, RowShareLock, ExclusiveLock, AccessExclusiveLock};
 
 static void unlock_release(BTreeModifyInternalContext *context, bool unlock);
@@ -178,6 +180,8 @@ retry:
 	 */
 	context.lockStatus = BTreeModifyNoLock;
 	context.haveRedundantRowLocks = false;
+	if (dbg1384_enabled())
+		elog(LOG, "DBG1384 retry hwLockMode %d lockMode %d action %d", context.hwLockMode, context.lockMode, action);
 
 	/*
 	 * Keep the modify retry loop interruptible.  A row-lock conflict against
@@ -487,10 +491,20 @@ wait_for_tuple(BTreeDescr *desc, uint32 tupleHash, OXid oxid,
 						  0);
 		*hwLockMode = hwLockModes[lockMode];
 
+		if (dbg1384_enabled())
+			elog(LOG, "DBG1384 hwlock acquire mode %d lockMode %d hash %u", *hwLockMode, lockMode, tupleHash);
 		(void) LockAcquire(hwLockTag, *hwLockMode, false, false);
+		if (dbg1384_enabled())
+			elog(LOG, "DBG1384 hwlock acquired");
 	}
+	else if (dbg1384_enabled())
+		elog(LOG, "DBG1384 hwlock skip held %d lockStatus %d lockMode %d", *hwLockMode, lockStatus, lockMode);
 
+	if (dbg1384_enabled())
+		elog(LOG, "DBG1384 wait oxid " UINT64_FORMAT " (my " UINT64_FORMAT ")", (uint64) oxid, (uint64) get_current_oxid_if_any());
 	wait_for_oxid(oxid, false);
+	if (dbg1384_enabled())
+		elog(LOG, "DBG1384 woke from oxid " UINT64_FORMAT, (uint64) oxid);
 }
 
 /*
