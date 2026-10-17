@@ -1635,6 +1635,8 @@ BEGIN
     PERFORM pg_terminate_backend(pid)
        FROM pg_stat_activity WHERE backend_type = 'autovacuum worker';
     PERFORM pg_sleep(0.1);
+    -- pg_stat_activity is read once per transaction: refresh it
+    PERFORM pg_stat_clear_snapshot();
   END LOOP;
 END;
 $$;
