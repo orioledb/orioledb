@@ -138,6 +138,29 @@ class DatabaseTemplateTest(BaseTest):
 		return sorted(name for name in os.listdir(data_root)
 		              if os.path.isdir(os.path.join(data_root, name)))
 
+	def test_create_table_in_template1_after_database_copy(self):
+		with self.node as node:
+			node.start()
+			node.safe_psql("template1", "CREATE EXTENSION orioledb")
+			node.safe_psql(
+			    "CREATE DATABASE template_copy STRATEGY WAL_LOG TEMPLATE template1"
+			)
+			node.safe_psql("template1",
+			               "CREATE TABLE o_test (id integer PRIMARY KEY)")
+			node.safe_psql("CHECKPOINT")
+			node.stop(['-m', 'immediate'])
+			node.start()
+			self.assertEqual(
+			    [(1, )],
+			    node.execute(
+			        "template1",
+			        "SELECT count(*) FROM pg_class WHERE relname = 'o_test'"))
+			self.assertEqual(
+			    [(0, )],
+			    node.execute(
+			        "template_copy",
+			        "SELECT count(*) FROM pg_class WHERE relname = 'o_test'"))
+
 	def test_create_database_template_failure_cleans_orioledb_data(self):
 		with self.node as master:
 			master.append_conf("orioledb.enable_stopevents = true\n")

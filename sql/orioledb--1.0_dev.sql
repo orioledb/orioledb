@@ -19,3 +19,8 @@ CREATE FUNCTION s3_put(objectname text, filename text)
 RETURNS text
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_flush_local_wal()
+RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
