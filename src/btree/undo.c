@@ -2186,7 +2186,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 		elog(LOG, "DBG1384 rlc start mode %d my " UINT64_FORMAT " retained " UINT64_FORMAT " page oxid " UINT64_FORMAT " lo %d m %d next " UINT64_FORMAT " chl %d",
 			 mode, (uint64) my_oxid, (uint64) retainedUndoLocation,
 			 (uint64) XACT_INFO_GET_OXID(curTuphdr.xactInfo), XACT_INFO_IS_LOCK_ONLY(curTuphdr.xactInfo) ? 1 : 0,
-			 XACT_INFO_GET_LOCK_MODE(curTuphdr.xactInfo), (uint64) curTuphdr.undoLocation, curTuphdr.chainHasLocks ? 1 : 0);
+			 (int) XACT_INFO_GET_LOCK_MODE(curTuphdr.xactInfo), (uint64) curTuphdr.undoLocation, curTuphdr.chainHasLocks ? 1 : 0);
 	finalTuphdr = curTuphdr;
 	finalUndoLocation = curUndoLocation = InvalidUndoLocation;
 	lastLockOnlyUndoLocation = InvalidUndoLocation;
