@@ -283,6 +283,7 @@ jobs:
             ./orioledb/test/tmp_check/log/*log
             ./orioledb/test/tmp_check_iso/log/*log
             ./orioledb/test/log/*.log
+            ./orioledb/test/output_iso/log/*.log
             ./postgresql/pg.log
             ./postgresql/rep_pg.log
             ./postgresql/src/test/**/tmp_check/*.dump
