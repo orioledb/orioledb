@@ -1250,6 +1250,8 @@ fsync_xidmap_range(OXid xmin, OXid xmax, uint32 wait_event_info)
 				   wait_event_info);
 }
 
+extern bool dbg1384_enabled(void);
+
 /*
  * Wait particular oxid to finish or oxid_notify() call.  Returns true if
  * oxid was finished.
@@ -1289,9 +1291,13 @@ wait_for_oxid(OXid oxid, bool errorOk)
 		return true;
 	}
 
+	if (dbg1384_enabled())
+		elog(LOG, "DBG1384 vxid wait oxid " UINT64_FORMAT " procnum %d level %d vxid %d/%u", (uint64) oxid, procnum, (int) COMMITSEQNO_GET_LEVEL(csn), (int) vxid.BACKENDID, vxid.localTransactionId);
 	GET_CUR_PROCDATA()->waitingForOxid = true;
 	result = VirtualXactLock(vxid, true);
 	GET_CUR_PROCDATA()->waitingForOxid = false;
+	if (dbg1384_enabled())
+		elog(LOG, "DBG1384 vxid wait done %d", result);
 
 	return result;
 }
@@ -1465,6 +1471,8 @@ oxid_notify_all(void)
 	}
 
 	LWLockRelease(partitionLock);
+	if (dbg1384_enabled())
+		elog(LOG, "DBG1384 notify_all woke %d", list_length(procs));
 	VirtualXactLock(vxid, true);
 
 	list_free(procs);

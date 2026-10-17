@@ -26,10 +26,45 @@ pass_banner () { [ "$REPEATS" = 1 ] || echo "=== $1: pass $2 of $REPEATS ==="; }
 
 cd orioledb
 if [ $CHECK_TYPE = "valgrind_1" ]; then
-	for pass in $(seq 1 "$REPEATS"); do
-		pass_banner valgrind_1 "$pass"
-	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 regresscheck isolationcheck testgrescheck_part_1 -j $(nproc) || status=$?
+	# DBG #1381: loop rll_deadlock under the usual valgrind_1 load until it
+	# reports a deadlock or the time budget runs out.  Only the first load
+	# pass installs; later passes and the loop reuse tmp_install, which a
+	# temp-install would delete under a running test.
+	deadline=$(( $(date +%s) + ${RLL_MINUTES:-120} * 60 ))
+	(
+		make USE_PGXS=1 IS_DEV=1 VALGRIND=1 regresscheck testgrescheck_part_1 -j $(nproc) > /tmp/load.log 2>&1 || true
+		while [ $(date +%s) -lt $deadline ]; do
+			make USE_PGXS=1 IS_DEV=1 VALGRIND=1 NO_INSTALL=1 NO_TEMP_INSTALL=1 regresscheck testgrescheck_part_1 -j $(nproc) > /tmp/load2.log 2>&1 || true
+		done
+	) &
+	loadpid=$!
+	t0=$(date +%s)
+	until grep -q "+++ regress check" /tmp/load.log 2>/dev/null; do
+		[ $(( $(date +%s) - t0 )) -gt 1200 ] && { echo "load did not start"; cat /tmp/load.log; break; }
+		sleep 5
 	done
+	n=0
+	other=0
+	while [ $(date +%s) -lt $deadline ]; do
+		n=$((n + 1))
+		make USE_PGXS=1 IS_DEV=1 VALGRIND=1 NO_INSTALL=1 NO_TEMP_INSTALL=1 isolationcheck ISOLATIONCHECKS="rll_deadlock" > /tmp/iso.log 2>&1 && continue
+		if grep -q "deadlock detected" test/output_iso/results/rll_deadlock.out 2>/dev/null; then
+			echo "=== DEADLOCK CAUGHT on iteration $n"
+			status=1
+			break
+		fi
+		other=$((other + 1))
+		echo "=== rll_deadlock failed without a deadlock on iteration $n"
+		tail -20 /tmp/iso.log
+		[ -f test/output_iso/regression.diffs ] && head -60 test/output_iso/regression.diffs
+	done
+	echo "=== rll_deadlock iterations: $n, other failures: $other"
+	kill $loadpid 2>/dev/null || true
+	pkill -f "regresscheck testgrescheck_part_1" 2>/dev/null || true
+	pkill -f pg_regress 2>/dev/null || true
+	pkill -f "unittest -v test/t/" 2>/dev/null || true
+	sleep 5
+	pkill -9 -f "valgrind.bin" 2>/dev/null || true
 elif [ $CHECK_TYPE = "valgrind_2" ]; then
 	for pass in $(seq 1 "$REPEATS"); do
 		pass_banner valgrind_2 "$pass"

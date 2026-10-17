@@ -12,6 +12,7 @@
  *-------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "utils/guc.h"
 
 #include "orioledb.h"
 
@@ -2145,6 +2146,15 @@ clean_chain_has_locks_flag(UndoLogType undoType, UndoLocation location,
  * Lock-only undo records from committed and aborted transactions are removed.
  * Own lock-only undo records of the same or weaker level are removed.
  */
+
+/* DBG1384: trace row-lock walks of the rll_deadlock sessions only */
+bool		dbg1384_enabled(void);
+bool
+dbg1384_enabled(void)
+{
+	return application_name && strstr(application_name, "rll_deadlock") != NULL;
+}
+
 bool
 row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				   BTreeLeafTuphdr *conflictTuphdr,
@@ -2172,6 +2182,11 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 
 	curTuphdr = *pageTuphdr;
 	lock_chain_resolve(undoType, &curTuphdr, &curLink);
+	if (dbg1384_enabled())
+		elog(LOG, "DBG1384 rlc start mode %d my " UINT64_FORMAT " retained " UINT64_FORMAT " page oxid " UINT64_FORMAT " lo %d m %d next " UINT64_FORMAT " chl %d",
+			 mode, (uint64) my_oxid, (uint64) retainedUndoLocation,
+			 (uint64) XACT_INFO_GET_OXID(curTuphdr.xactInfo), XACT_INFO_IS_LOCK_ONLY(curTuphdr.xactInfo) ? 1 : 0,
+			 (int) XACT_INFO_GET_LOCK_MODE(curTuphdr.xactInfo), (uint64) curTuphdr.undoLocation, curTuphdr.chainHasLocks ? 1 : 0);
 	finalTuphdr = curTuphdr;
 	finalUndoLocation = curUndoLocation = InvalidUndoLocation;
 	lastLockOnlyUndoLocation = InvalidUndoLocation;
@@ -2306,6 +2321,10 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 					*conflictTuphdr = finalTuphdr;
 					*conflictUndoLocation = finalUndoLocation;
 				}
+				if (dbg1384_enabled())
+
+					elog(LOG, "DBG1384 rlc end %d result %d status %d conflict oxid " UINT64_FORMAT, 1, result, *lock_status, (uint64) XACT_INFO_GET_OXID(conflictTuphdr->xactInfo));
+
 				return result;
 			}
 			newTuphdr = curTuphdr;
@@ -2385,6 +2404,10 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				*conflictTuphdr = finalTuphdr;
 				*conflictUndoLocation = finalUndoLocation;
 			}
+			if (dbg1384_enabled())
+
+				elog(LOG, "DBG1384 rlc end %d result %d status %d conflict oxid " UINT64_FORMAT, 2, result, *lock_status, (uint64) XACT_INFO_GET_OXID(conflictTuphdr->xactInfo));
+
 			return result;
 		}
 
@@ -2410,6 +2433,10 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 					*conflictTuphdr = finalTuphdr;
 					*conflictUndoLocation = finalUndoLocation;
 				}
+				if (dbg1384_enabled())
+
+					elog(LOG, "DBG1384 rlc end %d result %d status %d conflict oxid " UINT64_FORMAT, 3, result, *lock_status, (uint64) XACT_INFO_GET_OXID(conflictTuphdr->xactInfo));
+
 				return result;
 			}
 		}
@@ -2428,6 +2455,11 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			xactIsFinal = (csn < my_csn);
 		}
 		undoLocation = curTuphdr.undoLocation;
+		if (dbg1384_enabled())
+			elog(LOG, "DBG1384 rlc rec at " UINT64_FORMAT " oxid " UINT64_FORMAT " lo %d m %d next " UINT64_FORMAT " chl %d final %d",
+				 (uint64) curUndoLocation, (uint64) XACT_INFO_GET_OXID(xactInfo),
+				 XACT_INFO_IS_LOCK_ONLY(xactInfo) ? 1 : 0, xactMode,
+				 (uint64) undoLocation, curTuphdr.chainHasLocks ? 1 : 0, xactIsFinal ? 1 : 0);
 
 		if (prevChainHasLocks &&
 			!curTuphdr.chainHasLocks &&
@@ -2457,6 +2489,10 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 		*conflictTuphdr = finalTuphdr;
 		*conflictUndoLocation = finalUndoLocation;
 	}
+	if (dbg1384_enabled())
+
+		elog(LOG, "DBG1384 rlc end %d result %d status %d conflict oxid " UINT64_FORMAT, 4, result, *lock_status, (uint64) XACT_INFO_GET_OXID(conflictTuphdr->xactInfo));
+
 	return result;
 }
 

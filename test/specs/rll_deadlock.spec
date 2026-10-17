@@ -16,6 +16,7 @@ teardown
 }
 
 session s1
+setup { SET log_statement = 'all'; }
 step "begin_1" { BEGIN; }
 step "key_share_1" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR KEY SHARE;}
 step "share_1" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR SHARE; }
@@ -29,6 +30,7 @@ step "rollback_1" { ROLLBACK; }
 step "commit_1" { COMMIT; }
 
 session s2
+setup { SET log_statement = 'all'; }
 step "begin_2" { BEGIN; }
 step "forkeyshare_2" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR KEY SHARE; }
 step "fornokeyupd_2" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR NO KEY UPDATE; }
@@ -36,6 +38,7 @@ step "for_update_2" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR UPDATE; }
 step "rollback_2" { ROLLBACK; }
 
 session s3
+setup { SET log_statement = 'all'; }
 step "begin_3" { BEGIN; }
 step "key_share_3" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR KEY SHARE; }
 step "share_3" { SELECT val_1 FROM o_test_1 WHERE val_1 = 1 FOR SHARE; }
