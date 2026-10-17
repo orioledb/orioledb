@@ -382,6 +382,18 @@ o_tables_rel_meta_unlock(Relation rel, Oid oldRelnode)
 		ORelOids	oids;
 
 		ORelOidsSetFromRel(oids, rel);
+
+		/*
+		 * During a native heap rewrite the catalog maps the transient new
+		 * heap's OID (rel->oid) to a freshly allocated relfilenode Rnew, but
+		 * the OTable that owns the fill lives at the adopted permanent
+		 * identity (oldrel_oid, Rnew).  Redirect the META_UNLOCK WAL record's
+		 * oids to that identity so standby reconciliation (which looks up the
+		 * OTable by these oids) finds the surviving table rather than the
+		 * transient heap that is dropped after the swap.
+		 */
+		if (OidIsValid(rel->rd_rel->relrewrite))
+			oids.reloid = rel->rd_rel->relrewrite;
 		o_tables_meta_unlock(oids, oldRelnode);
 	}
 	else
@@ -406,11 +418,24 @@ o_tables_table_meta_unlock(OTable *o_table, Oid oldRelnode)
 		o_tables_meta_unlock_no_wal();
 }
 
-extern Oid	o_saved_relrewrite;
 extern List *o_reuse_indices;
+
+/*
+ * Set by orioledb_finish_heap_swap_body around the post-swap reindex so that
+ * orioledb_ambuild no-ops the already-adopted primary while PG's
+ * reindex_relation builds the secondaries.
+ */
+extern bool o_skip_primary_ambuild;
 
 extern void redefine_pkey_for_rel(Relation rel);
 
 extern bool destroy_tablespace_directories(Oid tablespaceoid, bool redo);
+extern void orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel);
+extern void orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
+										   bool swap_toast_by_content,
+										   bool is_internal,
+										   TransactionId frozenXid,
+										   MultiXactId cutoffMulti,
+										   char newrelpersistence);
 
 #endif							/* __O_TABLES_H__ */
