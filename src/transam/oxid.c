@@ -1293,7 +1293,38 @@ wait_for_oxid(OXid oxid, bool errorOk)
 	result = VirtualXactLock(vxid, true);
 	GET_CUR_PROCDATA()->waitingForOxid = false;
 
+	/*
+	 * oxid_notify_all() lets us go while the transaction is still running, so
+	 * the lock alone does not say it has finished.  It has once its vxid slot
+	 * no longer holds it.
+	 */
+	pg_read_barrier();
+	if (result && vxidElem->oxid == oxid)
+		result = false;
+
 	return result;
+}
+
+/*
+ * Let a backend waiting in wait_for_oxid() for our transaction go while the
+ * transaction goes on.  Wake it the way ProcLockWakeup() wakes a waiter:
+ * grant it the lock it waits for.  It only takes the ShareLock on our vxid
+ * to release it straight away, and wait_for_oxid() then sees our
+ * transaction still running.
+ *
+ * Not RemoveFromWaitQueue(): that marks the waiter a deadlock victim
+ * (PROC_WAIT_STATUS_ERROR), and the waiter reads its status without the
+ * partition lock.  One that is awake before we overwrite the status reports
+ * a deadlock nobody detected, with no cycle in the detail.
+ *
+ * The caller holds the lock's partition lock.
+ */
+static void
+wake_oxid_waiter(PGPROC *proc)
+{
+	Assert(proc->waitStatus == PROC_WAIT_STATUS_WAITING);
+	GrantLock(proc->waitLock, proc->waitProcLock, proc->waitLockMode);
+	ProcWakeup(proc, PROC_WAIT_STATUS_OK);
 }
 
 /*
@@ -1346,9 +1377,7 @@ oxid_notify(OXid oxid)
 		 * unlocked only by this code.
 		 */
 		LWLockAcquire(partitionLock, LW_EXCLUSIVE);
-		RemoveFromWaitQueue(proc, hashcode);
-		proc->waitStatus = PROC_WAIT_STATUS_OK;
-		SetLatch(&proc->procLatch);
+		wake_oxid_waiter(proc);
 
 		LWLockRelease(partitionLock);
 	}
@@ -1459,9 +1488,8 @@ oxid_notify_all(void)
 	foreach(lc, procs)
 	{
 		proc = lfirst(lc);
-		RemoveFromWaitQueue(proc, hashcode);
-		proc->waitStatus = PROC_WAIT_STATUS_OK;
-		SetLatch(&proc->procLatch);
+		wake_oxid_waiter(proc);
+		STOPEVENT(STOPEVENT_OXID_NOTIFY_WOKE, NULL);
 	}
 
 	LWLockRelease(partitionLock);
