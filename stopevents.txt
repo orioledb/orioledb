@@ -56,3 +56,4 @@ enum_cache_after_delete_all
 recreate_table_descr
 before_split_fix_left_lock
 split_fix_before_downlink
+oxid_notify_woke
