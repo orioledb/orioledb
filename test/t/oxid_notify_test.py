@@ -20,12 +20,18 @@ class OxidNotifyTest(BaseTest):
 
 		Park the notifier right after it has let the waiter go, and wake
 		the waiter with a procsignal.  The waiter must carry on waiting for
-		the row, and get it once the notifier's transaction is over.
+		the row, and get it once the notifier's transaction is over.  Only
+		PostgreSQL 18 could fail here: before it, ProcSleep() returned the
+		status read again under the partition lock, after the notifier had
+		overwritten it.
 
-		The notifier is parked holding a lock manager partition lock, so
-		while it is parked the test only uses a connection opened in
-		advance and queries that take no heavyweight lock in that
-		partition: opening a connection or reading pg_locks can block.
+		The notifier is parked holding a lock manager partition lock.  Any
+		heavyweight lock that goes to the main lock table may hash to that
+		partition and block: opening a connection, reading pg_locks, or
+		planning a query on pg_stat_activity, which opens indexes of shared
+		catalogs.  So while it is parked the test only calls functions over
+		a connection opened in advance, and runs each of those queries once
+		beforehand to have the caches warm.
 		"""
 		node = self.node
 		node.append_conf('postgresql.conf',
@@ -53,20 +59,28 @@ class OxidNotifyTest(BaseTest):
 		notifier.execute(
 		    "SELECT id FROM o_oxid_notify WHERE id = 1 FOR SHARE;")
 
+		waits_on = ("SELECT coalesce(wait_event_type, '') "
+		            "FROM pg_stat_get_activity(%d);" % waiter_pid)
+		parked = ("SELECT count(*) > 0 FROM pg_stopevents() "
+		          "WHERE waiter_pids @> ARRAY[%d];" % notifier_pid)
+		control.execute(waits_on)
+		control.execute(parked)
+		control.execute("SELECT pg_log_backend_memory_contexts(%d);" %
+		                waiter_pid)
+		control.execute("SELECT pg_stopevent_reset('oxid_notify_woke');")
+
 		t_waiter = ThreadQueryExecutor(
 		    waiter, "SELECT id FROM o_oxid_notify WHERE id = 1 FOR UPDATE;")
 		t_waiter.start()
-		self.wait_until(
-		    control, "SELECT wait_event_type = 'Lock' "
-		    "FROM pg_stat_activity WHERE pid = %d;" % waiter_pid)
+		while control.execute(waits_on)[0][0] != 'Lock':
+			time.sleep(0.05)
 
 		control.execute("SELECT pg_stopevent_set('oxid_notify_woke', "
 		                "'$applicationName == \"oxid_notifier\"');")
 		t_notifier = ThreadQueryExecutor(notifier, "ROLLBACK TO SAVEPOINT s;")
 		t_notifier.start()
-		self.wait_until(
-		    control, "SELECT EXISTS (SELECT 1 FROM pg_stopevents() "
-		    "WHERE waiter_pids @> ARRAY[%d]);" % notifier_pid)
+		while not control.execute(parked)[0][0]:
+			time.sleep(0.05)
 
 		# Make sure the waiter is awake and looks at its wait status while
 		# the notifier is parked.  It either fails at once -- the bug -- or
@@ -74,9 +88,7 @@ class OxidNotifyTest(BaseTest):
 		control.execute("SELECT pg_log_backend_memory_contexts(%d);" %
 		                waiter_pid)
 		while t_waiter.is_alive():
-			if control.execute("SELECT wait_event_type = 'LWLock' "
-			                   "FROM pg_stat_activity WHERE pid = %d;" %
-			                   waiter_pid)[0][0]:
+			if control.execute(waits_on)[0][0] == 'LWLock':
 				break
 			time.sleep(0.05)
 
@@ -96,7 +108,3 @@ class OxidNotifyTest(BaseTest):
 		notifier.close()
 		waiter.close()
 		node.stop()
-
-	def wait_until(self, con, query):
-		while not con.execute(query)[0][0]:
-			time.sleep(0.05)
