@@ -3894,6 +3894,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		o_tables_table_meta_lock(NULL);
 		o_tables_drop_all(oxid, oSnapshot.csn, objectId);
 		o_tables_table_meta_unlock(NULL, InvalidOid);
+		o_sys_caches_delete_datoid(objectId);
 
 		dropped_database_oid = objectId;
 	}

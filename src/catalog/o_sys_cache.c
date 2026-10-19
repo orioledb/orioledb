@@ -1558,6 +1558,92 @@ o_sys_caches_delete_by_lsn(XLogRecPtr checkPointRedo)
 	}
 }
 
+static OSysCacheKey *
+copy_sys_cache_key(OSysCache *sys_cache, OSysCacheKey *key)
+{
+	Size		key_len;
+	OSysCacheKey *copy;
+
+	key_len = offsetof(OSysCacheKey, keys) +
+		sizeof(Datum) * sys_cache->nkeys + key->common.dataLength;
+	copy = palloc(key_len);
+	memcpy(copy, key, key_len);
+	return copy;
+}
+
+static void
+o_sys_cache_delete_datoid(OSysCache *sys_cache, Oid datoid)
+{
+	BTreeDescr *td = get_sys_tree(sys_cache->sys_tree_num);
+	BTreeIterator *it;
+	OSysCacheKey *pending = NULL;
+
+	it = o_btree_iterator_create(td, NULL, BTreeKeyNone,
+								 &o_in_progress_snapshot, ForwardScanDirection);
+	do
+	{
+		bool		end;
+		OTuple		tup;
+		OSysCacheKey *key;
+
+		tup = btree_iterate_raw(it, NULL, BTreeKeyNone, false, &end, NULL);
+		if (O_TUPLE_IS_NULL(tup))
+		{
+			if (end)
+				break;
+			continue;
+		}
+
+		if (sys_cache->is_toast)
+		{
+			OSysCacheToastChunkKey *chunk_key;
+
+			chunk_key = (OSysCacheToastChunkKey *) tup.data;
+			if (chunk_key->common.chunknum != 0)
+				continue;
+			key = &chunk_key->sys_cache_key;
+		}
+		else
+			key = (OSysCacheKey *) tup.data;
+
+		if (key->common.datoid != datoid)
+			continue;
+
+		if (pending != NULL &&
+			o_sys_cache_key_cmp(sys_cache, sys_cache->nkeys,
+							pending, key) != 0)
+		{
+			if (!pending->common.deleted)
+				(void) o_sys_cache_delete(sys_cache, pending);
+			pfree(pending);
+			pending = NULL;
+		}
+
+		if (pending != NULL)
+			pfree(pending);
+		pending = copy_sys_cache_key(sys_cache, key);
+	} while (true);
+
+	if (pending != NULL)
+	{
+		if (!pending->common.deleted)
+			(void) o_sys_cache_delete(sys_cache, pending);
+		pfree(pending);
+	}
+	btree_iterator_free(it);
+}
+
+void
+o_sys_caches_delete_datoid(Oid datoid)
+{
+	HASH_SEQ_STATUS hash_seq;
+	OCacheIdMapEntry *entry;
+
+	hash_seq_init(&hash_seq, sys_caches);
+	while ((entry = (OCacheIdMapEntry *) hash_seq_search(&hash_seq)) != NULL)
+		o_sys_cache_delete_datoid(entry->sys_cache, datoid);
+}
+
 
 static BTreeDescr *
 oSysCacheToastGetBTreeDesc(void *arg)
