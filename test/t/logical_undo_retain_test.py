@@ -379,6 +379,9 @@ class LogicalUndoRetainTest(BaseTest):
 			# the slot without waiting for catchup across multiple
 			# sync cycles with exponential backoff.
 			self.catchup_orioledb(replica)
+			# Wake the slotsync worker from its exponential backoff
+			# sleep so it retries immediately with WAL already caught up.
+			replica.safe_psql('postgres', 'SELECT pg_reload_conf()')
 			replica.poll_query_until(
 			    f"SELECT EXISTS (SELECT 1 FROM pg_replication_slots "
 			    f"WHERE slot_name = '{SLOT}' AND synced AND NOT temporary);",
