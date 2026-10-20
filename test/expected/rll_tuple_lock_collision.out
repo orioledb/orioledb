@@ -1,0 +1,90 @@
+Parsed test spec with 4 sessions
+
+starting permutation: begin_1 begin_3 ks_1_211 ks_1_9660 fu_3_211 begin_2 ks_2_211 fu_2_9660 rb_1 rb_2 rb_3
+step begin_1: BEGIN;
+step begin_3: BEGIN;
+step ks_1_211: SELECT id FROM o_hwlock WHERE id = 211 FOR KEY SHARE;
+ id
+---
+211
+(1 row)
+
+step ks_1_9660: SELECT id FROM o_hwlock WHERE id = 9660 FOR KEY SHARE;
+  id
+----
+9660
+(1 row)
+
+step fu_3_211: SELECT id FROM o_hwlock WHERE id = 211 FOR UPDATE; <waiting ...>
+step begin_2: BEGIN;
+step ks_2_211: SELECT id FROM o_hwlock WHERE id = 211 FOR KEY SHARE;
+ id
+---
+211
+(1 row)
+
+step fu_2_9660: SELECT id FROM o_hwlock WHERE id = 9660 FOR UPDATE; <waiting ...>
+step rb_1: ROLLBACK;
+step fu_2_9660: <... completed>
+  id
+----
+9660
+(1 row)
+
+step rb_2: ROLLBACK;
+step fu_3_211: <... completed>
+ id
+---
+211
+(1 row)
+
+step rb_3: ROLLBACK;
+
+starting permutation: begin_1 begin_3 begin_4 ks_4_211 ks_1_1 ks_3_9660 fu_3_1 begin_2 fu_2_9660 fu_1_211 rb_4 rb_1 rb_3 rb_2
+step begin_1: BEGIN;
+step begin_3: BEGIN;
+step begin_4: BEGIN;
+step ks_4_211: SELECT id FROM o_hwlock WHERE id = 211 FOR KEY SHARE;
+ id
+---
+211
+(1 row)
+
+step ks_1_1: SELECT id FROM o_hwlock WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step ks_3_9660: SELECT id FROM o_hwlock WHERE id = 9660 FOR KEY SHARE;
+  id
+----
+9660
+(1 row)
+
+step fu_3_1: SELECT id FROM o_hwlock WHERE id = 1 FOR UPDATE; <waiting ...>
+step begin_2: BEGIN;
+step fu_2_9660: SELECT id FROM o_hwlock WHERE id = 9660 FOR UPDATE; <waiting ...>
+step fu_1_211: SELECT id FROM o_hwlock WHERE id = 211 FOR UPDATE; <waiting ...>
+step rb_4: ROLLBACK;
+step fu_1_211: <... completed>
+ id
+---
+211
+(1 row)
+
+step rb_1: ROLLBACK;
+step fu_3_1: <... completed>
+id
+--
+ 1
+(1 row)
+
+step rb_3: ROLLBACK;
+step fu_2_9660: <... completed>
+  id
+----
+9660
+(1 row)
+
+step rb_2: ROLLBACK;
