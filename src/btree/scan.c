@@ -1729,7 +1729,7 @@ page_fully_in_scan_range(BTreeSeqScan *scan, OTuple keyRangeLow,
  * Returns:
  *   -1 if the tuple is before the scan range (skip it)
  *    0 if the tuple is within the scan range (return it)
- *    1 if the tuple is after the scan range (scan is done)
+ *    1 if the tuple is after the scan range (see seq_scan_past_range())
  *
  * Inclusivity is encoded in OBTreeValueBound.flags, and o_btree_cmp
  * incorporates it into the comparison result automatically.
@@ -1790,6 +1790,27 @@ tuple_in_scan_range(BTreeSeqScan *scan, OTuple tuple)
 		return 1;
 
 	return 0;
+}
+
+/*
+ * Called when tuple_in_scan_range() returns 1.  An ordered scan reads its
+ * leaves in key order, so it is finished.  An unordered scan reads on-disk
+ * leaves after the in-memory ones, in file order, so later leaves can still
+ * hold keys in the range: drop the rest of the current leaf and its
+ * historical image, and return false.
+ */
+static bool
+seq_scan_past_range(BTreeSeqScan *scan)
+{
+	if (scan->ordered)
+	{
+		scan->status = BTreeSeqScanFinished;
+		return true;
+	}
+
+	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
+	scan->haveHistImg = false;
+	return false;
 }
 
 /*
@@ -3107,10 +3128,12 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 						continue;	/* tuple before scan range, skip */
 					if (rangeCheck == 1)
 					{
-						/* tuple past scan range, scan is done */
-						scan->status = BTreeSeqScanFinished;
-						O_TUPLE_SET_NULL(tuple);
-						return tuple;
+						if (seq_scan_past_range(scan))
+						{
+							O_TUPLE_SET_NULL(tuple);
+							return tuple;
+						}
+						continue;
 					}
 				}
 				if (hint)
@@ -3219,10 +3242,12 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 					continue;	/* tuple before scan range, skip */
 				if (rangeCheck == 1)
 				{
-					/* tuple past scan range, scan is done */
-					scan->status = BTreeSeqScanFinished;
-					O_TUPLE_SET_NULL(tuple);
-					return tuple;
+					if (seq_scan_past_range(scan))
+					{
+						O_TUPLE_SET_NULL(tuple);
+						return tuple;
+					}
+					continue;
 				}
 			}
 			if (hint)
