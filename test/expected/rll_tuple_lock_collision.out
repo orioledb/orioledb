@@ -88,3 +88,61 @@ step fu_2_9660: <... completed>
 (1 row)
 
 step rb_2: ROLLBACK;
+
+starting permutation: begin_1 begin_3 ks_1_small8 fu_3_small8 show_tag rb_1 rb_3 begin_1 begin_3 ks_1_large8 fu_3_large8 show_tag rb_1 rb_3
+step begin_1: BEGIN;
+step begin_3: BEGIN;
+step ks_1_small8: SELECT id FROM o_hwlock8 WHERE id = 5000000000000 FOR KEY SHARE;
+           id
+-------------
+5000000000000
+(1 row)
+
+step fu_3_small8: SELECT id FROM o_hwlock8 WHERE id = 5000000000000 FOR UPDATE; <waiting ...>
+step show_tag: 
+	SELECT CASE WHEN tuple & 32768 <> 0
+				THEN 'key ' || ((tuple & 32767)::bigint << 32 | (page::bigint & 4294967295))
+				ELSE 'hash' END AS tuple_lock_id
+	FROM pg_locks WHERE locktype = 'tuple' AND granted;
+
+tuple_lock_id    
+-----------------
+key 5000000000000
+(1 row)
+
+step rb_1: ROLLBACK;
+step fu_3_small8: <... completed>
+           id
+-------------
+5000000000000
+(1 row)
+
+step rb_3: ROLLBACK;
+step begin_1: BEGIN;
+step begin_3: BEGIN;
+step ks_1_large8: SELECT id FROM o_hwlock8 WHERE id = 1125899906842624 FOR KEY SHARE;
+              id
+----------------
+1125899906842624
+(1 row)
+
+step fu_3_large8: SELECT id FROM o_hwlock8 WHERE id = 1125899906842624 FOR UPDATE; <waiting ...>
+step show_tag: 
+	SELECT CASE WHEN tuple & 32768 <> 0
+				THEN 'key ' || ((tuple & 32767)::bigint << 32 | (page::bigint & 4294967295))
+				ELSE 'hash' END AS tuple_lock_id
+	FROM pg_locks WHERE locktype = 'tuple' AND granted;
+
+tuple_lock_id
+-------------
+hash         
+(1 row)
+
+step rb_1: ROLLBACK;
+step fu_3_large8: <... completed>
+              id
+----------------
+1125899906842624
+(1 row)
+
+step rb_3: ROLLBACK;
