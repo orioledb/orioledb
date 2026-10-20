@@ -657,7 +657,7 @@ s3_header_compare_and_swap(S3HeaderTag tag, int index,
 
 
 /*
- * We allow only one part to be locked simultaneosly.
+ * We allow only one part to be locked simultaneously.
  */
 static S3HeaderTag curLockedTag = {{{InvalidOid, InvalidOid, InvalidOid,
 InvalidOid}}, 0, 0};

@@ -937,7 +937,7 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 }
 
 /*
- * Make an interator to read the key range from `startKey` to the next
+ * Make an iterator to read the key range from `startKey` to the next
  * downlink or hikey of internal page hikey if we're considering the last
  * downlink.
  */
@@ -2139,7 +2139,7 @@ get_prev_downlink_parallel(BTreeSeqScan *scan, uint64 *downlink,
 
 
 /*
- * Interates the internal page till we either:
+ * Iterates the internal page till we either:
  *  - Successfully read the next in-memory leaf page;
  *  - Made an iterator to read key range, which belongs to current downlink;
  *  - Reached the end of internal page.

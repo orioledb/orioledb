@@ -27,7 +27,7 @@
 static void initHashTable(S3ChecksumState *state, const char *filename);
 
 /*
- * Allocate S3ChecksumState and initalize hashTable by reading filename.  A
+ * Allocate S3ChecksumState and initialize hashTable by reading filename.  A
  * caller should prepare a buffer for S3FileChecksum entries, the caller is
  * responsible to release the buffer.
  */

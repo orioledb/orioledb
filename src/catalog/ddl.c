@@ -4773,7 +4773,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					tbl = relation_open(o_saved_relrewrite, AccessShareLock);
 
 					/*
-					 * Redefinig primary key here to not do rebuild after
+					 * Redefining primary key here to not do rebuild after
 					 * rewrite_table
 					 */
 					redefine_indices(tbl, new_o_table, true, InvalidOid);
@@ -4857,7 +4857,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						tbl = relation_open(tbl_oid, AccessShareLock);
 
 						/*
-						 * Redefinig primary key here to not do rebuild after
+						 * Redefining primary key here to not do rebuild after
 						 * rewrite_table
 						 */
 						redefine_indices(tbl, new_o_table, true, old_o_table->oids.relnode);
@@ -5590,7 +5590,7 @@ o_check_movedb(const AlterDatabaseStmt *stmt, movedb_params *movedb)
 	if (!get_db_info(stmt->dbname, NoLock, &db_id))
 
 		/*
-		 * Lets standard processing of moving datatabase generates an error.
+		 * Lets standard processing of moving database generates an error.
 		 */
 		return;
 

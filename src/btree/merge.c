@@ -137,7 +137,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 	if (*merge_parent && is_page_too_sparse(desc, parent))
 	{
 		/*
-		 * We can try to merge thr parent page in the loop.  No undo is
+		 * We can try to merge the parent page in the loop.  No undo is
 		 * required for non-leaf pages.
 		 */
 		if (!O_PAGE_IS(parent, RIGHTMOST))

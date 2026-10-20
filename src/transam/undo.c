@@ -1487,8 +1487,8 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 	else
 	{
 		/*
-		 * Abort can relate to part of transactio chain.  "On commit" location
-		 * needs to be updated accordingly.
+		 * Abort can relate to part of transaction chain.  "On commit"
+		 * location needs to be updated accordingly.
 		 */
 		location = pg_atomic_read_u64(&sharedLocations->location);
 		newOnCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
@@ -3897,7 +3897,7 @@ o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 
 /*
  * Output OrioleDB undo sizes per each undo type.
- * There is a single undo dir for all tablespaces and databasess.
+ * There is a single undo dir for all tablespaces and databases.
  */
 Datum
 orioledb_undo_size(PG_FUNCTION_ARGS)

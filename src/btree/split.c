@@ -313,7 +313,7 @@ btree_page_split_can_succeed(BTreeSplitItems *items)
 }
 
 /*
- * Find the location for B-tree page split.  This function take into accouint
+ * Find the location for B-tree page split.  This function take into account
  * insertion of new tuple or replacement of existing one.  It tries to keep
  * as close as possible to `targetLocation`, or if `targetLocation == 0` close
  * to `spaceRatio`.  Also, this function takes advantage of reclaiming unused
@@ -367,7 +367,7 @@ btree_get_split_left_count(BTreeDescr *desc, Page page,
 	 * If we're close to the end of the page, split already inserted data away
 	 * from the insertion point (if it gives at least 90% utilization).
 	 * Otherwise, place already inserted data together with the insertion
-	 * point. Hopefuly, we still have many tuple to insert and that will give
+	 * point. Hopefully, we still have many tuple to insert and that will give
 	 * us the good utilization.
 	 */
 	if (offset == header->prevInsertOffset + 1)

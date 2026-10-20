@@ -266,7 +266,7 @@ set_snapshot(LogicalDecodingContext *ctx,
  * anymore.
  *
  * If store to slot is not requested, HeapTuple is freed inside o_convert_non_toast_tuple() and this
- * function only returns reodrer buffer tuple without any side effects.
+ * function only returns reorder buffer tuple without any side effects.
  */
 static REORDER_BUFFER_TUPLE_TYPE
 o_convert_non_toast_tuple(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexDescr *indexDescr, OTuple tuple, bool force_store_to_slot, TupleTableSlot *store_slot, HeapTuple *heaptuple, bool leafTuple)
@@ -736,7 +736,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 					/*
 					 * Oriole logical xid stays invalid for an autonomous
 					 * transactions (internal Oriole's mechanism intended for
-					 * independed commit of Oriole system catalog changes)
+					 * independent commit of Oriole system catalog changes)
 					 */
 					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid " UINT64_FORMAT,
 						 rec->type, recname, rec->oxid);
