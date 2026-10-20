@@ -72,15 +72,24 @@ class UndoUpdateDiffTest(BaseTest):
 
 	def test_undo_size(self):
 		with self.node.connect() as con:
+			# Narrow update: only the 8-byte c column changes.
 			con.begin()
 			start = self.row_undo_location(con)
-			# No index covers c, so the update makes one record per row
 			con.execute("UPDATE o_diff SET c = c + 1;")
-			used = self.row_undo_location(con) - start
+			diff_used = self.row_undo_location(con) - start
 			con.rollback()
 
-		# A full record holds the whole old tuple, over 200 bytes of filler.
-		self.assertLess(used / ROWS, 150)
+			# Wide update: rewrite the 200-byte filler, forcing a full record.
+			con.begin()
+			start = self.row_undo_location(con)
+			con.execute(
+			    "UPDATE o_diff SET filler = repeat('x', 200 - length(id::text)) || id::text;"
+			)
+			full_used = self.row_undo_location(con) - start
+			con.rollback()
+
+		# The diff path must save at least half the undo space.
+		self.assertLess(diff_used * 2, full_used)
 
 	def test_rollback(self):
 		node = self.node
