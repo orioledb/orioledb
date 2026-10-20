@@ -14,6 +14,9 @@ on:
       - "doc/**"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   static:
     runs-on:
