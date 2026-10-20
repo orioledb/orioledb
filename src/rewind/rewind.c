@@ -508,8 +508,8 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 
 				/*
 				 * subxidsItem->nsubxids for every subxidsItem contains the
-				 * same sum of of subxids for a rewindItem (not just the
-				 * number of subxids in a current subxidsItem.
+				 * same sum of subxids for a rewindItem (not just the number
+				 * of subxids in a current subxidsItem.
 				 */
 				Assert(subxidsItem->nsubxids == nsubxids);
 				Assert(subxidsItem->oxid == oxid);
@@ -880,7 +880,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 		if (retry >= 100)
 
 			/*
-			 * Rewind worker already stopped and come transactions could be
+			 * Rewind worker already stopped and some transactions could be
 			 * not in the buffer so we can't continue.
 			 */
 			ereport(FATAL,
@@ -1084,7 +1084,7 @@ is_rewind_worker(void)
 
 /*
  * Restore page from disk to an empty space in completeBuffer.
- * Takes an exclusive lock to avoid cocurrent page eviction.
+ * Takes an exclusive lock to avoid concurrent page eviction.
  */
 static void
 try_restore_evicted_rewind_page(void)
@@ -1632,10 +1632,10 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 	while (true)
 	{
 		/*
-		 * freeAddSpace is the free space in rewindAddBuffer presumind space
+		 * freeAddSpace is the free space in rewindAddBuffer presuming space
 		 * needed the current items for the current process nitems as already
 		 * occupied. Space reserved by concurrent processes later is not
-		 * counted as occupied here. Concurrent processes will see theit
+		 * counted as occupied here. Concurrent processes will see their
 		 * freeAddSpace under the same presumption for them and will use it
 		 * for eviction in the same way. So double eviction is possible and OK
 		 * but very unlikely.

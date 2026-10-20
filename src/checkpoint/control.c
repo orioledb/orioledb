@@ -93,8 +93,8 @@ check_checkpoint_control(CheckpointControl *control)
 		/*
 		 * Now we have only one control version. When we bump
 		 * ORIOLEDB_CHECKPOINT_CONTROL_VERSION this is the place to write
-		 * routine for on-the-flight convesion of data read from control file
-		 * to CheckpointControl contents.
+		 * routine for on-the-fly conversion of data read from control file to
+		 * CheckpointControl contents.
 		 */
 		ereport(FATAL,
 				(errmsg("checkpoint files are incompatible with server"),

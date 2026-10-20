@@ -1437,7 +1437,7 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 
 		if (DatumGetPointer(tmp) != NULL)
 		{
-			/* Suceessfully compressed, replace the value */
+			/* Successfully compressed, replace the value */
 
 			/* free the old value */
 			if (oslot->vfree[max_attn])

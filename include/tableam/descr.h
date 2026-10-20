@@ -299,7 +299,7 @@ struct OTableDescr
 
 	/*
 	 * Description of table indices and toast.  indices[0] always points to
-	 * the primary key, reset of indeces array point to the secondary indices.
+	 * the primary key, rest of indices array point to the secondary indices.
 	 */
 	OIndexDescr **indices;
 	OIndexDescr *bridge;

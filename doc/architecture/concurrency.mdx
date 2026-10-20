@@ -37,7 +37,7 @@ Step 1 depicts the initial state of part of the tree comprising parent page 1 an
 
 ![Evict step 1](../images/evict_step_1.svg)
 
-Step 2 depicts both page 1 and page 2 locked. At this point evicting process repaces in-memory downlink with IO downlink and increases page change count. IO downlink prevents a concurrent process from using it, making them wait till IO is completed. Increased change count prevents all the concurrent processes, which managed to use in-memory downlink, from using page 2.
+Step 2 depicts both page 1 and page 2 locked. At this point evicting process replaces in-memory downlink with IO downlink and increases page change count. IO downlink prevents a concurrent process from using it, making them wait till IO is completed. Increased change count prevents all the concurrent processes, which managed to use in-memory downlink, from using page 2.
 
 ![Evict step 2](../images/evict_step_2.svg)
 

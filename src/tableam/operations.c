@@ -1770,7 +1770,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 		apply_undo_stack(UndoLogRegular, oxid, &undoStackLocations, true);
 		oxid_notify_all();
 
-		/* Conflish with running oxid case */
+		/* Conflict with running oxid case */
 		if (OXidIsValid(ioc_arg.conflictOxid))
 		{
 			/* helps avoid deadlocks */

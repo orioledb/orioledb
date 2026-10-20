@@ -114,7 +114,7 @@ static OBTreeModifyResult o_btree_normal_modify(BTreeDescr *desc,
 												BTreeModifyCallbackInfo *callbackInfo);
 
 /*
- * Perform modification of btree leaf tuple, when page is alredy located
+ * Perform modification of btree leaf tuple, when page is already located
  * and locked, all reservations are done.
  */
 static OBTreeModifyResult
@@ -1252,7 +1252,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		params = prepare_modify_start_params(desc);
 	STOPEVENT(STOPEVENT_MODIFY_START, params);
 
-	/* No no key is separately given, use the tuple itself */
+	/* If no key is separately given, use the tuple itself */
 	if (key == NULL)
 	{
 		key = (Pointer) &tuple;
@@ -1494,7 +1494,7 @@ retry:
 	/*---
 	 * We can do fast path unique check if we know that the required key range
 	 * resides the single page, and we managed to take a unique lwlock
-	 * simultaneusly.
+	 * simultaneously.
 	 *
 	 * It might seem that we don't need unique lwlock as soon as we see all the
 	 * key range in the locked page.  However, consider the following example.
@@ -1593,7 +1593,7 @@ retry:
 		if (refind)
 		{
 			/*
-			 * We've to find approprivate offset for the new tuple.  It should
+			 * We've to find appropriate offset for the new tuple.  It should
 			 * be within the page, but can not match current offset, because
 			 * we've searched for BTreeUniqueMinBound.
 			 */

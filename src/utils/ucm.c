@@ -31,7 +31,7 @@ static void ucm_inc_recursive(UsageCountMap *map, int i, int prev, int next);
 static bool ucm_check_recursive(UsageCountMap *map, int i);
 
 /*
- * Estimate shaed memory space for UCM data structure.
+ * Estimate shared memory space for UCM data structure.
  */
 Size
 estimate_ucm_space(UsageCountMap *map, OInMemoryBlkno offset, OInMemoryBlkno size)
@@ -139,7 +139,7 @@ init_ucm(UsageCountMap *map, Pointer ptr, bool found)
 		blkno += UCM_BRANCH_FACTOR;
 	}
 
-	/* Recursively inin non-leaf variables */
+	/* Recursively init non-leaf variables */
 	for (i = 0; i < UCM_BRANCH_FACTOR; i++)
 		init_ucm_non_leaf_recursive(map, i);
 }

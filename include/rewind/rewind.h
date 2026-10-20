@@ -96,7 +96,7 @@ typedef struct
 									 * circular buffer against concurrent
 									 * eviction */
 	int			rewindCheckpointTrancheId;
-	LWLock		rewindCheckpointLock;	/* Lock during checkpointing againts
+	LWLock		rewindCheckpointLock;	/* Lock during checkpointing against
 										 * concurrent eviction */
 	pg_atomic_uint64 oldestConsideredRunningXid;
 	pg_atomic_uint64 runXmin;
@@ -147,7 +147,7 @@ typedef struct
  *
  *  Adding to addBuffer:
  *  (1) checks is the space enough, if not calls eviction first
- *  (2) reserves space to addind by incrementing AR
+ *  (2) reserves space to add by incrementing AR
  *  (3) adds items to the reserved space:
  *
  * Rewind queue items has two types
