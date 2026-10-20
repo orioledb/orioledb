@@ -30,6 +30,7 @@
 #include "utils/page_pool.h"
 #include "utils/stopevent.h"
 
+#include "common/hashfn.h"
 #include "miscadmin.h"
 
 #define IsRelationTree(desc) (ORelOidsIsValid(desc->oids) && !IS_SYS_TREE_OIDS(desc->oids))
@@ -459,19 +460,72 @@ unlock_release(BTreeModifyInternalContext *context, bool unlock)
 }
 
 /*
- * Wait for the transaction that holds the tuple we want.
+ * Tuple lock ids with this bit set in field4 carry the key itself rather than
+ * a hash of it.
+ */
+#define TUPLE_LOCK_EXACT_KEY	0x8000
+
+/*
+ * Build the tag of the heavyweight lock that queues the waiters for a tuple,
+ * as heap queues them on its tuple lock.  Unlike a heap TID, the position of
+ * our tuple moves under a waiter -- inserts shift the items of its page, and
+ * splits, merges and eviction move the page -- so the tag identifies the
+ * tuple by its key, which every waiter for it reads the same.
  *
- * tupleHash identifies the tuple in the heavyweight lock tag, and the caller
- * has to compute it before releasing the page: the tuple lives in the page,
- * and once the page is unlocked its bytes are anyone's to move or overwrite.
- * Hashing a key from an unlocked page reads a length that may no longer
- * belong to it, and the hash functions of collatable types copy the value
- * they are given -- a copy sized by one read of that length and filled by
- * another writes past its own buffer.
+ * The tag has 48 bits for that: field3 and field4.  A key of up to four bytes
+ * is stored there as is, so two different keys never share a lock.  A longer
+ * one is represented by 47 bits of a 64-bit hash.  A 32-bit hash used to let
+ * waiters for unrelated keys queue behind each other, and a waiter that
+ * holds a row lock the other one waits for then deadlocks with it.
+ *
+ * The tag is made from the bytes of the stored key, not by the type's hash
+ * function: all the waiters for a tuple read the same bytes, and two tuples
+ * of a tree, whose keys are unique, never have the same key bytes.
+ *
+ * Call it with the page locked: the tuple lives in the page, and once the
+ * page is unlocked its bytes are anyone's to move or overwrite.
  */
 static void
-wait_for_tuple(BTreeDescr *desc, uint32 tupleHash, OXid oxid,
-			   RowLockMode lockMode, BTreeModifyLockStatus lockStatus,
+make_tuple_lock_tag(BTreeDescr *desc, OTuple tuple, LOCKTAG *tag)
+{
+	OFixedKey	key;
+	bool		allocated;
+	int			len;
+	uint32		id = 0;
+	uint16		idExt;
+
+	key.tuple = o_btree_tuple_make_key(desc, tuple, key.fixedData, false,
+									   &allocated);
+	Assert(!allocated);
+	len = o_btree_len(desc, key.tuple, OKeyLength);
+
+	if (len <= sizeof(id))
+	{
+		memcpy(&id, key.tuple.data, len);
+		idExt = TUPLE_LOCK_EXACT_KEY | (len << 8) | key.tuple.formatFlags;
+	}
+	else
+	{
+		uint64		hash;
+
+		hash = hash_bytes_extended((const unsigned char *) key.tuple.data,
+								   len, key.tuple.formatFlags);
+		id = (uint32) hash;
+		idExt = (uint16) (hash >> 32) & ~TUPLE_LOCK_EXACT_KEY;
+	}
+
+	SET_LOCKTAG_TUPLE(*tag, desc->oids.datoid, desc->oids.reloid, id, idExt);
+}
+
+/*
+ * Wait for the transaction that holds the tuple we want.
+ *
+ * *hwLockTag must have been made by make_tuple_lock_tag() if we are going to
+ * queue on the tuple lock: when we hold no lock on the tuple yet.
+ */
+static void
+wait_for_tuple(OXid oxid, RowLockMode lockMode,
+			   BTreeModifyLockStatus lockStatus,
 			   LOCKTAG *hwLockTag, LOCKMODE *hwLockMode)
 {
 	/*
@@ -480,13 +534,7 @@ wait_for_tuple(BTreeDescr *desc, uint32 tupleHash, OXid oxid,
 	 */
 	if (*hwLockMode == NoLock && lockStatus == BTreeModifyNoLock)
 	{
-		SET_LOCKTAG_TUPLE(*hwLockTag,
-						  desc->oids.datoid,
-						  desc->oids.reloid,
-						  tupleHash,
-						  0);
 		*hwLockMode = hwLockModes[lockMode];
-
 		(void) LockAcquire(hwLockTag, *hwLockMode, false, false);
 	}
 
@@ -661,7 +709,6 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 */
 				OBTreeWaitCallbackAction cbAction = OBTreeCallbackActionXidWait;
 				OFindPageResult result PG_USED_FOR_ASSERTS_ONLY;
-				uint32		tupleHash = 0;
 
 				Assert(COMMITSEQNO_IS_INPROGRESS(csn));
 
@@ -680,14 +727,13 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				}
 
 				/*
-				 * The wait below locks the tuple by hash, and curTuple points
-				 * into the page -- so hash it here, while the page is still
-				 * ours.  See wait_for_tuple().
+				 * The wait below locks the tuple by its key, and curTuple
+				 * points into the page -- so make the lock tag here, while
+				 * the page is still ours.  See make_tuple_lock_tag().
 				 */
 				if (context->hwLockMode == NoLock &&
 					context->lockStatus == BTreeModifyNoLock)
-					tupleHash = o_btree_hash(desc, curTuple,
-											 BTreeKeyLeafTuple);
+					make_tuple_lock_tag(desc, curTuple, &context->hwLockTag);
 
 				unlock_page(blkno);
 
@@ -695,7 +741,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				Assert(cbAction <= OBTreeCallbackActionXidExit);
 
 				if (cbAction == OBTreeCallbackActionXidWait)
-					wait_for_tuple(desc, tupleHash, oxid,
+					wait_for_tuple(oxid,
 								   context->lockMode,
 								   context->lockStatus,
 								   &context->hwLockTag,
