@@ -16,6 +16,8 @@
    "checkpoint recovery: append writer made progress"
    "checkpoint recovery: churn writer made progress"
    "checkpoint recovery: TOAST writer made progress"
+   "checkpoint recovery: transactional DDL remained consistent"
+   "checkpoint recovery: DDL worker made progress"
    "checkpoint recovery: checkpoints made progress"
    "checkpoint recovery: verifier made progress"
    "checkpoint recovery: result artifact is readable"])
@@ -26,6 +28,7 @@
    "checkpoint recovery: multiple boots occurred before readiness"
    "checkpoint recovery: recovery probe completed after restart"
    "checkpoint recovery: post-recovery checkpoint completed"
+   "checkpoint recovery: DDL continued across recovery generations"
    "checkpoint recovery: durable volume canary survived restart"])
 
 (defn assertion [id type hit condition details]
@@ -74,6 +77,8 @@
                 "checkpoint recovery: append writer made progress" (pos? (:append-writes driver 0))
                 "checkpoint recovery: churn writer made progress" (pos? (:churn-writes driver 0))
                 "checkpoint recovery: TOAST writer made progress" (pos? (:toast-writes driver 0))
+                "checkpoint recovery: transactional DDL remained consistent" (map? (:ddl-verification summary))
+                "checkpoint recovery: DDL worker made progress" (pos? (:ddl_operations database 0))
                 "checkpoint recovery: checkpoints made progress" (pos? (:completed_checkpoints database 0))
                 "checkpoint recovery: verifier made progress" (pos? (:verifications driver 0))
                 "checkpoint recovery: result artifact is readable" (and (map? summary) (nil? (:read-error summary)))
@@ -83,6 +88,7 @@
                 "checkpoint recovery: recovery probe completed after restart" (> (:ready_boots database 0) 1)
                 "checkpoint recovery: post-recovery checkpoint completed" (and (> (:ready_boots database 0) 1)
                                                                                 (pos? (:current_generation_checkpoints database 0)))
+                "checkpoint recovery: DDL continued across recovery generations" (> (:ddl_boots database 0) 1)
                 "checkpoint recovery: durable volume canary survived restart" (true? (:volume-canary-verified-after-restart summary))}
         always-ok? (every? true? (map checks always))]
     (with-open [out (writer)]

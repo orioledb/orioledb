@@ -102,8 +102,11 @@ snouty launch \
 The `workload/checkpoint-recovery` configuration initializes fixed OrioleDB and
 heap-shadow table pairs before setup completes. It uses named `pgdata` and
 runtime-state volumes, records every database boot, removes the Compose restart
-policy, and runs strict final data, checksum, native-index, checkpoint, and
-`verify_orioledb` checks.
+policy, and runs strict final data, checksum, native-index, checkpoint, DDL, and
+`verify_orioledb` checks. A dedicated DDL worker concurrently cycles through
+table creation and deletion, column add/rename/drop, `TRUNCATE`, and native
+index creation and deletion. Each transition is committed with a durable schema
+journal entry so recovery can distinguish committed from interrupted DDL.
 
 Run a short local no-fault smoke test with a reduced, but still oversized,
 working set:

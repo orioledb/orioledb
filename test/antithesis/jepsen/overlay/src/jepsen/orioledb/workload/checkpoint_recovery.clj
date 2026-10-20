@@ -24,6 +24,7 @@
   {:append-writes 0
    :churn-writes 0
    :toast-writes 0
+   :ddl-operations 0
    :checkpoints-started 0
    :checkpoints-completed 0
    :verifications 0
@@ -162,22 +163,122 @@
         (throw (ex-info "expected native index was not selected"
                         {:index index :plan plan}))))))
 
-(defn verify-data! [connection]
+(def ddl-state-expectations
+  {0 {:scratch? false :column nil :scratch-index? false :churn-index? false}
+   1 {:scratch? true :column nil :scratch-index? false :churn-index? false}
+   2 {:scratch? true :column "added_value" :scratch-index? false :churn-index? false}
+   3 {:scratch? true :column "renamed_value" :scratch-index? false :churn-index? false}
+   4 {:scratch? true :column "renamed_value" :scratch-index? true :churn-index? false}
+   5 {:scratch? true :column "renamed_value" :scratch-index? false :churn-index? false}
+   6 {:scratch? true :column "renamed_value" :scratch-index? false :churn-index? false :truncated? true}
+   7 {:scratch? true :column nil :scratch-index? false :churn-index? false :truncated? true}
+   8 {:scratch? false :column nil :scratch-index? false :churn-index? true}})
+
+(defn expected-ddl-state [phase]
+  (or (ddl-state-expectations phase)
+      (throw (ex-info "unknown DDL phase" {:phase phase}))))
+
+(defn relation-exists? [connection relation]
+  (some? (:relation
+          (execute-one! connection
+                        ["SELECT to_regclass(?)::text AS relation" relation]))))
+
+(defn column-exists? [connection relation column]
+  (:exists
+   (execute-one!
+    connection
+    ["SELECT EXISTS (
+        SELECT 1 FROM pg_attribute
+         WHERE attrelid = to_regclass(?) AND attname = ? AND NOT attisdropped
+      ) AS exists"
+     relation column])))
+
+(defn verify-ddl-index-results! [connection]
+  (jdbc/execute! connection ["SET LOCAL enable_seqscan = off"])
+  (let [plan (pr-str (jdbc/execute!
+                      connection
+                      ["EXPLAIN (FORMAT JSON, COSTS OFF)
+                        SELECT id FROM o_churn WHERE nullable_value = 'value-1'"]
+                      builder))
+        differences
+        (:count
+         (execute-one!
+          connection
+          ["SELECT count(*) AS count FROM
+              ((SELECT id FROM o_churn WHERE nullable_value IS NULL
+                EXCEPT SELECT id FROM h_churn WHERE nullable_value IS NULL)
+               UNION ALL
+               (SELECT id FROM h_churn WHERE nullable_value IS NULL
+                EXCEPT SELECT id FROM o_churn WHERE nullable_value IS NULL)) d"]))]
+    (when-not (str/includes? plan "o_churn_ddl_nullable_idx")
+      (throw (ex-info "DDL-created native index was not selected" {:plan plan})))
+    (when-not (zero? differences)
+      (throw (ex-info "DDL-created index returned inconsistent rows"
+                      {:differences differences})))))
+
+(defn verify-ddl-state! [connection]
   (in-transaction!
    connection
    (fn [tx]
-     (jdbc/execute! tx ["SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"])
-     (jdbc/execute! tx ["SET LOCAL statement_timeout = '60s'"])
-     (jdbc/execute! tx ["SET LOCAL lock_timeout = '10s'"])
-     (let [differences (execute-one! tx [pair-difference-sql])
-           bad-checksums (execute-one! tx [checksum-sql])]
-       (when-not (zero-values? differences)
-         (throw (ex-info "target/shadow mismatch" differences)))
-       (when-not (zero-values? bad-checksums)
-         (throw (ex-info "deterministic checksum mismatch" bad-checksums)))
-       (verify-indexes! tx)
-       (bump! :verifications)
-       {:differences differences :bad-checksums bad-checksums}))))
+     (jdbc/execute! tx ["SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"])
+     (let [{:keys [phase epoch]} (execute-one!
+                                  tx
+                                  ["SELECT phase, epoch FROM ddl_state
+                                    WHERE id = 1 FOR SHARE"])
+           expected (expected-ddl-state phase)
+           actual {:scratch? (relation-exists? tx "o_ddl_scratch")
+                   :column (cond
+                             (column-exists? tx "o_ddl_scratch" "added_value") "added_value"
+                             (column-exists? tx "o_ddl_scratch" "renamed_value") "renamed_value"
+                             :else nil)
+                   :scratch-index? (relation-exists? tx "o_ddl_scratch_payload_idx")
+                   :churn-index? (and (relation-exists? tx "o_churn_ddl_nullable_idx")
+                                      (relation-exists? tx "h_churn_ddl_nullable_idx"))}]
+       (when-not (= (select-keys expected [:scratch? :column :scratch-index? :churn-index?])
+                    actual)
+         (throw (ex-info "transactional DDL state disagrees with its durable journal"
+                         {:phase phase :epoch epoch :expected expected :actual actual})))
+       (when (:truncated? expected)
+         (let [row (execute-one! tx
+                                 ["SELECT count(*) AS count, min(id) AS id FROM o_ddl_scratch"])]
+           (when-not (= {:count 1 :id 700} row)
+             (throw (ex-info "DDL scratch table contents are inconsistent after TRUNCATE"
+                             {:phase phase :row row})))))
+       (when (and (:scratch? expected) (not (:truncated? expected)))
+         (let [column (:column expected)
+               row (execute-one!
+                    tx
+                    [(str "SELECT count(*) AS count, min(id) AS id, min(payload) AS payload"
+                          (when column (str ", min(" column ") AS column_value"))
+                          " FROM o_ddl_scratch")])
+               expected-row (cond-> {:count 1 :id 1 :payload "created"}
+                              column (assoc :column_value 17))]
+           (when-not (= expected-row row)
+             (throw (ex-info "DDL scratch table contents are inconsistent"
+                             {:phase phase :expected expected-row :row row})))))
+       (when (:churn-index? expected)
+         (verify-ddl-index-results! tx))
+       {:phase phase :epoch epoch}))))
+
+(defn verify-data! [connection]
+  (let [result
+        (in-transaction!
+         connection
+         (fn [tx]
+           (jdbc/execute! tx ["SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"])
+           (jdbc/execute! tx ["SET LOCAL statement_timeout = '60s'"])
+           (jdbc/execute! tx ["SET LOCAL lock_timeout = '10s'"])
+           (let [differences (execute-one! tx [pair-difference-sql])
+                 bad-checksums (execute-one! tx [checksum-sql])]
+             (when-not (zero-values? differences)
+               (throw (ex-info "target/shadow mismatch" differences)))
+             (when-not (zero-values? bad-checksums)
+               (throw (ex-info "deterministic checksum mismatch" bad-checksums)))
+             (verify-indexes! tx)
+             {:differences differences :bad-checksums bad-checksums})))]
+    (verify-ddl-state! connection)
+    (bump! :verifications)
+    result))
 
 (defn append! [connection process]
   (in-transaction!
@@ -251,6 +352,74 @@
        (bump! :toast-writes)
        {:key key :version version :profile profile}))))
 
+(def ddl-transitions
+  {0 {:next 1
+      :operation "create-scratch-table"
+      :statements ["CREATE TABLE o_ddl_scratch
+                      (id integer PRIMARY KEY, payload text NOT NULL)
+                    USING orioledb"
+                   "INSERT INTO o_ddl_scratch VALUES (1, 'created')"]}
+   1 {:next 2
+      :operation "add-column"
+      :statements ["ALTER TABLE o_ddl_scratch
+                      ADD COLUMN added_value integer NOT NULL DEFAULT 17"]}
+   2 {:next 3
+      :operation "rename-column"
+      :statements ["ALTER TABLE o_ddl_scratch
+                      RENAME COLUMN added_value TO renamed_value"]}
+   3 {:next 4
+      :operation "create-scratch-index"
+      :statements ["CREATE INDEX o_ddl_scratch_payload_idx
+                      ON o_ddl_scratch(payload) WITH (compress = 5)"]}
+   4 {:next 5
+      :operation "drop-scratch-index"
+      :statements ["DROP INDEX o_ddl_scratch_payload_idx"]}
+   5 {:next 6
+      :operation "truncate-scratch-table"
+      :statements ["TRUNCATE o_ddl_scratch"
+                   "INSERT INTO o_ddl_scratch(id, payload, renamed_value)
+                      VALUES (700, 'after-truncate', 19)"]}
+   6 {:next 7
+      :operation "drop-column"
+      :statements ["ALTER TABLE o_ddl_scratch DROP COLUMN renamed_value"]}
+   7 {:next 8
+      :operation "replace-table-with-live-indexes"
+      :statements ["DROP TABLE o_ddl_scratch"
+                   "CREATE INDEX o_churn_ddl_nullable_idx
+                      ON o_churn(nullable_value) WITH (compress = 5)"
+                   "CREATE INDEX h_churn_ddl_nullable_idx
+                      ON h_churn(nullable_value)"]}
+   8 {:next 0
+      :operation "drop-live-indexes"
+      :statements ["DROP INDEX o_churn_ddl_nullable_idx"
+                   "DROP INDEX h_churn_ddl_nullable_idx"]}})
+
+(defn ddl! [connection]
+  (let [{:keys [boot_id]} (generation connection)
+        operation
+        (in-transaction!
+         connection
+         (fn [tx]
+           (let [{:keys [phase epoch]} (execute-one!
+                                        tx
+                                        ["SELECT phase, epoch FROM ddl_state
+                                          WHERE id = 1 FOR UPDATE"])
+                 {:keys [next operation statements]} (ddl-transitions phase)]
+             (doseq [statement statements]
+               (jdbc/execute! tx [statement]))
+             (jdbc/execute! tx
+                            ["UPDATE ddl_state SET epoch = ?, phase = ? WHERE id = 1"
+                             (inc epoch) next])
+             (jdbc/execute! tx
+                            ["INSERT INTO ddl_history(epoch, phase, operation, boot_id)
+                              VALUES (?, ?, ?, ?)"
+                             (inc epoch) next operation boot_id])
+             operation)))]
+    (let [verified (verify-ddl-state! connection)]
+      (bump! :ddl-operations)
+      (Thread/sleep 100)
+      (assoc verified :operation operation))))
+
 (defn checkpoint! [connection kind]
   (let [{:keys [boot_id postmaster_start_time]} (generation connection)
         attempt (:attempt_id
@@ -313,10 +482,19 @@
   (case process
     0 :checkpoint
     1 :recovery
-    (case (mod process 3)
+    2 :ddl
+    (case (mod (- process 3) 3)
       0 :append
       1 :churn
       2 :toast)))
+
+(defn worker-role [process]
+  (if-let [worker (some->> (.getName (Thread/currentThread))
+                           (re-find #"worker ([0-9]+)$")
+                           second
+                           parse-long)]
+    (role worker)
+    (role process)))
 
 (defn persist-progress!
   ([] (persist-progress! false))
@@ -348,9 +526,10 @@
                        (reset! connection opened)
                        opened))
             process (:process op)
-            value (case (role process)
+            value (case (worker-role process)
                     :checkpoint (checkpoint! conn "steady-state")
                     :recovery (or (recovery-probe! conn) {:unchanged true})
+                    :ddl (ddl! conn)
                     :append (append! conn process)
                     :churn (churn! conn process)
                     :toast (toast! conn))]
@@ -442,7 +621,12 @@
       (epoch_id bigserial PRIMARY KEY, boot_id text NOT NULL,
        verified_at timestamptz NOT NULL DEFAULT clock_timestamp(), final boolean NOT NULL) USING heap"
    "CREATE TABLE IF NOT EXISTS recovery_write_probe
-      (id bigserial PRIMARY KEY, note text) USING heap"])
+      (id bigserial PRIMARY KEY, note text) USING heap"
+   "CREATE TABLE IF NOT EXISTS ddl_state
+      (id integer PRIMARY KEY, epoch bigint NOT NULL, phase integer NOT NULL) USING heap"
+   "CREATE TABLE IF NOT EXISTS ddl_history
+      (epoch bigint PRIMARY KEY, phase integer NOT NULL, operation text NOT NULL,
+       boot_id text NOT NULL, completed_at timestamptz NOT NULL DEFAULT clock_timestamp()) USING heap"])
 
 (defn initialize! []
   (let [test (environment-test)
@@ -453,6 +637,9 @@
       (try
         (doseq [statement schema-statements]
           (jdbc/execute! connection [statement]))
+        (jdbc/execute! connection
+                       ["INSERT INTO ddl_state VALUES (1, 0, 0)
+                         ON CONFLICT (id) DO NOTHING"])
         (let [setup (execute-one! connection ["SELECT version FROM workload_setup WHERE id = 1"])]
           (when-not (= schema-version (:version setup))
             (in-transaction!
@@ -540,6 +727,7 @@
         (checkpoint! connection "final")
         (structural-verification! connection)
         (verify-data! connection)
+        (let [ddl-verification (verify-ddl-state! connection)]
         (jdbc/execute! connection
                        ["INSERT INTO verification_epochs(boot_id, final) VALUES (?, true)"
                         (:boot_id current)])
@@ -549,6 +737,8 @@
                                    (SELECT count(*) FROM checkpoint_attempts WHERE completed_at IS NOT NULL) AS completed_checkpoints,
                                    (SELECT count(*) FROM recovery_probes) AS recovery_probes,
                                    (SELECT count(DISTINCT boot_id) FROM recovery_probes) AS ready_boots,
+                                   (SELECT count(*) FROM ddl_history) AS ddl_operations,
+                                   (SELECT count(DISTINCT boot_id) FROM ddl_history) AS ddl_boots,
                                    (SELECT count(*) FROM checkpoint_attempts WHERE kind = 'post-recovery' AND completed_at IS NOT NULL) AS post_recovery_checkpoints,
                                    (SELECT count(*) FROM checkpoint_attempts WHERE completed_boot_id = current_setting('cluster_name')) AS current_generation_checkpoints,
                                    (SELECT count(*) FROM checkpoint_attempts WHERE completed_at IS NULL) AS incomplete_checkpoints"])
@@ -562,10 +752,11 @@
                        :boot-attempts (line-count (io/file state-dir "boot-attempts.jsonl"))
                        :volume-canary-present (.isFile state-canary)
                        :volume-canary-verified-after-restart (.isFile canary-verified)
+                       :ddl-verification ddl-verification
                        :structural-verification true
                        :finished-at (str (Instant/now))}]
           (atomic-json! "final-summary.json" summary)
-          summary)))))
+          summary))))))
 
 (defn -main [& [mode]]
   (case mode

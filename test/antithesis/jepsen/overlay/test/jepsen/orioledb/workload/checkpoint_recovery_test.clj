@@ -11,9 +11,19 @@
 (deftest roles-are-stable
   (is (= :checkpoint (workload/role 0)))
   (is (= :recovery (workload/role 1)))
-  (is (= :toast (workload/role 2)))
+  (is (= :ddl (workload/role 2)))
   (is (= :append (workload/role 3)))
-  (is (= :churn (workload/role 4))))
+  (is (= :churn (workload/role 4)))
+  (is (= :toast (workload/role 5))))
+
+(deftest ddl-state-expectations-are-complete
+  (is (= {:scratch? false :column nil :scratch-index? false :churn-index? false}
+         (workload/expected-ddl-state 0)))
+  (is (= true (:scratch-index? (workload/expected-ddl-state 4))))
+  (is (= true (:truncated? (workload/expected-ddl-state 6))))
+  (is (= true (:churn-index? (workload/expected-ddl-state 8))))
+  (is (thrown? clojure.lang.ExceptionInfo
+               (workload/expected-ddl-state 9))))
 
 (deftest generation-classification
   (is (= 12 (workload/boot-number "orioledb-boot-12")))
