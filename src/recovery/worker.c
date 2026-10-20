@@ -869,7 +869,7 @@ apply_modify_record(OTableDescr *descr, OIndexDescr *id, uint16 type,
 		recovery_bridge_ctid_update(id, p);
 
 	/*
-	 * Don't apply changes to secondary indices before TOAST is consisntent.
+	 * Don't apply changes to secondary indices before TOAST is consistent.
 	 * Otherwise, values of secondary indices on TOASTed fields can be
 	 * invalid.
 	 */

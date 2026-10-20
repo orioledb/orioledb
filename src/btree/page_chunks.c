@@ -312,8 +312,8 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 	}
 
 	/*
-	 * We have a chance to do a compation on leaf.  Check if at least
-	 * optimistic esimate will work.
+	 * We have a chance to do a compaction on leaf.  Check if at least
+	 * optimistic estimate will work.
 	 */
 	if (compactedFreeSpace < spaceNeeded)
 		return BTreeItemPageFitSplitRequired;

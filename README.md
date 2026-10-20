@@ -25,7 +25,7 @@ modern hardware architectures.
    optimized usage of modern storage technologies such as SSD and NVRAM.
 
 2. Reduced maintenance needs.  OrioleDB implements the concepts of undo log
-   and page-mergins, eliminating the need for dedicated garbage collection
+   and page merging, eliminating the need for dedicated garbage collection
    processes.  Additionally, OrioleDB implements default 64-bit transaction
    identifiers, thus eliminating the well-known and painful wraparound problem.
 
@@ -47,7 +47,7 @@ The key technical differentiations of OrioleDB are as follows:
    do not cause bloat in the main storage system, but eviction into the undo
    log comprising undo chains.  Page-level undo records allow the system
    to easily reclaim space occupied by deleted tuples as soon as possible.
-   Together with page-mergins, these mechanisms eliminate bloat in the majority
+   Together with page merging, these mechanisms eliminate bloat in the majority
    of cases.  Dedicated VACUUMing of tables is not needed as well, removing
    a significant and common cause of system performance deterioration and
    database outages.

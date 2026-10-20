@@ -2404,7 +2404,7 @@ after_checkpoint_sync_wal(void)
 		if (!IsXLogFileName(xlde->d_name))
 			continue;
 
-		/* Ignore already arhieved files */
+		/* Ignore already archived files */
 		if (check_archive_done(xlde->d_name))
 			continue;
 
@@ -3961,7 +3961,7 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	rpage_desc = O_GET_IN_MEMORY_PAGEDESC(rightBlkno);
 
 	/*
-	 * Сheck there is no IO in progress for the right page.
+	 * Check there is no IO in progress for the right page.
 	 */
 	if (rpage_desc->ionum >= 0)
 	{
@@ -5897,8 +5897,8 @@ can_use_checkpoint_extents(BTreeDescr *desc, uint32 chkp_num)
 		return false;
 
 	/*
-	 * Prevent situtation when checkpoint was finished and new sequential scan
-	 * started between out checks for numSeqScans and lastCheckpointNumber.
+	 * Prevent situation when checkpoint was finished and new sequential scan
+	 * started between our checks for numSeqScans and lastCheckpointNumber.
 	 */
 	pg_read_barrier();
 

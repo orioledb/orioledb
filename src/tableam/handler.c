@@ -491,7 +491,7 @@ orioledb_get_row_ref_type(Relation rel)
 	}
 
 	/*
-	 * Always use rowid identifieds.  If even we use ctid as primary key, we
+	 * Always use rowid identifiers.  If even we use ctid as primary key, we
 	 * still prepend it with page location hint.
 	 */
 	return ROW_REF_ROWID;

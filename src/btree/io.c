@@ -1421,7 +1421,7 @@ check_orioledb_page_checksum(OrioleDBOndiskPageHeader ondisk_page_header,
 }
 
 /*
- * Now we have only one compresss version (1). When we have
+ * Now we have only one compress version (1). When we have
  * different versions we'll need to bump
  * ORIOLEDB_COMPRESS_VERSION and add other variants of
  * decompress function from all previous page versions in
@@ -3560,8 +3560,8 @@ retry:
 }
 
 /*
- * Recursively write pages in the tree. Stop reqursion if we reach maxLevel,
- * when it has non-negtive value. To write all pages, set maxLevel to -1.
+ * Recursively write pages in the tree. Stop recursion if we reach maxLevel,
+ * when it has non-negative value. To write all pages, set maxLevel to -1.
  */
 static bool
 write_tree_pages_recursive(UndoLogType undoType,

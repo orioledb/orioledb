@@ -182,7 +182,7 @@ o_print_btree_pages(BTreeDescr *desc, StringInfo outbuf,
 
 /*
  * Print contents of give B-tree page.  If non-leaf page is given, recursively
- * print childredn.
+ * print children.
  */
 static void
 print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
@@ -663,8 +663,8 @@ btree_print_csn(CommitSeqNo csn, StringInfo outbuf, BTreePrintData *printData, b
 		else
 		{
 			/*
-			 * If relative csn option set, then substract min csn from
-			 * absolute node csn
+			 * If relative csn option set, then subtract min csn from absolute
+			 * node csn
 			 */
 			if (printData->options->csnPrintType == BTreePrintRelative)
 				printedCsn = csn - printData->minCsn;

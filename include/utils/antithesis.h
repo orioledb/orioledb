@@ -8,11 +8,11 @@
  * unless it is compiled by GCC or Clang for an ELF target, so anywhere else
  * (a macOS development build, say) it is compiled out to no-ops.
  * The wrapper makes not using antithesis the default, and compiles out the
- * antitehsis macros and registration.
+ * antithesis macros and registration.
  *
  * Define USE_ANTITHESIS_SDK to enable.
  *
- * Evven with the SDK compiled in, the assertions stay silent unless
+ * Even with the SDK compiled in, the assertions stay silent unless
  * /usr/lib/libvoidstar.so is present (i.e. we run inside an Antithesis test)
  * or ANTITHESIS_SDK_LOCAL_OUTPUT names an output file.  Each call site emits
  * at most one message per outcome, so an ordinary build pays a relaxed atomic

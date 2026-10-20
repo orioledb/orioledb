@@ -1753,7 +1753,7 @@ orioledb_shmem_request(void)
 }
 
 /*
- * Initialize OrioleDB's shared memory.  Called on database instanse start
+ * Initialize OrioleDB's shared memory.  Called on database instance start
  * or restart.
  */
 static void

@@ -944,9 +944,9 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 }
 
 /*
- * Adcance page location after finding an appropriate key to prepare for the
+ * Advance page location after finding an appropriate key to prepare for the
  * iteration.  btree_page_search() prepares a location perfectly for the
- * forward interation.  The backward iteration might need to advance the
+ * forward iteration.  The backward iteration might need to advance the
  * position.
  */
 static void
@@ -1336,14 +1336,14 @@ o_btree_iterator_set_interruptible(BTreeIterator *it)
 }
 
 /*
- * Fetches tha next tuple from the iterator.  Returns null tuple when there
+ * Fetches the next tuple from the iterator.  Returns null tuple when there
  * are no more tuples before the end boundary (defined by `end`, `endType`,
  * and `endIsIncluded`).
  *
  * The result's OTuple.data is allocated in it->tupleCxt memory context.  It's
  * the caller's responsibility to free this memory.
  */
-/* Supress strange asan complaint using clang attribute */
+/* Suppress strange asan complaint using clang attribute */
 #if defined(__clang__)
 __attribute__((no_sanitize("address")))
 #endif
@@ -1429,7 +1429,7 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 }
 
 /*
- * Free resouces associated with iterator.
+ * Free resources associated with iterator.
  *
  * fromResowner is true when we are called (perhaps indirectly) from the
  * release callback of the ResourceOwner that is being released.
@@ -1444,7 +1444,7 @@ btree_iterator_free_extended(BTreeIterator *it, bool fromResowner)
 						  NULL);
 
 		/*
-		 * Durring transaction abort, cleanup sets CurrentResourceOwner to
+		 * During transaction abort, cleanup sets CurrentResourceOwner to
 		 * TopTransactionResourceOwner before the iterator is freed. Always
 		 * using CurrentResourceOwner used to PANIC
 		 */
@@ -2106,7 +2106,7 @@ can_fetch_from_undo(BTreeIterator *it)
 	if (!BTREE_PAGE_LOCATOR_IS_VALID(it->undoIt.image, &it->undoLoc))
 		return false;
 
-	/* True if `img` key range is inifity in the required direction */
+	/* True if `img` key range is infinite in the required direction */
 	if (IS_LAST_PAGE(context->img, it))
 		return true;
 

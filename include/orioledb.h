@@ -54,7 +54,7 @@
  * ORIOLEDB_VERSION is output by orioledb_version() SQL function and its change doesn't mean any
  * changes in the code that can introduce incompatibilities. But if values for compatibility (below)
  * should be bumped, it's enough to do this once before next release. I.e. compatibility is
- * neecessary between releases, not between different commits belonging to one release.
+ * necessary between releases, not between different commits belonging to one release.
  *
  * Values to reflect incompatibilities and limitations:
  *
@@ -69,7 +69,7 @@
  * For logical decoding: Logical decoding will fail and throw error. Cluster will continue working.
  *
  * - ORIOLEDB_CHECKPOINT_CONTROL_VERSION - Version of OrioleDB control file format
- *   (seeinclude/checkpoint/control.h)
+ *   (see include/checkpoint/control.h)
  *
  * ORIOLEDB_CHECKPOINT_CONTROL_VERSION is intended for on-the fly conversion of CheckpointControl
  * structure. Compatibility is only one-way, if read versions are lower than current
@@ -396,7 +396,7 @@ typedef struct
  *
  * At reading page from disk:
  * - Necessary information (related to checkpoint and compression) is extracted from OrioleDBOndiskPageHeader.
- * - Сompression info and page format version is used for checks and decompression (if needed)
+ * - Compression info and page format version is used for checks and decompression (if needed)
  * - OrioleDBPageHeader from decompressed page is redundant and it is not used (but we check checkpointNum in it just in case)
  * - Page header is replaced by empty OrioleDBPageHeader of the same size.
  * - Necessary information related to checkpoint is restored to OrioleDBPageHeader.

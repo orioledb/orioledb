@@ -81,7 +81,7 @@ This message indicates that the child page has been processed, and the parent ne
 
 ### WalkContinue
 
-This message has no parameters. It just indicates that checkpointer must continue processing the same page with the same `next downlink`. That happens when the checkpointer has to wait for the concurrent operation. Such as meeting IO in-process downlink and having to release the log and wait till the IO is finished.
+This message has no parameters. It just indicates that checkpointer must continue processing the same page with the same `next downlink`. That happens when the checkpointer has to wait for the concurrent operation. Such as meeting IO in-process downlink and having to release the lock and wait till the IO is finished.
 
 ## Sequential buffers
 
