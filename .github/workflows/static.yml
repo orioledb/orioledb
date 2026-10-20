@@ -59,3 +59,14 @@ jobs:
             /tmp/scan-build-*
           retention-days: 2
           if-no-files-found: ignore
+
+  pgspot:
+    runs-on:
+      - blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout extension code
+        uses: actions/checkout@v6
+      - name: Install pgspot
+        run: pip install pgspot==0.9.4
+      - name: Check extension SQL scripts
+        run: bash ci/pgspot.sh
