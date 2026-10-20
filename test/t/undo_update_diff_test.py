@@ -10,6 +10,8 @@ old snapshot, recovery rolling back a transaction that was in progress at a
 checkpoint.
 """
 
+from threading import Thread
+
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_stopevent
@@ -220,3 +222,52 @@ class UndoUpdateDiffTest(BaseTest):
 			self.assertEqual(
 			    con.execute("SELECT id FROM o_diff WHERE a = -10;"), [(10, )])
 		node.stop()
+
+	def test_concurrent_updates_and_reads(self):
+		"""
+		Multiple backends update disjoint row ranges while readers with
+		repeatable-read snapshots see a consistent earlier version through
+		the undo chain.
+		"""
+		node = self.node
+		n_writers = 3
+		rounds = 5
+		original = node.execute(CHECK)[0][0]
+
+		readers = []
+		for _ in range(2):
+			r = node.connect()
+			r.execute("BEGIN ISOLATION LEVEL REPEATABLE READ;")
+			r.execute(CHECK)
+			readers.append(r)
+
+		errors = []
+
+		def writer_fn(writer_id):
+			try:
+				con = node.connect()
+				lo = writer_id * (ROWS // n_writers) + 1
+				hi = (writer_id + 1) * (ROWS // n_writers)
+				for _ in range(rounds):
+					con.execute(
+					    "UPDATE o_diff SET a = a + 1 WHERE id BETWEEN %d AND %d;"
+					    % (lo, hi))
+					con.commit()
+				con.close()
+			except Exception as e:
+				errors.append(e)
+
+		threads = []
+		for i in range(n_writers):
+			t = Thread(target=writer_fn, args=(i, ))
+			t.start()
+			threads.append(t)
+		for t in threads:
+			t.join()
+
+		self.assertEqual(errors, [])
+
+		for r in readers:
+			self.assertEqual(r.execute(CHECK)[0][0], original)
+			r.commit()
+			r.close()
