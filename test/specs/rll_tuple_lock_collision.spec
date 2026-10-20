@@ -13,11 +13,18 @@ setup
 	 * tag.  The tag now carries a 4-byte key itself.
 	 */
 	INSERT INTO o_hwlock VALUES (1, 1), (211, 1), (9660, 1);
+
+	CREATE TABLE o_hwlock8 (
+		id bigint PRIMARY KEY,
+		v int
+	) USING orioledb;
+	INSERT INTO o_hwlock8 VALUES (5000000000000, 1), (1125899906842624, 1);
 }
 
 teardown
 {
 	DROP TABLE o_hwlock;
+	DROP TABLE o_hwlock8;
 }
 
 session s1
@@ -26,6 +33,8 @@ step "ks_1_1" { SELECT id FROM o_hwlock WHERE id = 1 FOR KEY SHARE; }
 step "ks_1_211" { SELECT id FROM o_hwlock WHERE id = 211 FOR KEY SHARE; }
 step "ks_1_9660" { SELECT id FROM o_hwlock WHERE id = 9660 FOR KEY SHARE; }
 step "fu_1_211" { SELECT id FROM o_hwlock WHERE id = 211 FOR UPDATE; }
+step "ks_1_small8" { SELECT id FROM o_hwlock8 WHERE id = 5000000000000 FOR KEY SHARE; }
+step "ks_1_large8" { SELECT id FROM o_hwlock8 WHERE id = 1125899906842624 FOR KEY SHARE; }
 step "rb_1" { ROLLBACK; }
 
 session s2
@@ -39,12 +48,22 @@ step "begin_3" { BEGIN; }
 step "ks_3_9660" { SELECT id FROM o_hwlock WHERE id = 9660 FOR KEY SHARE; }
 step "fu_3_1" { SELECT id FROM o_hwlock WHERE id = 1 FOR UPDATE; }
 step "fu_3_211" { SELECT id FROM o_hwlock WHERE id = 211 FOR UPDATE; }
+step "fu_3_small8" { SELECT id FROM o_hwlock8 WHERE id = 5000000000000 FOR UPDATE; }
+step "fu_3_large8" { SELECT id FROM o_hwlock8 WHERE id = 1125899906842624 FOR UPDATE; }
 step "rb_3" { ROLLBACK; }
 
 session s4
 step "begin_4" { BEGIN; }
 step "ks_4_211" { SELECT id FROM o_hwlock WHERE id = 211 FOR KEY SHARE; }
 step "rb_4" { ROLLBACK; }
+# The tuple lock id of a waiter: the key itself, with bit 47 set, when the
+# key fits 47 bits, else a hash.
+step "show_tag" {
+	SELECT CASE WHEN tuple & 32768 <> 0
+				THEN 'key ' || ((tuple & 32767)::bigint << 32 | (page::bigint & 4294967295))
+				ELSE 'hash' END AS tuple_lock_id
+	FROM pg_locks WHERE locktype = 'tuple' AND granted;
+}
 
 # Scenarios by Pavel Borisov (#1408).  Each waiter that holds no lock on
 # its tuple queues on the tuple lock of that tuple.  When unrelated keys
@@ -90,3 +109,12 @@ permutation
 	"fu_1_211"
 	"rb_4"
 	"rb_1" "rb_3" "rb_2"
+
+# Permutation 3: an int8 key that fits 47 bits is the lock id itself, a
+# larger one is hashed.  (Little-endian: the key bytes read as a number are
+# the value.)
+permutation
+	"begin_1" "begin_3"
+	"ks_1_small8" "fu_3_small8" "show_tag" "rb_1" "rb_3"
+	"begin_1" "begin_3"
+	"ks_1_large8" "fu_3_large8" "show_tag" "rb_1" "rb_3"

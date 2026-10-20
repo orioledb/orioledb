@@ -27,6 +27,7 @@
 #include "recovery/wal.h"
 #include "transam/undo.h"
 #include "transam/oxid.h"
+#include "tuple/format.h"
 #include "utils/page_pool.h"
 #include "utils/stopevent.h"
 
@@ -460,27 +461,31 @@ unlock_release(BTreeModifyInternalContext *context, bool unlock)
 }
 
 /*
- * Tuple lock ids with this bit set in field4 carry the key itself rather than
- * a hash of it.
+ * A tuple lock id takes the 48 bits LOCKTAG_TUPLE has for the tuple: field3
+ * and field4.  The top one tells an id that is the key itself from one that
+ * is a hash of it.
  */
-#define TUPLE_LOCK_EXACT_KEY	0x8000
+#define TUPLE_LOCK_EXACT_KEY	(UINT64CONST(1) << 47)
+#define TUPLE_LOCK_ID_MASK		(TUPLE_LOCK_EXACT_KEY - 1)
 
 /*
  * Build the tag of the heavyweight lock that queues the waiters for a tuple,
  * as heap queues them on its tuple lock.  Unlike a heap TID, the position of
  * our tuple moves under a waiter -- inserts shift the items of its page, and
  * splits, merges and eviction move the page -- so the tag identifies the
- * tuple by its key, which every waiter for it reads the same.
+ * tuple by its key, which every waiter for it reads the same.  The keys of a
+ * tree are unique, so two tuples never have the same key bytes.
  *
- * The tag has 48 bits for that: field3 and field4.  A key of up to four bytes
- * is stored there as is, so two different keys never share a lock.  A longer
- * one is represented by 47 bits of a 64-bit hash.  A 32-bit hash used to let
- * waiters for unrelated keys queue behind each other, and a waiter that
- * holds a row lock the other one waits for then deadlocks with it.
- *
- * The tag is made from the bytes of the stored key, not by the type's hash
- * function: all the waiters for a tuple read the same bytes, and two tuples
- * of a tree, whose keys are unique, never have the same key bytes.
+ * When the key fits the 47 bits, the tag carries the key itself, so it is
+ * never shared with another tuple.  That takes a key whose length and layout
+ * all the keys of the tree share, which a key tuple in the fixed format of a
+ * table index has: no header, the same fixed-length attributes.  Its bytes,
+ * read as a number, then fit for a short key, such as int4, a ctid with an
+ * offset below 2^15, or an int8 below 2^47 on a little-endian machine.  Any
+ * other key is represented by 47 bits of a 64-bit hash of its bytes.  A 32-bit
+ * hash used to let waiters for unrelated keys queue behind each other, and a
+ * waiter that holds a row lock the other one waits for then deadlocks with
+ * it.
  *
  * Call it with the page locked: the tuple lives in the page, and once the
  * page is unlocked its bytes are anyone's to move or overwrite.
@@ -491,30 +496,30 @@ make_tuple_lock_tag(BTreeDescr *desc, OTuple tuple, LOCKTAG *tag)
 	OFixedKey	key;
 	bool		allocated;
 	int			len;
-	uint32		id = 0;
-	uint16		idExt;
+	uint64		id = 0;
 
 	key.tuple = o_btree_tuple_make_key(desc, tuple, key.fixedData, false,
 									   &allocated);
 	Assert(!allocated);
 	len = o_btree_len(desc, key.tuple, OKeyLength);
 
-	if (len <= sizeof(id))
-	{
+	if (IsRelationTree(desc) &&
+		desc->type != oIndexToast && desc->type != oIndexBridge &&
+		(key.tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT) &&
+		len <= sizeof(id))
 		memcpy(&id, key.tuple.data, len);
-		idExt = TUPLE_LOCK_EXACT_KEY | (len << 8) | key.tuple.formatFlags;
-	}
 	else
-	{
-		uint64		hash;
+		id = PG_UINT64_MAX;
 
-		hash = hash_bytes_extended((const unsigned char *) key.tuple.data,
-								   len, key.tuple.formatFlags);
-		id = (uint32) hash;
-		idExt = (uint16) (hash >> 32) & ~TUPLE_LOCK_EXACT_KEY;
-	}
+	if (id <= TUPLE_LOCK_ID_MASK)
+		id |= TUPLE_LOCK_EXACT_KEY;
+	else
+		id = hash_bytes_extended((const unsigned char *) key.tuple.data,
+								 len, key.tuple.formatFlags) &
+			TUPLE_LOCK_ID_MASK;
 
-	SET_LOCKTAG_TUPLE(*tag, desc->oids.datoid, desc->oids.reloid, id, idExt);
+	SET_LOCKTAG_TUPLE(*tag, desc->oids.datoid, desc->oids.reloid,
+					  (uint32) id, (uint16) (id >> 32));
 }
 
 /*
