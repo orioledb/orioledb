@@ -2537,6 +2537,25 @@ init_checkpoit_number(BTreeSeqScan *scan)
 	btree_unpin_meta_page();
 }
 
+/*
+ * Params for STOPEVENT_SEQ_SCAN_PARALLEL_JOIN and
+ * STOPEVENT_SEQ_SCAN_DSM_CREATE_FAIL: which tree the parallel scan is over.
+ */
+static Jsonb *
+btree_parallel_join_stopevent_params(BTreeDescr *desc)
+{
+	JsonbParseState *state = NULL;
+	Jsonb	   *res;
+	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	btree_desc_stopevent_params_internal(desc, &state);
+	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+	MemoryContextSwitchTo(mctx);
+
+	return res;
+}
+
 static void
 init_btree_seq_scan(BTreeSeqScan *scan)
 {
@@ -2546,6 +2565,9 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 
 	if (poscan)
 	{
+		STOPEVENT(STOPEVENT_SEQ_SCAN_PARALLEL_JOIN,
+				  btree_parallel_join_stopevent_params(desc));
+
 		/*
 		 * Scan worker numbers are assigned by the order of workers init of
 		 * local seqscan. In case of call seqscan in an index build worker,
@@ -2565,14 +2587,26 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 		scan->workerNumber = poscan->nworkers;
 		poscan->nworkers++;
 #endif
-		/* Scan leader */
+		if (scan->workerNumber == 0)
+		{
+			Assert(!(poscan->flags & O_PARALLEL_LEADER_STARTED));
+			poscan->flags |= O_PARALLEL_LEADER_STARTED;
+		}
+		SpinLockRelease(&poscan->workerStart);
+
+		/*
+		 * Scan leader.  init_checkpoit_number() and dsm_create() can raise an
+		 * error (dsm_create() does when /dev/shm is out of space), so they
+		 * run after workerStart is released: an error does not release a
+		 * spinlock, and the participants still to take a number would spin on
+		 * it until "stuck spinlock".  The others wait below for
+		 * O_PARALLEL_DSM_CREATED.
+		 */
 		if (scan->workerNumber == 0)
 		{
 			uint32		numLeafPages;
 			uint64		allocSize;
 
-			Assert(!(poscan->flags & O_PARALLEL_LEADER_STARTED));
-			poscan->flags |= O_PARALLEL_LEADER_STARTED;
 			init_checkpoit_number(scan);
 
 			/*
@@ -2584,20 +2618,19 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 			if (numLeafPages < 16)
 				numLeafPages = 16;
 			allocSize = MAXALIGN((uint64) numLeafPages * sizeof(BTreeSeqScanDiskDownlink));
+			if (STOPEVENT_CONDITION(STOPEVENT_SEQ_SCAN_DSM_CREATE_FAIL,
+									btree_parallel_join_stopevent_params(desc)))
+				elog(ERROR, "Debug condition: parallel scan DSM creation failed.");
 			scan->dsmSeg = dsm_create(allocSize, DSM_CREATE_NULL_IF_MAXSEGMENTS);
 			if (scan->dsmSeg == NULL)
-			{
-				SpinLockRelease(&poscan->workerStart);
 				ereport(ERROR,
 						(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
 						 errmsg("parallel scan failed: too many dynamic shared memory segments")));
-			}
 			poscan->dsmHandle = dsm_segment_handle(scan->dsmSeg);
 			poscan->dsmAllocated = numLeafPages;
 			pg_write_barrier();
 			poscan->flags |= O_PARALLEL_DSM_CREATED;
 		}
-		SpinLockRelease(&poscan->workerStart);
 
 		/* Non-leader workers: wait for DSM creation and attach */
 		Assert(scan->workerNumber >= 0);

@@ -57,3 +57,5 @@ recreate_table_descr
 before_split_fix_left_lock
 split_fix_before_downlink
 oxid_notify_woke
+seq_scan_parallel_join
+seq_scan_dsm_create_fail
