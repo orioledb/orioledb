@@ -392,6 +392,58 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	$$) as t;
 COMMIT;
 
+-- A bitmap heap scan rescanned by its parent keeps its EXPLAIN ANALYZE
+-- counters until the end of the query
+CREATE TABLE o_explain_bitmap_rescan (
+	key int PRIMARY KEY,
+	val int NOT NULL
+) USING orioledb;
+CREATE INDEX o_explain_bitmap_rescan_val ON o_explain_bitmap_rescan (val);
+INSERT INTO o_explain_bitmap_rescan
+	(SELECT v, v % 10 FROM generate_series(1, 100) v);
+ANALYZE o_explain_bitmap_rescan;
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+SET LOCAL enable_indexonlyscan = off;
+SET LOCAL enable_hashjoin = off;
+SET LOCAL enable_mergejoin = off;
+SET LOCAL enable_material = off;
+SET LOCAL max_parallel_workers_per_gather = 0;
+-- Inner side of a nested loop: rescanned and executed once per outer row
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text($$
+		EXPLAIN (ANALYZE, BUFFERS, COSTS OFF, TIMING OFF, SUMMARY OFF)
+			SELECT count(*) FROM generate_series(1, 3) g(v)
+				JOIN o_explain_bitmap_rescan b ON b.val = g.v;
+	$$) as t
+	WHERE t NOT LIKE '%Buffers: %' AND t NOT LIKE '%Index Searches: %' AND
+		  t NOT LIKE '%Planning:%';
+SELECT count(*) > 0 AS has_counters, bool_and(c[1]::bigint < 10000) AS sane
+	FROM regexp_matches(
+		(SELECT string_agg(t, E'\n') FROM query_to_text($$
+			EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+				SELECT count(*) FROM generate_series(1, 3) g(v)
+					JOIN o_explain_bitmap_rescan b ON b.val = g.v;
+		$$) as t),
+		'"(?:Read|Lock|Evict|Write|Load)": (\d+)', 'g') c;
+-- Rescanned by Append on every outer row, never executed because LIMIT 1 is
+-- satisfied by the first Append child
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text($$
+		EXPLAIN (ANALYZE, BUFFERS, COSTS OFF, TIMING OFF, SUMMARY OFF)
+			SELECT count(*) FROM generate_series(1, 3) g(v),
+				LATERAL (SELECT k FROM (SELECT g.v AS k
+										UNION ALL
+										SELECT key FROM o_explain_bitmap_rescan b
+											WHERE b.val > 5) u
+						 LIMIT 1) s;
+	$$) as t
+	WHERE t NOT LIKE '%Buffers: %' AND t NOT LIKE '%Index Searches: %' AND
+		  t NOT LIKE '%Planning:%';
+COMMIT;
+DROP TABLE o_explain_bitmap_rescan;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA explain CASCADE;
 RESET search_path;
