@@ -64,6 +64,7 @@ allowedRegexes = {
 	r"\s+$": ['*'],
 	r"\s*(->\s+)?Bitmap (Heap|Index) Scan\b": ['*'],
 	r"\s+(Filter|Index Cond|Recheck Cond):": ['*'],
+	r"isolationtester: canceling step": ['tuplelock-upgrade-no-deadlock'],
 }
 
 def is_allowed_line(testName, line):
