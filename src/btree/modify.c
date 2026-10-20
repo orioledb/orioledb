@@ -180,6 +180,17 @@ retry:
 	context.haveRedundantRowLocks = false;
 
 	/*
+	 * Release the tuple-hash heavyweight lock from a previous wait so it does
+	 * not persist into the next iteration where the conflict target may
+	 * differ.
+	 */
+	if (context.hwLockMode != NoLock)
+	{
+		LockRelease(&context.hwLockTag, context.hwLockMode, false);
+		context.hwLockMode = NoLock;
+	}
+
+	/*
 	 * Keep the modify retry loop interruptible.  A row-lock conflict against
 	 * a concurrent transaction can livelock here:
 	 * o_btree_modify_handle_conflicts() returns ConflictResolutionRetry --
@@ -475,8 +486,16 @@ wait_for_tuple(BTreeDescr *desc, uint32 tupleHash, OXid oxid,
 			   LOCKTAG *hwLockTag, LOCKMODE *hwLockMode)
 {
 	/*
-	 * Acquire the lock, if necessary (but skip it when we're requesting a
-	 * lock and already have one; avoids deadlock).
+	 * Try to acquire the heavyweight lock non-blocking.  The lock serializes
+	 * concurrent waiters on the same tuple so they don't thundering-herd on
+	 * retry; it is not required for correctness (the page content lock does
+	 * that).
+	 *
+	 * The lock tag is keyed by a hash of the primary key, so different keys
+	 * can collide.  A blocking acquire would create false dependencies
+	 * visible to the deadlock detector.  With dontWait the lock is
+	 * best-effort: when it is unavailable we skip it and proceed to
+	 * wait_for_oxid.
 	 */
 	if (*hwLockMode == NoLock && lockStatus == BTreeModifyNoLock)
 	{
@@ -487,7 +506,8 @@ wait_for_tuple(BTreeDescr *desc, uint32 tupleHash, OXid oxid,
 						  0);
 		*hwLockMode = hwLockModes[lockMode];
 
-		(void) LockAcquire(hwLockTag, *hwLockMode, false, false);
+		if (LockAcquire(hwLockTag, *hwLockMode, false, true) == LOCKACQUIRE_NOT_AVAIL)
+			*hwLockMode = NoLock;
 	}
 
 	wait_for_oxid(oxid, false);

@@ -1,6 +1,6 @@
 Parsed test spec with 3 sessions
 
-starting permutation: begin_1 begin_2 begin_3 select_1 delete_1 insert_1_2 select_1 select_2 select_3 delete_2 select_1 select_3 update_3 select_1 rollback_1 insert_2 select_1 select_2 commit_2 commit_3 select_1 select_2 select_3
+starting permutation: begin_1 begin_2 begin_3 select_1 delete_1 insert_1_2 select_1 select_2 select_3 delete_2 select_1 select_3 select_1 rollback_1 update_3 insert_2 select_1 select_2 commit_2 commit_3 select_1 select_2 select_3
 step begin_1: BEGIN;
 step begin_2: BEGIN;
 step begin_3: BEGIN;
@@ -77,9 +77,6 @@ val_1|val_2
     5|  105
 (5 rows)
 
-step update_3: 
-	UPDATE o_test_1 SET val_2 = 3 WHERE val_1 = 1;
- <waiting ...>
 step select_1: 
 	SELECT * FROM o_test_1 ORDER BY val_1;
 
@@ -94,6 +91,9 @@ val_1|val_2
 
 step rollback_1: ROLLBACK;
 step delete_2: <... completed>
+step update_3: 
+	UPDATE o_test_1 SET val_2 = 3 WHERE val_1 = 1;
+ <waiting ...>
 step insert_2: INSERT INTO o_test_1 VALUES (1, 2);
 step select_1: 
 	SELECT * FROM o_test_1 ORDER BY val_1;
@@ -276,7 +276,7 @@ val_1|val_2
 (9 rows)
 
 
-starting permutation: begin_1 begin_2 begin_3 select_1 delete_1 insert_1_2 select_1 select_2 select_3 delete_2 select_1 select_3 update_3 select_1 commit_1 insert_2 select_1 select_2 commit_2 commit_3 select_1 select_2 select_3
+starting permutation: begin_1 begin_2 begin_3 select_1 delete_1 insert_1_2 select_1 select_2 select_3 delete_2 select_1 select_3 select_1 commit_1 update_3 insert_2 select_1 select_2 commit_2 commit_3 select_1 select_2 select_3
 step begin_1: BEGIN;
 step begin_2: BEGIN;
 step begin_3: BEGIN;
@@ -353,9 +353,6 @@ val_1|val_2
     5|  105
 (5 rows)
 
-step update_3: 
-	UPDATE o_test_1 SET val_2 = 3 WHERE val_1 = 1;
- <waiting ...>
 step select_1: 
 	SELECT * FROM o_test_1 ORDER BY val_1;
 
@@ -370,6 +367,9 @@ val_1|val_2
 
 step commit_1: COMMIT;
 step delete_2: <... completed>
+step update_3: 
+	UPDATE o_test_1 SET val_2 = 3 WHERE val_1 = 1;
+ <waiting ...>
 step insert_2: INSERT INTO o_test_1 VALUES (1, 2);
 step select_1: 
 	SELECT * FROM o_test_1 ORDER BY val_1;
