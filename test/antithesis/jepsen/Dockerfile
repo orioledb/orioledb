@@ -11,20 +11,30 @@ RUN apt-get update \
 
 WORKDIR /src
 
-# 2026-07-29: use antithesis-instrumented sql workload
-RUN git clone --depth=1 https://github.com/pmbauer/jepsen-sql.git sql \
+# 2026-07-29: use antithesis-instrumented sql workload, pinned to
+# v0.1.1sb-SNAPSHOT. Fetch the commit explicitly so the build does not depend
+# on it remaining reachable from the repository's default branch.
+RUN git init sql \
     && cd sql \
-    # pin to v0.1.1sb-SNAPSHOT
-    && git checkout fc117a6e6c10b7408dfe49dad6bd6cadbcb0541a \
+    && git remote add origin https://github.com/pmbauer/jepsen-sql.git \
+    && git fetch --depth=1 origin fc117a6e6c10b7408dfe49dad6bd6cadbcb0541a \
+    && git checkout --detach FETCH_HEAD \
     && lein install
 
 # 2026-07-29: use antithesis-instrumented postgres driver
 WORKDIR /src/jepsen-postgres
 RUN git init \
     && git remote add origin https://github.com/pmbauer/jepsen-postgres.git \
-    && git fetch --depth=1 origin "${JEPSEN_POSTGRES_REF}" \
-    && git checkout 1b99cd9dd11df56a2e45ec7c5638dae82c54446f \
+    && git fetch --depth=1 origin 1b99cd9dd11df56a2e45ec7c5638dae82c54446f \
+    && git checkout --detach FETCH_HEAD
+
+COPY overlay/cli.patch /tmp/orioledb-cli.patch
+COPY overlay/src/ postgres/src/
+COPY overlay/test/ postgres/test/
+RUN git apply --check /tmp/orioledb-cli.patch \
+    && git apply /tmp/orioledb-cli.patch \
     && cd postgres \
+    && lein test jepsen.orioledb.workload.checkpoint-recovery-test \
     && lein jar \
     && mkdir -p /opt/jepsen \
     && cp target/postgres-*.jar /opt/jepsen/jepsen-postgres.jar \
@@ -137,7 +147,9 @@ ENV JEPSEN_WORKLOAD=append \
     JEPSEN_POSTGRES_USER=jepsen \
     JEPSEN_POSTGRES_PASSWORD=pw \
     JEPSEN_POSTGRES_PORT=5432 \
-    JEPSEN_JDWP_PORT=
+    JEPSEN_JDWP_PORT= \
+    JEPSEN_TEST_SUITE=jepsen-postgres \
+    RUNTIME_STATE_DIR=/runtime-state
 
 COPY ./test /opt/antithesis/test
 COPY --chmod=755 entrypoint /usr/local/bin/
