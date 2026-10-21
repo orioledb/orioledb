@@ -110,7 +110,7 @@ SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
 SET enable_hashjoin = off;
 SET enable_material = off;
 RESET enable_mergejoin;
-EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2) ORDER BY id1, id2;
 RESET enable_material;
 RESET enable_nestloop;
