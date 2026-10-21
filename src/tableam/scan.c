@@ -1238,8 +1238,10 @@ o_rescan_custom_scan(CustomScanState *node)
 		if (bitmap_state->scan)
 			o_free_bitmap_scan(bitmap_state->scan);
 
-		if (is_explain_analyze(ocstate->o_plan_state->plan_state))
-			pfree(bitmap_state->eaCounters);
+		/*
+		 * Keep eaCounters across rescans: later bitmap-index scans may update
+		 * them, and EXPLAIN reads them before o_end_custom_scan() frees them.
+		 */
 		bitmap_state->scan = NULL;
 	}
 }
