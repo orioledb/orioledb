@@ -2,11 +2,13 @@
 # coding: utf-8
 
 import base64
+import glob
 import hashlib
 import inspect
 import os
 import random
 import re
+import resource
 import shutil
 import signal
 import socket
@@ -18,6 +20,7 @@ import time
 import typing
 import unittest
 
+from contextlib import contextmanager
 from threading import Thread
 from testgres.enums import NodeStatus
 from testgres.exceptions import PortForException
@@ -479,6 +482,19 @@ class BaseTest(unittest.TestCase):
 
 		# 4. Let testgres know the node is no longer running so start() works.
 		self.node.is_started = False
+
+	@contextmanager
+	def expected_postgres_panic(self):
+		"""Prevent an intentional PostgreSQL PANIC from failing CI cleanup."""
+		old_core_limit = resource.getrlimit(resource.RLIMIT_CORE)
+		old_valgrind_logs = set(glob.glob('pid-*.log'))
+		try:
+			resource.setrlimit(resource.RLIMIT_CORE, (0, old_core_limit[1]))
+			yield
+		finally:
+			resource.setrlimit(resource.RLIMIT_CORE, old_core_limit)
+			for path in set(glob.glob('pid-*.log')) - old_valgrind_logs:
+				os.remove(path)
 
 	def list2reason(self, exc_list):
 		if exc_list and exc_list[-1][0] is self:

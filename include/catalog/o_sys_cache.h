@@ -282,6 +282,7 @@ extern void o_validate_composite_type(Oid typoid, Oid opclass);
 extern Oid	o_get_hash_proc_by_btree_opclass(Oid btreeOpclass);
 
 extern void o_sys_caches_delete_by_lsn(XLogRecPtr checkPointRedo);
+extern void o_sys_caches_delete_datoid(Oid datoid);
 
 extern void o_sys_caches_copy_datoid(Oid src_datoid, Oid dst_datoid);
 
@@ -674,7 +675,5 @@ o_set_sys_cache_search_datoid(Oid datoid)
 #if PG_VERSION_NUM >= 180000
 extern void o_database_cache_restore_default_locale(void);
 #endif
-extern void o_get_prefixes_for_tablespace(Oid datoid, Oid tablespace,
-										  char **prefix, char **db_prefix);
 
 #endif							/* __O_SYS_CACHE_H__ */

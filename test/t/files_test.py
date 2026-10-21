@@ -413,7 +413,13 @@ class FilesTest(BaseTest):
 
 	def test_drop_database_cleanup(self):
 		node = self.node
+		cache_trees = (4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22)
+		tablespace_dir = os.path.join(node.base_dir, 'drop_database_ts')
+		os.makedirs(tablespace_dir)
 		node.start()  # start PostgreSQL
+		node.safe_psql(
+		    'postgres',
+		    f"CREATE TABLESPACE drop_database_ts LOCATION '{tablespace_dir}';")
 		node.safe_psql('postgres', "CREATE DATABASE t;")
 		node.safe_psql(
 		    'postgres', """
@@ -433,17 +439,65 @@ class FilesTest(BaseTest):
 				id integer NOT NULL,
 				val text
 			) USING orioledb;
+			CREATE TABLE o_test_ts (
+				id integer NOT NULL
+			) USING orioledb TABLESPACE drop_database_ts;
 			INSERT INTO o_test
 				(SELECT id, id || 'val' FROM generate_series(1, 1000, 1) id);
 			INSERT INTO o_test2
 				(SELECT id, id || 'val' FROM generate_series(1, 1000, 1) id);
 			""")
 		deleted = node.execute(
-		    't', "SELECT 'o_test'::regclass::oid, 'o_test2'::regclass::oid")[0]
+		    't', "SELECT 'o_test'::regclass::oid, 'o_test2'::regclass::oid, "
+		    "'o_test_ts'::regclass::oid")[0]
 		reloids = node.execute('postgres',
 		                       "SELECT * FROM orioledb_table_oids();")
 		reloids = [item[1] for item in reloids if item[1] not in deleted]
+		t_db_oid = node.execute(
+		    'postgres',
+		    "SELECT oid FROM pg_database WHERE datname = 't';")[0][0]
+
+		def cache_state():
+			alive = 0
+			marked = 0
+			for tree_num in cache_trees:
+				cur_alive, cur_marked = node.execute(
+				    'postgres', """
+						SELECT count(*),
+							   count(*) FILTER (
+								   WHERE (r->'key'->>'deleted')::bool)
+							FROM orioledb_sys_tree_rows(%d) r
+							WHERE (r->'key'->>'datoid')::oid = %d
+							  AND NOT (r->'tupHdr'->>'deleted')::bool;
+					""" % (tree_num, t_db_oid))[0]
+				alive += cur_alive
+				marked += cur_marked
+			return alive, marked
+
+		alive, marked = cache_state()
+		self.assertGreater(alive, 0)
+		self.assertEqual(marked, 0)
+		default_db_dir = os.path.join(node.data_dir, 'orioledb_data',
+		                              str(t_db_oid))
+		tablespace_db_dirs = glob.glob(
+		    os.path.join(tablespace_dir, 'PG_*', 'orioledb_data',
+		                 str(t_db_oid)))
+		self.assertTrue(os.path.isdir(default_db_dir))
+		self.assertEqual(1, len(tablespace_db_dirs))
+		self.assertTrue(os.path.isdir(tablespace_db_dirs[0]))
 		node.safe_psql('postgres', "DROP DATABASE t;")
+		alive, marked = cache_state()
+		self.assertEqual(alive, marked)
+		self.assertFalse(os.path.exists(default_db_dir))
+		self.assertFalse(os.path.exists(tablespace_db_dirs[0]))
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(cache_state(), (0, 0))
+		node.safe_psql('postgres', "CHECKPOINT;")
+		self.assertEqual(cache_state(), (0, 0))
+
+		node.safe_psql('postgres', "DROP TABLESPACE drop_database_ts;")
 		new_reloids = node.execute('postgres',
 		                           "SELECT * FROM orioledb_table_oids();")
 		new_reloids = [item[1] for item in new_reloids]
