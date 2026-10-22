@@ -153,6 +153,8 @@ static CreateStmt *create_stmt = NULL;
 static List *o_added_columns = NIL;
 static movedb_params o_movedb_data = {InvalidOid, InvalidOid, InvalidOid};
 
+static Oid	dropped_database_oid = InvalidOid;
+
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
 									 bool readOnlyTree,
@@ -3511,6 +3513,134 @@ remove_symlink:
 }
 
 
+static void
+rmdir_dropped_database_dir(const char *prefix, Oid dbOid)
+{
+	char		path[MAXPGPATH];
+	int			saved_errno;
+
+	pg_snprintf(path, MAXPGPATH, "%s/%u", prefix, dbOid);
+	if (rmdir(path) == 0)
+	{
+		fsync_fname_ext(prefix, true, false, WARNING);
+		return;
+	}
+
+	saved_errno = errno;
+	if (saved_errno != ENOENT && saved_errno != ENOTEMPTY)
+	{
+		errno = saved_errno;
+		ereport(WARNING,
+				(errcode_for_file_access(),
+				 errmsg("could not remove orioledb database directory \"%s\": %m",
+						path)));
+	}
+}
+
+static void
+cleanup_dropped_database_dirs(void)
+{
+	Oid			dbOid = dropped_database_oid;
+	DIR		   *dir;
+	struct dirent *file;
+	char		path[MAXPGPATH];
+	char		targetpath[MAXPGPATH];
+	int			saved_errno;
+
+#define PG_TBLSPC "pg_tblspc"
+
+	if (!OidIsValid(dbOid))
+		return;
+
+	dropped_database_oid = InvalidOid;
+	rmdir_dropped_database_dir(ORIOLEDB_DATA_DIR, dbOid);
+
+	dir = opendir(PG_TBLSPC);
+	if (dir == NULL)
+	{
+		ereport(WARNING,
+				(errcode_for_file_access(),
+				 errmsg("could not open directory \"%s\": %m", PG_TBLSPC)));
+		return;
+	}
+
+	while (errno = 0, (file = readdir(dir)) != NULL)
+	{
+		struct stat st;
+		int			rllen;
+
+		if (strcmp(file->d_name, ".") == 0 ||
+			strcmp(file->d_name, "..") == 0)
+			continue;
+
+		pg_snprintf(path, MAXPGPATH,
+					PG_TBLSPC "/%s/" TABLESPACE_VERSION_DIRECTORY,
+					file->d_name);
+		if (lstat(path, &st) < 0)
+		{
+			saved_errno = errno;
+			if (saved_errno == ENOENT)
+				continue;
+			errno = saved_errno;
+			ereport(WARNING,
+					(errcode_for_file_access(),
+					 errmsg("could not stat file \"%s\": %m", path)));
+			continue;
+		}
+
+		if (S_ISLNK(st.st_mode))
+		{
+			rllen = readlink(path, targetpath, sizeof(targetpath));
+			if (rllen < 0)
+			{
+				saved_errno = errno;
+				errno = saved_errno;
+				ereport(WARNING,
+						(errcode_for_file_access(),
+						 errmsg("could not read symbolic link \"%s\": %m",
+								path)));
+				continue;
+			}
+			if (rllen >= (int) sizeof(targetpath))
+			{
+				ereport(WARNING,
+						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+						 errmsg("symbolic link \"%s\" target is too long",
+								path)));
+				continue;
+			}
+			targetpath[rllen] = '\0';
+			pg_snprintf(path, MAXPGPATH, "%s/" ORIOLEDB_DATA_DIR,
+						targetpath);
+		}
+		else
+			strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
+
+		rmdir_dropped_database_dir(path, dbOid);
+	}
+	saved_errno = errno;
+	closedir(dir);
+	if (saved_errno != 0)
+	{
+		errno = saved_errno;
+		ereport(WARNING,
+				(errcode_for_file_access(),
+				 errmsg("could not read directory \"%s\": %m", PG_TBLSPC)));
+	}
+#undef PG_TBLSPC
+}
+
+void
+orioledb_drop_database_xact_callback(XactEvent event, void *arg)
+{
+	(void) arg;
+
+	if (event == XACT_EVENT_COMMIT)
+		cleanup_dropped_database_dirs();
+	else if (event == XACT_EVENT_ABORT)
+		dropped_database_oid = InvalidOid;
+}
+
 /*
  * get_collation		- fetch qualified name of a collation
  *
@@ -3920,6 +4050,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		o_tables_table_meta_lock(NULL);
 		o_tables_drop_all(oxid, oSnapshot.csn, objectId);
 		o_tables_table_meta_unlock(NULL, InvalidOid);
+
+		dropped_database_oid = objectId;
 	}
 	else if (access == OAT_DROP && classId == TypeRelationId &&
 			 ActiveSnapshotSet())
