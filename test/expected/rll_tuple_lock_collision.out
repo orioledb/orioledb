@@ -146,3 +146,40 @@ step fu_3_large8: <... completed>
 (1 row)
 
 step rb_3: ROLLBACK;
+
+starting permutation: set_dt_short_3 begin_1 begin_3 ks_1_coll_A ks_1_coll_B fu_3_coll_A begin_2 ks_2_coll_A fu_2_coll_B rb_1 rb_3 rb_2
+step set_dt_short_3: SET deadlock_timeout = '10ms';
+step begin_1: BEGIN;
+step begin_3: BEGIN;
+step ks_1_coll_A: SELECT id FROM o_hwlock_coll WHERE id = 140737490556223 FOR KEY SHARE;
+             id
+---------------
+140737490556223
+(1 row)
+
+step ks_1_coll_B: SELECT id FROM o_hwlock_coll WHERE id = 140737501603420 FOR KEY SHARE;
+             id
+---------------
+140737501603420
+(1 row)
+
+step fu_3_coll_A: SELECT id FROM o_hwlock_coll WHERE id = 140737490556223 FOR UPDATE; <waiting ...>
+step begin_2: BEGIN;
+step ks_2_coll_A: SELECT id FROM o_hwlock_coll WHERE id = 140737490556223 FOR KEY SHARE;
+             id
+---------------
+140737490556223
+(1 row)
+
+step fu_2_coll_B: SELECT id FROM o_hwlock_coll WHERE id = 140737501603420 FOR UPDATE; <waiting ...>
+step rb_1: ROLLBACK;
+step fu_3_coll_A: <... completed>
+ERROR:  deadlock detected
+step fu_2_coll_B: <... completed>
+             id
+---------------
+140737501603420
+(1 row)
+
+step rb_3: ROLLBACK;
+step rb_2: ROLLBACK;
