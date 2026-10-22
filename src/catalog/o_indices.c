@@ -2481,9 +2481,13 @@ Datum
 orioledb_index_description(PG_FUNCTION_ARGS)
 {
 	ORelOids	oids;
-	text	   *indexTypeText = PG_GETARG_TEXT_PP(3);
+	text	   *indexTypeText;
 	OIndexType	indexType;
 	TupleDesc	tupdesc;
+
+	if (PG_ARGISNULL(3))
+		PG_RETURN_NULL();
+	indexTypeText = PG_GETARG_TEXT_PP(3);
 
 	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
 		elog(ERROR, "return type must be a row type");
