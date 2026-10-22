@@ -289,7 +289,7 @@ typedef struct
 	bool		needs_wal_flush;
 	bool		has_retained_undo_location[(int) UndoLogsCount];
 	bool		local_wal_has_material_changes;
-	XLogRecPtr	saved_xidless_commit_lsn;	/* During autonumous xact
+	XLogRecPtr	saved_xidless_commit_lsn;	/* During autonomous xact
 											 * xidless_commit_lsn should be
 											 * invalidated. Save it before and
 											 * restore it after Autonomous

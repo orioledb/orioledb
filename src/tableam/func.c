@@ -526,7 +526,7 @@ append_bits(StringInfo str, Page p, OffsetNumber *offset,
 
 /*
  * Print contents of give B-tree page.  If non-leaf page is given, recursively
- * print childredn.
+ * print children.
  */
 static void
 print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,

@@ -276,7 +276,7 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 * Check if we need to load page image from undo?
 	 *
 	 * We do this check without holding a page lock or even usage of state
-	 * protocol.  Istead we ensure correctenss of this check in a following
+	 * protocol.  Instead we ensure correctness of this check in a following
 	 * way.
 	 *
 	 * 1. We read csn before undo location (ensured with memory barriers).

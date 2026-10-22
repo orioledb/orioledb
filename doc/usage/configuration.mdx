@@ -38,7 +38,7 @@ what this GUC requested when `max_procs` is high.
 The number of recovery workers for row-level WAL based recovery.
 
 Increasing the sum value of `orioledb.recovery_pool_size` and `orioledb.recovery_idx_pool_size` to 50-100% of number of
-available CPU cores speeds up recovery process for the cluster. You need to set `max_worker_processes` to more that
+available CPU cores speeds up recovery process for the cluster. You need to set `max_worker_processes` to more than
 this sum amount, otherwise OrioleDB will fallback to single-process index build in recovery or to single-process recovery.
 
 ### `orioledb.recovery_idx_pool_size`
@@ -50,7 +50,7 @@ this sum amount, otherwise OrioleDB will fallback to single-process index build 
 The number of recovery parallel index build workers.
 
 Increasing the sum value of `orioledb.recovery_pool_size` and `orioledb.recovery_idx_pool_size` to 50-100% of number of
-available CPU cores speeds up recovery process for the cluster. You need to set `max_worker_processes` to more that
+available CPU cores speeds up recovery process for the cluster. You need to set `max_worker_processes` to more than
 this sum amount, otherwise OrioleDB will fallback to single-process index build in recovery or to single-process recovery.
 
 ### `orioledb.recovery_queue_size`
@@ -145,7 +145,7 @@ The remaining `orioledb.undo_buffers` (except the fraction specified by sum of `
 | ----------- | --- |
 | **Default** | 1MB |
 
-Size of OrioleDB in-memory xid buffers. Each MB can acommodate 65 thousands of xid items corresponding to open
+Size of OrioleDB in-memory xid buffers. Each MB can accommodate 65 thousands of xid items corresponding to open
 transactions. Consider increasing this parameter if you have very big transactions rate.
 
 ### `orioledb.bgwriter_num_workers`
@@ -292,7 +292,7 @@ Maximum number of rewind transaction items that are stored for a rewind. Older r
 | ----------- | --- |
 | **Default** | 1MB |
 
-Size of OrioleDB in-memory rewind buffers. Each MB can acommodate around 8000 rewind transaction items. If you have
+Size of OrioleDB in-memory rewind buffers. Each MB can accommodate around 8000 rewind transaction items. If you have
 enough memory set it near a value (`orioledb.rewind_max_transactions` / 8000) MB to avoid writing rewind info to disk.
 
 ### `orioledb.logical_xid_buffers`

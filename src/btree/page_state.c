@@ -1243,7 +1243,7 @@ release_all_page_locks(void)
 
 /*
  * Register in-progress split.  This split will be marked as incomplete on
- * errer cleanup unless it's unregistered before.
+ * error cleanup unless it's unregistered before.
  *
  * Must be called within critical section.
  */
@@ -1264,7 +1264,7 @@ btree_register_inprogress_split(OInMemoryBlkno rightBlkno)
 /*
  * Unregister in-progress split.
  *
- * Must be calles within critical section.
+ * Must be called within critical section.
  */
 void
 btree_unregister_inprogress_split(OInMemoryBlkno rightBlkno)

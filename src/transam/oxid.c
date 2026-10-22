@@ -924,7 +924,7 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr, bool getRawCsn)
 		}
 	}
 
-	/* Optimisticly try to read csn and/or xlog ptr from circular buffer */
+	/* Optimistically try to read csn and/or xlog ptr from circular buffer */
 	if (outCsn)
 		*outCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn) & (getRawCsn ? UINT64_MAX : (~COMMITSEQNO_RETAINED_FOR_REWIND));
 	if (outPtr)
@@ -1720,7 +1720,7 @@ advance_oxids(OXid new_xid)
 
 			/*
 			 * Nobody can evict this to the disk before we advance nextXid.
-			 * So, marking bufffer dirty is safe.
+			 * So, marking buffer dirty is safe.
 			 */
 			mark_xid_buffer_dirty(xid);
 		}
@@ -2302,7 +2302,7 @@ oxid_get_procnum(OXid oxid)
 /*
  * Check if xid should be considered as finished for given process.  During
  * recovery we also consult with local map of xids, because workers can go
- * ahead of what is markerd as finished for everybody.
+ * ahead of what is marked as finished for everybody.
  */
 bool
 xid_is_finished(OXid xid)

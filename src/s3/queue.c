@@ -126,7 +126,7 @@ s3_queue_put_task(Pointer data, uint32 len)
 	/* Put the task into a circular buffer */
 	if (insertLocation / s3_queue_size == (insertLocation + totallen - 1) / s3_queue_size)
 	{
-		/* Easy case: we can put the task a as continuous chunk of memory */
+		/* Easy case: we can put the task as a continuous chunk of memory */
 		memcpy(s3_queue_buffer + insertLocation % s3_queue_size + sizeof(uint32),
 			   data,
 			   len);

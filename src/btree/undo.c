@@ -358,7 +358,7 @@ page_add_image_to_undo(BTreeDescr *desc, Pointer p, CommitSeqNo imageCsn,
 /*
  * Given page item modified by in-progress transaction.  Rollback changes
  * using undo chain.  Specify 'wholeChain' flag to revert all in-progress
- * changes from the chain.  Otherise, only last change item is reverted.
+ * changes from the chain.  Otherwise, only last change item is reverted.
  *
  * Return true if page item still exists.
  *
@@ -2461,7 +2461,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 }
 
 /*
- * Remove redudant row-level locks.
+ * Remove redundant row-level locks.
  */
 void
 remove_redundant_row_locks(BTreeLeafTuphdr *pageTuphdr,

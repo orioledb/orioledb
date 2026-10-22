@@ -1322,7 +1322,7 @@ step_upward_level(OBTreeFindPageInternalContext *intCxt)
 
 /*
  * Re-find the location of previously found key.  If search for modification,
- * assume lock was relesed (otherwise, no point to refind).
+ * assume lock was released (otherwise, no point to refind).
  */
 OFindPageResult
 refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
@@ -1595,8 +1595,8 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 		return false;
 
 	/*
-	 * Currenlty, the only user of this function is iterator, which is
-	 * read-only.  So, no support for modification, but could we added later.
+	 * Currently, the only user of this function is iterator, which is
+	 * read-only.  So, no support for modification, but could be added later.
 	 */
 	Assert(!BTREE_PAGE_FIND_IS(context, MODIFY));
 
@@ -1779,8 +1779,8 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	Assert(BTREE_PAGE_FIND_IS(context, KEEP_LOKEY));
 
 	/*
-	 * Currenlty, the only user of this function is iterator, which is
-	 * read-only.  So, no support for modification, but could we added later.
+	 * Currently, the only user of this function is iterator, which is
+	 * read-only.  So, no support for modification, but could be added later.
 	 */
 	Assert(!BTREE_PAGE_FIND_IS(context, MODIFY));
 

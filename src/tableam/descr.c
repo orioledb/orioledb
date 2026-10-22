@@ -483,7 +483,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 			init_extents = true;
 
 			/*
-			 * We should prevent iteration through free extentents list by the
+			 * We should prevent iteration through free extents list by the
 			 * checkpointer until free extents is not completely initialized
 			 * yet.
 			 */
@@ -2027,7 +2027,7 @@ o_resolve_collation(Oid collation)
 }
 
 /*
- * Find opfamily omparator for given datatypes and collation.  Throws error
+ * Find opfamily comparator for given datatypes and collation.  Throws error
  * if not found.
  */
 OComparator *

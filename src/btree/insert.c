@@ -447,7 +447,7 @@ typedef struct
 } TupleWaiterInfo;
 
 /*
- * Gethers information about tuples to be inserted by other processes.
+ * Gathers information about tuples to be inserted by other processes.
  * Returns total size to be occupied by new tuples.
  */
 static int

@@ -34,7 +34,7 @@ Build via `make build` (see details under Usage)
 - a config follows simple conventions
     - named by a path inside the `config` folder (e.g. `setup/s3` points to ``<repo>/config/setup/s3`)
     - `compose.yaml` - merged with base compose file
-    - `env` - enivronment customizations
+    - `env` - environment customizations
 
 ### Nightly
 
@@ -143,14 +143,14 @@ You will need to install `snouty` to fully use the skills (see pre-requisites ab
 
 ### `sbin/debug-jepsen-append`
 
-This script requires babshka.  You can get it automatically with mise (see pre-requisites above).
+This script requires babashka.  You can get it automatically with mise (see pre-requisites above).
 
 ```shell
 # 1. Choose a recent run (or pass --run-id)
 # 2. Choose a jepsen anomaly and detection moment
 # 3. Wizard prints results.edn report
 # 4. Wizard prints operation log events related to the anomaly
-# 5. Launch an MVD debug sesson at chosen log event
+# 5. Launch an MVD debug session at chosen log event
 
 sbin/debug-jepsen-append [--run-id 9f95138a6ce1234501b5c8d900e730ca-60-11]
 ```
@@ -237,7 +237,7 @@ Replace `8` with the PID reported by `jcmd -l`.
 
 
 > [!note]
-> `gdb` attachment to an x64_86 process doesn't work on mac/OrbStack/Rosetta. You'll need native amd64 Linux.
+> `gdb` attachment to an x86_64 process doesn't work on mac/OrbStack/Rosetta. You'll need native amd64 Linux.
 
 List PostgreSQL processes:
 

@@ -1676,7 +1676,7 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 		.on_record = recovery_on_record
 	};
 
-	/* Currently we consider ony recovery_target_time */
+	/* Currently we consider only recovery_target_time */
 	if (recoveryTarget != RECOVERY_TARGET_TIME)
 		return false;
 

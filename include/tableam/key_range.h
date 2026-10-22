@@ -40,7 +40,7 @@ typedef struct
 	/*
 	 * We're going to do many comparisons between bound value and tuple
 	 * values. It would be very slow to lookup for the comparator each time.
-	 * So if types don't match, we do cache the comaparator.
+	 * So if types don't match, we do cache the comparator.
 	 */
 	OComparator *comparator;
 	OExclusionFn *exclusion_fn;

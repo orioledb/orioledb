@@ -62,6 +62,6 @@ When the checkpointing of the primary key trees is finished, we mark the current
 
 ![Recovery of secondary indexes](../images/recovery_secondary_indexes.svg)
 
-We only apply WAL records to TOAST and primary key trees during recovery before the toast consistency point. We cannot "lose" any secondary index changes in that period because secondary index trees were checkpointer later. Thus, secondary indexes already contain all the changes made before the toast consistency point.
+We only apply WAL records to TOAST and primary key trees during recovery before the toast consistency point. We cannot "lose" any secondary index changes in that period because secondary index trees were checkpointed later. Thus, secondary indexes already contain all the changes made before the toast consistency point.
 
 After the toast consistency point, we start to apply changes to the secondary indexes. Since TOAST WAL records are going first, we can fetch all the TOASTed values we need (if any) and apply the changes to the secondary indexes while applying the primary key WAL record.
