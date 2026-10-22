@@ -199,8 +199,21 @@ o_ppool_reserve_pages(PagePool *pool, int kind, int count)
 		 * ppool_run_clock()).
 		 */
 		if (!ppool_run_maintenance(pool, true, NULL))
-
 		{
+			/*
+			 * The checkpointer must not ERROR here: any error during
+			 * checkpoint becomes FATAL and brings down the whole cluster.
+			 * Pool exhaustion is transient; the user backend holding the
+			 * pages will eventually abort (hitting the same limit) and
+			 * release them.
+			 */
+			if (MyBackendType == B_CHECKPOINTER)
+			{
+				CHECK_FOR_INTERRUPTS();
+				pg_usleep(10000L);
+				continue;
+			}
+
 			o_stop_saving_inval_messages(was_saving);
 			ereport(ERROR,
 					(errcode(ERRCODE_OUT_OF_MEMORY),
