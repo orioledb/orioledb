@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import re
 import threading
 
 from .base_test import BaseTest, ThreadQueryExecutor, wait_stopevent
@@ -173,6 +174,76 @@ class ConcurrentIndexStopEventsTest(BaseTest):
 		self.assertEqual(self._heap_count(), 110)
 		self.assertEqual(self._index_count("val >= 'v' AND val < 'w'"), 100)
 		self.assertEqual(self._index_count("val >= 'w_v' AND val < 'w_w'"), 10)
+
+	def test_aborted_inserts_from_two_spools_during_build(self):
+		"""
+		Rolled-back inserts from two spool files must not reach the new index.
+		"""
+		node = self.node
+		node.safe_psql("""
+			CREATE TABLE t2 (
+				id int8 NOT NULL PRIMARY KEY,
+				val text NOT NULL,
+				pad text NOT NULL
+			) USING orioledb;
+			INSERT INTO t2 SELECT g, 'v' || g, repeat('x', 400)
+				FROM generate_series(1, 20000) g;
+		""")
+
+		root = node.execute("SELECT orioledb_idx_structure('t2'::regclass, "
+		                    "'t2_pkey', 'n', 1)")[0][0]
+		m = re.search(r"level = (\d+)", root)
+		self.assertIsNotNone(m)
+		self.assertGreaterEqual(int(m.group(1)), 2)
+
+		ctrl = node.connect(autocommit=True)
+		ctrl.execute("SELECT pg_stopevent_set('seq_scan_load_internal_page', "
+		             "'$.treeName == \"t2_pkey\"');")
+
+		conn = node.connect(autocommit=True)
+		conn.execute("SET max_parallel_maintenance_workers = 0;")
+		pid = conn.execute("SELECT pg_backend_pid();")[0][0]
+		t = ThreadQueryExecutor(
+		    conn, "CREATE INDEX CONCURRENTLY t2_val_idx ON t2 (val);")
+		t.start()
+		try:
+			wait_stopevent(node, pid)
+
+			# Keep both connected so that they write separate spool files.
+			w1 = node.connect()
+			w2 = node.connect()
+			w1.execute("INSERT INTO t2 VALUES (100001, 'w1', 'x');")
+			w2.execute("INSERT INTO t2 VALUES (100002, 'w2', 'x');")
+			w1.rollback()
+			w2.rollback()
+			# The reader has to grow w2's tuple buffer for this row.
+			w2.execute("INSERT INTO t2 "
+			           "VALUES (100003, 'w3' || repeat('y', 100), 'x');")
+			w2.commit()
+			w1.close()
+			w2.close()
+
+			self._release(ctrl, 'seq_scan_load_internal_page')
+			t.join()
+		finally:
+			conn.close()
+			ctrl.close()
+
+		with node.connect() as c:
+			c.execute("SET enable_indexscan = off")
+			c.execute("SET enable_indexonlyscan = off")
+			c.execute("SET enable_bitmapscan = off")
+			rows = c.execute("SELECT count(*) FROM t2;")[0][0]
+		live = node.execute(
+		    "SELECT total - dead FROM "
+		    "orioledb_index_rows('t2_val_idx'::regclass);")[0][0]
+		with node.connect() as c:
+			c.execute("SET enable_seqscan = off")
+			stale = c.execute("SELECT count(*) FROM t2 "
+			                  "WHERE val IN ('w1', 'w2');")[0][0]
+			kept = c.execute("SELECT count(*) FROM t2 "
+			                 "WHERE val = 'w3' || repeat('y', 100);")[0][0]
+		self.assertEqual((rows, live, stale, kept), (20001, 20001, 0, 1))
 
 	def test_tree_settled_at_before_flip(self):
 		"""
