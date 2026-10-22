@@ -384,7 +384,7 @@ Datum
 orioledb_tbl_structure(PG_FUNCTION_ARGS)
 {
 	Oid			relid = PG_GETARG_OID(0);
-	VarChar    *optionsArg = (VarChar *) PG_GETARG_VARCHAR_P(1);
+	VarChar    *optionsArg;
 	int			depth = PG_GETARG_INT32(2);
 	OTableDescr *descr;
 	Relation	rel;
@@ -392,6 +392,10 @@ orioledb_tbl_structure(PG_FUNCTION_ARGS)
 	int			treen;
 	StringInfoData buf;
 	BTreePrintOptions printOptions;
+
+	if (PG_ARGISNULL(1))
+		PG_RETURN_NULL();
+	optionsArg = (VarChar *) PG_GETARG_VARCHAR_P(1);
 
 	ASAN_UNPOISON_MEMORY_REGION(&printOptions, sizeof(printOptions));
 	MemSet(&printOptions, 0, sizeof(printOptions));
@@ -961,8 +965,8 @@ Datum
 orioledb_idx_structure(PG_FUNCTION_ARGS)
 {
 	Oid			relid = PG_GETARG_OID(0);
-	const char *treeName = text_to_cstring(PG_GETARG_TEXT_PP(1));
-	VarChar    *optionsArg = (VarChar *) PG_GETARG_VARCHAR_P(2);
+	const char *treeName;
+	VarChar    *optionsArg;
 	int			depth = PG_GETARG_INT32(3);
 	OTableDescr *descr;
 	Relation	rel;
@@ -970,6 +974,11 @@ orioledb_idx_structure(PG_FUNCTION_ARGS)
 	int			treen;
 	StringInfoData buf;
 	BTreePrintOptions printOptions = {0};
+
+	if (PG_ARGISNULL(1) || PG_ARGISNULL(2))
+		PG_RETURN_NULL();
+	treeName = text_to_cstring(PG_GETARG_TEXT_PP(1));
+	optionsArg = (VarChar *) PG_GETARG_VARCHAR_P(2);
 
 	orioledb_check_shmem();
 

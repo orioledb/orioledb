@@ -533,10 +533,14 @@ Datum
 orioledb_sys_tree_structure(PG_FUNCTION_ARGS)
 {
 	int			num = PG_GETARG_INT32(0);
-	VarChar    *optionsArg = (VarChar *) PG_GETARG_VARCHAR_P(1);
+	VarChar    *optionsArg;
 	int			depth = PG_GETARG_INT32(2);
 	BTreePrintOptions printOptions = {0};
 	StringInfoData buf;
+
+	if (PG_ARGISNULL(1))
+		PG_RETURN_NULL();
+	optionsArg = (VarChar *) PG_GETARG_VARCHAR_P(1);
 
 	check_tree_num_input(num);
 
