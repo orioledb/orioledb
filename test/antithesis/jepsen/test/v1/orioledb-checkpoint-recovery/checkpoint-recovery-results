@@ -1,0 +1,106 @@
+#!/usr/bin/env bb
+(require '[cheshire.core :as json]
+         '[clojure.java.io :as io])
+
+(def state-dir (or (System/getenv "RUNTIME_STATE_DIR") "/runtime-state"))
+(def output-dir (System/getenv "ANTITHESIS_OUTPUT_DIR"))
+(def final-file (io/file state-dir "final-summary.json"))
+
+(def always
+  ["checkpoint recovery: final verification completed"
+   "checkpoint recovery: target and shadow data are equal"
+   "checkpoint recovery: deterministic checksums are valid"
+   "checkpoint recovery: native index probes are valid"
+   "checkpoint recovery: structural verification passed"
+   "checkpoint recovery: driver reported no safety failures"
+   "checkpoint recovery: append writer made progress"
+   "checkpoint recovery: churn writer made progress"
+   "checkpoint recovery: TOAST writer made progress"
+   "checkpoint recovery: transactional DDL remained consistent"
+   "checkpoint recovery: DDL worker made progress"
+   "checkpoint recovery: checkpoints made progress"
+   "checkpoint recovery: verifier made progress"
+   "checkpoint recovery: result artifact is readable"])
+
+(def sometimes
+  ["checkpoint recovery: postmaster generation changed"
+   "checkpoint recovery: checkpoint was interrupted"
+   "checkpoint recovery: multiple boots occurred before readiness"
+   "checkpoint recovery: recovery probe completed after restart"
+   "checkpoint recovery: post-recovery checkpoint completed"
+   "checkpoint recovery: DDL continued across recovery generations"
+   "checkpoint recovery: durable volume canary survived restart"])
+
+(defn assertion [id type hit condition details]
+  {:antithesis_assert
+   {:id id :message id :hit hit :must_hit true
+    :assert_type type
+    :display_type (if (= type "always") "Always" "Sometimes")
+    :condition condition
+    :location {:class "" :function "checkpoint-recovery-results"
+               :file (str (io/file *file*)) :begin_line 1 :begin_column 0}
+    :details details}})
+
+(defn emit! [value]
+  (println (json/generate-string value)))
+
+(defn writer []
+  (if output-dir
+    (io/writer (io/file output-dir "sdk.jsonl") :append true)
+    *out*))
+
+(defn declare! []
+  (with-open [out (writer)]
+    (binding [*out* out]
+      (doseq [id always] (emit! (assertion id "always" false false nil)))
+      (doseq [id sometimes] (emit! (assertion id "sometimes" false false nil)))))
+  0)
+
+(defn read-summary []
+  (try
+    (when (.isFile final-file)
+      (json/parse-string (slurp final-file) true))
+    (catch Throwable error
+      {:read-error (.getMessage error)})))
+
+(defn evaluate! []
+  (let [summary (read-summary)
+        driver (:driver summary)
+        database (:database summary)
+        checks {"checkpoint recovery: final verification completed" (true? (:valid summary))
+                "checkpoint recovery: target and shadow data are equal" (true? (:structural-verification summary))
+                "checkpoint recovery: deterministic checksums are valid" (true? (:structural-verification summary))
+                "checkpoint recovery: native index probes are valid" (true? (:structural-verification summary))
+                "checkpoint recovery: structural verification passed" (true? (:structural-verification summary))
+                "checkpoint recovery: driver reported no safety failures" (and (true? (:valid driver))
+                                                                                 (zero? (:operation-failures driver 0)))
+                "checkpoint recovery: append writer made progress" (pos? (:append-writes driver 0))
+                "checkpoint recovery: churn writer made progress" (pos? (:churn-writes driver 0))
+                "checkpoint recovery: TOAST writer made progress" (pos? (:toast-writes driver 0))
+                "checkpoint recovery: transactional DDL remained consistent" (map? (:ddl-verification summary))
+                "checkpoint recovery: DDL worker made progress" (pos? (:ddl_operations database 0))
+                "checkpoint recovery: checkpoints made progress" (pos? (:completed_checkpoints database 0))
+                "checkpoint recovery: verifier made progress" (pos? (:verifications driver 0))
+                "checkpoint recovery: result artifact is readable" (and (map? summary) (nil? (:read-error summary)))
+                "checkpoint recovery: postmaster generation changed" (pos? (:generation-changes driver 0))
+                "checkpoint recovery: checkpoint was interrupted" (pos? (:incomplete_checkpoints database 0))
+                "checkpoint recovery: multiple boots occurred before readiness" (pos? (:repeated-boots-before-ready driver 0))
+                "checkpoint recovery: recovery probe completed after restart" (> (:ready_boots database 0) 1)
+                "checkpoint recovery: post-recovery checkpoint completed" (and (> (:ready_boots database 0) 1)
+                                                                                (pos? (:current_generation_checkpoints database 0)))
+                "checkpoint recovery: DDL continued across recovery generations" (> (:ddl_boots database 0) 1)
+                "checkpoint recovery: durable volume canary survived restart" (true? (:volume-canary-verified-after-restart summary))}
+        always-ok? (every? true? (map checks always))]
+    (with-open [out (writer)]
+      (binding [*out* out]
+        (doseq [id always]
+          (emit! (assertion id "always" true (true? (checks id)) summary)))
+        (doseq [id sometimes]
+          (emit! (assertion id "sometimes" true (true? (checks id)) summary)))))
+    (if always-ok? 0 1)))
+
+(System/exit
+ (case (first *command-line-args*)
+   "declare" (declare!)
+   "evaluate" (evaluate!)
+   2))
