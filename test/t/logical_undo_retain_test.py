@@ -352,6 +352,9 @@ class LogicalUndoRetainTest(BaseTest):
 		    'postgresql.conf', "hot_standby_feedback = on\n"
 		    "synchronized_standby_slots = ''\n")
 		node.restart()
+		# Take the backup before the failover slot so its catalog xmin cannot
+		# precede the standby's initial catalog horizon.
+		replica = self.getReplica()
 		node.safe_psql(
 		    'postgres',
 		    "SELECT pg_create_physical_replication_slot('standby_slot');")
@@ -359,7 +362,7 @@ class LogicalUndoRetainTest(BaseTest):
 		    'postgres', "SELECT pg_create_logical_replication_slot("
 		    f"'{SLOT}', 'test_decoding', false, false, true);")
 
-		with self.getReplica().start() as replica:
+		with replica.start():
 			# Slot synchronisation insists on a dbname it can connect to,
 			# and the conninfo testgres writes has none.
 			replica.append_conf(
