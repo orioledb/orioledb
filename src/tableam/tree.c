@@ -106,6 +106,16 @@ index_btree_desc_init(BTreeDescr *desc, OCompress compress, int fillfactor,
 	else
 		desc->fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	desc->type = type;
+
+	if (type != oIndexBridge && oids.datoid == MyDatabaseId &&
+		OidIsValid(MyDatabaseId))
+		desc->pgstatRelOid = oids.reloid;
+	else
+		desc->pgstatRelOid = InvalidOid;
+
+	desc->pgstatInfo = NULL;
+	desc->pgstatGen = 0;
+
 	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.rootPageChangeCount = 0;
