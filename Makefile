@@ -240,6 +240,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/truncate_under_checkpoint_test.py \
 						test/t/checkpoint_collation_test.py \
 						test/t/checkpoint_eviction_test.py \
+						test/t/checkpoint_moved_child_test.py \
 						test/t/checkpoint_same_trx_test.py \
 						test/t/checkpoint_split1_test.py \
 						test/t/checkpoint_split2_test.py \
