@@ -919,15 +919,20 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 		descr->indices[cur_ix] = indexDescr;
 	}
 
-	index = make_o_index(o_table, TOASTIndexNumber, OIndexVersionPass);
-	indexDescr = palloc0(sizeof(OIndexDescr));
-	o_index_fill_descr(indexDescr, index, o_table, oTableSourceTable);
-	index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
-						  indexDescr->fillfactor, indexDescr->oids,
-						  index->indexType, index->table_persistence,
-						  index->indexOids.spcoid, index->createOxid, indexDescr);
-	free_o_index(index);
-	descr->toast = indexDescr;
+	if (ORelOidsIsValid(o_table->toast_oids))
+	{
+		index = make_o_index(o_table, TOASTIndexNumber, OIndexVersionPass);
+		indexDescr = palloc0(sizeof(OIndexDescr));
+		o_index_fill_descr(indexDescr, index, o_table, oTableSourceTable);
+		index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
+							  indexDescr->fillfactor, indexDescr->oids,
+							  index->indexType, index->table_persistence,
+							  index->indexOids.spcoid, index->createOxid, indexDescr);
+		free_o_index(index);
+		descr->toast = indexDescr;
+	}
+	else
+		descr->toast = NULL;
 
 	if (ORelOidsIsValid(o_table->bridge_oids))
 	{
@@ -1054,7 +1059,7 @@ find_tree_in_descr(OTableDescr *descr, ORelOids oids)
 		}
 	}
 
-	if (descr->toast->oids.datoid == oids.datoid &&
+	if (descr->toast && descr->toast->oids.datoid == oids.datoid &&
 		descr->toast->oids.reloid == oids.reloid &&
 		descr->toast->oids.relnode == oids.relnode)
 		return TOASTIndexNumber;

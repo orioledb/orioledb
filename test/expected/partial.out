@@ -360,7 +360,6 @@ SELECT orioledb_tbl_structure('o_test_sql_func'::regclass, 'nue');
      Item 0: offset = 264, tuple = ('4', '(0,4)')                   +
      Item 1: offset = 296, tuple = ('8', '(0,8)')                   +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 

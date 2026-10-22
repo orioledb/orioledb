@@ -1327,14 +1327,40 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 		if (att->attlen <= 0 && !slot->tts_isnull[i]
 			&& (VARATT_IS_EXTERNAL_ONDISK(slot->tts_values[i]) ||
 				VARATT_IS_EXTERNAL_ORIOLEDB(slot->tts_values[i])))
-			has_toasted = true;
+		{
+			if (descr->toast)
+				has_toasted = true;
+			else
+			{
+				Datum		value;
+				MemoryContext oldcontext;
+
+				/*
+				 * A bounded-width destination can have no TOAST tree even if
+				 * INSERT ... SELECT supplies external values from a wider
+				 * row. Store their contents inline instead of copying or
+				 * re-TOASTing a pointer owned by the source table.  Leave
+				 * inline compressed and short-header values alone.
+				 */
+				if (!oslot->vfree)
+					alloc_to_toast_vfree_detoasted(slot);
+				oldcontext = MemoryContextSwitchTo(slot->tts_mcxt);
+				value = PointerGetDatum(PG_DETOAST_DATUM(slot->tts_values[i]));
+				MemoryContextSwitchTo(oldcontext);
+				if (oslot->vfree[i])
+					pfree(DatumGetPointer(slot->tts_values[i]));
+				slot->tts_values[i] = value;
+				oslot->vfree[i] = true;
+			}
+		}
 	}
 
 	if (!has_toasted)
 		full_size = expected_tuple_len(slot, descr);
 
 	/* we do not need use TOAST */
-	if (full_size <= O_BTREE_MAX_TUPLE_SIZE && !has_toasted)
+	if (descr->toast == NULL ||
+		(full_size <= O_BTREE_MAX_TUPLE_SIZE && !has_toasted))
 	{
 		return;
 	}

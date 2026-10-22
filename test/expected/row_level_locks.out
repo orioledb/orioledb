@@ -36,7 +36,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64                +
      Item 0: offset = 264, tuple = ('1', '1')                              +
                                                                            +
- Index toast: not loaded                                                   +
  
 (1 row)
 
@@ -66,7 +65,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64                                +
      Item 0: offset = 264, tuple = ('1', '1')                                              +
                                                                                            +
- Index toast: not loaded                                                                   +
  
 (1 row)
 
@@ -92,7 +90,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64                          +
      Item 0: offset = 264, tuple = ('1', '1')                                        +
                                                                                      +
- Index toast: not loaded                                                             +
  
 (1 row)
 
@@ -116,7 +113,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64                                +
      Item 0: offset = 264, tuple = ('1', '1')                                              +
                                                                                            +
- Index toast: not loaded                                                                   +
  
 (1 row)
 
@@ -139,7 +135,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64                +
      Item 0: offset = 264, tuple = ('1', '1')                              +
                                                                            +
- Index toast: not loaded                                                   +
  
 (1 row)
 
@@ -161,7 +156,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
      Item 0: offset = 264, tuple = ('1', '1')                       +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -190,7 +184,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64                   +
      Item 0: offset = 264, tuple = ('1', '1')                                 +
                                                                               +
- Index toast: not loaded                                                      +
  
 (1 row)
 
@@ -218,7 +211,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64                +
      Item 0: offset = 264, tuple = ('1', '1')                              +
                                                                            +
- Index toast: not loaded                                                   +
  
 (1 row)
 
@@ -243,7 +235,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64                          +
      Item 0: offset = 264, tuple = ('1', '1')                                        +
                                                                                      +
- Index toast: not loaded                                                             +
  
 (1 row)
 
@@ -270,7 +261,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
        Undo item:                                                               +
      Item 1: mode = update, offset = 296, tuple = ('2', '1')                    +
                                                                                 +
- Index toast: not loaded                                                        +
  
 (1 row)
 
@@ -299,7 +289,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
        Undo item:                                                                    +
      Item 1: mode = update, offset = 296, tuple = ('2', '1')                         +
                                                                                      +
- Index toast: not loaded                                                             +
  
 (1 row)
 
@@ -322,7 +311,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64                +
      Item 0: offset = 264, tuple = ('1', '1')                              +
                                                                            +
- Index toast: not loaded                                                   +
  
 (1 row)
 
@@ -344,7 +332,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
      Item 0: offset = 264, tuple = ('1', '1')                       +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -373,7 +360,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64                +
      Item 0: offset = 264, tuple = ('1', '1')                              +
                                                                            +
- Index toast: not loaded                                                   +
  
 (1 row)
 
@@ -401,7 +387,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64                +
      Item 0: offset = 264, tuple = ('1', '1')                              +
                                                                            +
- Index toast: not loaded                                                   +
  
 (1 row)
 
@@ -428,7 +413,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
        Undo item:                                                               +
      Item 1: mode = update, offset = 296, tuple = ('2', '1')                    +
                                                                                 +
- Index toast: not loaded                                                        +
  
 (1 row)
 
@@ -455,7 +439,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
        Undo item:                                                                    +
      Item 1: mode = update, offset = 296, tuple = ('2', '1')                         +
                                                                                      +
- Index toast: not loaded                                                             +
  
 (1 row)
 
@@ -478,7 +461,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64                +
      Item 0: offset = 264, tuple = ('1', '1')                              +
                                                                            +
- Index toast: not loaded                                                   +
  
 (1 row)
 
@@ -500,7 +482,6 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
      Item 0: offset = 264, tuple = ('1', '1')                       +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 

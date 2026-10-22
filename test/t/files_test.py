@@ -240,14 +240,21 @@ class FilesTest(BaseTest):
 		self.assertEqual([], [f[2] for f in tmp_files])
 
 	def test_multiple_checkpoint_tmp_map_cleanup(self):
+		self.multiple_checkpoint_tmp_map_cleanup_base(False)
+
+	def test_multiple_checkpoint_tmp_map_cleanup_with_toast(self):
+		self.multiple_checkpoint_tmp_map_cleanup_base(True)
+
+	def multiple_checkpoint_tmp_map_cleanup_base(self, has_toast):
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres', """
+		    'postgres', f"""
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TABLE IF NOT EXISTS o_test (
 				id serial NOT NULL PRIMARY KEY,
 				value int NOT NULL
+				{', payload text' if has_toast else ''}
 			) USING orioledb;
 			INSERT INTO o_test (value) (
 				SELECT id FROM generate_series(1, 1000, 1) id);
@@ -256,13 +263,17 @@ class FilesTest(BaseTest):
 			SELECT reltoastrelid FROM pg_class
 				WHERE oid = 'o_test'::regclass::oid
 		""")[0][0]
+		# Fixed-width rows have no TOAST relation.  The text variant retains
+		# coverage of an existing but unused TOAST tree: payload stays NULL.
+		self.assertEqual(toast_oid != 0, has_toast)
 		o_test_pkey_relnode = node.execute("""
 			SELECT relfilenode FROM pg_class
 				WHERE oid = 'o_test_pkey'::regclass::oid
 		""")[0][0]
-		o_test_toast_relnode = node.execute("""
-			SELECT relfilenode FROM pg_class WHERE oid = %u
-		""" % toast_oid)[0][0]
+		if has_toast:
+			o_test_toast_relnode = node.execute("""
+				SELECT relfilenode FROM pg_class WHERE oid = %u
+			""" % toast_oid)[0][0]
 		datoid = node.execute("""
 			SELECT oid FROM pg_database WHERE datname = current_database()
 		""")[0][0]
@@ -288,8 +299,11 @@ class FilesTest(BaseTest):
 		self.assertEqual([], tmp_files)
 		map_file_key = "%s_%s" % (datoid, o_test_pkey_relnode)
 		self.assertEqual([8, 4], map_files[map_file_key])
-		map_file_key = "%s_%s" % (datoid, o_test_toast_relnode)
-		self.assertFalse(map_file_key in map_files)
+		if has_toast:
+			map_file_key = "%s_%s" % (datoid, o_test_toast_relnode)
+			self.assertNotIn(map_file_key, map_files)
+		else:
+			self.assertEqual(set(map_files), {map_file_key})
 
 	def test_tmp_map_cleanup_no_error(self):
 		node = self.node

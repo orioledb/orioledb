@@ -509,7 +509,6 @@ SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
      Item 0: offset = 264, tuple = ('(0,1)', '1', null)             +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -533,7 +532,6 @@ SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
      Item 0: offset = 264, tuple = ('(0,1)', '1', null)             +
      Item 1: offset = 296, tuple = ('(0,2)', '2', '0.2')            +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -638,7 +636,6 @@ SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
    Chunk 4: offset = 4, location = 384, hikey location = 112                     +
      Item 4: offset = 392, tuple = ('50', '5')                                   +
                                                                                  +
- Index toast: not loaded                                                         +
  
 (1 row)
 
@@ -696,7 +693,6 @@ SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
    Chunk 4: offset = 4, location = 384, hikey location = 112                     +
      Item 4: offset = 392, tuple = ('50', '5')                                   +
                                                                                  +
- Index toast: not loaded                                                         +
  
 (1 row)
 
@@ -1032,7 +1028,6 @@ SELECT orioledb_tbl_structure('o_test_inherits_alter_type_int8'::regclass,
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
      Item 0: offset = 264, tuple = ('(0,1)', '1', 'f')              +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -1047,7 +1042,6 @@ SELECT orioledb_tbl_structure('o_test_inherits_alter_type_int8_child'::regclass,
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
      Item 0: offset = 264, tuple = ('(0,1)', '0', 't')              +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 

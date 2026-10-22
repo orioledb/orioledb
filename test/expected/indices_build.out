@@ -1198,7 +1198,6 @@ SELECT orioledb_tbl_structure('o_indices0'::regclass, 'nue');
      Item 79: offset = 2968, tuple = ('3500', '1500')                                    +
                                                                                          +
  Index o_indices0_idx2: not loaded                                                       +
- Index toast: not loaded                                                                 +
  
 (1 row)
 
@@ -3400,7 +3399,6 @@ SELECT orioledb_tbl_structure('o_indices0'::regclass, 'nue');
    Chunk 9: offset = 81, location = 3064, hikey location = 240                           +
      Item 81: offset = 3072, tuple = ('3500', '1500')                                    +
                                                                                          +
- Index toast: not loaded                                                                 +
  
 (1 row)
 
@@ -4572,7 +4570,6 @@ SELECT orioledb_tbl_structure('o_indices0'::regclass, 'nue');
      Item 78: offset = 2936, tuple = ('3499', '1499')                                    +
      Item 79: offset = 2968, tuple = ('3500', '1500')                                    +
                                                                                          +
- Index toast: not loaded                                                                 +
  
 (1 row)
 
@@ -4725,7 +4722,6 @@ SELECT orioledb_tbl_structure('o_indices1'::regclass, 'nue');
      Item 8: offset = 552, tuple = ('9', '(0,9)')                                   +
      Item 9: offset = 584, tuple = ('10', '(0,10)')                                 +
                                                                                     +
- Index toast: not loaded                                                            +
  
 (1 row)
 
@@ -4875,7 +4871,6 @@ SELECT orioledb_tbl_structure('o_indices2'::regclass, 'nue');
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
                                                                     +
  Index o_indices2_idx2: not loaded                                  +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -17365,7 +17360,6 @@ SELECT orioledb_tbl_structure('o_indices4'::regclass, 'nue');
    Chunk 9: offset = 81, location = 3064, hikey location = 240                           +
      Item 81: offset = 3072, tuple = ('3001', '1001')                                    +
                                                                                          +
- Index toast: not loaded                                                                 +
  
 (1 row)
 
@@ -19626,7 +19620,6 @@ SELECT orioledb_tbl_structure('o_indices5'::regclass, 'nue');
    Chunk 9: offset = 81, location = 3064, hikey location = 240                                   +
      Item 81: offset = 3072, tuple = ('3500', '4500', '1500')                                    +
                                                                                                  +
- Index toast: not loaded                                                                         +
  
 (1 row)
 
@@ -21320,7 +21313,6 @@ SELECT orioledb_tbl_structure('o_indices6'::regclass, 'nue');
    Chunk 9: offset = 81, location = 3064, hikey location = 240                           +
      Item 81: offset = 3072, tuple = ('4500', '1500')                                    +
                                                                                          +
- Index toast: not loaded                                                                 +
  
 (1 row)
 
@@ -22499,7 +22491,6 @@ SELECT orioledb_tbl_structure('o_indices6_ctid'::regclass, 'nue');
    Chunk 9: offset = 81, location = 3064, hikey location = 240                              +
      Item 81: offset = 3072, tuple = ('4500', '(0,500)')                                    +
                                                                                             +
- Index toast: not loaded                                                                    +
  
 (1 row)
 
@@ -23897,7 +23888,6 @@ SELECT orioledb_tbl_structure('o_test_pkey_mixed_build'::regclass, 'nue');
      Item 1: offset = 328, tuple = ('(0,2)', '10', '20', '30', '40', '50', '60', '70', '80', '90')         +
      Item 2: offset = 392, tuple = ('(0,3)', '100', '200', '300', '400', '500', '600', '700', '800', '900')+
                                                                                                            +
- Index toast: not loaded                                                                                   +
  
 (1 row)
 
@@ -24226,7 +24216,6 @@ SELECT orioledb_tbl_structure('o_test_pkey_mixed_build'::regclass, 'nue');
    Chunk 2: offset = 2, location = 368, hikey location = 136                                                                         +
      Item 2: offset = 376, tuple = ('400', '100', '900', '200', '800', '500', '600', '700')                                          +
                                                                                                                                      +
- Index toast: not loaded                                                                                                             +
  
 (1 row)
 
@@ -24271,7 +24260,6 @@ SELECT orioledb_tbl_structure('o_test_pkey_include_box_build'::regclass, 'nue');
      Item 1: offset = 336, tuple = ('(0,2)', '10', '(40,50),(20,30)', '60')      +
      Item 2: offset = 408, tuple = ('(0,3)', '100', '(400,500),(200,300)', '600')+
                                                                                  +
- Index toast: not loaded                                                         +
  
 (1 row)
 
@@ -24307,7 +24295,6 @@ SELECT orioledb_tbl_structure('o_test_pkey_include_box_build'::regclass, 'nue');
    Chunk 2: offset = 2, location = 400, hikey location = 152                                        +
      Item 2: offset = 408, tuple = ('100', '(400,500),(200,300)', '600')                            +
                                                                                                     +
- Index toast: not loaded                                                                            +
  
 (1 row)
 
@@ -24331,7 +24318,6 @@ SELECT orioledb_tbl_structure('o_test_include_box_build'::regclass, 'nue');
      Item 1: offset = 328, tuple = ('(0,2)', '10', '(40,50),(20,30)')     +
      Item 2: offset = 392, tuple = ('(0,3)', '100', '(400,500),(200,300)')+
                                                                           +
- Index toast: not loaded                                                  +
  
 (1 row)
 
@@ -24402,7 +24388,6 @@ SELECT orioledb_tbl_structure('o_test_include_box_build'::regclass, 'nue');
    Chunk 2: offset = 2, location = 400, hikey location = 168                                                 +
      Item 2: offset = 408, tuple = ('100', '(400,500),(200,300)', '(0,3)')                                   +
                                                                                                              +
- Index toast: not loaded                                                                                     +
  
 (1 row)
 
@@ -24449,7 +24434,6 @@ SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
      Item 1: offset = 336, tuple = ('(0,2)', '10', '20', '30', '(60,70),(40,50)')       +
      Item 2: offset = 408, tuple = ('(0,3)', '100', '200', '300', '(600,700),(400,500)')+
                                                                                         +
- Index toast: not loaded                                                                +
  
 (1 row)
 
@@ -24564,7 +24548,6 @@ SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
    Chunk 2: offset = 2, location = 320, hikey location = 88                        +
      Item 2: offset = 328, tuple = ('300', '100')                                  +
                                                                                    +
- Index toast: not loaded                                                           +
  
 (1 row)
 

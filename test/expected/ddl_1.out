@@ -320,7 +320,6 @@ SELECT orioledb_tbl_structure('o_ddl_check'::regclass, 'nue');
      Item 5: offset = 512, tuple = ('6', '2', null, null)           +
      Item 6: offset = 552, tuple = ('7', '2', null, null)           +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -448,7 +447,6 @@ SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
           orioledb_tbl_structure          
 ------------------------------------------
  Index o_test_add_column_pkey: not loaded+
- Index toast: not loaded                 +
  
 (1 row)
 
@@ -499,7 +497,6 @@ SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
      Item 9: offset = 576, tuple = ('9', '18518', '9', null)        +
      Item 10: offset = 608, tuple = ('10', '18915', '10', null)     +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -548,7 +545,6 @@ SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
      Item 9: offset = 576, tuple = ('9', '18518', '9', null, null)   +
      Item 10: offset = 608, tuple = ('10', '18915', '10', null, null)+
                                                                      +
- Index toast: not loaded                                             +
  
 (1 row)
 
@@ -600,7 +596,6 @@ SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
      Item 9: offset = 776, tuple = ('9', '18518', '9', null, '5', '9993')   +
      Item 10: offset = 832, tuple = ('10', '18915', '10', null, '5', '5149')+
                                                                             +
- Index toast: not loaded                                                    +
  
 (1 row)
 
@@ -632,7 +627,6 @@ SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
      Item 14: offset = 1072, tuple = ('14', '9948', '14', null, '5', '1747')  +
      Item 15: offset = 1128, tuple = ('15', '4451', '15', null, '5', '17054') +
                                                                               +
- Index toast: not loaded                                                      +
  
 (1 row)
 
@@ -1036,7 +1030,6 @@ SELECT orioledb_tbl_structure('o_test_duplicate_key_fields'::regclass, 'nue');
      Item 3: offset = 392, tuple = ('40', '4', '40', '(0,4)')       +
      Item 4: offset = 432, tuple = ('50', '5', '50', '(0,5)')       +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -1352,7 +1345,6 @@ SELECT orioledb_tbl_structure('o_test_add_pkey_empty_index'::regclass, 'nue');
      Item 3: offset = 368, tuple = ('4', '40', '4000')              +
      Item 4: offset = 400, tuple = ('5', '50', '5000')              +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
@@ -1411,7 +1403,6 @@ SELECT orioledb_tbl_structure('o_test_empty'::regclass, 'nue');
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
                                                                     +
- Index toast: not loaded                                            +
  
 (1 row)
 
