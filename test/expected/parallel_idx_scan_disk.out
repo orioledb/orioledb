@@ -1,0 +1,267 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s2_explain s2_count
+step s2_explain: 
+	EXPLAIN (COSTS OFF) SELECT count(*) FROM o_pis_disk WHERE a = 5;
+QUERY PLAN                                                     
+---------------------------------------------------------------
+Finalize Aggregate                                             
+  ->  Gather                                                   
+        Workers Planned: 1                                     
+        ->  Partial Aggregate                                  
+              ->  Parallel Custom Scan (o_scan) on o_pis_disk  
+                    Forward index only scan of: o_pis_disk_pkey
+                    Conds: (a = 5)                             
+(7 rows)
+
+step s2_count: 
+	SELECT count(*) FROM o_pis_disk WHERE a = 5;
+count
+-----
+ 2000
+(1 row)
+
+
+starting permutation: s2_evict s2_count
+step s2_evict: 
+	SELECT orioledb_evict_pages('o_pis_disk'::regclass, 0);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_count: 
+	SELECT count(*) FROM o_pis_disk WHERE a = 5;
+count
+-----
+ 2000
+(1 row)
+
+
+starting permutation: s2_evict s2_load_boundary s2_count
+step s2_evict: 
+	SELECT orioledb_evict_pages('o_pis_disk'::regclass, 0);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_load_boundary: 
+	SELECT a, b FROM o_pis_disk WHERE a = 6 AND b = 1;
+a|b
+-+-
+6|1
+(1 row)
+
+step s2_count: 
+	SELECT count(*) FROM o_pis_disk WHERE a = 5;
+count
+-----
+ 2000
+(1 row)
+
+
+starting permutation: s2_evict s2_checkpoint s1_update_head s2_evict s2_count
+step s2_evict: 
+	SELECT orioledb_evict_pages('o_pis_disk'::regclass, 0);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_checkpoint: CHECKPOINT;
+step s1_update_head: 
+	UPDATE o_pis_disk SET v = v + 1 WHERE a = 5 AND b <= 1000;
+step s2_evict: 
+	SELECT orioledb_evict_pages('o_pis_disk'::regclass, 0);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_count: 
+	SELECT count(*) FROM o_pis_disk WHERE a = 5;
+count
+-----
+ 2000
+(1 row)
+
+
+starting permutation: s2_evict s2_begin_rr s1_update_boundary s2_count s2_commit
+step s2_evict: 
+	SELECT orioledb_evict_pages('o_pis_disk'::regclass, 0);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_begin_rr: 
+	BEGIN ISOLATION LEVEL REPEATABLE READ;
+	SELECT 1;
+?column?
+--------
+       1
+(1 row)
+
+step s1_update_boundary: 
+	UPDATE o_pis_disk SET v = v + 1 WHERE a = 6 AND b = 1;
+step s2_count: 
+	SELECT count(*) FROM o_pis_disk WHERE a = 5;
+count
+-----
+ 2000
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s2_ordered_setup s2_explain_ordered s2_explain_ordered_desc s2_count_ordered s2_count_ordered_desc
+step s2_ordered_setup: 
+	ANALYZE o_pis_disk;
+	SET enable_sort = off;
+step s2_explain_ordered: 
+	EXPLAIN (COSTS OFF)
+	SELECT b FROM o_pis_disk WHERE a = 5 AND sqrt(v::float8) >= 0 ORDER BY b;
+QUERY PLAN                                                            
+----------------------------------------------------------------------
+Gather Merge                                                          
+  Workers Planned: 2                                                  
+  ->  Parallel Custom Scan (o_scan) on o_pis_disk                     
+        Filter: (sqrt((v)::double precision) >= '0'::double precision)
+        Forward index scan of: o_pis_disk_pkey                        
+        Conds: (a = 5)                                                
+(6 rows)
+
+step s2_explain_ordered_desc: 
+	EXPLAIN (COSTS OFF)
+	SELECT b FROM o_pis_disk WHERE a = 5 AND sqrt(v::float8) >= 0
+		ORDER BY b DESC;
+QUERY PLAN                                                            
+----------------------------------------------------------------------
+Gather Merge                                                          
+  Workers Planned: 2                                                  
+  ->  Parallel Custom Scan (o_scan) on o_pis_disk                     
+        Filter: (sqrt((v)::double precision) >= '0'::double precision)
+        Backward index scan of: o_pis_disk_pkey                       
+        Conds: (a = 5)                                                
+(6 rows)
+
+step s2_count_ordered: 
+	SELECT count(*), min(b), max(b),
+		(count(*) = count(*) FILTER (WHERE prev IS NULL OR b > prev)) AS sorted
+	FROM (SELECT b, lag(b) OVER () AS prev FROM (
+		SELECT b FROM o_pis_disk
+			WHERE a = 5 AND sqrt(v::float8) >= 0
+			ORDER BY b) o) t;
+count|min| max|sorted
+-----+---+----+------
+ 2000|  1|2000|t     
+(1 row)
+
+step s2_count_ordered_desc: 
+	SELECT count(*), min(b), max(b),
+		(count(*) = count(*) FILTER (WHERE prev IS NULL OR b < prev)) AS sorted
+	FROM (SELECT b, lag(b) OVER () AS prev FROM (
+		SELECT b FROM o_pis_disk
+			WHERE a = 5 AND sqrt(v::float8) >= 0
+			ORDER BY b DESC) o) t;
+count|min| max|sorted
+-----+---+----+------
+ 2000|  1|2000|t     
+(1 row)
+
+
+starting permutation: s2_ordered_setup s2_evict s2_load_boundary s2_count_ordered
+step s2_ordered_setup: 
+	ANALYZE o_pis_disk;
+	SET enable_sort = off;
+step s2_evict: 
+	SELECT orioledb_evict_pages('o_pis_disk'::regclass, 0);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_load_boundary: 
+	SELECT a, b FROM o_pis_disk WHERE a = 6 AND b = 1;
+a|b
+-+-
+6|1
+(1 row)
+
+step s2_count_ordered: 
+	SELECT count(*), min(b), max(b),
+		(count(*) = count(*) FILTER (WHERE prev IS NULL OR b > prev)) AS sorted
+	FROM (SELECT b, lag(b) OVER () AS prev FROM (
+		SELECT b FROM o_pis_disk
+			WHERE a = 5 AND sqrt(v::float8) >= 0
+			ORDER BY b) o) t;
+count|min| max|sorted
+-----+---+----+------
+ 2000|  1|2000|t     
+(1 row)
+
+
+starting permutation: s2_ordered_setup s2_evict s2_checkpoint s1_update_head s2_evict s2_count_ordered
+step s2_ordered_setup: 
+	ANALYZE o_pis_disk;
+	SET enable_sort = off;
+step s2_evict: 
+	SELECT orioledb_evict_pages('o_pis_disk'::regclass, 0);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_checkpoint: CHECKPOINT;
+step s1_update_head: 
+	UPDATE o_pis_disk SET v = v + 1 WHERE a = 5 AND b <= 1000;
+step s2_evict: 
+	SELECT orioledb_evict_pages('o_pis_disk'::regclass, 0);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_count_ordered: 
+	SELECT count(*), min(b), max(b),
+		(count(*) = count(*) FILTER (WHERE prev IS NULL OR b > prev)) AS sorted
+	FROM (SELECT b, lag(b) OVER () AS prev FROM (
+		SELECT b FROM o_pis_disk
+			WHERE a = 5 AND sqrt(v::float8) >= 0
+			ORDER BY b) o) t;
+count|min| max|sorted
+-----+---+----+------
+ 2000|  1|2000|t     
+(1 row)
+
+
+starting permutation: s2_ordered_setup s2_evict s2_load_low_boundary s2_count_ordered_desc
+step s2_ordered_setup: 
+	ANALYZE o_pis_disk;
+	SET enable_sort = off;
+step s2_evict: 
+	SELECT orioledb_evict_pages('o_pis_disk'::regclass, 0);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_load_low_boundary: 
+	SELECT a, b FROM o_pis_disk WHERE a = 4 AND b = 2000;
+a|   b
+-+----
+4|2000
+(1 row)
+
+step s2_count_ordered_desc: 
+	SELECT count(*), min(b), max(b),
+		(count(*) = count(*) FILTER (WHERE prev IS NULL OR b < prev)) AS sorted
+	FROM (SELECT b, lag(b) OVER () AS prev FROM (
+		SELECT b FROM o_pis_disk
+			WHERE a = 5 AND sqrt(v::float8) >= 0
+			ORDER BY b DESC) o) t;
+count|min| max|sorted
+-----+---+----+------
+ 2000|  1|2000|t     
+(1 row)
+
