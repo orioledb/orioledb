@@ -126,7 +126,11 @@ fi
 declare -A should_backpatch
 any=false
 if $squashed; then
-	bp=$(for m in $pr_commits; do base64 -d <<< "$m" | has_backpatch; done | head -n 1)
+	bp=
+	for m in $pr_commits; do
+		bp=$(base64 -d <<< "$m" | has_backpatch)
+		[ -n "$bp" ] && break
+	done
 	if [ -n "$bp" ]; then
 		should_backpatch[$merge_sha]=true
 		any=true
