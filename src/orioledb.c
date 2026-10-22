@@ -1632,6 +1632,7 @@ o_proc_shmem_init(Pointer ptr, bool found)
 			pg_atomic_init_u64(&oProcData[i].pendingSkUndoTail, InvalidUndoLocation);
 			pg_atomic_init_u32(&oProcData[i].pinnedMetaPageBlkno,
 							   (uint32) OInvalidInMemoryBlkno);
+			oProcData[i].tupleLockKeyLen = 0;
 			oProcData[i].autonomousNestingLevel = 0;
 			memset(&oProcData[i].vxids, 0, sizeof(oProcData[i].vxids));
 			LWLockInitialize(&oProcData[i].undoStackLocationsFlushLock,
