@@ -18,6 +18,7 @@
 
 #include "btree/find.h"
 #include "btree/io.h"
+#include "btree/modify.h"
 #include "btree/scan.h"
 #include "catalog/cic_spool.h"
 #include "catalog/o_tables.h"
@@ -248,7 +249,8 @@ static ShmemItem shmemItems[] = {
 	{s3_queue_shmem_needs, s3_queue_init_shmem},
 	{s3_workers_shmem_needs, s3_workers_init_shmem},
 	{s3_headers_shmem_needs, s3_headers_shmem_init},
-	{rewind_shmem_needs, rewind_init_shmem}
+	{rewind_shmem_needs, rewind_init_shmem},
+	{tuple_lock_shmem_needs, tuple_lock_shmem_init}
 };
 
 
