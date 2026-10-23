@@ -747,7 +747,9 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 
 	/* The statement's batch, if it has one, becomes our transaction */
 	if (!descr->bridge)
-		(void) o_batch_begin(RelationGetRelid(relation));
+		(void) o_batch_begin(RelationGetRelid(relation),
+							 descr->nIndices < 2 ? &GET_PRIMARY(descr)->desc : NULL,
+							 wal_relreplident(relation), descr->version);
 	oxid = get_current_oxid();
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &old_pkey, &hint,
@@ -765,6 +767,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	marg.tmpSlot = descr->oldTuple;
 	marg.modified = false;
 	marg.selfModified = false;
+	marg.absorbed = false;
 	marg.deleted = BTreeLeafTupleNonDeleted;
 	marg.newSlot = (OTableSlot *) slot;
 	was_saving = o_start_saving_inval_messages();

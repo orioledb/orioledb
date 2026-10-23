@@ -96,6 +96,13 @@ typedef struct BTreeDelegatedModifyResult
 	 * stands".
 	 */
 	LocationIndex newTupleLen;
+
+	/*
+	 * The holder took the update into its own batch transaction: the row
+	 * carries the batch's oxid, the batch logs it and commits it, and the
+	 * waiter has nothing left to record.
+	 */
+	bool		absorbed;
 } BTreeDelegatedModifyResult;
 
 /*
@@ -144,6 +151,30 @@ extern BTreeDelegatedApplyResultCallback btree_get_delegated_apply_result_callba
 
 extern BTreeModifyCallbackInfo nullCallbackInfo;
 extern void btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno);
+
+/*
+ * The batch transaction this backend runs, if any, and the rows it took over
+ * from waiters, in the order it wrote them.  The batch logs those rows itself
+ * before it commits.
+ */
+typedef struct BTreeAbsorbedRow
+{
+	BTreeDescr *desc;
+	OTuple		tuple;
+} BTreeAbsorbedRow;
+
+extern OXid btree_batch_oxid;
+extern BTreeDescr *btree_batch_desc;
+extern List *btree_absorbed_rows;
+extern void btree_absorbed_reset(void);
+
+#define BATCH_QUEUE_CLOSED	0
+#define BATCH_QUEUE_EMPTY	1
+#define BATCH_QUEUE_PROCNO(v)	((int) (v) - 2)
+#define BATCH_QUEUE_VALUE(procno)	((uint32) (procno) + 2)
+
+extern void btree_batch_queue_open(void);
+extern void btree_batch_queue_drain(bool absorb);
 
 extern bool o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple);
 extern bool o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,

@@ -540,6 +540,29 @@ typedef struct
 	 * the work went into is durable.
 	 */
 	bool		deferWake;
+
+	/*
+	 * Set by the waiter: its update belongs to a statement whose batch
+	 * transaction may take it over (see apply_waiter_op()).
+	 */
+	bool		absorbable;
+
+	/*
+	 * Set by the holder when it wakes a waiter whose update it took into a
+	 * batch that then aborted.  The update is gone with the batch; the waiter
+	 * does it again itself.
+	 */
+	bool		batchFailed;
+
+	/*
+	 * The queue of this process's batch transaction: processes that found a
+	 * row it wrote and left it their update instead of waiting for it to end.
+	 * 0 means closed -- what zeroed memory says -- 1 open and empty, and n +
+	 * 2 that process n is the last to have joined.  batchNext links a queued
+	 * process to the one before it.
+	 */
+	pg_atomic_uint32 batchQueue;
+	uint32		batchNext;
 	OPageWaiterOpResult opResult;
 	Size		reservedUndoSize;
 	UndoLocation undoLocation;

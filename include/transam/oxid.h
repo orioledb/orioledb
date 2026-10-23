@@ -213,6 +213,7 @@ extern Size oxid_shmem_needs(void);
 extern void oxid_init_shmem(Pointer ptr, bool found);
 extern bool wait_for_oxid(OXid oxid, bool errorOk);
 extern bool oxid_assign_decodable;
+extern bool oxid_get_autonomous_owner(OXid oxid, int *procnum);
 extern void oxid_batch_lock(OXid oxid);
 extern void oxid_batch_unlock(OXid oxid);
 extern void oxid_notify(OXid oxid);

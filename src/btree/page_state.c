@@ -1056,7 +1056,7 @@ unlock_check_page(OInMemoryBlkno blkno)
 static uint32 deferredWakeHead = PAGE_STATE_INVALID_PROCNO;
 
 void
-btree_wake_deferred_waiters(void)
+btree_wake_deferred_waiters(bool batchFailed)
 {
 	while (deferredWakeHead != PAGE_STATE_INVALID_PROCNO)
 	{
@@ -1065,6 +1065,7 @@ btree_wake_deferred_waiters(void)
 		uint32		next = lockState->next;
 
 		lockState->deferWake = false;
+		lockState->batchFailed = batchFailed;
 
 		pg_memory_barrier();
 		lockState->status = OPageWaitWakeUp;
@@ -1073,6 +1074,18 @@ btree_wake_deferred_waiters(void)
 		PGSemaphoreUnlock(proc->sem);
 		deferredWakeHead = next;
 	}
+}
+
+/*
+ * Keep a process whose work we did, not on any page queue, asleep until the
+ * work is committed.
+ */
+void
+btree_defer_waiter(int pgprocno)
+{
+	lockerStates[pgprocno].deferWake = false;
+	lockerStates[pgprocno].next = deferredWakeHead;
+	deferredWakeHead = pgprocno;
 }
 
 bool

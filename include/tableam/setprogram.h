@@ -80,7 +80,9 @@ typedef struct
 extern OSetProgram *o_current_set_program(Oid relid);
 
 extern void o_setprogram_init(void);
-extern bool o_batch_begin(Oid relid);
+struct BTreeDescr;
+extern bool o_batch_begin(Oid relid, struct BTreeDescr *pkDesc,
+						  char replident, uint32 version);
 
 /*
  * Apply a program to a tuple's values.  Returns false when an assignment

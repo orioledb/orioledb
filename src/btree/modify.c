@@ -33,6 +33,8 @@
 #include "utils/stopevent.h"
 
 #include "miscadmin.h"
+#include "pgstat.h"
+#include "storage/lwlock.h"
 #include "utils/memutils.h"
 
 #define IsRelationTree(desc) (ORelOidsIsValid(desc->oids) && !IS_SYS_TREE_OIDS(desc->oids))
@@ -81,7 +83,8 @@ typedef enum ConflictResolution
 {
 	ConflictResolutionOK,
 	ConflictResolutionRetry,
-	ConflictResolutionFound
+	ConflictResolutionFound,
+	ConflictResolutionAbsorbed	/* a batch did the update for us */
 } ConflictResolution;
 
 BTreeModifyCallbackInfo nullCallbackInfo =
@@ -97,6 +100,11 @@ static const LOCKMODE hwLockModes[] = {AccessShareLock, RowShareLock, ExclusiveL
 
 static void unlock_release(BTreeModifyInternalContext *context, bool unlock);
 static ConflictResolution o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context);
+static bool batch_queue_join(BTreeDescr *desc, int owner, OTuple tuple,
+							 CommitSeqNo opCsn);
+static void run_delegated_apply(BTreeDescr *desc,
+								BTreeModifyCallbackInfo *callbackInfo);
+static void reserve_undo_for_modification(UndoLogType undoType);
 static OBTreeModifyResult o_btree_modify_handle_tuple_not_found(BTreeModifyInternalContext *context);
 static bool o_btree_modify_item_rollback(BTreeModifyInternalContext *context);
 static bool reserve_undo_for_lock_dispatch(BTreeModifyInternalContext *context);
@@ -240,6 +248,13 @@ retry:
 			return OBTreeModifyResultFound;
 		else if (resolution == ConflictResolutionRetry)
 			goto retry;
+		else if (resolution == ConflictResolutionAbsorbed)
+		{
+			/* The page is already let go; the rest is bookkeeping */
+			run_delegated_apply(desc, callbackInfo);
+			unlock_release(&context, false);
+			return OBTreeModifyResultUpdated;
+		}
 	}
 
 	Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
@@ -671,6 +686,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 */
 				OBTreeWaitCallbackAction cbAction = OBTreeCallbackActionXidWait;
 				OFindPageResult result PG_USED_FOR_ASSERTS_ONLY;
+				int			batchOwner;
 				uint32		tupleHash = 0;
 
 				Assert(COMMITSEQNO_IS_INPROGRESS(csn));
@@ -701,6 +717,18 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 
 				unlock_page(blkno);
 
+				/*
+				 * The row is a batch's.  If ours is an update the batch can
+				 * take over, leave it there rather than wait for the batch to
+				 * end and then do it ourselves.
+				 */
+				if (cbAction == OBTreeCallbackActionXidWait &&
+					context->action == BTreeOperationUpdate &&
+					lockerStates[MYPROCNUMBER].absorbable &&
+					oxid_get_autonomous_owner(oxid, &batchOwner) &&
+					batch_queue_join(desc, batchOwner,
+									 context->tuple, context->opCsn))
+					return ConflictResolutionAbsorbed;
 
 				Assert(cbAction <= OBTreeCallbackActionXidExit);
 
@@ -1223,6 +1251,19 @@ o_btree_modify_lock(BTreeModifyInternalContext *context)
  */
 static MemoryContext delegated_rebuild_cxt = NULL;
 
+OXid		btree_batch_oxid = InvalidOXid;
+BTreeDescr *btree_batch_desc = NULL;
+List	   *btree_absorbed_rows = NIL;
+static MemoryContext absorbed_cxt = NULL;
+
+void
+btree_absorbed_reset(void)
+{
+	btree_absorbed_rows = NIL;
+	if (absorbed_cxt != NULL)
+		MemoryContextReset(absorbed_cxt);
+}
+
 /*
  * Rebuild a waiting backend's new row from the row as we found it, by
  * applying the assignment it left us.
@@ -1315,6 +1356,333 @@ rebuild_waiter_tuple(BTreeDescr *desc, OTuple curTuple, int pgprocno,
 	return result;
 }
 
+/*
+ * Take a waiter's update into our own batch transaction.
+ *
+ * The rows we may do this for are the ones our batch has already written in
+ * this statement.  Whoever else wants such a row waits for our batch to end
+ * anyway, so writing its update now, under our oxid, and committing it with
+ * ours costs it nothing and saves it the wait; and our statement never comes
+ * back to a row it has updated, so the waiter's version is not in its way.
+ *
+ * What the waiter would have recorded is ours to record: the undo goes into
+ * our stack, and the WAL record into the batch's, after our own -- see
+ * btree_absorbed_rows.  The waiter stays asleep until the batch commits.
+ *
+ * Returns false, leaving the waiter to the ordinary paths, for anything else.
+ */
+static bool
+absorb_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
+				 BTreePageItemLocator *loc, BTreeLeafTuphdr *tuphdr,
+				 OTuple curTuple, int pgprocno, bool steal)
+{
+	OPageWaiterShmemState *lockerState = &lockerStates[pgprocno];
+	OPageWaiterPayload *payload = &lockerPayloads[pgprocno];
+	BTreeLeafTuphdr conflictTupHdr;
+	BTreeLeafTuphdr newTuphdr;
+	BTreeModifyLockStatus lockStatus = BTreeModifyNoLock;
+	UndoLocation conflictUndoLocation;
+	UndoLocation undoLocation;
+	OTuple		newTuple;
+	LocationIndex newTuplen = 0;
+	LocationIndex oldTuplen;
+	LocationIndex newItemSize;
+	RowLockMode lockMode;
+	bool		redundantRowLocks = false;
+	BTreeAbsorbedRow *row;
+	MemoryContext oldcxt;
+
+	if (!lockerState->absorbable || !OXidIsValid(btree_batch_oxid) ||
+		desc != btree_batch_desc ||
+		lockerState->action != BTreeOperationUpdate ||
+		payload->program.nops == 0)
+		return false;
+
+	/* Only a row our batch has written, and not merely locked */
+	if (XACT_INFO_GET_OXID(tuphdr->xactInfo) != btree_batch_oxid ||
+		XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo))
+		return false;
+
+	/* The program never assigns a key column: the weaker update mode does */
+	lockMode = Max(XACT_INFO_GET_LOCK_MODE(tuphdr->xactInfo),
+				   RowLockNoKeyUpdate);
+
+	if (row_lock_conflicts(tuphdr, &conflictTupHdr, desc->undoType,
+						   &conflictUndoLocation, lockMode,
+						   btree_batch_oxid, lockerState->opCsn, blkno,
+						   InvalidUndoLocation, &redundantRowLocks,
+						   &lockStatus) &&
+		XACT_INFO_GET_OXID(conflictTupHdr.xactInfo) != btree_batch_oxid)
+		return false;
+
+	newTuple = rebuild_waiter_tuple(desc, curTuple, pgprocno, &newTuplen);
+	if (O_TUPLE_IS_NULL(newTuple))
+		return false;
+
+	newItemSize = MAXALIGN(newTuplen) + BTreeLeafTuphdrSize;
+	if (newItemSize > BTREE_PAGE_GET_ITEM_SIZE(p, loc) &&
+		newItemSize - BTREE_PAGE_GET_ITEM_SIZE(p, loc) >
+		BTREE_PAGE_FREE_SPACE(p))
+		return false;
+
+	/* The same rule as for the waiter's own undo: what it reserved, or none */
+	if (steal && lockerState->reservedUndoSize < O_UPDATE_MAX_UNDO_SIZE)
+		return false;
+
+	/*
+	 * Keep the row for the batch's WAL.  Allocate before touching the page:
+	 * past this point nothing may fail.
+	 */
+	if (absorbed_cxt == NULL)
+		absorbed_cxt = AllocSetContextCreate(TopMemoryContext,
+											 "orioledb absorbed rows",
+											 ALLOCSET_DEFAULT_SIZES);
+	oldcxt = MemoryContextSwitchTo(absorbed_cxt);
+	row = (BTreeAbsorbedRow *) palloc(sizeof(BTreeAbsorbedRow));
+	row->desc = desc;
+	row->tuple.formatFlags = newTuple.formatFlags;
+	row->tuple.data = palloc(newTuplen);
+	memcpy(row->tuple.data, newTuple.data, newTuplen);
+	btree_absorbed_rows = lappend(btree_absorbed_rows, row);
+	MemoryContextSwitchTo(oldcxt);
+
+	if (steal)
+		steal_reserved_undo_size(desc->undoType, lockerState->reservedUndoSize);
+	undoLocation = make_undo_record(desc, curTuple, true, BTreeOperationUpdate,
+									blkno, O_PAGE_GET_CHANGE_COUNT(p), tuphdr);
+
+	/* Hand the waiter the row as it was and the row as it is now */
+	oldTuplen = o_btree_len(desc, curTuple, OTupleLength);
+	Assert(oldTuplen <= O_BTREE_MAX_TUPLE_SIZE);
+	memcpy(payload->oldTupleData.fixedData, curTuple.data, oldTuplen);
+	lockerState->oldTupleFlags = curTuple.formatFlags;
+	lockerState->oldTupleLen = oldTuplen;
+	memcpy(&payload->tupleData.fixedData[BTreeLeafTuphdrSize],
+		   newTuple.data, newTuplen);
+	lockerState->tupleFlags = newTuple.formatFlags;
+	memset(&payload->delegatedResult, 0, sizeof(payload->delegatedResult));
+	payload->delegatedResult.newTupleLen = newTuplen;
+	payload->delegatedResult.undoLocation = undoLocation;
+	payload->delegatedResult.absorbed = true;
+
+	newTuphdr.xactInfo = OXID_GET_XACT_INFO(btree_batch_oxid, lockMode, false);
+	newTuphdr.deleted = BTreeLeafTupleNonDeleted;
+	newTuphdr.undoLocation = undoLocation;
+	newTuphdr.formatFlags = 0;
+	newTuphdr.chainHasLocks = tuphdr->chainHasLocks;
+
+	START_CRIT_SECTION();
+	page_block_reads(blkno);
+	if (!btree_leaf_replace_item_no_split(desc, p, loc, &newTuphdr,
+										  newTuple, newTuplen))
+		elog(PANIC, "absorbed update does not fit the page after all");
+	MARK_DIRTY(desc, blkno);
+	END_CRIT_SECTION();
+
+	lockerState->opResult = OPageWaiterOpUpdated;
+	lockerState->deferWake = true;
+	return true;
+}
+
+/*
+ * The batch queue.
+ *
+ * Most processes that want a row our batch has written never meet us on the
+ * page: they find the row, see our oxid on it and go to sleep until the batch
+ * ends.  Those whose updates we could take over leave them in our queue
+ * instead, and we do them as the batch ends, before it commits.
+ */
+
+static void
+wake_batch_waiter(int pgprocno)
+{
+	pg_memory_barrier();
+	lockerStates[pgprocno].status = OPageWaitWakeUp;
+	pg_memory_barrier();
+	PGSemaphoreUnlock(GetPGProcByNumber(pgprocno)->sem);
+}
+
+void
+btree_batch_queue_open(void)
+{
+	pg_atomic_write_u32(&lockerStates[MYPROCNUMBER].batchQueue,
+						BATCH_QUEUE_EMPTY);
+}
+
+/*
+ * Find the row a queued process wants and take its update into our batch.
+ */
+static bool
+absorb_queued_op(BTreeDescr *desc, int pgprocno)
+{
+	OBTreeFindPageContext pageFindContext;
+	OTuple		key;
+	OInMemoryBlkno blkno;
+	BTreePageItemLocator loc;
+	Page		p;
+	BTreeLeafTuphdr *tuphdr;
+	OTuple		curTuple;
+	bool		result = false;
+
+	if (desc == NULL)
+		return false;
+
+	key.formatFlags = lockerStates[pgprocno].tupleFlags;
+	key.data = &lockerPayloads[pgprocno].tupleData.fixedData[BTreeLeafTuphdrSize];
+
+	/* The record is ours to write, from a reservation of our own */
+	reserve_undo_for_modification(desc->undoType);
+
+	init_page_find_context(&pageFindContext, desc, COMMITSEQNO_INPROGRESS,
+						   BTREE_PAGE_FIND_MODIFY);
+	(void) find_page(&pageFindContext, (Pointer) &key, BTreeKeyLeafTuple, 0);
+	blkno = pageFindContext.items[pageFindContext.index].blkno;
+	loc = pageFindContext.items[pageFindContext.index].locator;
+	p = O_GET_IN_MEMORY_PAGE(blkno);
+
+	if (BTREE_PAGE_LOCATOR_IS_VALID(p, &loc))
+	{
+		BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, p, &loc);
+		if (o_btree_cmp(desc, &key, BTreeKeyLeafTuple,
+						&curTuple, BTreeKeyLeafTuple) == 0 &&
+			tuphdr->deleted == BTreeLeafTupleNonDeleted)
+			result = absorb_waiter_op(desc, blkno, p, &loc, tuphdr, curTuple,
+									  pgprocno, false);
+	}
+	unlock_page(blkno);
+
+	release_undo_size(desc->undoType);
+	if (GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType) != desc->undoType)
+		release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+
+	return result;
+}
+
+#define BATCH_QUEUE_MAX_ROUNDS	8
+
+/*
+ * Take what is in our queue: into the batch if absorb, else back to its
+ * owners.  Whoever joins while we work is taken too, for a few rounds; then
+ * the queue is closed and those still to come wait for the batch to end.
+ */
+void
+btree_batch_queue_drain(bool absorb)
+{
+	pg_atomic_uint32 *queue = &lockerStates[MYPROCNUMBER].batchQueue;
+	int			round = 0;
+	bool		closed = false;
+
+	while (!closed)
+	{
+		uint32		value;
+
+		value = pg_atomic_exchange_u32(queue,
+									   (!absorb || ++round >= BATCH_QUEUE_MAX_ROUNDS) ?
+									   BATCH_QUEUE_CLOSED : BATCH_QUEUE_EMPTY);
+		if (value == BATCH_QUEUE_CLOSED)
+			break;
+		if (value == BATCH_QUEUE_EMPTY)
+		{
+			/* Nobody new: close, and take whoever slipped in meanwhile */
+			value = pg_atomic_exchange_u32(queue, BATCH_QUEUE_CLOSED);
+			closed = true;
+		}
+		else if (!absorb || round >= BATCH_QUEUE_MAX_ROUNDS)
+			closed = true;
+
+		pg_read_barrier();
+		while (value != BATCH_QUEUE_EMPTY && value != BATCH_QUEUE_CLOSED)
+		{
+			int			pgprocno = BATCH_QUEUE_PROCNO(value);
+			OPageWaiterShmemState *waiter = &lockerStates[pgprocno];
+
+			value = waiter->batchNext;
+
+			if (absorb && absorb_queued_op(btree_batch_desc, pgprocno))
+			{
+				waiter->serviced = true;
+				btree_defer_waiter(pgprocno);
+			}
+			else
+			{
+				waiter->serviced = false;
+				wake_batch_waiter(pgprocno);
+			}
+		}
+	}
+}
+
+/*
+ * Leave our update to the batch transaction of process owner, which wrote the
+ * row we want, and sleep until it is done with it.  Returns true when the
+ * batch has taken the update and committed it; false when we are to go on as
+ * if we had never asked -- the queue was closed, the batch could not take the
+ * update, or it took it and then aborted.
+ */
+static bool
+batch_queue_join(BTreeDescr *desc, int owner, OTuple tuple, CommitSeqNo opCsn)
+{
+	OPageWaiterShmemState *me = &lockerStates[MYPROCNUMBER];
+	OPageWaiterPayload *payload = &lockerPayloads[MYPROCNUMBER];
+	pg_atomic_uint32 *queue = &lockerStates[owner].batchQueue;
+	LocationIndex tuplen;
+	uint32		value;
+	int			extraWaits = 0;
+
+	if (owner == MYPROCNUMBER || O_TUPLE_IS_NULL(tuple))
+		return false;
+
+	tuplen = o_btree_len(desc, tuple, OTupleLength);
+	if (tuplen > O_BTREE_MAX_TUPLE_SIZE)
+		return false;
+
+	memcpy(&payload->tupleData.fixedData[BTreeLeafTuphdrSize], tuple.data, tuplen);
+	payload->delegatedResult.absorbed = false;
+	me->tupleFlags = tuple.formatFlags;
+	me->action = BTreeOperationUpdate;
+	me->keyType = BTreeKeyLeafTuple;
+	me->opCsn = opCsn;
+	me->opResult = OPageWaiterOpNotApplied;
+	me->undoLocation = InvalidUndoLocation;
+	me->serviced = false;
+	me->batchFailed = false;
+	me->status = OPageWaitInsert;
+
+	value = pg_atomic_read_u32(queue);
+	for (;;)
+	{
+		if (value == BATCH_QUEUE_CLOSED)
+			return false;
+		me->batchNext = value;
+		pg_write_barrier();
+		if (pg_atomic_compare_exchange_u32(queue, &value,
+										   BATCH_QUEUE_VALUE(MYPROCNUMBER)))
+			break;
+	}
+
+	pgstat_report_wait_start(PG_WAIT_LWLOCK | LWTRANCHE_BUFFER_CONTENT);
+	for (;;)
+	{
+		PGSemaphoreLock(MyProc->sem);
+		if (me->status == OPageWaitWakeUp)
+			break;
+		extraWaits++;
+	}
+	pgstat_report_wait_end();
+	while (extraWaits-- > 0)
+		PGSemaphoreUnlock(MyProc->sem);
+
+	pg_read_barrier();
+	if (me->serviced && !me->batchFailed)
+	{
+		me->serviced = false;
+		return true;
+	}
+	me->serviced = false;
+	me->batchFailed = false;
+	return false;
+}
+
 static bool
 apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 {
@@ -1391,6 +1759,10 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 					&curTuple, BTreeKeyLeafTuple) != 0 ||
 		tuphdr->deleted != BTreeLeafTupleNonDeleted)
 		return false;
+
+	if (absorb_waiter_op(desc, blkno, p, &loc, tuphdr, curTuple, pgprocno,
+						 true))
+		return true;
 
 	/*
 	 * The half of the caller's callback that belongs on the page runs here.
@@ -1628,13 +2000,16 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
  * we can of it.  The page state must be one we already hold: an extra read of
  * the page's state word is the most expensive thing this code could do.
  */
+#define BTREE_MAX_ABSORBED_PER_HOLD 32
+
 void
 btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 {
 	uint64		state;
 	int			procnums[BTREE_PAGE_MAX_SPLIT_ITEMS];
 	int			count,
-				i;
+				i,
+				nabsorbed = 0;
 
 	if (O_PAGE_IS_LOCAL(blkno) || desc->undoType == UndoLogNone)
 		return;
@@ -1656,8 +2031,18 @@ btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 
 		if (apply_waiter_op(desc, blkno, procnums[i]))
 		{
+			bool		absorbed = lockerPayloads[procnums[i]].delegatedResult.absorbed;
+
 			pg_write_barrier();
 			lockerState->serviced = true;
+
+			/*
+			 * Absorbed work goes into our own undo, from reservations its
+			 * owners made before they queued, so it does not hold up the undo
+			 * the way the record below does.  Take what the batch can.
+			 */
+			if (absorbed && ++nabsorbed < BTREE_MAX_ABSORBED_PER_HOLD)
+				continue;
 		}
 
 		/*
@@ -1827,6 +2212,25 @@ modify_can_be_delegated(BTreeDescr *desc, BTreeOperationType action,
 	return true;
 }
 
+static void
+run_delegated_apply(BTreeDescr *desc, BTreeModifyCallbackInfo *callbackInfo)
+{
+	OPageWaiterShmemState *myState = &lockerStates[MYPROCNUMBER];
+	OPageWaiterPayload *myPayload = &lockerPayloads[MYPROCNUMBER];
+	BTreeDelegatedApplyResultCallback applyResult;
+
+	if (!callbackInfo || callbackInfo->delegatedCallbackId == 0)
+		return;
+
+	myPayload->delegatedResult.oldTuple.formatFlags = myState->oldTupleFlags;
+	myPayload->delegatedResult.oldTuple.data = myState->oldTupleLen > 0 ?
+		myPayload->oldTupleData.fixedData : NULL;
+
+	applyResult = btree_get_delegated_apply_result_callback(callbackInfo->delegatedCallbackId);
+	if (applyResult)
+		applyResult(desc, &myPayload->delegatedResult, callbackInfo->arg);
+}
+
 static OBTreeModifyResult
 o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 					  OTuple tuple, BTreeKeyType tupleType,
@@ -1852,6 +2256,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		keyType = tupleType;
 	}
 
+restart:
 	reserve_undo_for_modification(desc->undoType);
 
 	if (OIDS_EQ_SYS_TREE(desc->oids, SYS_TREES_SHARED_ROOT_INFO))
@@ -1923,6 +2328,23 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		OPageWaiterShmemState *myState = &lockerStates[MYPROCNUMBER];
 
 		/*
+		 * The holder took our update into its batch, and the batch aborted:
+		 * the update went with it.  Nothing of ours is left anywhere, so do
+		 * it all again, ourselves this time.
+		 */
+		if (myState->batchFailed)
+		{
+			myState->batchFailed = false;
+			myState->absorbable = false;
+			lockerPayloads[MYPROCNUMBER].delegatedResult.absorbed = false;
+			if (desc->undoType != UndoLogNone &&
+				GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType) != desc->undoType)
+				release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+			ppool_release_reserved(desc->ppool, PPOOL_RESERVE_INSERT);
+			goto restart;
+		}
+
+		/*
 		 * lock_page_with_tuple() has already handed our undo reservation to
 		 * the holder that used it, and retained the record the holder wrote.
 		 * What is left is the page-level reservation, which the holder never
@@ -1939,20 +2361,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		 * The holder could not touch our memory, so the half of the callback
 		 * that belongs here runs now, on what it left us.
 		 */
-		if (callbackInfo && callbackInfo->delegatedCallbackId != 0)
-		{
-			BTreeDelegatedApplyResultCallback applyResult;
-
-			OPageWaiterPayload *myPayload = &lockerPayloads[MYPROCNUMBER];
-
-			myPayload->delegatedResult.oldTuple.formatFlags = myState->oldTupleFlags;
-			myPayload->delegatedResult.oldTuple.data = myState->oldTupleLen > 0 ?
-				myPayload->oldTupleData.fixedData : NULL;
-
-			applyResult = btree_get_delegated_apply_result_callback(callbackInfo->delegatedCallbackId);
-			if (applyResult)
-				applyResult(desc, &myPayload->delegatedResult, callbackInfo->arg);
-		}
+		run_delegated_apply(desc, callbackInfo);
 
 		switch (pageFindContext.waiterOpResult)
 		{

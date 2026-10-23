@@ -1279,6 +1279,22 @@ set_oxid_batch_locktag(LOCKTAG *tag, OXid oxid)
 						 (uint32) oxid, OXID_BATCH_LOCK_FIELD4);
 }
 
+/*
+ * The process running an oxid, if the oxid is an autonomous transaction's and
+ * still running.
+ */
+bool
+oxid_get_autonomous_owner(OXid oxid, int *procnum)
+{
+	CommitSeqNo csn;
+
+	map_oxid(oxid, &csn, NULL, false);
+	if (!COMMITSEQNO_IS_SPECIAL(csn) || COMMITSEQNO_GET_LEVEL(csn) == 0)
+		return false;
+	*procnum = COMMITSEQNO_GET_PROCNUM(csn);
+	return true;
+}
+
 void
 oxid_batch_lock(OXid oxid)
 {

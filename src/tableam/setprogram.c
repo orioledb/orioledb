@@ -14,6 +14,11 @@
 
 #include "orioledb.h"
 
+#include "btree/modify.h"
+#include "btree/page_state.h"
+#include "recovery/wal.h"
+#include "tableam/descr.h"
+#include "tableam/scan.h"
 #include "tableam/setprogram.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
@@ -29,6 +34,9 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/portal.h"
+#include "utils/typcache.h"
+#include "storage/ipc.h"
+#include "catalog/pg_class.h"
 
 static ExecutorStart_hook_type next_ExecutorStart_hook = NULL;
 static ExecutorRun_hook_type next_ExecutorRun_hook = NULL;
@@ -62,6 +70,10 @@ static bool currentProgramCombinable = false;
 static bool batchOpen = false;
 static OXid batchOxid = InvalidOXid;
 static OAutonomousTxState batchState;
+
+/* What the batch needs to log the rows it takes over from waiters */
+static char batchReplident;
+static uint32 batchVersion;
 
 static bool
 program_is_current(Oid relid)
@@ -353,6 +365,132 @@ compile_set_op(OSetProgram *program, ParamListInfo params,
  * update column numbers -- the same two things ExecBuildUpdateProjection()
  * consumes -- so what we compile is what EvalPlanQual() would re-evaluate.
  */
+/*
+ * Is "expr" "pk column = value", with a value fixed for the statement?
+ * Returns the column's attribute number, or InvalidAttrNumber.
+ */
+static AttrNumber
+pk_equality_attnum(Node *expr, Index scanrelid)
+{
+	OpExpr	   *op;
+	Node	   *left,
+			   *right;
+	Var		   *var;
+
+	if (!IsA(expr, OpExpr))
+		return InvalidAttrNumber;
+	op = (OpExpr *) expr;
+	if (list_length(op->args) != 2)
+		return InvalidAttrNumber;
+
+	left = strip_implicit_coercions(linitial(op->args));
+	right = strip_implicit_coercions(lsecond(op->args));
+	if (!IsA(left, Var))
+	{
+		Node	   *tmp = left;
+
+		left = right;
+		right = tmp;
+	}
+	if (!IsA(left, Var))
+		return InvalidAttrNumber;
+	var = (Var *) left;
+	if (var->varno != scanrelid || var->varlevelsup != 0)
+		return InvalidAttrNumber;
+
+	if (!IsA(right, Const) &&
+		!(IsA(right, Param) && ((Param *) right)->paramkind == PARAM_EXTERN))
+		return InvalidAttrNumber;
+
+	if (op->opno != lookup_type_cache(var->vartype, TYPECACHE_EQ_OPR)->eq_opr)
+		return InvalidAttrNumber;
+
+	return var->varattno;
+}
+
+/*
+ * Does the statement update at most one row, picked by its primary key and
+ * by nothing else?
+ *
+ * That is what lets somebody else finish the update for us.  It is applied to
+ * the row as it then is, and that is only right if no condition of ours
+ * needs evaluating again: EvalPlanQual() would recheck the WHERE clause, and
+ * the key, the only thing it tests, cannot change, as we refuse to assign
+ * key columns.  And our statement must be over once that row is done: the
+ * update can be committed by another transaction before we return, beyond
+ * the reach of any error we might raise afterwards.
+ */
+static bool
+updates_one_pk_row(Plan *subplan, Relation rel)
+{
+	OTableDescr *descr;
+	OIndexDescr *primary;
+	CustomScan *cscan;
+	Plan	   *ixplan;
+	List	   *quals;
+	ListCell   *lc;
+	Bitmapset  *keyAttrs = NULL;
+	Bitmapset  *seen = NULL;
+	int			i;
+	bool		result;
+
+	if (IsA(subplan, Result))
+	{
+		Result	   *res = (Result *) subplan;
+
+		if (res->resconstantqual != NULL || subplan->qual != NIL ||
+			subplan->initPlan != NIL)
+			return false;
+		subplan = outerPlan(subplan);
+	}
+
+	if (subplan == NULL || !IsA(subplan, CustomScan))
+		return false;
+	cscan = (CustomScan *) subplan;
+	if (!is_o_custom_scan(cscan) || subplan->qual != NIL ||
+		subplan->initPlan != NIL || subplan->parallel_aware ||
+		intVal(linitial(cscan->custom_private)) != O_IndexPlan ||
+		intVal(lsecond(cscan->custom_private)) != PrimaryIndexNumber)
+		return false;
+
+	ixplan = (Plan *) linitial(cscan->custom_plans);
+	if (IsA(ixplan, Result))
+		ixplan = outerPlan(ixplan);
+	if (IsA(ixplan, IndexScan))
+		quals = ((IndexScan *) ixplan)->indexqualorig;
+	else
+		return false;
+
+	descr = relation_get_descr(rel);
+	if (descr == NULL)
+		return false;
+	primary = GET_PRIMARY(descr);
+	if (primary->primaryIsCtid)
+		return false;
+	for (i = 0; i < primary->nKeyFields; i++)
+		keyAttrs = bms_add_member(keyAttrs, primary->tableAttnums[i]);
+
+	result = true;
+	foreach(lc, quals)
+	{
+		AttrNumber	attnum = pk_equality_attnum(lfirst(lc),
+												cscan->scan.scanrelid);
+
+		if (attnum == InvalidAttrNumber || !bms_is_member(attnum, keyAttrs))
+		{
+			result = false;
+			break;
+		}
+		seen = bms_add_member(seen, attnum);
+	}
+	if (result)
+		result = bms_equal(seen, keyAttrs);
+
+	bms_free(keyAttrs);
+	bms_free(seen);
+	return result;
+}
+
 static void
 compile_current_program(QueryDesc *queryDesc)
 {
@@ -447,7 +585,12 @@ compile_current_program(QueryDesc *queryDesc)
 			rri->ri_projectReturning != NULL ||
 			rri->ri_WithCheckOptions != NIL)
 			return;
+
+		if (!updates_one_pk_row(subplan, rri->ri_RelationDesc))
+			return;
 	}
+	else
+		return;
 
 	rti = linitial_int(node->resultRelations);
 	rte = list_nth_node(RangeTblEntry, stmt->rtable, rti - 1);
@@ -463,40 +606,128 @@ compile_current_program(QueryDesc *queryDesc)
 }
 
 /*
+ * Waiters our batch took over sleep until it ends.  A backend that exits
+ * without ending its statement -- FATAL skips ExecutorRun()'s catch -- would
+ * leave them asleep for good; tell them to do their work themselves.
+ */
+static void
+batch_before_shmem_exit(int code, Datum arg)
+{
+	btree_batch_queue_drain(false);
+	btree_absorbed_reset();
+	btree_batch_oxid = InvalidOXid;
+	btree_batch_desc = NULL;
+	btree_wake_deferred_waiters(true);
+}
+
+/*
  * Open the batch for an update of the given relation, if the statement
  * qualifies and it is not open yet.  Returns whether the update is to be
  * done in the batch, which is then the current transaction.
+ *
+ * pkDesc is the relation's primary tree, if the batch may also take over the
+ * updates of waiting batches on it -- which takes being able to log them with
+ * nothing but the new row, as replica identity FULL does not allow.
  */
 bool
-o_batch_begin(Oid relid)
+o_batch_begin(Oid relid, BTreeDescr *pkDesc, char replident, uint32 version)
 {
+	static bool exitCallbackRegistered = false;
+
 	if (batchOpen)
 		return true;
 	if (!currentProgramCombinable || !program_is_current(relid))
 		return false;
 
+	if (!exitCallbackRegistered)
+	{
+		before_shmem_exit(batch_before_shmem_exit, (Datum) 0);
+		exitCallbackRegistered = true;
+	}
+
 	start_autonomous_transaction(&batchState);
+	batchState.durable = true;
 	oxid_assign_decodable = true;
 	batchOxid = get_current_oxid();
 	oxid_assign_decodable = false;
 	oxid_batch_lock(batchOxid);
 	batchOpen = true;
+
+	batchReplident = replident;
+	batchVersion = version;
+	btree_absorbed_reset();
+	btree_batch_oxid = batchOxid;
+	btree_batch_desc = (replident != REPLICA_IDENTITY_FULL) ? pkDesc : NULL;
+	if (btree_batch_desc != NULL)
+		btree_batch_queue_open();
 	return true;
+}
+
+static void
+batch_abort(void)
+{
+	btree_batch_queue_drain(false);
+	btree_batch_oxid = InvalidOXid;
+	btree_batch_desc = NULL;
+	btree_absorbed_reset();
+	abort_autonomous_transaction(&batchState);
+	oxid_batch_unlock(batchOxid);
+	batchOxid = InvalidOXid;
+
+	/* What we took over went with the batch: its owners do it again */
+	btree_wake_deferred_waiters(true);
 }
 
 static void
 batch_end(bool commit)
 {
+	ListCell   *lc;
+
 	if (!batchOpen)
 		return;
 
 	batchOpen = false;
-	if (commit)
-		finish_autonomous_transaction(&batchState);
-	else
-		abort_autonomous_transaction(&batchState);
+	if (!commit)
+	{
+		batch_abort();
+		return;
+	}
+
+	PG_TRY();
+	{
+		/* Whoever left us an update gets it done now, in this batch */
+		btree_batch_queue_drain(true);
+
+		/*
+		 * The rows we took over, after everything we wrote ourselves: each of
+		 * them replaced a version of ours, so this is their order on the page
+		 * too.
+		 */
+		foreach(lc, btree_absorbed_rows)
+		{
+			BTreeAbsorbedRow *row = (BTreeAbsorbedRow *) lfirst(lc);
+
+			if (row->desc->storageType == BTreeStoragePersistence)
+				o_wal_update(row->desc, row->tuple, row->tuple,
+							 batchReplident, batchVersion);
+		}
+	}
+	PG_CATCH();
+	{
+		batch_abort();
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+
+	btree_batch_oxid = InvalidOXid;
+	btree_batch_desc = NULL;
+	btree_absorbed_reset();
+	finish_autonomous_transaction(&batchState);
 	oxid_batch_unlock(batchOxid);
 	batchOxid = InvalidOXid;
+
+	/* The work we took over is now as committed as ours */
+	btree_wake_deferred_waiters(false);
 }
 
 #if PG_VERSION_NUM >= 180000

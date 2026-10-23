@@ -3248,6 +3248,7 @@ start_autonomous_transaction(OAutonomousTxState *state)
 	oxid_needs_wal_flush = false;
 	xidless_commit_lsn = InvalidXLogRecPtr;
 	reset_current_oxid();
+	state->durable = false;
 	GET_CUR_PROCDATA()->autonomousNestingLevel++;
 }
 
@@ -3299,6 +3300,7 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 	if (OXidIsValid(oxid))
 	{
 		CommitSeqNo csn;
+		XLogRecPtr	commitLsn = InvalidXLogRecPtr;
 		int			i;
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
@@ -3311,7 +3313,17 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 		START_CRIT_SECTION();
 
 		if (!is_recovery_process())
-			wal_commit(oxid, get_current_logical_xid(), true);
+			commitLsn = wal_commit(oxid, get_current_logical_xid(), true);
+
+		/*
+		 * Nothing makes an autonomous commit durable later on: the
+		 * transaction it runs in may have nothing of its own to flush.  So a
+		 * durable one is flushed here, before its csn lets anybody see it --
+		 * the order RecordTransactionCommit() keeps.
+		 */
+		if (state->durable && !XLogRecPtrIsInvalid(commitLsn) &&
+			synchronous_commit > SYNCHRONOUS_COMMIT_OFF)
+			XLogFlush(commitLsn);
 
 		current_oxid_precommit();
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
@@ -3329,6 +3341,14 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 		{
 			if (!state->has_retained_undo_location[i])
 				free_retained_undo_location((UndoLogType) i);
+		}
+
+		/* And to synchronous standbys, as an ordinary commit waits for */
+		if (state->durable && !XLogRecPtrIsInvalid(commitLsn))
+		{
+			HOLD_INTERRUPTS();
+			SyncRepWaitForLSN(commitLsn, true);
+			RESUME_INTERRUPTS();
 		}
 	}
 
