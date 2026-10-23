@@ -2235,7 +2235,15 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 	{
 		oldSlot = mres.oldTuple;
 
-		if (mres.action == BTreeOperationUpdate)
+		if (mres.action == BTreeOperationUpdate && arg->absorbed)
+		{
+			/*
+			 * A batch took the update over: the row it stored is in its WAL,
+			 * not ours, and its program assigns no TOASTed value, so neither
+			 * the old row nor the new one is ours to look at again.
+			 */
+		}
+		else if (mres.action == BTreeOperationUpdate)
 		{
 			OTuple		oldWalTuple;
 			bool		oldWalTupleAllocated;
