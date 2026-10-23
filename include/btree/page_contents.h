@@ -563,6 +563,16 @@ typedef struct
 	 */
 	pg_atomic_uint32 batchQueue;
 	uint32		batchNext;
+
+	/*
+	 * Set by a page holder that found the waiter's row written by another
+	 * process's batch: owner procno + 1.  The unlock then leaves the waiter
+	 * in that batch's queue instead of waking it.
+	 */
+	uint32		forwardTo;
+
+	/* The holder took over the waiter's undo reservation */
+	bool		reservationStolen;
 	OPageWaiterOpResult opResult;
 	Size		reservedUndoSize;
 	UndoLocation undoLocation;

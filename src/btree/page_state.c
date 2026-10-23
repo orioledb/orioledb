@@ -640,7 +640,15 @@ lock_page_with_tuple(BTreeDescr *desc,
 			lockerState->serviced = false;
 			if (undoType != UndoLogNone)
 			{
-				giveup_reserved_undo_size(undoType);
+				/*
+				 * Give the reservation up if the holder took it over, else
+				 * release it: giving up an unused one leaks it.
+				 */
+				if (lockerState->reservationStolen)
+					giveup_reserved_undo_size(undoType);
+				else
+					release_undo_size(undoType);
+				lockerState->reservationStolen = false;
 				if (UndoLocationIsValid(lockerState->undoLocation) &&
 					!UndoLocationIsValid(curRetainUndoLocations[undoType]))
 					curRetainUndoLocations[undoType] = lockerState->undoLocation;
@@ -1055,11 +1063,14 @@ unlock_check_page(OInMemoryBlkno blkno)
  */
 static uint32 deferredWakeHead = PAGE_STATE_INVALID_PROCNO;
 
-void
+int
 btree_wake_deferred_waiters(bool batchFailed)
 {
+	int			nwoken = 0;
+
 	while (deferredWakeHead != PAGE_STATE_INVALID_PROCNO)
 	{
+		nwoken++;
 		OPageWaiterShmemState *lockState = &lockerStates[deferredWakeHead];
 		PGPROC	   *proc = GetPGProcByNumber(deferredWakeHead);
 		uint32		next = lockState->next;
@@ -1074,6 +1085,7 @@ btree_wake_deferred_waiters(bool batchFailed)
 		PGSemaphoreUnlock(proc->sem);
 		deferredWakeHead = next;
 	}
+	return nwoken;
 }
 
 /*
@@ -1141,7 +1153,7 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 			OPageWaiterShmemState *lock = &lockerStates[cur];
 
 			bool		shouldWake =
-				lock->serviced ||
+				lock->serviced || lock->forwardTo != 0 ||
 				lock->status == OPageWaitNonExclusive ||
 				(split && lock->status == OPageWaitInsert);
 
@@ -1282,6 +1294,20 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 			actualWakeCount++;
 			procno = next;
 			continue;
+		}
+
+		/* Off this page's queue now, so on to the batch that has its row */
+		if (lockState->forwardTo != 0)
+		{
+			int			owner = (int) lockState->forwardTo - 1;
+
+			lockState->forwardTo = 0;
+			if (btree_batch_queue_push(owner, procno))
+			{
+				actualWakeCount++;
+				procno = next;
+				continue;
+			}
 		}
 
 		/*

@@ -34,6 +34,7 @@
 
 #include "miscadmin.h"
 #include "pgstat.h"
+#include "utils/wait_event.h"
 #include "storage/lwlock.h"
 #include "utils/memutils.h"
 
@@ -1476,7 +1477,10 @@ absorb_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
 	MemoryContextSwitchTo(oldcxt);
 
 	if (steal)
+	{
 		steal_reserved_undo_size(desc->undoType, lockerState->reservedUndoSize);
+		lockerState->reservationStolen = true;
+	}
 	undoLocation = make_undo_record(desc, curTuple, true, BTreeOperationUpdate,
 									blkno, O_PAGE_GET_CHANGE_COUNT(p), tuphdr);
 
@@ -1522,6 +1526,20 @@ absorb_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
  * instead, and we do them as the batch ends, before it commits.
  */
 
+static uint32
+batch_queue_wait_info(void)
+{
+#if PG_VERSION_NUM >= 170000
+	static uint32 cached_wait_info = 0;
+
+	if (cached_wait_info == 0)
+		cached_wait_info = WaitEventExtensionNew("OrioleBatchQueue");
+	return cached_wait_info;
+#else
+	return PG_WAIT_EXTENSION;
+#endif
+}
+
 static void
 wake_batch_waiter(int pgprocno)
 {
@@ -1529,6 +1547,28 @@ wake_batch_waiter(int pgprocno)
 	lockerStates[pgprocno].status = OPageWaitWakeUp;
 	pg_memory_barrier();
 	PGSemaphoreUnlock(GetPGProcByNumber(pgprocno)->sem);
+}
+
+/*
+ * Put a process into the queue of owner's batch on its behalf.  It is asleep
+ * and on no page's queue.  Returns false if the queue is closed.
+ */
+bool
+btree_batch_queue_push(int owner, int pgprocno)
+{
+	pg_atomic_uint32 *queue = &lockerStates[owner].batchQueue;
+	uint32		value = pg_atomic_read_u32(queue);
+
+	for (;;)
+	{
+		if (value == BATCH_QUEUE_CLOSED)
+			return false;
+		lockerStates[pgprocno].batchNext = value;
+		pg_write_barrier();
+		if (pg_atomic_compare_exchange_u32(queue, &value,
+										   BATCH_QUEUE_VALUE(pgprocno)))
+			return true;
+	}
 }
 
 void
@@ -1623,6 +1663,12 @@ absorb_queued_ops(BTreeDescr *desc, int *procnos, bool *absorbed, int n)
 				absorbed[j] = done[j] = true;
 		}
 
+		/*
+		 * Others have queued on the page while we held it, for the same row
+		 * most likely: take them too, rather than hand the page to each in
+		 * turn only for it to find our batch's row there.
+		 */
+		btree_do_queued_work(desc, blkno);
 		unlock_page(blkno);
 		release_undo_size(desc->undoType);
 	}
@@ -1742,7 +1788,7 @@ batch_queue_join(BTreeDescr *desc, int owner, OTuple tuple, CommitSeqNo opCsn)
 			break;
 	}
 
-	pgstat_report_wait_start(PG_WAIT_LWLOCK | LWTRANCHE_BUFFER_CONTENT);
+	pgstat_report_wait_start(batch_queue_wait_info());
 	for (;;)
 	{
 		PGSemaphoreLock(MyProc->sem);
@@ -1845,6 +1891,27 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	if (absorb_waiter_op(desc, blkno, p, &loc, tuphdr, curTuple, pgprocno,
 						 true))
 		return true;
+
+	/*
+	 * The row is another process's batch's.  The waiter would only wake up
+	 * to find that out under the page lock and go to that batch's queue:
+	 * send it there straight away, as the page is unlocked.
+	 */
+	if (lockerState->absorbable &&
+		lockerState->action == BTreeOperationUpdate &&
+		lockerPayloads[pgprocno].program.nops > 0)
+	{
+		OXid		rowOxid = XACT_INFO_GET_OXID(tuphdr->xactInfo);
+		int			owner;
+
+		if (rowOxid != btree_batch_oxid &&
+			oxid_get_autonomous_owner(rowOxid, &owner) &&
+			owner != pgprocno && owner != MYPROCNUMBER)
+		{
+			lockerState->forwardTo = owner + 1;
+			return false;
+		}
+	}
 
 	/*
 	 * Doing the work under the waiter's own oxid is experimental: it loses
@@ -1980,6 +2047,7 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 		return false;
 
 	steal_reserved_undo_size(desc->undoType, lockerState->reservedUndoSize);
+	lockerState->reservationStolen = true;
 	undoLocation = make_waiter_modify_undo_record(desc, curTuple, true,
 												  lockerState->action, blkno,
 												  O_PAGE_GET_CHANGE_COUNT(p),
@@ -2133,6 +2201,8 @@ btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 			if (absorbed && ++nabsorbed < BTREE_MAX_ABSORBED_PER_HOLD)
 				continue;
 		}
+		else if (lockerState->forwardTo != 0)
+			continue;			/* costs nothing here: no undo */
 
 		/*
 		 * One per page hold.  Making an undo record publishes a reserved undo
