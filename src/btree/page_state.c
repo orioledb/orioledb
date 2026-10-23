@@ -1089,6 +1089,47 @@ btree_wake_deferred_waiters(bool batchFailed)
 }
 
 /*
+ * Let readers back onto a page we still hold locked, our modification of it
+ * being complete.  The change count moves on with it, as unlock would move
+ * it, so a reader that copied the page before or during the modification
+ * sees that it changed.
+ *
+ * Readers already queued for the page stay asleep until we unlock it; those
+ * who come meanwhile read it at once.
+ */
+void
+page_unblock_reads(OInMemoryBlkno blkno)
+{
+	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+	OrioleDBPageHeader *hdr = (OrioleDBPageHeader *) p;
+	uint64		state,
+				newState;
+	int			i;
+
+	if (O_PAGE_IS_LOCAL(blkno))
+		return;
+
+	i = get_my_locked_page_index(blkno);
+	if (!(myLockedPages[i].state & PAGE_STATE_NO_READ_FLAG))
+		return;
+
+	state = pg_atomic_read_u64(&hdr->state);
+	do
+	{
+		uint64		changeCount;
+
+		Assert(state & PAGE_STATE_LOCKED_FLAG);
+		Assert(state & PAGE_STATE_NO_READ_FLAG);
+		newState = state & ~(PAGE_STATE_NO_READ_FLAG | PAGE_STATE_CHANGE_COUNT_MASK);
+		changeCount = ((state & PAGE_STATE_CHANGE_COUNT_MASK) +
+					   PAGE_STATE_CHANGE_COUNT_ONE) & PAGE_STATE_CHANGE_COUNT_MASK;
+		newState |= changeCount;
+	} while (!pg_atomic_compare_exchange_u64(&hdr->state, &state, newState));
+
+	myLockedPages[i].state = newState;
+}
+
+/*
  * Keep a process whose work we did, not on any page queue, asleep until the
  * work is committed.
  */

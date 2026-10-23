@@ -128,6 +128,7 @@ extern bool try_lock_page_and_check(OInMemoryBlkno blkno, uint16 level,
 extern void delare_page_as_locked(OInMemoryBlkno blkno);
 extern bool page_is_locked(OInMemoryBlkno blkno);
 extern void page_block_reads(OInMemoryBlkno blkno);
+extern void page_unblock_reads(OInMemoryBlkno blkno);
 extern void unlock_page(OInMemoryBlkno blkno);
 extern void unlock_page_after_split(OInMemoryBlkno blkno);
 extern void release_all_page_locks(void);

@@ -1671,6 +1671,9 @@ absorb_row_group(BTreeDescr *desc, OInMemoryBlkno blkno, int *procnos, int n,
 	MARK_DIRTY(desc, blkno);
 	END_CRIT_SECTION();
 
+	/* Done with the page itself: readers need not wait for the rest */
+	page_unblock_reads(blkno);
+
 	/*
 	 * Tell each waiter it is done.  Nothing of the row goes back: the waiter
 	 * neither logs it nor reads it again.
@@ -2405,6 +2408,12 @@ btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 		return;
 
 	count = get_page_waiters(desc, blkno, state, procnums);
+
+	/*
+	 * Our own modification is complete: let readers in while we work for the
+	 * others, who block reads again only for the moment they store a row.
+	 */
+	page_unblock_reads(blkno);
 
 	/*
 	 * The updates our batch can take, all at once and a row at a time.  They
