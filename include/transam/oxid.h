@@ -212,6 +212,9 @@ extern void oxid_subxact_callback(SubXactEvent event, SubTransactionId mySubid, 
 extern Size oxid_shmem_needs(void);
 extern void oxid_init_shmem(Pointer ptr, bool found);
 extern bool wait_for_oxid(OXid oxid, bool errorOk);
+extern bool oxid_assign_decodable;
+extern void oxid_batch_lock(OXid oxid);
+extern void oxid_batch_unlock(OXid oxid);
 extern void oxid_notify(OXid oxid);
 extern void oxid_notify_all(void);
 extern void advance_oxids(OXid new_xid);
