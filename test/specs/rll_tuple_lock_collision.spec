@@ -20,23 +20,12 @@ setup
 	) USING orioledb;
 	INSERT INTO o_hwlock8 VALUES (5000000000000, 1), (1125899906842624, 1);
 
-	CREATE TABLE o_hwlock_coll (
-		id bigint PRIMARY KEY,
-		v int
-	) USING orioledb;
-	/*
-	 * These two int8 keys are above 2^47, so both go through the 47-bit
-	 * hash path.  Their hash_bytes_extended(..., 1) values collide in the
-	 * low 47 bits (0x26533263fd90), giving them the same LOCKTAG_TUPLE tag.
-	 */
-	INSERT INTO o_hwlock_coll VALUES (140737490556223, 1), (140737501603420, 1);
 }
 
 teardown
 {
 	DROP TABLE o_hwlock;
 	DROP TABLE o_hwlock8;
-	DROP TABLE o_hwlock_coll;
 }
 
 session s1
@@ -47,16 +36,12 @@ step "ks_1_9660" { SELECT id FROM o_hwlock WHERE id = 9660 FOR KEY SHARE; }
 step "fu_1_211" { SELECT id FROM o_hwlock WHERE id = 211 FOR UPDATE; }
 step "ks_1_small8" { SELECT id FROM o_hwlock8 WHERE id = 5000000000000 FOR KEY SHARE; }
 step "ks_1_large8" { SELECT id FROM o_hwlock8 WHERE id = 1125899906842624 FOR KEY SHARE; }
-step "ks_1_coll_A" { SELECT id FROM o_hwlock_coll WHERE id = 140737490556223 FOR KEY SHARE; }
-step "ks_1_coll_B" { SELECT id FROM o_hwlock_coll WHERE id = 140737501603420 FOR KEY SHARE; }
 step "rb_1" { ROLLBACK; }
 
 session s2
 step "begin_2" { BEGIN; }
 step "ks_2_211" { SELECT id FROM o_hwlock WHERE id = 211 FOR KEY SHARE; }
 step "fu_2_9660" { SELECT id FROM o_hwlock WHERE id = 9660 FOR UPDATE; }
-step "ks_2_coll_A" { SELECT id FROM o_hwlock_coll WHERE id = 140737490556223 FOR KEY SHARE; }
-step "fu_2_coll_B" { SELECT id FROM o_hwlock_coll WHERE id = 140737501603420 FOR UPDATE; }
 step "rb_2" { ROLLBACK; }
 
 session s3
@@ -66,8 +51,6 @@ step "fu_3_1" { SELECT id FROM o_hwlock WHERE id = 1 FOR UPDATE; }
 step "fu_3_211" { SELECT id FROM o_hwlock WHERE id = 211 FOR UPDATE; }
 step "fu_3_small8" { SELECT id FROM o_hwlock8 WHERE id = 5000000000000 FOR UPDATE; }
 step "fu_3_large8" { SELECT id FROM o_hwlock8 WHERE id = 1125899906842624 FOR UPDATE; }
-step "set_dt_short_3" { SET deadlock_timeout = '10ms'; }
-step "fu_3_coll_A" { SELECT id FROM o_hwlock_coll WHERE id = 140737490556223 FOR UPDATE; }
 step "rb_3" { ROLLBACK; }
 
 session s4
@@ -80,7 +63,8 @@ step "show_tag" {
 	SELECT CASE WHEN tuple & 32768 <> 0
 				THEN 'key ' || ((tuple & 32767)::bigint << 32 | (page::bigint & 4294967295))
 				ELSE 'hash' END AS tuple_lock_id
-	FROM pg_locks WHERE locktype = 'tuple' AND granted;
+	FROM pg_locks WHERE locktype = 'tuple' AND granted
+		 AND relation = 'o_hwlock8_pkey'::regclass;
 }
 
 # Scenarios by Pavel Borisov (#1408).  Each waiter that holds no lock on
@@ -136,28 +120,3 @@ permutation
 	"ks_1_small8" "fu_3_small8" "show_tag" "rb_1" "rb_3"
 	"begin_1" "begin_3"
 	"ks_1_large8" "fu_3_large8" "show_tag" "rb_1" "rb_3"
-
-# Permutation 4 (known anomaly): two int8 keys above 2^47 whose 47-bit
-# hashes collide.  Same schedule as permutation 1.  Because the two keys
-# share a LOCKTAG_TUPLE tag, they deadlock; with distinct tags both
-# waiters would complete.
-#
-# This is extremely unlikely in practice: p ~ 2^-47 per pair, i.e. ~12M
-# hashed keys needed for a 50% chance of any collision.  Only keys that
-# do not fit in 47 bits (large int8, composite, text, ...) go through
-# the hash path at all.  Text keys always hash, so colliding pairs can
-# be crafted, but exploiting that also requires orchestrating the exact
-# multi-session locking sequence.  The colliding pair below was found by
-# brute force over hash_bytes_extended.
-#
-# s3 has a short deadlock_timeout so it detects the cycle.
-permutation
-	"set_dt_short_3"
-	"begin_1" "begin_3"
-	"ks_1_coll_A" "ks_1_coll_B"
-	"fu_3_coll_A"
-	"begin_2" "ks_2_coll_A"
-	"fu_2_coll_B"
-	"rb_1"
-	"rb_3"
-	"rb_2"

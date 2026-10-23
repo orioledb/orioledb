@@ -92,7 +92,23 @@ BTreeModifyCallbackInfo nullCallbackInfo =
 	.arg = NULL
 };
 
+static uint64 *tupleLockHashSeed;
+
 static const LOCKMODE hwLockModes[] = {AccessShareLock, RowShareLock, ExclusiveLock, AccessExclusiveLock};
+
+Size
+tuple_lock_shmem_needs(void)
+{
+	return sizeof(uint64);
+}
+
+void
+tuple_lock_shmem_init(Pointer ptr, bool found)
+{
+	tupleLockHashSeed = (uint64 *) ptr;
+	if (!found)
+		pg_strong_random(tupleLockHashSeed, sizeof(uint64));
+}
 
 static void unlock_release(BTreeModifyInternalContext *context, bool unlock);
 static ConflictResolution o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context);
@@ -515,7 +531,7 @@ make_tuple_lock_tag(BTreeDescr *desc, OTuple tuple, LOCKTAG *tag)
 		id |= TUPLE_LOCK_EXACT_KEY;
 	else
 		id = hash_bytes_extended((const unsigned char *) key.tuple.data,
-								 len, key.tuple.formatFlags) &
+								 len, *tupleLockHashSeed) &
 			TUPLE_LOCK_ID_MASK;
 
 	SET_LOCKTAG_TUPLE(*tag, desc->oids.datoid, desc->oids.reloid,

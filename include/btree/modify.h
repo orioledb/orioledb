@@ -66,6 +66,9 @@ typedef struct BTreeModifyCallbackInfo
 
 extern BTreeModifyCallbackInfo nullCallbackInfo;
 
+extern Size tuple_lock_shmem_needs(void);
+extern void tuple_lock_shmem_init(Pointer ptr, bool found);
+
 extern bool o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple);
 extern bool o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
 									  BTreeLocationHint *hint);
