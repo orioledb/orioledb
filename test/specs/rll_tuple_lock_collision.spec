@@ -63,7 +63,8 @@ step "show_tag" {
 	SELECT CASE WHEN tuple & 32768 <> 0
 				THEN 'key ' || ((tuple & 32767)::bigint << 32 | (page::bigint & 4294967295))
 				ELSE 'hash' END AS tuple_lock_id
-	FROM pg_locks WHERE locktype = 'tuple' AND granted;
+	FROM pg_locks WHERE locktype = 'tuple' AND granted
+		 AND relation = 'o_hwlock8_pkey'::regclass;
 }
 
 # Scenarios by Pavel Borisov (#1408).  Each waiter that holds no lock on
