@@ -290,6 +290,13 @@ compile_set_op(OSetProgram *program, ParamListInfo params,
 	memset(op, 0, sizeof(*op));
 	op->attnum = attnum;
 
+	/*
+	 * A binary-compatible cast changes nothing we store: a varchar parameter
+	 * assigned to a text column, say, which is what a JDBC client sends.
+	 */
+	while (IsA(expr, RelabelType))
+		expr = ((RelabelType *) expr)->arg;
+
 	if (resolve_constant((Node *) expr, params, &value, &isnull, &type))
 	{
 		op->kind = OSetOpConst;

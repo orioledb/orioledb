@@ -187,9 +187,21 @@ o_update_delegated_apply(BTreeDescr *desc, BTreeDelegatedModifyResult *result,
 	o_arg->tup_undo_location = result->undoLocation;
 	o_arg->absorbed = result->absorbed;
 
+	/*
+	 * Both rows are in our shared state, and the slots must not point there:
+	 * it is not ours alone once we are awake.  Copy them out.
+	 */
 	if (!O_TUPLE_IS_NULL(result->oldTuple))
-		copy_tuple_to_slot(result->oldTuple, update_arg_get_slot(o_arg),
+	{
+		OTuple		oldTuple = result->oldTuple;
+		int			len = lockerStates[MYPROCNUMBER].oldTupleLen;
+
+		oldTuple.data = palloc(len);
+		memcpy(oldTuple.data, result->oldTuple.data, len);
+		copy_tuple_to_slot(oldTuple, update_arg_get_slot(o_arg),
 						   o_arg->descr, o_arg->csn, PrimaryIndexNumber, NULL);
+		slot_getallattrs(update_arg_get_slot(o_arg));
+	}
 
 	/*
 	 * If the holder worked the new row out from the row it found, our slot
@@ -203,9 +215,20 @@ o_update_delegated_apply(BTreeDescr *desc, BTreeDelegatedModifyResult *result,
 		OTuple		newTuple;
 
 		newTuple.formatFlags = lockerStates[MYPROCNUMBER].tupleFlags;
-		newTuple.data = &myPayload->tupleData.fixedData[BTreeLeafTuphdrSize];
+		newTuple.data = palloc(result->newTupleLen);
+		memcpy(newTuple.data,
+			   &myPayload->tupleData.fixedData[BTreeLeafTuphdrSize],
+			   result->newTupleLen);
 		copy_tuple_to_slot(newTuple, (TupleTableSlot *) o_arg->newSlot,
 						   o_arg->descr, o_arg->csn, PrimaryIndexNumber, NULL);
+
+		/*
+		 * What reads the slot next -- the TOAST and key handling of
+		 * o_tbl_update() -- takes tts_values as it is, so deform now: the
+		 * slot still holds the values we computed, and for a varlena those
+		 * point at memory that is no longer ours.
+		 */
+		slot_getallattrs((TupleTableSlot *) o_arg->newSlot);
 	}
 
 	((OTableSlot *) o_arg->newSlot)->version =
@@ -2578,7 +2601,7 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 		 * the PK/SK marker and the index maintenance itself, neither of which
 		 * it can do for us.
 		 */
-		.delegatedCallbackId = (descr->nIndices < 2) ? o_update_delegated_id : 0
+		.delegatedCallbackId = (descr->nIndices < 2 && orioledb_delegate_updates) ? o_update_delegated_id : 0
 	};
 
 	memset(&result, 0, sizeof(result));
