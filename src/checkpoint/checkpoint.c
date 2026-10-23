@@ -6247,19 +6247,31 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 
 		if (read_result != OReadPageResultOk)
 		{
+			/* unlock_page() must not change what %m reports */
+			int			save_errno = errno;
+
 			unlock_page(desc->rootInfo.rootPageBlkno);
 			if (read_result == OReadPageResultChecksumFailed)
 				ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
-								errmsg("invalid rootPageBlkno page in %s: %m",
+								errmsg("invalid rootPageBlkno page in %s",
+									   btree_smgr_filename(desc,
+														   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
+														   chkp_num))));
+			else if (read_result == OReadPageResultShortRead)
+				ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+								errmsg("could not read rootPageBlkno page from %s: unexpected end of file",
 									   btree_smgr_filename(desc,
 														   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
 														   chkp_num))));
 			else
+			{
+				errno = save_errno;
 				ereport(FATAL, (errcode_for_file_access(),
 								errmsg("could not read rootPageBlkno page from %s: %m",
 									   btree_smgr_filename(desc,
 														   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
 														   chkp_num))));
+			}
 		}
 
 		put_page_image(desc->rootInfo.rootPageBlkno, buf);

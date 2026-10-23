@@ -1437,6 +1437,24 @@ check_orioledb_compress_version(OrioleDBOndiskPageHeader ondisk_page_header)
 }
 
 /*
+ * Reads exactly amount bytes of a page image.
+ *
+ * A read that fails sets errno, but one that stops at the end of the file
+ * does not, so tell the two apart: reporting the latter with %m would print
+ * whatever an unrelated earlier call left in errno.
+ */
+static OReadPageResult
+read_page_part(BTreeDescr *desc, char *buffer, uint32 chkpNum,
+			   int amount, off_t offset)
+{
+	int			nbytes = btree_smgr_read(desc, buffer, chkpNum, amount, offset);
+
+	if (nbytes == amount)
+		return OReadPageResultOk;
+	return nbytes < 0 ? OReadPageResultIOError : OReadPageResultShortRead;
+}
+
+/*
  * Reads a page from disk to the img from a valid downlink. It's fills an empty
  * array of offsets for the page.
  */
@@ -1449,7 +1467,7 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 	uint64		offset = DOWNLINK_GET_DISK_OFF(downlink);
 	uint32		chkpNum = 0;
 	uint16		len = DOWNLINK_GET_DISK_LEN(downlink);
-	bool		err = false;
+	OReadPageResult result;
 	OrioleDBOndiskPageHeader ondisk_page_header = {0};
 	bool		needs_page_version_convert;
 
@@ -1478,9 +1496,9 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 			byte_offset = (off_t) offset * (off_t) ORIOLEDB_BLCKSZ;
 		read_size = ORIOLEDB_BLCKSZ;
 
-		err = btree_smgr_read(desc, img, chkpNum, read_size, byte_offset) != read_size;
-		if (err)
-			return OReadPageResultIOError;
+		result = read_page_part(desc, img, chkpNum, read_size, byte_offset);
+		if (result != OReadPageResultOk)
+			return result;
 
 		ondisk_page_header = *((OrioleDBOndiskPageHeader *) img);
 		needs_page_version_convert = check_orioledb_page_version(ondisk_page_header);
@@ -1505,9 +1523,9 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 			byte_offset = (off_t) offset * (off_t) ORIOLEDB_COMP_BLCKSZ;
 			read_size = len * ORIOLEDB_COMP_BLCKSZ;
 
-			err = btree_smgr_read(desc, buf, chkpNum, read_size, byte_offset) != read_size;
-			if (err)
-				return OReadPageResultIOError;
+			result = read_page_part(desc, buf, chkpNum, read_size, byte_offset);
+			if (result != OReadPageResultOk)
+				return result;
 
 			ondisk_page_header = *((OrioleDBOndiskPageHeader *) buf);
 			needs_page_version_convert = check_orioledb_page_version(ondisk_page_header);
@@ -1534,16 +1552,16 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 			read_size = O_PAGE_HEADER_SIZE;
 
 			/* details about written image parts are in write_page_to_disk */
-			err = btree_smgr_read(desc, (Pointer) &ondisk_page_header, chkpNum, read_size, byte_offset) != read_size;
+			result = read_page_part(desc, (Pointer) &ondisk_page_header, chkpNum, read_size, byte_offset);
 			byte_offset += read_size;
 
-			if (err)
-				return OReadPageResultIOError;
+			if (result != OReadPageResultOk)
+				return result;
 
 			read_size = ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE;
-			err = btree_smgr_read(desc, img + O_PAGE_HEADER_SIZE, chkpNum, read_size, byte_offset) != read_size;
-			if (err)
-				return OReadPageResultIOError;
+			result = read_page_part(desc, img + O_PAGE_HEADER_SIZE, chkpNum, read_size, byte_offset);
+			if (result != OReadPageResultOk)
+				return result;
 
 			needs_page_version_convert = check_orioledb_page_version(ondisk_page_header);
 
@@ -1570,7 +1588,6 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 	 * needed data from OrioleDBOndiskPageHeader to OrioleDBPageHeader. Do
 	 * conversion of page version (not implemented yet);
 	 */
-	Assert(!err);
 
 	if (needs_page_version_convert)
 		convert_orioledb_page_version(img);
@@ -1796,6 +1813,9 @@ load_page(OBTreeFindPageContext *context)
 									  &page_desc->fileExtent);
 	if (read_result != OReadPageResultOk)
 	{
+		/* the cleanup below must not change what %m reports */
+		int			save_errno = errno;
+
 		int_hdr->downlink = downlink;
 		PAGE_INC_N_ONDISK(parent_page);
 		unlock_io(ionum);
@@ -1816,11 +1836,19 @@ load_page(OBTreeFindPageContext *context)
 							errmsg("invalid page with file offset " UINT64_FORMAT " in %s",
 								   DOWNLINK_GET_DISK_OFF(downlink),
 								   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
+		else if (read_result == OReadPageResultShortRead)
+			ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("could not read page with file offset " UINT64_FORMAT " from %s: unexpected end of file",
+								   DOWNLINK_GET_DISK_OFF(downlink),
+								   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
 		else
+		{
+			errno = save_errno;
 			ereport(ERROR, (errcode_for_file_access(),
 							errmsg("could not read page with file offset " UINT64_FORMAT " from %s: %m",
 								   DOWNLINK_GET_DISK_OFF(downlink),
 								   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
+		}
 	}
 
 	put_page_image(blkno, buf);
