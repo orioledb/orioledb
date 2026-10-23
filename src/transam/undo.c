@@ -3262,9 +3262,17 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 
 		if (!is_recovery_process())
 			wal_rollback(oxid, get_current_logical_xid(), true);
-		current_oxid_abort();
+
+		/*
+		 * Take our changes back before telling anybody we aborted, as the
+		 * XACT_EVENT_ABORT path does.  A backend that sees an aborted oxid on
+		 * a row takes the change back itself, and may then write the row
+		 * over; applying our undo after that would put back a version from
+		 * before its write.
+		 */
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			apply_undo_stack((UndoLogType) i, oxid, NULL, true);
+		current_oxid_abort();
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			release_undo_size((UndoLogType) i);
