@@ -2601,7 +2601,7 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 		 * the PK/SK marker and the index maintenance itself, neither of which
 		 * it can do for us.
 		 */
-		.delegatedCallbackId = (descr->nIndices < 2 && orioledb_delegate_updates) ? o_update_delegated_id : 0
+		.delegatedCallbackId = (descr->nIndices < 2) ? o_update_delegated_id : 0
 	};
 
 	memset(&result, 0, sizeof(result));

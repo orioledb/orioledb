@@ -3245,6 +3245,13 @@ start_autonomous_transaction(OAutonomousTxState *state)
 	if (!is_recovery_process() && !local_wal_is_empty())
 		flush_local_wal(false, false);
 
+	/*
+	 * Only what the autonomous transaction itself writes counts for its
+	 * commit.  Left as the enclosing transaction had it, one that wrote
+	 * nothing still logged a commit and waited for it to be flushed.
+	 */
+	set_local_wal_has_material_changes(false);
+
 	oxid_needs_wal_flush = false;
 	xidless_commit_lsn = InvalidXLogRecPtr;
 	reset_current_oxid();
