@@ -730,6 +730,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 				TransactionId topXid = rec->u.swxid.topXid;
 				TransactionId subXid = rec->u.swxid.subXid;
+				ReorderBufferTXN *parentTxn;
 
 				elog(DEBUG4, "RECEIVE record type %d (%s) %u=>%u oxid " UINT64_FORMAT " logicalXId %u heapXid %u xlogPtr %X/%X",
 					 rec->type, recname, topXid, subXid,
@@ -739,6 +740,10 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				Assert(TransactionIdIsValid(subXid));
 
 				ReorderBufferAssignChild(ctx->decodeCtx->reorder, topXid, subXid, xlogPtr);
+
+				parentTxn = get_reorder_buffer_txn(ctx->decodeCtx->reorder, topXid);
+				if (parentTxn)
+					parentTxn->txn_flags |= RBTXN_DISTR_SKIP_CLEANUP;
 
 				break;
 			}
@@ -1119,13 +1124,23 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 			break;
 
 		case WAL_REC_SAVEPOINT:
-			elog(DEBUG4, "APPLY record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u parentLogicalXid %u",
-				 rec->type, recname, rec->oxid, rec->logicalXid, rec->u.savepoint.parentLogicalXid);
+			{
+				ReorderBufferTXN *parentTxn;
 
-			if (!ctx->decodeCtx->fast_forward)
-				ReorderBufferAssignChild(ctx->decodeCtx->reorder, rec->u.savepoint.parentLogicalXid, rec->logicalXid, ctx->decodeBuf->origptr);
+				elog(DEBUG4, "APPLY record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u parentLogicalXid %u",
+					 rec->type, recname, rec->oxid, rec->logicalXid, rec->u.savepoint.parentLogicalXid);
 
-			break;
+				if (!ctx->decodeCtx->fast_forward)
+				{
+					ReorderBufferAssignChild(ctx->decodeCtx->reorder, rec->u.savepoint.parentLogicalXid, rec->logicalXid, ctx->decodeBuf->origptr);
+
+					parentTxn = get_reorder_buffer_txn(ctx->decodeCtx->reorder, rec->u.savepoint.parentLogicalXid);
+					if (parentTxn)
+						parentTxn->txn_flags |= RBTXN_DISTR_SKIP_CLEANUP;
+				}
+
+				break;
+			}
 
 		case WAL_REC_ROLLBACK_TO_SAVEPOINT:
 			{
