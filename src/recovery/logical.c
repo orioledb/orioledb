@@ -1380,6 +1380,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	WalParseResult st;
 
+	/* Only containers carry changes to decode */
+	if ((XLogRecGetInfo(record) & ~XLR_INFO_MASK) != ORIOLEDB_XLOG_CONTAINER)
+		return;
+
 	elog(DEBUG4, "OrioleDB decode started startXLogPtr %X/%X endXLogPtr %X/%X",
 		 LSN_FORMAT_ARGS(startXLogPtr), LSN_FORMAT_ARGS(endXLogPtr));
 
