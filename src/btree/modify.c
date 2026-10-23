@@ -614,6 +614,7 @@ wait_for_tuple(OXid oxid, RowLockMode lockMode,
 	PG_CATCH();
 	{
 		if (geterrcode() == ERRCODE_T_R_DEADLOCK_DETECTED &&
+			*hwLockMode != NoLock &&
 			is_hashed_tuple_locktag(hwLockTag) &&
 			tuple_lock_has_collision(hwLockTag))
 		{
