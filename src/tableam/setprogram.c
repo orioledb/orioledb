@@ -72,6 +72,7 @@ static OXid batchOxid = InvalidOXid;
 static OAutonomousTxState batchState;
 
 /* What the batch needs to log the rows it takes over from waiters */
+static BTreeDescr *batchDesc = NULL;
 static char batchReplident;
 static uint32 batchVersion;
 
@@ -647,6 +648,27 @@ batch_before_shmem_exit(int code, Datum arg)
 }
 
 /*
+ * Start a batch transaction.  A continuation is one we open after our
+ * statement is done, only to take over the updates queued meanwhile.
+ */
+static void
+batch_open(bool continuation)
+{
+	start_autonomous_transaction(&batchState);
+	batchState.durable = true;
+	oxid_assign_decodable = true;
+	batchOxid = get_current_oxid();
+	oxid_assign_decodable = false;
+	oxid_batch_lock(batchOxid);
+	batchOpen = true;
+
+	btree_absorbed_reset();
+	btree_batch_written = continuation;
+	btree_batch_oxid = batchOxid;
+	btree_batch_desc = batchDesc;
+}
+
+/*
  * Open the batch for an update of the given relation, if the statement
  * qualifies and it is not open yet.  Returns whether the update is to be
  * done in the batch, which is then the current transaction.
@@ -671,21 +693,11 @@ o_batch_begin(Oid relid, BTreeDescr *pkDesc, char replident, uint32 version)
 		exitCallbackRegistered = true;
 	}
 
-	start_autonomous_transaction(&batchState);
-	batchState.durable = true;
-	oxid_assign_decodable = true;
-	batchOxid = get_current_oxid();
-	oxid_assign_decodable = false;
-	oxid_batch_lock(batchOxid);
-	batchOpen = true;
-
 	batchReplident = replident;
 	batchVersion = version;
-	btree_absorbed_reset();
-	btree_batch_written = false;
-	btree_batch_oxid = batchOxid;
-	btree_batch_desc = (replident != REPLICA_IDENTITY_FULL) ? pkDesc : NULL;
-	if (btree_batch_desc != NULL)
+	batchDesc = (replident != REPLICA_IDENTITY_FULL) ? pkDesc : NULL;
+	batch_open(false);
+	if (batchDesc != NULL)
 		btree_batch_queue_open();
 	return true;
 }
@@ -693,6 +705,7 @@ o_batch_begin(Oid relid, BTreeDescr *pkDesc, char replident, uint32 version)
 static void
 batch_abort(void)
 {
+	batchOpen = false;
 	btree_batch_queue_drain(false);
 	btree_batch_oxid = InvalidOXid;
 	btree_batch_desc = NULL;
@@ -705,20 +718,14 @@ batch_abort(void)
 	btree_wake_deferred_waiters(true);
 }
 
+/*
+ * Commit the open batch.  Errors before the commit record is written abort
+ * it instead.
+ */
 static void
-batch_end(bool commit)
+batch_commit(void)
 {
 	ListCell   *lc;
-
-	if (!batchOpen)
-		return;
-
-	batchOpen = false;
-	if (!commit)
-	{
-		batch_abort();
-		return;
-	}
 
 	PG_TRY();
 	{
@@ -727,8 +734,8 @@ batch_end(bool commit)
 
 		/*
 		 * The rows we took over, after everything we wrote ourselves: each of
-		 * them replaced a version of ours, so this is their order on the page
-		 * too.
+		 * them replaced a version of ours, or a committed one, so this is
+		 * their order on the page too.
 		 */
 		foreach(lc, btree_absorbed_rows)
 		{
@@ -746,6 +753,7 @@ batch_end(bool commit)
 	}
 	PG_END_TRY();
 
+	batchOpen = false;
 	btree_batch_oxid = InvalidOXid;
 	btree_batch_desc = NULL;
 	btree_absorbed_reset();
@@ -755,6 +763,42 @@ batch_end(bool commit)
 
 	/* The work we took over is now as committed as ours */
 	(void) btree_wake_deferred_waiters(false);
+}
+
+#define BATCH_MAX_CONTINUATIONS 4
+
+static void
+batch_end(bool commit)
+{
+	int			n;
+
+	if (!batchOpen)
+		return;
+
+	if (!commit)
+	{
+		batchOpen = false;
+		batch_abort();
+		return;
+	}
+
+	/*
+	 * Those who queued while a batch was committing are left waiting for the
+	 * next one: rather than have them wake and contend for the page all at
+	 * once, open that next batch ourselves and take them -- a few times, as
+	 * our own client waits meanwhile.
+	 */
+	for (n = 0;; n++)
+	{
+		batch_commit();
+		if (batchDesc == NULL || n >= BATCH_MAX_CONTINUATIONS ||
+			!btree_batch_queue_pending())
+			break;
+		batch_open(true);
+	}
+
+	/* Those left over do their updates themselves */
+	btree_batch_queue_drain(false);
 }
 
 #if PG_VERSION_NUM >= 180000

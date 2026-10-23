@@ -1655,12 +1655,15 @@ absorb_on_locked_page(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 							pgprocno, false);
 }
 
+#define ABSORB_PER_PAGE_HOLD 8
+
 static void
 absorb_queued_ops(BTreeDescr *desc, int *procnos, bool *absorbed, int n)
 {
 	bool	   *done = (bool *) palloc0(n * sizeof(bool));
 	int			i,
-				j;
+				j,
+				nheld;
 
 	for (i = 0; i < n; i++)
 	{
@@ -1689,11 +1692,20 @@ absorb_queued_ops(BTreeDescr *desc, int *procnos, bool *absorbed, int n)
 		absorbed[i] = absorb_on_locked_page(desc, blkno, procnos[i]);
 		done[i] = true;
 
-		/* Anybody else whose row is on this page, while we hold it */
-		for (j = i + 1; j < n; j++)
+		/*
+		 * Anybody else whose row is on this page, while we hold it -- but not
+		 * too many at a time: every one of them keeps the page closed to
+		 * readers, the scans of the very statements about to join us.  The
+		 * rest are taken in the next hold.
+		 */
+		nheld = absorbed[i] ? 1 : 0;
+		for (j = i + 1; j < n && nheld < ABSORB_PER_PAGE_HOLD; j++)
 		{
 			if (!done[j] && absorb_on_locked_page(desc, blkno, procnos[j]))
+			{
 				absorbed[j] = done[j] = true;
+				nheld++;
+			}
 		}
 
 		/*
@@ -1711,66 +1723,86 @@ absorb_queued_ops(BTreeDescr *desc, int *procnos, bool *absorbed, int n)
 #define BATCH_QUEUE_MAX_ROUNDS	8
 
 /*
- * Take what is in our queue: into the batch if absorb, else back to its
- * owners.  Whoever joins while we work is taken too, for a few rounds; then
- * the queue is closed and those still to come wait for the batch to end.
+ * Settle a list of queued processes: into the batch if absorb, else back to
+ * their owners, who do their updates themselves.
+ */
+static void
+batch_queue_settle(uint32 value, bool absorb)
+{
+	int		   *procnos;
+	bool	   *absorbed;
+	int			n = 0,
+				i;
+
+	if (value == BATCH_QUEUE_EMPTY || value == BATCH_QUEUE_CLOSED)
+		return;
+
+	procnos = (int *) palloc(max_procs * sizeof(int));
+	absorbed = (bool *) palloc(max_procs * sizeof(bool));
+
+	pg_read_barrier();
+	while (value != BATCH_QUEUE_EMPTY && value != BATCH_QUEUE_CLOSED)
+	{
+		procnos[n] = BATCH_QUEUE_PROCNO(value);
+		absorbed[n] = false;
+		value = lockerStates[procnos[n]].batchNext;
+		n++;
+	}
+
+	if (absorb && btree_batch_desc != NULL)
+		absorb_queued_ops(btree_batch_desc, procnos, absorbed, n);
+
+	for (i = 0; i < n; i++)
+	{
+		OPageWaiterShmemState *waiter = &lockerStates[procnos[i]];
+
+		waiter->serviced = absorbed[i];
+		if (absorbed[i])
+			btree_defer_waiter(procnos[i]);
+		else
+			wake_batch_waiter(procnos[i]);
+	}
+
+	pfree(procnos);
+	pfree(absorbed);
+}
+
+/*
+ * With absorb, take whoever is in our queue into the batch -- and whoever
+ * joins while we work, for a few rounds -- leaving the queue open: those who
+ * come while the batch commits wait there for the next one.  Without, close
+ * the queue and send whoever is in it back to do its update itself.
  */
 void
 btree_batch_queue_drain(bool absorb)
 {
 	pg_atomic_uint32 *queue = &lockerStates[MYPROCNUMBER].batchQueue;
-	int			round = 0;
-	bool		closed = false;
-	int		   *procnos = (int *) palloc(max_procs * sizeof(int));
-	bool	   *absorbed = (bool *) palloc(max_procs * sizeof(bool));
-	int			n,
-				i;
+	int			round;
 
-	while (!closed)
+	if (!absorb)
 	{
-		uint32		value;
-
-		value = pg_atomic_exchange_u32(queue,
-									   (!absorb || ++round >= BATCH_QUEUE_MAX_ROUNDS) ?
-									   BATCH_QUEUE_CLOSED : BATCH_QUEUE_EMPTY);
-		if (value == BATCH_QUEUE_CLOSED)
-			break;
-		if (value == BATCH_QUEUE_EMPTY)
-		{
-			/* Nobody new: close, and take whoever slipped in meanwhile */
-			value = pg_atomic_exchange_u32(queue, BATCH_QUEUE_CLOSED);
-			closed = true;
-		}
-		else if (!absorb || round >= BATCH_QUEUE_MAX_ROUNDS)
-			closed = true;
-
-		pg_read_barrier();
-		n = 0;
-		while (value != BATCH_QUEUE_EMPTY && value != BATCH_QUEUE_CLOSED)
-		{
-			procnos[n] = BATCH_QUEUE_PROCNO(value);
-			absorbed[n] = false;
-			value = lockerStates[procnos[n]].batchNext;
-			n++;
-		}
-
-		if (absorb && btree_batch_desc != NULL && n > 0)
-			absorb_queued_ops(btree_batch_desc, procnos, absorbed, n);
-
-		for (i = 0; i < n; i++)
-		{
-			OPageWaiterShmemState *waiter = &lockerStates[procnos[i]];
-
-			waiter->serviced = absorbed[i];
-			if (absorbed[i])
-				btree_defer_waiter(procnos[i]);
-			else
-				wake_batch_waiter(procnos[i]);
-		}
+		batch_queue_settle(pg_atomic_exchange_u32(queue, BATCH_QUEUE_CLOSED),
+						   false);
+		return;
 	}
 
-	pfree(procnos);
-	pfree(absorbed);
+	for (round = 0; round < BATCH_QUEUE_MAX_ROUNDS; round++)
+	{
+		uint32		value = pg_atomic_exchange_u32(queue, BATCH_QUEUE_EMPTY);
+
+		if (value == BATCH_QUEUE_EMPTY || value == BATCH_QUEUE_CLOSED)
+			break;
+		batch_queue_settle(value, true);
+	}
+}
+
+/* Is anybody waiting in our queue? */
+bool
+btree_batch_queue_pending(void)
+{
+	uint32		value = pg_atomic_read_u32(&lockerStates[MYPROCNUMBER].batchQueue);
+
+	return value != BATCH_QUEUE_EMPTY && value != BATCH_QUEUE_CLOSED;
 }
 
 /*

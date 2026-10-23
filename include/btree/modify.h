@@ -176,6 +176,7 @@ extern void btree_absorbed_reset(void);
 
 extern void btree_batch_queue_open(void);
 extern void btree_batch_queue_drain(bool absorb);
+extern bool btree_batch_queue_pending(void);
 extern bool btree_batch_queue_push(int owner, int pgprocno);
 
 extern bool o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple);
