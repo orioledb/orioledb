@@ -981,6 +981,14 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 	BTreeDescr *desc = pageFindContext->desc;
 	int			tuplen;
 
+	/*
+	 * Our batch has written its row: from now on the statement does not
+	 * update anything else, so other rows may be taken into the batch.
+	 */
+	if (OXidIsValid(btree_batch_oxid) && context->opOxid == btree_batch_oxid &&
+		desc == btree_batch_desc && context->action == BTreeOperationUpdate)
+		btree_batch_written = true;
+
 	if (context->undoIsReserved && context->needsUndo)
 	{
 		o_btree_modify_add_undo_record(context);
@@ -1275,6 +1283,7 @@ o_btree_modify_lock(BTreeModifyInternalContext *context)
 static MemoryContext delegated_rebuild_cxt = NULL;
 
 OXid		btree_batch_oxid = InvalidOXid;
+bool		btree_batch_written = false;
 BTreeDescr *btree_batch_desc = NULL;
 List	   *btree_absorbed_rows = NIL;
 static MemoryContext absorbed_cxt = NULL;
@@ -1411,6 +1420,7 @@ absorb_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
 	LocationIndex oldTuplen;
 	LocationIndex newItemSize;
 	RowLockMode lockMode;
+	OXid		rowOxid;
 	bool		redundantRowLocks = false;
 	BTreeAbsorbedRow *row;
 	MemoryContext oldcxt;
@@ -1421,14 +1431,36 @@ absorb_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
 		payload->program.nops == 0)
 		return false;
 
-	/* Only a row our batch has written, and not merely locked */
-	if (XACT_INFO_GET_OXID(tuphdr->xactInfo) != btree_batch_oxid ||
-		XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo))
-		return false;
+	rowOxid = XACT_INFO_GET_OXID(tuphdr->xactInfo);
+	if (rowOxid == btree_batch_oxid)
+	{
+		/* A row our batch has written, and not merely locked */
+		if (XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo))
+			return false;
+		lockMode = Max(XACT_INFO_GET_LOCK_MODE(tuphdr->xactInfo),
+					   RowLockNoKeyUpdate);
+	}
+	else
+	{
+		CommitSeqNo rowCsn;
 
-	/* The program never assigns a key column: the weaker update mode does */
-	lockMode = Max(XACT_INFO_GET_LOCK_MODE(tuphdr->xactInfo),
-				   RowLockNoKeyUpdate);
+		/*
+		 * Somebody else's row.  Ours to take only once our statement has
+		 * written its own -- before that it might be the very row the
+		 * statement is about to update, and finding our batch's version
+		 * there it would take it for its own and skip the update -- and
+		 * only as committed: an in-progress writer is waited for, and an
+		 * aborted version has yet to be taken back.
+		 */
+		if (!btree_batch_written)
+			return false;
+		rowCsn = oxid_get_csn(rowOxid, false);
+		if (!COMMITSEQNO_IS_NORMAL(rowCsn) && !COMMITSEQNO_IS_FROZEN(rowCsn))
+			return false;
+
+		/* The program never assigns a key column: the weaker mode does */
+		lockMode = RowLockNoKeyUpdate;
+	}
 
 	if (row_lock_conflicts(tuphdr, &conflictTupHdr, desc->undoType,
 						   &conflictUndoLocation, lockMode,
@@ -1502,7 +1534,8 @@ absorb_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
 	newTuphdr.deleted = BTreeLeafTupleNonDeleted;
 	newTuphdr.undoLocation = undoLocation;
 	newTuphdr.formatFlags = 0;
-	newTuphdr.chainHasLocks = tuphdr->chainHasLocks;
+	newTuphdr.chainHasLocks = tuphdr->chainHasLocks ||
+		XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo);
 
 	START_CRIT_SECTION();
 	page_block_reads(blkno);

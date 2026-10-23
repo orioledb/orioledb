@@ -435,6 +435,7 @@ updates_one_pk_row(Plan *subplan, Relation rel)
 	CustomScan *cscan;
 	Plan	   *ixplan;
 	List	   *quals;
+	Index		scanrelid;
 	ListCell   *lc;
 	Bitmapset  *keyAttrs = NULL;
 	Bitmapset  *seen = NULL;
@@ -451,21 +452,40 @@ updates_one_pk_row(Plan *subplan, Relation rel)
 		subplan = outerPlan(subplan);
 	}
 
-	if (subplan == NULL || !IsA(subplan, CustomScan))
-		return false;
-	cscan = (CustomScan *) subplan;
-	if (!is_o_custom_scan(cscan) || subplan->qual != NIL ||
-		subplan->initPlan != NIL || subplan->parallel_aware ||
-		intVal(linitial(cscan->custom_private)) != O_IndexPlan ||
-		intVal(lsecond(cscan->custom_private)) != PrimaryIndexNumber)
+	if (subplan == NULL || subplan->initPlan != NIL || subplan->parallel_aware)
 		return false;
 
-	ixplan = (Plan *) linitial(cscan->custom_plans);
-	if (IsA(ixplan, Result))
-		ixplan = outerPlan(ixplan);
-	if (IsA(ixplan, IndexScan))
-		quals = ((IndexScan *) ixplan)->indexqualorig;
+	if (IsA(subplan, SeqScan))
+	{
+		/*
+		 * A table small enough is scanned rather than looked up, with the key
+		 * test as a filter.  Equality on the whole key still picks one row at
+		 * most, and still tests nothing an update can change.
+		 */
+		quals = subplan->qual;
+		scanrelid = ((Scan *) subplan)->scanrelid;
+	}
+	else if (IsA(subplan, CustomScan))
+	{
+		cscan = (CustomScan *) subplan;
+		if (!is_o_custom_scan(cscan) || subplan->qual != NIL ||
+			intVal(linitial(cscan->custom_private)) != O_IndexPlan ||
+			intVal(lsecond(cscan->custom_private)) != PrimaryIndexNumber)
+			return false;
+
+		ixplan = (Plan *) linitial(cscan->custom_plans);
+		if (IsA(ixplan, Result))
+			ixplan = outerPlan(ixplan);
+		if (IsA(ixplan, IndexScan))
+			quals = ((IndexScan *) ixplan)->indexqualorig;
+		else
+			return false;
+		scanrelid = cscan->scan.scanrelid;
+	}
 	else
+		return false;
+
+	if (quals == NIL)
 		return false;
 
 	descr = relation_get_descr(rel);
@@ -480,8 +500,7 @@ updates_one_pk_row(Plan *subplan, Relation rel)
 	result = true;
 	foreach(lc, quals)
 	{
-		AttrNumber	attnum = pk_equality_attnum(lfirst(lc),
-												cscan->scan.scanrelid);
+		AttrNumber	attnum = pk_equality_attnum(lfirst(lc), scanrelid);
 
 		if (attnum == InvalidAttrNumber || !bms_is_member(attnum, keyAttrs))
 		{
@@ -663,6 +682,7 @@ o_batch_begin(Oid relid, BTreeDescr *pkDesc, char replident, uint32 version)
 	batchReplident = replident;
 	batchVersion = version;
 	btree_absorbed_reset();
+	btree_batch_written = false;
 	btree_batch_oxid = batchOxid;
 	btree_batch_desc = (replident != REPLICA_IDENTITY_FULL) ? pkDesc : NULL;
 	if (btree_batch_desc != NULL)

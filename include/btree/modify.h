@@ -164,6 +164,7 @@ typedef struct BTreeAbsorbedRow
 } BTreeAbsorbedRow;
 
 extern OXid btree_batch_oxid;
+extern bool btree_batch_written;
 extern BTreeDescr *btree_batch_desc;
 extern List *btree_absorbed_rows;
 extern void btree_absorbed_reset(void);
