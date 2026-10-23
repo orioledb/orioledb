@@ -1389,54 +1389,134 @@ rebuild_waiter_tuple(BTreeDescr *desc, OTuple curTuple, int pgprocno,
 }
 
 /*
- * Take a waiter's update into our own batch transaction.
- *
- * The rows we may do this for are the ones our batch has already written in
- * this statement.  Whoever else wants such a row waits for our batch to end
- * anyway, so writing its update now, under our oxid, and committing it with
- * ours costs it nothing and saves it the wait; and our statement never comes
- * back to a row it has updated, so the waiter's version is not in its way.
- *
- * What the waiter would have recorded is ours to record: the undo goes into
- * our stack, and the WAL record into the batch's, after our own -- see
- * btree_absorbed_rows.  The waiter stays asleep until the batch commits.
- *
- * Returns false, leaving the waiter to the ordinary paths, for anything else.
+ * The batch logs each row it took over once, as it commits, with the version
+ * it ended up with: replace an earlier entry for the same row.
  */
-static bool
-absorb_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
-				 BTreePageItemLocator *loc, BTreeLeafTuphdr *tuphdr,
-				 OTuple curTuple, int pgprocno, bool steal)
+static void
+batch_absorbed_row_set(BTreeDescr *desc, OTuple tuple, LocationIndex len)
 {
-	OPageWaiterShmemState *lockerState = &lockerStates[pgprocno];
-	OPageWaiterPayload *payload = &lockerPayloads[pgprocno];
+	ListCell   *lc;
+	BTreeAbsorbedRow *row = NULL;
+	MemoryContext oldcxt;
+
+	if (absorbed_cxt == NULL)
+		absorbed_cxt = AllocSetContextCreate(TopMemoryContext,
+											 "orioledb absorbed rows",
+											 ALLOCSET_DEFAULT_SIZES);
+	oldcxt = MemoryContextSwitchTo(absorbed_cxt);
+
+	foreach(lc, btree_absorbed_rows)
+	{
+		BTreeAbsorbedRow *r = (BTreeAbsorbedRow *) lfirst(lc);
+
+		if (r->desc == desc &&
+			o_btree_cmp(desc, &r->tuple, BTreeKeyLeafTuple,
+						&tuple, BTreeKeyLeafTuple) == 0)
+		{
+			row = r;
+			break;
+		}
+	}
+	if (row == NULL)
+	{
+		row = (BTreeAbsorbedRow *) palloc(sizeof(BTreeAbsorbedRow));
+		row->desc = desc;
+		btree_absorbed_rows = lappend(btree_absorbed_rows, row);
+	}
+	else
+		pfree(row->tuple.data);
+	row->tuple.formatFlags = tuple.formatFlags;
+	row->tuple.data = palloc(len);
+	memcpy(row->tuple.data, tuple.data, len);
+	MemoryContextSwitchTo(oldcxt);
+}
+
+/*
+ * Take the updates of a group of waiters, all for one row, into our batch:
+ * apply their programs one after another to the row as it is, and store the
+ * result once.
+ *
+ * The versions in between are nobody's business.  A reader older than our
+ * batch follows the undo chain to the version before it, and an abort takes
+ * the row back there; neither ever looks at what the batch had in between.
+ * So the row gets at most one undo record -- none if our batch has written it
+ * already -- one replacement on the page, read-blocked only for the copy, and
+ * one WAL record, logged as the batch commits.
+ *
+ * procnos[0..n-1] are waiting for updates of the row with procnos[0]'s key,
+ * on the page we hold.  Sets absorbed[i] for those taken; returns how many.
+ * With steal, the undo record is written from a waiter's reservation rather
+ * than our own.
+ */
+static int
+absorb_row_group(BTreeDescr *desc, OInMemoryBlkno blkno, int *procnos, int n,
+				 bool *absorbed, bool steal)
+{
+	OIndexDescr *id = (OIndexDescr *) desc->arg;
+	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+	BTreePageItemLocator loc;
+	BTreeLeafTuphdr *tuphdr;
 	BTreeLeafTuphdr conflictTupHdr;
 	BTreeLeafTuphdr newTuphdr;
 	BTreeModifyLockStatus lockStatus = BTreeModifyNoLock;
 	UndoLocation conflictUndoLocation;
 	UndoLocation undoLocation;
+	OTuple		curTuple;
+	OTuple		key;
 	OTuple		newTuple;
-	LocationIndex newTuplen = 0;
-	LocationIndex oldTuplen;
-	LocationIndex newItemSize;
-	RowLockMode lockMode;
 	OXid		rowOxid;
+	RowLockMode lockMode;
+	bool		ours;
 	bool		redundantRowLocks = false;
-	BTreeAbsorbedRow *row;
+	LocationIndex newTuplen = 0;
+	LocationIndex newItemSize;
+	int			stealFrom = -1;
+	int			count = 0;
+	int			i;
+	TupleDesc	tupdesc = id->leafTupdesc;
+	int			natts = tupdesc->natts;
 	MemoryContext oldcxt;
 
-	if (!lockerState->absorbable || !OXidIsValid(btree_batch_oxid) ||
-		desc != btree_batch_desc ||
-		lockerState->action != BTreeOperationUpdate ||
-		payload->program.nops == 0)
-		return false;
+	/* Nobody is taken until shown otherwise, whichever way we leave */
+	for (i = 0; i < n; i++)
+		absorbed[i] = false;
 
+	if (n == 0 || !OXidIsValid(btree_batch_oxid) || desc != btree_batch_desc ||
+		desc->type != oIndexPrimary)
+		return 0;
+
+	key.formatFlags = lockerStates[procnos[0]].tupleFlags;
+	key.data = &lockerPayloads[procnos[0]].tupleData.fixedData[BTreeLeafTuphdrSize];
+
+	/* Is the row on this page? */
+	if (!O_PAGE_IS(p, RIGHTMOST))
+	{
+		OTuple		hikey;
+
+		BTREE_PAGE_GET_HIKEY(hikey, p);
+		if (o_btree_cmp(desc, &key, BTreeKeyLeafTuple,
+						&hikey, BTreeKeyNonLeafKey) >= 0)
+			return 0;
+	}
+	(void) btree_page_search(desc, p, (Pointer) &key, BTreeKeyLeafTuple,
+							 NULL, &loc);
+	(void) page_locator_find_real_item(p, NULL, &loc);
+	if (!BTREE_PAGE_LOCATOR_IS_VALID(p, &loc))
+		return 0;
+	BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, p, &loc);
+	if (o_btree_cmp(desc, &key, BTreeKeyLeafTuple,
+					&curTuple, BTreeKeyLeafTuple) != 0 ||
+		tuphdr->deleted != BTreeLeafTupleNonDeleted)
+		return 0;
+
+	/* Is it ours to write? */
 	rowOxid = XACT_INFO_GET_OXID(tuphdr->xactInfo);
-	if (rowOxid == btree_batch_oxid)
+	ours = (rowOxid == btree_batch_oxid);
+	if (ours)
 	{
 		/* A row our batch has written, and not merely locked */
 		if (XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo))
-			return false;
+			return 0;
 		lockMode = Max(XACT_INFO_GET_LOCK_MODE(tuphdr->xactInfo),
 					   RowLockNoKeyUpdate);
 	}
@@ -1447,88 +1527,134 @@ absorb_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
 		/*
 		 * Somebody else's row.  Ours to take only once our statement has
 		 * written its own -- before that it might be the very row the
-		 * statement is about to update, and finding our batch's version
-		 * there it would take it for its own and skip the update -- and
-		 * only as committed: an in-progress writer is waited for, and an
-		 * aborted version has yet to be taken back.
+		 * statement is about to update, and finding our batch's version there
+		 * it would take it for its own and skip the update -- and only as
+		 * committed: an in-progress writer is waited for, and an aborted
+		 * version has yet to be taken back.
 		 */
 		if (!btree_batch_written)
-			return false;
+			return 0;
 		rowCsn = oxid_get_csn(rowOxid, false);
 		if (!COMMITSEQNO_IS_NORMAL(rowCsn) && !COMMITSEQNO_IS_FROZEN(rowCsn))
-			return false;
+			return 0;
 
-		/* The program never assigns a key column: the weaker mode does */
+		/* The programs never assign a key column: the weaker mode does */
 		lockMode = RowLockNoKeyUpdate;
 	}
 
 	if (row_lock_conflicts(tuphdr, &conflictTupHdr, desc->undoType,
 						   &conflictUndoLocation, lockMode,
-						   btree_batch_oxid, lockerState->opCsn, blkno,
+						   btree_batch_oxid, COMMITSEQNO_INPROGRESS, blkno,
 						   InvalidUndoLocation, &redundantRowLocks,
 						   &lockStatus) &&
 		XACT_INFO_GET_OXID(conflictTupHdr.xactInfo) != btree_batch_oxid)
-		return false;
-
-	newTuple = rebuild_waiter_tuple(desc, curTuple, pgprocno, &newTuplen);
-	if (O_TUPLE_IS_NULL(newTuple))
-		return false;
-
-	newItemSize = MAXALIGN(newTuplen) + BTreeLeafTuphdrSize;
-	if (newItemSize > BTREE_PAGE_GET_ITEM_SIZE(p, loc) &&
-		newItemSize - BTREE_PAGE_GET_ITEM_SIZE(p, loc) >
-		BTREE_PAGE_FREE_SPACE(p))
-		return false;
-
-	/* The same rule as for the waiter's own undo: what it reserved, or none */
-	if (steal && lockerState->reservedUndoSize < O_UPDATE_MAX_UNDO_SIZE)
-		return false;
-
-	/* Our own reservation must still cover this record */
-	if (!steal &&
-		get_reserved_undo_size(desc->undoType) <
-		MAXALIGN(sizeof(BTreeModifyUndoStackItem) +
-				 o_btree_len(desc, curTuple, OTupleLength)))
-		return false;
+		return 0;
 
 	/*
-	 * Keep the row for the batch's WAL.  Allocate before touching the page:
-	 * past this point nothing may fail.
+	 * Work the row out, with the page still readable: nothing below touches
+	 * it.  Everything here can raise -- a malformed field, a tuple that will
+	 * not form -- and we hold a page, so catch it and take nobody.
 	 */
-	if (absorbed_cxt == NULL)
-		absorbed_cxt = AllocSetContextCreate(TopMemoryContext,
-											 "orioledb absorbed rows",
-											 ALLOCSET_DEFAULT_SIZES);
-	oldcxt = MemoryContextSwitchTo(absorbed_cxt);
-	row = (BTreeAbsorbedRow *) palloc(sizeof(BTreeAbsorbedRow));
-	row->desc = desc;
-	row->tuple.formatFlags = newTuple.formatFlags;
-	row->tuple.data = palloc(newTuplen);
-	memcpy(row->tuple.data, newTuple.data, newTuplen);
-	btree_absorbed_rows = lappend(btree_absorbed_rows, row);
+	if (delegated_rebuild_cxt == NULL)
+		delegated_rebuild_cxt =
+			AllocSetContextCreate(TopMemoryContext,
+								  "orioledb delegated update rebuild",
+								  ALLOCSET_SMALL_SIZES);
+	else
+		MemoryContextReset(delegated_rebuild_cxt);
+	oldcxt = MemoryContextSwitchTo(delegated_rebuild_cxt);
+	O_TUPLE_SET_NULL(newTuple);
+
+	PG_TRY();
+	{
+		OTupleReaderState reader;
+		Datum	   *values = (Datum *) palloc(natts * sizeof(Datum));
+		bool	   *isnull = (bool *) palloc(natts * sizeof(bool));
+		Datum	   *tryValues = (Datum *) palloc(natts * sizeof(Datum));
+		bool	   *tryIsnull = (bool *) palloc(natts * sizeof(bool));
+
+		o_tuple_init_reader(&reader, curTuple, tupdesc, &id->leafSpec);
+		for (i = 0; i < natts; i++)
+			values[i] = o_tuple_read_next_field(&reader, &isnull[i]);
+
+		for (i = 0; i < n; i++)
+		{
+			OPageWaiterShmemState *lockerState = &lockerStates[procnos[i]];
+			OSetProgram *program = &lockerPayloads[procnos[i]].program;
+
+			absorbed[i] = false;
+			if (!lockerState->absorbable ||
+				lockerState->action != BTreeOperationUpdate ||
+				program->nops == 0)
+				continue;
+
+			/* An assignment that cannot be done leaves the row as it was */
+			memcpy(tryValues, values, natts * sizeof(Datum));
+			memcpy(tryIsnull, isnull, natts * sizeof(bool));
+			if (!o_set_program_apply(program, tryValues, tryIsnull, natts))
+				continue;
+			memcpy(values, tryValues, natts * sizeof(Datum));
+			memcpy(isnull, tryIsnull, natts * sizeof(bool));
+
+			if (steal && stealFrom < 0 &&
+				lockerState->reservedUndoSize >= O_UPDATE_MAX_UNDO_SIZE)
+				stealFrom = i;
+			absorbed[i] = true;
+			count++;
+		}
+
+		if (count > 0)
+		{
+			newTuple = o_form_tuple(tupdesc, &id->leafSpec,
+									o_tuple_get_version(curTuple) + 1,
+									values, isnull, NULL);
+			newTuplen = o_btree_len(desc, newTuple, OTupleLength);
+		}
+	}
+	PG_CATCH();
+	{
+		FlushErrorState();
+		O_TUPLE_SET_NULL(newTuple);
+	}
+	PG_END_TRY();
 	MemoryContextSwitchTo(oldcxt);
 
-	if (steal)
-	{
-		steal_reserved_undo_size(desc->undoType, lockerState->reservedUndoSize);
-		lockerState->reservationStolen = true;
-	}
-	undoLocation = make_undo_record(desc, curTuple, true, BTreeOperationUpdate,
-									blkno, O_PAGE_GET_CHANGE_COUNT(p), tuphdr);
+	if (O_TUPLE_IS_NULL(newTuple) || newTuplen > O_BTREE_MAX_TUPLE_SIZE)
+		goto none;
 
-	/* Hand the waiter the row as it was and the row as it is now */
-	oldTuplen = o_btree_len(desc, curTuple, OTupleLength);
-	Assert(oldTuplen <= O_BTREE_MAX_TUPLE_SIZE);
-	memcpy(payload->oldTupleData.fixedData, curTuple.data, oldTuplen);
-	lockerState->oldTupleFlags = curTuple.formatFlags;
-	lockerState->oldTupleLen = oldTuplen;
-	memcpy(&payload->tupleData.fixedData[BTreeLeafTuphdrSize],
-		   newTuple.data, newTuplen);
-	lockerState->tupleFlags = newTuple.formatFlags;
-	memset(&payload->delegatedResult, 0, sizeof(payload->delegatedResult));
-	payload->delegatedResult.newTupleLen = newTuplen;
-	payload->delegatedResult.undoLocation = undoLocation;
-	payload->delegatedResult.absorbed = true;
+	newItemSize = MAXALIGN(newTuplen) + BTreeLeafTuphdrSize;
+	if (newItemSize > BTREE_PAGE_GET_ITEM_SIZE(p, &loc) &&
+		newItemSize - BTREE_PAGE_GET_ITEM_SIZE(p, &loc) >
+		BTREE_PAGE_FREE_SPACE(p))
+		goto none;
+
+	/*
+	 * The one undo record, keeping the committed version, unless our batch
+	 * already has one for the row.
+	 */
+	if (ours)
+		undoLocation = tuphdr->undoLocation;
+	else
+	{
+		if (steal)
+		{
+			if (stealFrom < 0)
+				goto none;
+			steal_reserved_undo_size(desc->undoType,
+									 lockerStates[procnos[stealFrom]].reservedUndoSize);
+			lockerStates[procnos[stealFrom]].reservationStolen = true;
+		}
+		else if (get_reserved_undo_size(desc->undoType) <
+				 MAXALIGN(sizeof(BTreeModifyUndoStackItem) +
+						  o_btree_len(desc, curTuple, OTupleLength)))
+			goto none;
+		undoLocation = make_undo_record(desc, curTuple, true,
+										BTreeOperationUpdate, blkno,
+										O_PAGE_GET_CHANGE_COUNT(p), tuphdr);
+	}
+
+	/* The batch's WAL record for the row, logged as it commits */
+	batch_absorbed_row_set(desc, newTuple, newTuplen);
 
 	newTuphdr.xactInfo = OXID_GET_XACT_INFO(btree_batch_oxid, lockMode, false);
 	newTuphdr.deleted = BTreeLeafTupleNonDeleted;
@@ -1539,15 +1665,35 @@ absorb_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
 
 	START_CRIT_SECTION();
 	page_block_reads(blkno);
-	if (!btree_leaf_replace_item_no_split(desc, p, loc, &newTuphdr,
+	if (!btree_leaf_replace_item_no_split(desc, p, &loc, &newTuphdr,
 										  newTuple, newTuplen))
 		elog(PANIC, "absorbed update does not fit the page after all");
 	MARK_DIRTY(desc, blkno);
 	END_CRIT_SECTION();
 
-	lockerState->opResult = OPageWaiterOpUpdated;
-	lockerState->deferWake = true;
-	return true;
+	/*
+	 * Tell each waiter it is done.  Nothing of the row goes back: the waiter
+	 * neither logs it nor reads it again.
+	 */
+	for (i = 0; i < n; i++)
+	{
+		OPageWaiterShmemState *lockerState = &lockerStates[procnos[i]];
+		OPageWaiterPayload *payload = &lockerPayloads[procnos[i]];
+
+		if (!absorbed[i])
+			continue;
+		memset(&payload->delegatedResult, 0, sizeof(payload->delegatedResult));
+		payload->delegatedResult.undoLocation = undoLocation;
+		payload->delegatedResult.absorbed = true;
+		lockerState->oldTupleLen = 0;
+		lockerState->opResult = OPageWaiterOpUpdated;
+	}
+	return count;
+
+none:
+	for (i = 0; i < n; i++)
+		absorbed[i] = false;
+	return 0;
 }
 
 /*
@@ -1612,64 +1758,86 @@ btree_batch_queue_open(void)
 }
 
 /*
- * Take queued updates into our batch, as many per page lock as there are
- * rows on that page: under contention for one row, all of them.
- *
- * Marks done[] for every process settled: absorbed[] tells which way.
+ * Take the updates of procnos[] whose rows are on the page we hold into our
+ * batch, a row at a time.  Sets absorbed[]; returns how many were taken.
  */
-static bool
-absorb_on_locked_page(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
+static int
+absorb_on_page(BTreeDescr *desc, OInMemoryBlkno blkno, int *procnos, int n,
+			   bool *absorbed, bool steal)
 {
-	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
-	BTreePageItemLocator loc;
-	BTreeLeafTuphdr *tuphdr;
-	OTuple		curTuple;
-	OTuple		key;
+	int		   *group = (int *) palloc(n * sizeof(int));
+	int		   *groupIdx = (int *) palloc(n * sizeof(int));
+	bool	   *groupAbsorbed = (bool *) palloc(n * sizeof(bool));
+	bool	   *seen = (bool *) palloc0(n * sizeof(bool));
+	int			total = 0;
+	int			i,
+				j;
 
-	key.formatFlags = lockerStates[pgprocno].tupleFlags;
-	key.data = &lockerPayloads[pgprocno].tupleData.fixedData[BTreeLeafTuphdrSize];
+	for (i = 0; i < n; i++)
+		absorbed[i] = false;
 
-	if (!O_PAGE_IS(p, RIGHTMOST))
+	for (i = 0; i < n; i++)
 	{
-		OTuple		hikey;
+		OTuple		key;
+		int			ng = 0;
 
-		BTREE_PAGE_GET_HIKEY(hikey, p);
-		if (o_btree_cmp(desc, &key, BTreeKeyLeafTuple,
-						&hikey, BTreeKeyNonLeafKey) >= 0)
-			return false;
+		if (seen[i])
+			continue;
+
+		key.formatFlags = lockerStates[procnos[i]].tupleFlags;
+		key.data = &lockerPayloads[procnos[i]].tupleData.fixedData[BTreeLeafTuphdrSize];
+
+		/* Everybody after us waiting for the same row, in queue order */
+		for (j = i; j < n; j++)
+		{
+			OTuple		other;
+
+			if (seen[j])
+				continue;
+			other.formatFlags = lockerStates[procnos[j]].tupleFlags;
+			other.data = &lockerPayloads[procnos[j]].tupleData.fixedData[BTreeLeafTuphdrSize];
+			if (j == i ||
+				o_btree_cmp(desc, &key, BTreeKeyLeafTuple,
+							&other, BTreeKeyLeafTuple) == 0)
+			{
+				seen[j] = true;
+				groupIdx[ng] = j;
+				group[ng++] = procnos[j];
+			}
+		}
+
+		total += absorb_row_group(desc, blkno, group, ng, groupAbsorbed, steal);
+		for (j = 0; j < ng; j++)
+			absorbed[groupIdx[j]] = groupAbsorbed[j];
 	}
 
-	(void) btree_page_search(desc, p, (Pointer) &key, BTreeKeyLeafTuple,
-							 NULL, &loc);
-	(void) page_locator_find_real_item(p, NULL, &loc);
-	if (!BTREE_PAGE_LOCATOR_IS_VALID(p, &loc))
-		return false;
-
-	BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, p, &loc);
-	if (o_btree_cmp(desc, &key, BTreeKeyLeafTuple,
-					&curTuple, BTreeKeyLeafTuple) != 0 ||
-		tuphdr->deleted != BTreeLeafTupleNonDeleted)
-		return false;
-
-	return absorb_waiter_op(desc, blkno, p, &loc, tuphdr, curTuple,
-							pgprocno, false);
+	pfree(group);
+	pfree(groupIdx);
+	pfree(groupAbsorbed);
+	pfree(seen);
+	return total;
 }
 
-#define ABSORB_PER_PAGE_HOLD 8
-
+/*
+ * Take queued updates into our batch: for each page the rows are on, find
+ * it, lock it once and take every row of ours there.
+ */
 static void
 absorb_queued_ops(BTreeDescr *desc, int *procnos, bool *absorbed, int n)
 {
 	bool	   *done = (bool *) palloc0(n * sizeof(bool));
+	int		   *rest = (int *) palloc(n * sizeof(int));
+	int		   *restIdx = (int *) palloc(n * sizeof(int));
+	bool	   *restAbsorbed = (bool *) palloc(n * sizeof(bool));
 	int			i,
-				j,
-				nheld;
+				j;
 
 	for (i = 0; i < n; i++)
 	{
 		OBTreeFindPageContext pageFindContext;
 		OTuple		key;
 		OInMemoryBlkno blkno;
+		int			nrest = 0;
 
 		if (done[i])
 			continue;
@@ -1677,10 +1845,7 @@ absorb_queued_ops(BTreeDescr *desc, int *procnos, bool *absorbed, int n)
 		key.formatFlags = lockerStates[procnos[i]].tupleFlags;
 		key.data = &lockerPayloads[procnos[i]].tupleData.fixedData[BTreeLeafTuphdrSize];
 
-		/*
-		 * The records are ours to write, from a reservation of our own: as
-		 * much as we may take at once, which holds many of them.
-		 */
+		/* An undo record per row at most, from a reservation of our own */
 		(void) reserve_undo_size(desc->undoType, 2 * O_MAX_UNDO_RECORD_SIZE);
 
 		init_page_find_context(&pageFindContext, desc, COMMITSEQNO_INPROGRESS,
@@ -1688,25 +1853,22 @@ absorb_queued_ops(BTreeDescr *desc, int *procnos, bool *absorbed, int n)
 		(void) find_page(&pageFindContext, (Pointer) &key, BTreeKeyLeafTuple, 0);
 		blkno = pageFindContext.items[pageFindContext.index].blkno;
 
-		/* The one we came for is settled here, whichever way */
-		absorbed[i] = absorb_on_locked_page(desc, blkno, procnos[i]);
-		done[i] = true;
-
-		/*
-		 * Anybody else whose row is on this page, while we hold it -- but not
-		 * too many at a time: every one of them keeps the page closed to
-		 * readers, the scans of the very statements about to join us.  The
-		 * rest are taken in the next hold.
-		 */
-		nheld = absorbed[i] ? 1 : 0;
-		for (j = i + 1; j < n && nheld < ABSORB_PER_PAGE_HOLD; j++)
+		for (j = i; j < n; j++)
 		{
-			if (!done[j] && absorb_on_locked_page(desc, blkno, procnos[j]))
-			{
-				absorbed[j] = done[j] = true;
-				nheld++;
-			}
+			if (done[j])
+				continue;
+			restIdx[nrest] = j;
+			rest[nrest++] = procnos[j];
 		}
+		(void) absorb_on_page(desc, blkno, rest, nrest, restAbsorbed, false);
+		for (j = 0; j < nrest; j++)
+		{
+			if (restAbsorbed[j])
+				absorbed[restIdx[j]] = done[restIdx[j]] = true;
+		}
+
+		/* The one we came for is settled here, whichever way */
+		done[i] = true;
 
 		/*
 		 * Others have queued on the page while we held it, for the same row
@@ -1718,6 +1880,9 @@ absorb_queued_ops(BTreeDescr *desc, int *procnos, bool *absorbed, int n)
 		release_undo_size(desc->undoType);
 	}
 	pfree(done);
+	pfree(rest);
+	pfree(restIdx);
+	pfree(restAbsorbed);
 }
 
 #define BATCH_QUEUE_MAX_ROUNDS	8
@@ -1953,9 +2118,6 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 		tuphdr->deleted != BTreeLeafTupleNonDeleted)
 		return false;
 
-	if (absorb_waiter_op(desc, blkno, p, &loc, tuphdr, curTuple, pgprocno,
-						 true))
-		return true;
 
 	/*
 	 * The row is another process's batch's.  The waiter would only wake up
@@ -2222,16 +2384,17 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
  * we can of it.  The page state must be one we already hold: an extra read of
  * the page's state word is the most expensive thing this code could do.
  */
-#define BTREE_MAX_ABSORBED_PER_HOLD 32
 
 void
 btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 {
 	uint64		state;
 	int			procnums[BTREE_PAGE_MAX_SPLIT_ITEMS];
+	int			cand[BTREE_PAGE_MAX_SPLIT_ITEMS];
+	bool		candAbsorbed[BTREE_PAGE_MAX_SPLIT_ITEMS];
 	int			count,
-				i,
-				nabsorbed = 0;
+				ncand = 0,
+				i;
 
 	if (O_PAGE_IS_LOCAL(blkno) || desc->undoType == UndoLogNone)
 		return;
@@ -2243,28 +2406,47 @@ btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 
 	count = get_page_waiters(desc, blkno, state, procnums);
 
+	/*
+	 * The updates our batch can take, all at once and a row at a time.  They
+	 * stay asleep until the batch is durable.
+	 */
+	if (OXidIsValid(btree_batch_oxid) && desc == btree_batch_desc)
+	{
+		for (i = 0; i < count; i++)
+		{
+			OPageWaiterShmemState *lockerState = &lockerStates[procnums[i]];
+
+			if (lockerState->action == BTreeOperationUpdate &&
+				lockerState->absorbable)
+				cand[ncand++] = procnums[i];
+		}
+		if (ncand > 0 &&
+			absorb_on_page(desc, blkno, cand, ncand, candAbsorbed, true) > 0)
+		{
+			for (i = 0; i < ncand; i++)
+			{
+				if (!candAbsorbed[i])
+					continue;
+				lockerStates[cand[i]].deferWake = true;
+				pg_write_barrier();
+				lockerStates[cand[i]].serviced = true;
+			}
+		}
+	}
+
 	for (i = 0; i < count; i++)
 	{
 		OPageWaiterShmemState *lockerState = &lockerStates[procnums[i]];
 
 		/* Inserts are merged into the page by the insert path itself. */
-		if (lockerState->action == BTreeOperationInsert)
+		if (lockerState->action == BTreeOperationInsert ||
+			lockerState->serviced)
 			continue;
 
 		if (apply_waiter_op(desc, blkno, procnums[i]))
 		{
-			bool		absorbed = lockerPayloads[procnums[i]].delegatedResult.absorbed;
-
 			pg_write_barrier();
 			lockerState->serviced = true;
-
-			/*
-			 * Absorbed work goes into our own undo, from reservations its
-			 * owners made before they queued, so it does not hold up the undo
-			 * the way the record below does.  Take what the batch can.
-			 */
-			if (absorbed && ++nabsorbed < BTREE_MAX_ABSORBED_PER_HOLD)
-				continue;
 		}
 		else if (lockerState->forwardTo != 0)
 			continue;			/* costs nothing here: no undo */
