@@ -137,20 +137,15 @@ permutation
 	"begin_1" "begin_3"
 	"ks_1_large8" "fu_3_large8" "show_tag" "rb_1" "rb_3"
 
-# Permutation 4 (known anomaly): two int8 keys above 2^47 whose 47-bit
-# hashes collide.  Same schedule as permutation 1.  Because the two keys
-# share a LOCKTAG_TUPLE tag, they deadlock; with distinct tags both
-# waiters would complete.
+# Permutation 4 (hash-collision retry): two int8 keys above 2^47 whose
+# 47-bit hashes collide.  Same schedule as permutation 1.  When both
+# waiters queue on the shared LOCKTAG_TUPLE tag, a deadlock forms; the
+# catch-and-retry in wait_for_tuple detects the collision and skips the
+# lock, so both operations complete.
 #
-# This is extremely unlikely in practice: p ~ 2^-47 per pair, i.e. ~12M
-# hashed keys needed for a 50% chance of any collision.  Only keys that
-# do not fit in 47 bits (large int8, composite, text, ...) go through
-# the hash path at all.  Text keys always hash, so colliding pairs can
-# be crafted, but exploiting that also requires orchestrating the exact
-# multi-session locking sequence.  The colliding pair below was found by
-# brute force over hash_bytes_extended.
-#
-# s3 has a short deadlock_timeout so it detects the cycle.
+# The colliding pair below was found by brute force over
+# hash_bytes_extended.  s3 has a short deadlock_timeout so it detects
+# the false cycle quickly.
 permutation
 	"set_dt_short_3"
 	"begin_1" "begin_3"
@@ -159,5 +154,5 @@ permutation
 	"begin_2" "ks_2_coll_A"
 	"fu_2_coll_B"
 	"rb_1"
-	"rb_3"
 	"rb_2"
+	"rb_3"
