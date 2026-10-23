@@ -231,6 +231,55 @@ class LogicalTest(BaseTest):
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
+	def test_savepoint_rollback_running_xacts(self):
+		"""Regression test for RBTXN_DISTR_SKIP_CLEANUP on parent transactions.
+
+		Uses two nested SAVEPOINTs with ROLLBACKs to force the SAVEPOINT WAL
+		container to flush separately from the COMMIT container.  A
+		RUNNING_XACTS record injected between them triggers
+		ReorderBufferAbortOld; without RBTXN_DISTR_SKIP_CLEANUP on the parent,
+		the parent and all its children are cleaned up, losing committed
+		INSERT changes."""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE data(id int primary key, data text) USING orioledb;\n"
+		)
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		with node.connect() as con:
+			con.begin()
+			con.execute("SAVEPOINT s1;")
+			con.execute("INSERT INTO data VALUES(1, 'rolled_back');")
+			con.execute("ROLLBACK TO SAVEPOINT s1;")
+
+			con.execute("INSERT INTO data VALUES(2, 'kept');")
+
+			# ROLLBACK TO s2 flushes the local WAL buffer, separating
+			# the SAVEPOINT container from the COMMIT container.
+			con.execute("SAVEPOINT s2;")
+			con.execute("INSERT INTO data VALUES(3, 'also_rolled_back');")
+			con.execute("ROLLBACK TO SAVEPOINT s2;")
+
+			# Inject RUNNING_XACTS between the flushed SAVEPOINT
+			# container and the COMMIT container.
+			node.safe_psql('postgres', "SELECT pg_log_standby_snapshot();")
+
+			con.execute("INSERT INTO data VALUES(4, 'final');")
+			con.commit()
+
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:2 data[text]:'kept'\n"
+		    "table public.data: INSERT: id[integer]:4 data[text]:'final'\n"
+		    "COMMIT\n")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
 	def test_savepoint_release_after_first_change(self):
 		node = self.node
 		node.start()
