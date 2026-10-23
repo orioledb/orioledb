@@ -107,6 +107,7 @@ OrioleDBPageDesc *local_ppool_page_descs = NULL;
 /* Custom GUC variables */
 int			orioledb_serializable_mode = O_SERIALIZABLE_TABLE_LOCK;
 bool		orioledb_debug_disable_multi_insert = false;
+bool		orioledb_combine_updates = false;
 bool		orioledb_debug_disable_downlink_fastpath = false;
 
 static const struct config_enum_entry serializable_mode_options[] = {
@@ -699,6 +700,19 @@ _PG_init(void)
 							 &orioledb_serializable_mode,
 							 O_SERIALIZABLE_TABLE_LOCK,
 							 serializable_mode_options,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomBoolVariable("orioledb.combine_updates",
+							 "Commit a single-statement update in a transaction of its own.",
+							 "Experimental.  An autocommit UPDATE is applied and "
+							 "committed by a batch transaction before the statement "
+							 "returns.",
+							 &orioledb_combine_updates,
+							 false,
 							 PGC_USERSET,
 							 0,
 							 NULL,

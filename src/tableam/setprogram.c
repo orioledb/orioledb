@@ -15,6 +15,8 @@
 #include "orioledb.h"
 
 #include "tableam/setprogram.h"
+#include "transam/oxid.h"
+#include "transam/undo.h"
 
 #include "access/xact.h"
 #include "common/int.h"
@@ -23,27 +25,56 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
 #include "parser/parsetree.h"
+#include "tcop/pquery.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
+#include "utils/portal.h"
 
 static ExecutorStart_hook_type next_ExecutorStart_hook = NULL;
+static ExecutorRun_hook_type next_ExecutorRun_hook = NULL;
 static ExecutorEnd_hook_type next_ExecutorEnd_hook = NULL;
 
 /*
- * The one program in flight.  A statement that qualifies is by construction
- * the only thing its transaction runs, so there is never a second one to
- * keep; a nested executor (a function body, say) simply finds the slot taken
- * and leaves it alone, which costs it nothing but delegation.
+ * The one program in flight, and the statement it was compiled for.  Only a
+ * statement the client sent itself qualifies, so there is never a second one
+ * to keep: whatever runs inside it -- a function body, say -- goes without.
+ *
+ * The program is ours to use only while that statement's ExecutorRun() is in
+ * progress.  Tying it to the QueryDesc rather than to a nesting count keeps
+ * it from outliving a statement that failed: ExecutorEnd() is not called for
+ * those.
  */
 static OSetProgram currentProgram;
 static Oid	currentProgramRelid = InvalidOid;
-static int	currentProgramDepth = 0;
-static int	executorDepth = 0;
+static QueryDesc *programQueryDesc = NULL;
+static QueryDesc *runningQueryDesc = NULL;
+static int	runDepth = 0;
+
+/*
+ * The batch transaction of the statement now running.  A statement that is
+ * the whole of its transaction may have its updates done and committed by an
+ * autonomous transaction of its own, the batch, which ExecutorRun() commits
+ * as it returns: the client cannot tell, as nothing else of its transaction
+ * is there to see the difference.  Only statements we compiled a program for
+ * qualify, as they are the ones a page holder may later do updates for.
+ */
+static bool currentProgramCombinable = false;
+static bool batchOpen = false;
+static OXid batchOxid = InvalidOXid;
+static OAutonomousTxState batchState;
+
+static bool
+program_is_current(Oid relid)
+{
+	return programQueryDesc != NULL &&
+		programQueryDesc == runningQueryDesc &&
+		currentProgramRelid == relid;
+}
 
 OSetProgram *
 o_current_set_program(Oid relid)
 {
-	if (!OidIsValid(currentProgramRelid) || currentProgramRelid != relid)
+	if (!program_is_current(relid))
 		return NULL;
 	return &currentProgram;
 }
@@ -291,9 +322,9 @@ compile_set_op(OSetProgram *program, ParamListInfo params,
 		 * and the whole point is that it does not.
 		 *
 		 * By this stage set_plan_references() has rewritten the Var to point
-		 * at whatever the scan node produces -- for an index scan, a column of
-		 * the index tuple -- so the relation's own attribute number is the one
-		 * kept aside in varattnosyn.
+		 * at whatever the scan node produces -- for an index scan, a column
+		 * of the index tuple -- so the relation's own attribute number is the
+		 * one kept aside in varattnosyn.
 		 */
 		varattno = (var->varno == INDEX_VAR || var->varno == OUTER_VAR ||
 					var->varno == INNER_VAR) ? var->varattnosyn : var->varattno;
@@ -335,9 +366,22 @@ compile_current_program(QueryDesc *queryDesc)
 	Index		rti;
 	int			nops = 0;
 
+	programQueryDesc = NULL;
+	currentProgramRelid = InvalidOid;
+	currentProgramCombinable = false;
+	currentProgram.nops = 0;
 	currentProgram.constUsed = 0;
 
 	if (queryDesc->operation != CMD_UPDATE)
+		return;
+
+	/*
+	 * Only the statement the client sent: the one statement of the portal
+	 * running now.  A statement run through SPI -- from a function, a
+	 * procedure or a DO block -- is not in its list.
+	 */
+	if (ActivePortal == NULL || list_length(ActivePortal->stmts) != 1 ||
+		linitial(ActivePortal->stmts) != queryDesc->plannedstmt)
 		return;
 
 	/*
@@ -409,33 +453,118 @@ compile_current_program(QueryDesc *queryDesc)
 	rte = list_nth_node(RangeTblEntry, stmt->rtable, rti - 1);
 	currentProgram.nops = nops;
 	currentProgramRelid = rte->relid;
-	currentProgramDepth = executorDepth;
+	programQueryDesc = queryDesc;
+
+	/*
+	 * A statement inside a transaction block, implicit ones included, is
+	 * followed by others: committing it on its own would be visible.
+	 */
+	currentProgramCombinable = orioledb_combine_updates && !IsTransactionBlock();
+}
+
+/*
+ * Open the batch for an update of the given relation, if the statement
+ * qualifies and it is not open yet.  Returns whether the update is to be
+ * done in the batch, which is then the current transaction.
+ */
+bool
+o_batch_begin(Oid relid)
+{
+	if (batchOpen)
+		return true;
+	if (!currentProgramCombinable || !program_is_current(relid))
+		return false;
+
+	start_autonomous_transaction(&batchState);
+	oxid_assign_decodable = true;
+	batchOxid = get_current_oxid();
+	oxid_assign_decodable = false;
+	oxid_batch_lock(batchOxid);
+	batchOpen = true;
+	return true;
+}
+
+static void
+batch_end(bool commit)
+{
+	if (!batchOpen)
+		return;
+
+	batchOpen = false;
+	if (commit)
+		finish_autonomous_transaction(&batchState);
+	else
+		abort_autonomous_transaction(&batchState);
+	oxid_batch_unlock(batchOxid);
+	batchOxid = InvalidOXid;
+}
+
+#if PG_VERSION_NUM >= 180000
+#define EXECUTOR_RUN_ARGS queryDesc, direction, count
+static void
+			o_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count)
+#else
+#define EXECUTOR_RUN_ARGS queryDesc, direction, count, execute_once
+static void
+o_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count,
+			  bool execute_once)
+#endif
+{
+	bool		topLevel = (runDepth == 0);
+
+	if (topLevel)
+		runningQueryDesc = queryDesc;
+	runDepth++;
+	PG_TRY();
+	{
+		if (next_ExecutorRun_hook)
+			next_ExecutorRun_hook(EXECUTOR_RUN_ARGS);
+		else
+			standard_ExecutorRun(EXECUTOR_RUN_ARGS);
+	}
+	PG_CATCH();
+	{
+		runDepth--;
+		if (topLevel)
+		{
+			runningQueryDesc = NULL;
+			batch_end(false);
+		}
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+	runDepth--;
+
+	if (topLevel)
+	{
+		runningQueryDesc = NULL;
+		batch_end(true);
+	}
 }
 
 static void
 o_ExecutorStart(QueryDesc *queryDesc, int eflags)
 {
-	executorDepth++;
-
 	if (next_ExecutorStart_hook)
 		next_ExecutorStart_hook(queryDesc, eflags);
 	else
 		standard_ExecutorStart(queryDesc, eflags);
 
-	/* The outermost statement gets the slot; a nested one does without. */
-	if (!OidIsValid(currentProgramRelid) && !(eflags & EXEC_FLAG_EXPLAIN_ONLY))
+	/* Nothing started from inside a running statement gets the slot */
+	if (runDepth == 0 && !(eflags & EXEC_FLAG_EXPLAIN_ONLY))
 		compile_current_program(queryDesc);
 }
 
 static void
 o_ExecutorEnd(QueryDesc *queryDesc)
 {
-	if (OidIsValid(currentProgramRelid) && currentProgramDepth == executorDepth)
+	if (queryDesc == programQueryDesc)
 	{
+		programQueryDesc = NULL;
 		currentProgramRelid = InvalidOid;
 		currentProgram.nops = 0;
+		currentProgramCombinable = false;
 	}
-	executorDepth--;
 
 	if (next_ExecutorEnd_hook)
 		next_ExecutorEnd_hook(queryDesc);
@@ -448,6 +577,8 @@ o_setprogram_init(void)
 {
 	next_ExecutorStart_hook = ExecutorStart_hook;
 	ExecutorStart_hook = o_ExecutorStart;
+	next_ExecutorRun_hook = ExecutorRun_hook;
+	ExecutorRun_hook = o_ExecutorRun;
 	next_ExecutorEnd_hook = ExecutorEnd_hook;
 	ExecutorEnd_hook = o_ExecutorEnd;
 }

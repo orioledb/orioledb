@@ -1254,6 +1254,49 @@ fsync_xidmap_range(OXid xmin, OXid xmax, uint32 wait_event_info)
  * Wait particular oxid to finish or oxid_notify() call.  Returns true if
  * oxid was finished.
  */
+/*
+ * Set around the oxid assignment of an autonomous transaction whose changes
+ * logical decoding has to see.
+ */
+bool		oxid_assign_decodable = false;
+
+/*
+ * A batch transaction -- an autonomous transaction that does the update of
+ * a single-statement transaction -- ends long before the transaction it runs
+ * in, so its waiters cannot wait for the end of that one.  It holds a lock of
+ * its own instead, from before it writes anything until after its oxid has
+ * left the vxid slot.
+ *
+ * It is an advisory lock tag with a field4 nobody else uses (PostgreSQL's
+ * own advisory locks use 1 and 2).
+ */
+#define OXID_BATCH_LOCK_FIELD4	0x4F42
+
+static void
+set_oxid_batch_locktag(LOCKTAG *tag, OXid oxid)
+{
+	SET_LOCKTAG_ADVISORY(*tag, InvalidOid, (uint32) (oxid >> 32),
+						 (uint32) oxid, OXID_BATCH_LOCK_FIELD4);
+}
+
+void
+oxid_batch_lock(OXid oxid)
+{
+	LOCKTAG		tag;
+
+	set_oxid_batch_locktag(&tag, oxid);
+	(void) LockAcquire(&tag, ExclusiveLock, false, false);
+}
+
+void
+oxid_batch_unlock(OXid oxid)
+{
+	LOCKTAG		tag;
+
+	set_oxid_batch_locktag(&tag, oxid);
+	LockRelease(&tag, ExclusiveLock, false);
+}
+
 bool
 wait_for_oxid(OXid oxid, bool errorOk)
 {
@@ -1287,6 +1330,26 @@ wait_for_oxid(OXid oxid, bool errorOk)
 	{
 		Assert(errorOk);
 		return true;
+	}
+
+	/*
+	 * An autonomous transaction may be a batch: then its lock says when it
+	 * ends.  Other autonomous transactions do not take it, and we go on to
+	 * wait for the transaction they run in.
+	 */
+	if (COMMITSEQNO_GET_LEVEL(csn) > 0)
+	{
+		LOCKTAG		tag;
+
+		set_oxid_batch_locktag(&tag, oxid);
+		GET_CUR_PROCDATA()->waitingForOxid = true;
+		(void) LockAcquire(&tag, ShareLock, false, false);
+		GET_CUR_PROCDATA()->waitingForOxid = false;
+		LockRelease(&tag, ShareLock, false);
+
+		pg_read_barrier();
+		if (vxidElem->oxid != oxid)
+			return true;
 	}
 
 	GET_CUR_PROCDATA()->waitingForOxid = true;
@@ -1837,8 +1900,11 @@ get_current_oxid(void)
 			curOxid = newOxid;
 		}
 
-		/* Check if an autonomous transaction is in progress */
-		if (nestingLevel > 0)
+		/*
+		 * Check if an autonomous transaction is in progress.  A batch is one
+		 * that carries the user's changes, so it is decoded like any other.
+		 */
+		if (nestingLevel > 0 && !oxid_assign_decodable)
 		{
 			/*
 			 * Autonomous transactions should be ignored during logical

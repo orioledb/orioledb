@@ -31,6 +31,7 @@
 #include "tableam/descr.h"
 #include "tableam/handler.h"
 #include "tableam/operations.h"
+#include "tableam/setprogram.h"
 #include "tableam/tree.h"
 #include "tableam/vacuum.h"
 #include "transam/oxid.h"
@@ -743,6 +744,10 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	Assert(descr != NULL);
 
 	*update_indexes = TU_All;
+
+	/* The statement's batch, if it has one, becomes our transaction */
+	if (!descr->bridge)
+		(void) o_batch_begin(RelationGetRelid(relation));
 	oxid = get_current_oxid();
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &old_pkey, &hint,
