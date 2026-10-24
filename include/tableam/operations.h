@@ -53,6 +53,17 @@ typedef struct
 	OIndexNumber conflictIxNum;
 	bool		copyPrimaryOxid;
 	RowLockMode lockMode;
+
+	/*
+	 * The statement's ON CONFLICT action as a SET program, if it has one:
+	 * applied to the row found right where the conflict is, it does the row
+	 * lock and the update in one pass over the page.  selfTuple is the row
+	 * stored then, for the WAL.
+	 */
+	struct OSetProgram *selfProgram;
+	bool		selfUpdated;
+	OTuple		selfTuple;
+	int			selfTupleLen;
 } InsertOnConflictCallbackArg;
 
 typedef struct

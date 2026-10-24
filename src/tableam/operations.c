@@ -394,6 +394,7 @@ static OBTreeModifyCallbackAction o_insert_callback(BTreeDescr *descr,
 													BTreeLocationHint *hint,
 													void *arg);
 static void publish_set_program(OTableDescr *descr, OXid oxid, bool absorbable);
+static OSetProgram *usable_set_program(OTableDescr *descr);
 static OBTreeWaitCallbackAction o_insert_with_arbiter_wait_callback(BTreeDescr *descr,
 																	OTuple tup, OTuple *newtup,
 																	OXid oxid, OTupleXactInfo xactInfo,
@@ -1436,6 +1437,15 @@ o_tbl_insert_with_arbiter(Relation rel,
 	ioc_arg.scanSlot = lockedSlot;
 	ioc_arg.tupUndoLocation = InvalidUndoLocation;
 
+	/*
+	 * Only with the primary key as the one index to write, and a WAL record
+	 * that needs nothing but the new row.
+	 */
+	ioc_arg.selfProgram = NULL;
+	if (lockedSlot && descr->nIndices < 2 &&
+		wal_relreplident(rel) != REPLICA_IDENTITY_FULL)
+		ioc_arg.selfProgram = usable_set_program(descr);
+
 	while (true)
 	{
 		CommitSeqNo save_csn = csn;
@@ -1457,6 +1467,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 		ioc_arg.copyPrimaryOxid = false;
 		ioc_arg.conflictOxid = InvalidOXid;
 		ioc_arg.csn = csn;
+		ioc_arg.selfUpdated = false;
 
 		for (i = 0; (i < descr->nIndices) && success; i++)
 		{
@@ -1517,6 +1528,22 @@ o_tbl_insert_with_arbiter(Relation rel,
 					lockerPayloads[MYPROCNUMBER].delegatedResult.absorbed)
 				{
 					pgstat_count_heap_update(rel, false, false);
+					return slot;
+				}
+
+				/*
+				 * We did the ON CONFLICT update ourselves, at the conflict.
+				 * Log it, and the statement is done.
+				 */
+				if (result == OBTreeModifyResultUpdated && ioc_arg.selfUpdated)
+				{
+					OIndexDescr *primary = GET_PRIMARY(descr);
+
+					pgstat_count_heap_update(rel, false, false);
+					if (primary->desc.storageType == BTreeStoragePersistence)
+						o_wal_update(&primary->desc, ioc_arg.selfTuple,
+									 ioc_arg.selfTuple, wal_relreplident(rel),
+									 descr->version);
 					return slot;
 				}
 			}
@@ -3229,6 +3256,52 @@ o_insert_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 	return OBTreeCallbackActionUpdate;
 }
 
+/*
+ * Apply a SET program to a primary key row: the row the executor's ON
+ * CONFLICT update would store.  Called holding the page, so anything that
+ * raises is caught and reported as "could not": the caller then does what it
+ * did before.
+ */
+static bool
+apply_program_to_row(OIndexDescr *primary, OSetProgram *program, OTuple cur,
+					 OTuple *result, int *resultLen)
+{
+	TupleDesc	tupdesc = primary->leafTupdesc;
+	int			natts = tupdesc->natts;
+	bool		ok = false;
+	MemoryContext oldcxt = CurrentMemoryContext;
+
+	PG_TRY();
+	{
+		OTupleReaderState reader;
+		Datum	   *values = (Datum *) palloc(natts * sizeof(Datum));
+		bool	   *isnull = (bool *) palloc(natts * sizeof(bool));
+		int			i;
+
+		o_tuple_init_reader(&reader, cur, tupdesc, &primary->leafSpec);
+		for (i = 0; i < natts; i++)
+			values[i] = o_tuple_read_next_field(&reader, &isnull[i]);
+
+		if (o_set_program_apply(program, values, isnull, natts))
+		{
+			*result = o_form_tuple(tupdesc, &primary->leafSpec,
+								   o_tuple_get_version(cur) + 1,
+								   values, isnull, NULL);
+			*resultLen = o_btree_len(&primary->desc, *result, OTupleLength);
+			ok = (*resultLen <= O_BTREE_MAX_TUPLE_SIZE);
+		}
+	}
+	PG_CATCH();
+	{
+		MemoryContextSwitchTo(oldcxt);
+		FlushErrorState();
+		ok = false;
+	}
+	PG_END_TRY();
+
+	return ok;
+}
+
 static OBTreeWaitCallbackAction
 o_insert_with_arbiter_wait_callback(BTreeDescr *descr,
 									OTuple tup, OTuple *newtup,
@@ -3284,6 +3357,24 @@ o_insert_with_arbiter_modify_callback(BTreeDescr *descr,
 									  void *arg)
 {
 	InsertOnConflictCallbackArg *ioc_arg = (InsertOnConflictCallbackArg *) arg;
+
+	/*
+	 * Our ON CONFLICT action is a program and the row is somebody else's,
+	 * committed: do the update now instead of only locking the row for the
+	 * executor to update next.  A row of our own transaction is left to the
+	 * executor, which knows about command ids.
+	 */
+	if (ioc_arg->selfProgram && ioc_arg->conflictIxNum == PrimaryIndexNumber &&
+		descr->type == oIndexPrimary && XACT_INFO_IS_FINISHED(xactInfo) &&
+		!XACT_INFO_OXID_IS_CURRENT(xactInfo) &&
+		apply_program_to_row((OIndexDescr *) descr->arg, ioc_arg->selfProgram,
+							 tup, newtup, &ioc_arg->selfTupleLen))
+	{
+		ioc_arg->selfTuple = *newtup;
+		ioc_arg->selfUpdated = true;
+		*lock_mode = RowLockNoKeyUpdate;
+		return OBTreeCallbackActionUpdate;
+	}
 
 	if (ioc_arg->scanSlot && ioc_arg->conflictIxNum != InvalidIndexNumber)
 	{

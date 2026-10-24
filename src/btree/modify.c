@@ -2426,9 +2426,13 @@ btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 
 	/*
 	 * The updates our batch can take, all at once and a row at a time.  They
-	 * stay asleep until the batch is durable.
+	 * stay asleep until the batch is durable.  Not before our batch has
+	 * written its row: until then it may take none but that row, which it has
+	 * yet to write, and looking would only cost every waiter a search of the
+	 * page while we hold it.
 	 */
-	if (OXidIsValid(btree_batch_oxid) && desc == btree_batch_desc)
+	if (OXidIsValid(btree_batch_oxid) && desc == btree_batch_desc &&
+		btree_batch_written)
 	{
 		for (i = 0; i < count; i++)
 		{

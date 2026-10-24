@@ -717,6 +717,27 @@ compile_update_ops(QueryDesc *queryDesc, ModifyTable *node, Plan *subplan,
 	return nops;
 }
 
+static bool
+program_respects_constraints(OSetProgram *program, int nops, TupleDesc tupdesc)
+{
+	int			i;
+
+	if (tupdesc->constr != NULL && tupdesc->constr->num_check > 0)
+		return false;
+
+	for (i = 0; i < nops; i++)
+	{
+		OSetOp	   *op = &program->ops[i];
+
+		if (op->attnum < 1 || op->attnum > tupdesc->natts)
+			return false;
+		if (op->kind == OSetOpConst && op->isnull &&
+			TupleDescAttr(tupdesc, op->attnum - 1)->attnotnull)
+			return false;
+	}
+	return true;
+}
+
 static void
 compile_current_program(QueryDesc *queryDesc)
 {
@@ -793,6 +814,17 @@ compile_current_program(QueryDesc *queryDesc)
 	else
 		nops = compile_upsert_ops(queryDesc, node, subplan, rri->ri_RelationDesc);
 	if (nops <= 0)
+		return;
+
+	/*
+	 * The row a batch stores is worked out from the row it finds, not the one
+	 * the executor checked against the constraints -- for an absorbed upsert,
+	 * the executor checks nothing at all.  So no CHECK constraint, and no
+	 * NULL assigned to a NOT NULL column.  A domain's checks never get here:
+	 * they come as a CoerceToDomain, which compiles to nothing.
+	 */
+	if (!program_respects_constraints(&currentProgram, nops,
+									  RelationGetDescr(rri->ri_RelationDesc)))
 		return;
 
 	rti = linitial_int(node->resultRelations);

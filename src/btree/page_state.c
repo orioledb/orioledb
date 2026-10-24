@@ -1076,10 +1076,11 @@ btree_wake_deferred_waiters(bool batchFailed)
 
 	while (deferredWakeHead != PAGE_STATE_INVALID_PROCNO)
 	{
-		nwoken++;
 		OPageWaiterShmemState *lockState = &lockerStates[deferredWakeHead];
 		PGPROC	   *proc = GetPGProcByNumber(deferredWakeHead);
 		uint32		next = lockState->next;
+
+		nwoken++;
 
 		lockState->deferWake = false;
 		lockState->batchFailed = batchFailed;

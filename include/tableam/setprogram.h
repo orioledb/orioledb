@@ -64,7 +64,7 @@ typedef struct
 #define O_SET_PROGRAM_MAX_OPS		16
 #define O_SET_PROGRAM_CONST_SPACE	2048
 
-typedef struct
+typedef struct OSetProgram
 {
 	int			nops;			/* 0 means "nothing here" */
 	int			constUsed;
