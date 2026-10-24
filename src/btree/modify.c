@@ -1587,8 +1587,13 @@ absorb_row_group(BTreeDescr *desc, OInMemoryBlkno blkno, int *procnos, int n,
 			OSetProgram *program = &lockerPayloads[procnos[i]].program;
 
 			absorbed[i] = false;
+			/*
+			 * An update, or the insert of an upsert whose row is there: its
+			 * ON CONFLICT action is this same update, row lock and all.
+			 */
 			if (!lockerState->absorbable ||
-				lockerState->action != BTreeOperationUpdate ||
+				(lockerState->action != BTreeOperationUpdate &&
+				 lockerState->action != BTreeOperationInsert) ||
 				program->nops == 0)
 				continue;
 
@@ -2429,8 +2434,9 @@ btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 		{
 			OPageWaiterShmemState *lockerState = &lockerStates[procnums[i]];
 
-			if (lockerState->action == BTreeOperationUpdate &&
-				lockerState->absorbable)
+			if ((lockerState->action == BTreeOperationUpdate ||
+				 lockerState->action == BTreeOperationInsert) &&
+				lockerState->absorbable && !lockerState->serviced)
 				cand[ncand++] = procnums[i];
 		}
 		if (ncand > 0 &&

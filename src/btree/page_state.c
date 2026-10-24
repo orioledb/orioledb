@@ -329,8 +329,14 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 			newState = state & (~PAGE_STATE_LIST_TAIL_MASK);
 			newState |= pgprocnum;
 
-			/* Tell the holder there is work here worth looking for. */
-			newState |= PAGE_STATE_HAS_OP_WAITER_FLAG;
+			/*
+			 * Tell the holder there is work here worth looking for.  A plain
+			 * insert is not: the insert path merges those by itself, and
+			 * btree_do_queued_work() would only walk the queue to skip it. An
+			 * upsert's insert is, as a batch may take its update over.
+			 */
+			if (action != BTreeOperationInsert || lockerState->absorbable)
+				newState |= PAGE_STATE_HAS_OP_WAITER_FLAG;
 		}
 
 		if (!ucmUpdateTried)
