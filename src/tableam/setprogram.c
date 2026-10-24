@@ -27,6 +27,7 @@
 #include "common/int.h"
 #include "executor/executor.h"
 #include "nodes/execnodes.h"
+#include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
 #include "parser/parsetree.h"
@@ -67,6 +68,7 @@ static int	runDepth = 0;
  * qualify, as they are the ones a page holder may later do updates for.
  */
 static bool currentProgramCombinable = false;
+static bool currentProgramUpsert = false;
 static bool batchOpen = false;
 static OXid batchOxid = InvalidOXid;
 static OAutonomousTxState batchState;
@@ -82,6 +84,17 @@ program_is_current(Oid relid)
 	return programQueryDesc != NULL &&
 		programQueryDesc == runningQueryDesc &&
 		currentProgramRelid == relid;
+}
+
+/*
+ * Is the statement's program the ON CONFLICT action of an INSERT?  Its update
+ * comes after the insert has locked the row for our batch, and no other batch
+ * can take an update of a row we hold.
+ */
+bool
+o_current_program_is_upsert(void)
+{
+	return currentProgramUpsert;
 }
 
 OSetProgram *
@@ -489,6 +502,8 @@ updates_one_pk_row(Plan *subplan, Relation rel)
 	if (quals == NIL)
 		return false;
 
+	if (!is_orioledb_rel(rel))
+		return false;
 	descr = relation_get_descr(rel);
 	if (descr == NULL)
 		return false;
@@ -518,26 +533,210 @@ updates_one_pk_row(Plan *subplan, Relation rel)
 	return result;
 }
 
+/*
+ * The value a single-row VALUES list gives column attnum, as a Const: a
+ * literal, or a bound parameter, through binary-compatible casts.  NULL if it
+ * is anything else.
+ */
+static Const *
+values_column_const(Plan *subplan, AttrNumber attnum, ParamListInfo params)
+{
+	ListCell   *lc;
+
+	foreach(lc, subplan->targetlist)
+	{
+		TargetEntry *tle = lfirst_node(TargetEntry, lc);
+		Node	   *expr;
+		Datum		value;
+		bool		isnull;
+		Oid			type;
+		int16		typlen;
+		bool		typbyval;
+
+		if (tle->resno != attnum)
+			continue;
+		expr = (Node *) tle->expr;
+		while (IsA(expr, RelabelType))
+			expr = (Node *) ((RelabelType *) expr)->arg;
+		if (!resolve_constant(expr, params, &value, &isnull, &type))
+			return NULL;
+		get_typlenbyval(type, &typlen, &typbyval);
+		return makeConst(type, -1, InvalidOid, typlen, value, isnull, typbyval);
+	}
+	return NULL;
+}
+
+typedef struct
+{
+	ModifyTable *node;
+	Plan	   *subplan;
+	ParamListInfo params;
+	bool		ok;
+} ExcludedContext;
+
+/*
+ * Replace every EXCLUDED.col with the value the statement inserts there.
+ *
+ * Must happen before compile_set_op() sees the expression: by now EXCLUDED is
+ * INNER_VAR, and compile_set_op() takes an INNER_VAR for the column itself,
+ * which would make "v = EXCLUDED.v + 1" mean "v = v + 1".
+ */
+static Node *
+substitute_excluded(Node *node, ExcludedContext *ctx)
+{
+	if (node == NULL)
+		return NULL;
+	if (IsA(node, Var) && ((Var *) node)->varno == INNER_VAR)
+	{
+		Var		   *var = (Var *) node;
+		TargetEntry *etle;
+		Const	   *con;
+
+		if (var->varattno < 1 ||
+			var->varattno > list_length(ctx->node->exclRelTlist))
+		{
+			ctx->ok = false;
+			return node;
+		}
+		etle = list_nth_node(TargetEntry, ctx->node->exclRelTlist,
+							 var->varattno - 1);
+		if (!IsA(etle->expr, Var))
+		{
+			ctx->ok = false;
+			return node;
+		}
+		con = values_column_const(ctx->subplan,
+								  ((Var *) etle->expr)->varattno, ctx->params);
+		if (con == NULL)
+		{
+			ctx->ok = false;
+			return node;
+		}
+		return (Node *) con;
+	}
+	return expression_tree_mutator(node, substitute_excluded, ctx);
+}
+
+/*
+ * The SET clause of INSERT ... VALUES (one row) ON CONFLICT (pk) DO UPDATE,
+ * which is what a batch applies to the row it finds there -- just as the
+ * executor would after the insert conflicted.  Returns the number of ops, or
+ * -1 if the statement is not of that shape.
+ *
+ * The row is the one the inserted key names; the WHERE of the conflict action
+ * would need evaluating against it, so there must be none.
+ */
+static int
+compile_upsert_ops(QueryDesc *queryDesc, ModifyTable *node, Plan *subplan,
+				   Relation rel)
+{
+	OTableDescr *descr;
+	OIndexDescr *primary;
+	ListCell   *ltl,
+			   *lcol;
+	int			nops = 0;
+
+	if (node->onConflictAction != ONCONFLICT_UPDATE ||
+		node->onConflictWhere != NULL)
+		return -1;
+
+	/* One row, given as values */
+	if (!IsA(subplan, Result) || outerPlan(subplan) != NULL ||
+		((Result *) subplan)->resconstantqual != NULL ||
+		subplan->qual != NIL)
+		return -1;
+
+	if (!is_orioledb_rel(rel))
+		return -1;
+	descr = relation_get_descr(rel);
+	if (descr == NULL)
+		return -1;
+	primary = GET_PRIMARY(descr);
+	if (primary->primaryIsCtid ||
+		list_length(node->arbiterIndexes) != 1 ||
+		linitial_oid(node->arbiterIndexes) != primary->oids.reloid)
+		return -1;
+
+	if (list_length(node->onConflictCols) > O_SET_PROGRAM_MAX_OPS)
+		return -1;
+
+	forboth(ltl, node->onConflictSet, lcol, node->onConflictCols)
+	{
+		TargetEntry *tle = lfirst_node(TargetEntry, ltl);
+		ExcludedContext ctx = {node, subplan, queryDesc->params, true};
+		Node	   *expr;
+
+		if (tle->resjunk)
+			return -1;
+		expr = substitute_excluded((Node *) tle->expr, &ctx);
+		if (!ctx.ok ||
+			!compile_set_op(&currentProgram, queryDesc->params, (Expr *) expr,
+							lfirst_int(lcol), &currentProgram.ops[nops]))
+			return -1;
+		nops++;
+	}
+	return nops;
+}
+
+/*
+ * The SET clause of an UPDATE of one row by its primary key.  Returns the
+ * number of ops, or -1 if the statement is not of that shape.
+ */
+static int
+compile_update_ops(QueryDesc *queryDesc, ModifyTable *node, Plan *subplan,
+				   Relation rel)
+{
+	List	   *updateColnos;
+	ListCell   *ltl,
+			   *lcol;
+	int			nops = 0;
+
+	if (list_length(node->updateColnosLists) != 1 ||
+		node->onConflictAction != ONCONFLICT_NONE)
+		return -1;
+
+	updateColnos = (List *) linitial(node->updateColnosLists);
+	if (list_length(updateColnos) > O_SET_PROGRAM_MAX_OPS)
+		return -1;
+
+	forboth(ltl, subplan->targetlist, lcol, updateColnos)
+	{
+		TargetEntry *tle = lfirst_node(TargetEntry, ltl);
+
+		if (tle->resjunk)
+			return -1;			/* the lists would be out of step */
+
+		if (!compile_set_op(&currentProgram, queryDesc->params, tle->expr,
+							lfirst_int(lcol), &currentProgram.ops[nops]))
+			return -1;
+		nops++;
+	}
+
+	if (!updates_one_pk_row(subplan, rel))
+		return -1;
+	return nops;
+}
+
 static void
 compile_current_program(QueryDesc *queryDesc)
 {
 	PlannedStmt *stmt = queryDesc->plannedstmt;
 	ModifyTable *node;
 	Plan	   *subplan;
-	List	   *updateColnos;
-	ListCell   *ltl,
-			   *lcol;
+	ResultRelInfo *rri;
 	RangeTblEntry *rte;
 	Index		rti;
-	int			nops = 0;
+	int			nops;
 
 	programQueryDesc = NULL;
 	currentProgramRelid = InvalidOid;
 	currentProgramCombinable = false;
+	currentProgramUpsert = false;
 	currentProgram.nops = 0;
 	currentProgram.constUsed = 0;
 
-	if (queryDesc->operation != CMD_UPDATE)
+	if (queryDesc->operation != CMD_UPDATE &&
+		queryDesc->operation != CMD_INSERT)
 		return;
 
 	/*
@@ -562,13 +761,11 @@ compile_current_program(QueryDesc *queryDesc)
 	node = (ModifyTable *) stmt->planTree;
 
 	/*
-	 * One relation, plainly updated.  Anything that makes the statement mean
-	 * more than "assign these columns" -- routing, ON CONFLICT, RETURNING, a
-	 * WITH CHECK OPTION -- is somebody else's business to run.
+	 * One relation, plainly modified.  Anything that makes the statement mean
+	 * more than "assign these columns" -- routing, RETURNING, a WITH CHECK
+	 * OPTION -- is somebody else's business to run.
 	 */
 	if (list_length(node->resultRelations) != 1 ||
-		list_length(node->updateColnosLists) != 1 ||
-		node->onConflictAction != ONCONFLICT_NONE ||
 		node->returningLists != NIL ||
 		node->withCheckOptionLists != NIL ||
 		node->rootRelation != 0)
@@ -578,45 +775,24 @@ compile_current_program(QueryDesc *queryDesc)
 	if (subplan == NULL)
 		return;
 
-	updateColnos = (List *) linitial(node->updateColnosLists);
-	if (list_length(updateColnos) > O_SET_PROGRAM_MAX_OPS)
-		return;
-
-	forboth(ltl, subplan->targetlist, lcol, updateColnos)
-	{
-		TargetEntry *tle = lfirst_node(TargetEntry, ltl);
-		AttrNumber	attnum = lfirst_int(lcol);
-
-		if (tle->resjunk)
-			return;				/* the lists would be out of step */
-
-		if (!compile_set_op(&currentProgram, queryDesc->params, tle->expr,
-							attnum, &currentProgram.ops[nops]))
-			return;
-		nops++;
-	}
-
-	if (nops == 0)
-		return;
-
 	/*
 	 * Anything that reads the row we produce has to see the row that was
 	 * really stored, and the process that stores it cannot run triggers or
 	 * projections on our behalf.  Leave those statements alone.
 	 */
-	if (queryDesc->estate != NULL && queryDesc->estate->es_result_relations != NULL)
-	{
-		ResultRelInfo *rri = queryDesc->estate->es_result_relations[0];
+	if (queryDesc->estate == NULL || queryDesc->estate->es_result_relations == NULL)
+		return;
+	rri = queryDesc->estate->es_result_relations[0];
+	if (rri == NULL || rri->ri_TrigDesc != NULL ||
+		rri->ri_projectReturning != NULL ||
+		rri->ri_WithCheckOptions != NIL)
+		return;
 
-		if (rri == NULL || rri->ri_TrigDesc != NULL ||
-			rri->ri_projectReturning != NULL ||
-			rri->ri_WithCheckOptions != NIL)
-			return;
-
-		if (!updates_one_pk_row(subplan, rri->ri_RelationDesc))
-			return;
-	}
+	if (queryDesc->operation == CMD_UPDATE)
+		nops = compile_update_ops(queryDesc, node, subplan, rri->ri_RelationDesc);
 	else
+		nops = compile_upsert_ops(queryDesc, node, subplan, rri->ri_RelationDesc);
+	if (nops <= 0)
 		return;
 
 	rti = linitial_int(node->resultRelations);
@@ -624,6 +800,7 @@ compile_current_program(QueryDesc *queryDesc)
 	currentProgram.nops = nops;
 	currentProgramRelid = rte->relid;
 	programQueryDesc = queryDesc;
+	currentProgramUpsert = (queryDesc->operation == CMD_INSERT);
 
 	/*
 	 * A statement inside a transaction block, implicit ones included, is

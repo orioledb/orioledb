@@ -724,7 +724,8 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 * end and then do it ourselves.
 				 */
 				if (cbAction == OBTreeCallbackActionXidWait &&
-					context->action == BTreeOperationUpdate &&
+					(context->action == BTreeOperationUpdate ||
+					 context->action == BTreeOperationInsert) &&
 					lockerStates[MYPROCNUMBER].absorbable &&
 					oxid_get_autonomous_owner(oxid, &batchOwner))
 				{
@@ -986,7 +987,9 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 	 * update anything else, so other rows may be taken into the batch.
 	 */
 	if (OXidIsValid(btree_batch_oxid) && context->opOxid == btree_batch_oxid &&
-		desc == btree_batch_desc && context->action == BTreeOperationUpdate)
+		desc == btree_batch_desc &&
+		(context->action == BTreeOperationUpdate ||
+		 context->action == BTreeOperationInsert))
 		btree_batch_written = true;
 
 	if (context->undoIsReserved && context->needsUndo)
@@ -1534,7 +1537,8 @@ absorb_row_group(BTreeDescr *desc, OInMemoryBlkno blkno, int *procnos, int n,
 		 */
 		if (!btree_batch_written)
 			return 0;
-		rowCsn = oxid_get_csn(rowOxid, false);
+		/* Not waiting for a commit in progress: we hold the page */
+		rowCsn = oxid_get_csn_nowait(rowOxid);
 		if (!COMMITSEQNO_IS_NORMAL(rowCsn) && !COMMITSEQNO_IS_FROZEN(rowCsn))
 			return 0;
 

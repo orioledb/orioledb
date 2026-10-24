@@ -613,6 +613,16 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 
 	o_set_current_command(cid);
 
+	/*
+	 * The statement's batch, if it has one, takes the insert too: the row it
+	 * creates, or the ON CONFLICT update the executor does next, is the
+	 * batch's to commit.
+	 */
+	if (!descr->bridge)
+		(void) o_batch_begin(RelationGetRelid(rel),
+							 descr->nIndices < 2 ? &id->desc : NULL,
+							 wal_relreplident(rel), descr->version);
+
 	slot = o_tbl_insert_with_arbiter(rel, descr, slot, arbiterIndexes, cid,
 									 lockmode, lockedSlot, estate, rinfo);
 
