@@ -1,0 +1,28 @@
+# create orioledb install check image , for cahcing python dependencies
+ARG BASE
+FROM ${BASE}
+COPY . /local_workspace
+
+# initialisation; calling ./ci/check_docker.sh
+# and setup python3 test environments - as a docker layer for a better caching
+RUN bash /local_workspace/ci/check_docker.sh --running init
+
+# this checks working on python 3.8+
+RUN bash /local_workspace/ci/check_docker.sh --running test regresscheck
+RUN bash /local_workspace/ci/check_docker.sh --running test isolationcheck
+
+## orioledb testgrescheck_part_1 , testgrescheck_part_2 : are python 3.12+
+## don't work with older python3 versions. so we skip.
+
+RUN python3 --version
+RUN if python3 -c "import sys; sys.exit(0) if sys.version_info >= (3, 12) else sys.exit(1)"; then \
+      bash /local_workspace/ci/check_docker.sh --running test testgrescheck_part_1; \
+    else \
+      echo "Skip test: testgrescheck_part_1 (python < 3.12)"; \
+    fi
+
+RUN if python3 -c "import sys; sys.exit(0) if sys.version_info >= (3, 12) else sys.exit(1)"; then \
+      bash /local_workspace/ci/check_docker.sh --running test testgrescheck_part_2; \
+    else \
+      echo "Skip test: testgrescheck_part_2 (python < 3.12)"; \
+    fi
