@@ -137,6 +137,9 @@ o_get_tree_def(BTreeDescr *desc)
 	return desc->arg;
 }
 
+static bool o_key_attrs_not_null(OIndexDescr *id, OTuple tuple,
+								 OIndexType type, int ctid_off);
+
 static int
 o_get_key_len(BTreeDescr *desc, OTuple tuple, OIndexType type, bool keepVersion)
 {
@@ -146,9 +149,14 @@ o_get_key_len(BTreeDescr *desc, OTuple tuple, OIndexType type, bool keepVersion)
 	int			i,
 				len;
 	int			ctid_off = 0;
+	bool		anyNull = false;
 
 	if (id->bridging && id->desc.type == oIndexPrimary && !id->primaryIsCtid)
 		ctid_off = 1;
+
+	if (!keepVersion && id->fixedKeyLen > 0 &&
+		o_key_attrs_not_null(id, tuple, type, ctid_off))
+		return id->fixedKeyLen;
 
 	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
 	{
@@ -156,13 +164,55 @@ o_get_key_len(BTreeDescr *desc, OTuple tuple, OIndexType type, bool keepVersion)
 
 		Assert(attnum > 0);
 		values[i] = o_fastgetattr(tuple, attnum, id->leafTupdesc, &id->leafSpec, &isnull[i]);
+		anyNull |= isnull[i];
 	}
 
 	len = o_new_tuple_size(id->nonLeafTupdesc, &id->nonLeafSpec, NULL, NULL,
 						   keepVersion ? o_tuple_get_version(tuple) : 0,
 						   values, isnull, NULL);
 
+	if (id->fixedKeyLen == 0 && !keepVersion && !anyNull)
+	{
+		id->fixedKeyLen = len;
+		for (i = 0; i < id->nonLeafTupdesc->natts; i++)
+			if (TupleDescAttr(id->nonLeafTupdesc, i)->attlen <= 0)
+				id->fixedKeyLen = -1;
+	}
+
 	return len;
+}
+
+/*
+ * Are all the key attributes of the leaf tuple non-null?  Reads the null
+ * bitmap only, without deforming the tuple.
+ */
+static bool
+o_key_attrs_not_null(OIndexDescr *id, OTuple tuple, OIndexType type, int ctid_off)
+{
+	OTupleHeader header = (OTupleHeader) tuple.data;
+	bits8	   *bits;
+	int			i;
+
+	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
+	{
+		int			attnum = (type == oIndexPrimary) ? id->tableAttnums[i] + ctid_off : i + 1;
+
+		if (tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT)
+		{
+			if (attnum - 1 >= id->leafSpec.natts)
+				return false;
+			continue;
+		}
+		if (attnum > header->natts)
+			return false;
+		if (header->hasnulls)
+		{
+			bits = (bits8 *) (tuple.data + OTupleHeaderDataOff(header));
+			if (att_isnull(attnum - 1, bits))
+				return false;
+		}
+	}
+	return true;
 }
 
 static int

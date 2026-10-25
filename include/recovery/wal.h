@@ -28,7 +28,7 @@
  * ORIOLEDB_COMPRESS_VERSION (see big comment on versioning
  * in include/orioledb.h)
  */
-#define ORIOLEDB_WAL_VERSION (20)
+#define ORIOLEDB_WAL_VERSION (21)
 
 /*
  * Value has been fixed at the moment of introducing WAL versioning.
@@ -80,6 +80,16 @@
  */
 #define ORIOLEDB_FLAT_OLD_TUPLE_WAL_VERSION (20)
 
+/*
+ * WAL version that added the records written when wal_level < logical
+ * without the fields only logical decoding reads: WAL_REC_RELATION_SHORT
+ * (no xmin, csn, cid, version, base_version) and WAL_REC_XID_SHORT (no
+ * logical or heap xid).
+ *
+ * We should never change this value.
+ */
+#define ORIOLEDB_SHORT_RELATION_WAL_VERSION (21)
+
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
 #define OWalInvalidCommitPos		UINT64_MAX
@@ -125,6 +135,27 @@ typedef struct
 	/* Since ORIOLEDB_REL_TABLESPACE_WAL_VERSION */
 	uint8		tablespace[sizeof(Oid)];
 } WALRecRelation;
+
+/* WAL_REC_RELATION without the fields only logical decoding needs */
+typedef struct
+{
+	uint8		recType;
+	uint8		treeType;
+	uint8		datoid[sizeof(Oid)];
+	uint8		reloid[sizeof(Oid)];
+	uint8		relnode[sizeof(Oid)];
+	uint8		tablespace[sizeof(Oid)];
+} WALRecRelationShort;
+
+/*
+ * WAL_REC_XID without the logical and heap xids, written below
+ * wal_level = logical when the transaction has no heap xid.
+ */
+typedef struct
+{
+	uint8		recType;
+	uint8		oxid[sizeof(OXid)];
+} WALRecXidShort;
 
 typedef struct
 {
