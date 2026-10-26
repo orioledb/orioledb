@@ -1171,11 +1171,19 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 				if (state->retain_locs[undoType] < pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation))
 					pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation, state->retain_locs[undoType]);
 
+				/*
+				 * Keep the paired global frontiers ordered against a
+				 * concurrent update_min_undo_locations().
+				 */
+				SpinLockAcquire(&undoMeta->minUndoLocationsMutex);
 				if (state->retain_locs[undoType] < pg_atomic_read_u64(&undoMeta->minProcRetainLocation))
 					pg_atomic_write_u64(&undoMeta->minProcRetainLocation, state->retain_locs[undoType]);
 
 				if (state->retain_locs[undoType] < pg_atomic_read_u64(&undoMeta->minProcTransactionRetainLocation))
 					pg_atomic_write_u64(&undoMeta->minProcTransactionRetainLocation, state->retain_locs[undoType]);
+				Assert(pg_atomic_read_u64(&undoMeta->minProcRetainLocation) <=
+					   pg_atomic_read_u64(&undoMeta->minProcTransactionRetainLocation));
+				SpinLockRelease(&undoMeta->minUndoLocationsMutex);
 			}
 		}
 
