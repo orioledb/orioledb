@@ -7,11 +7,33 @@ import shutil
 import testgres
 import unittest
 
+from enum import Enum
 from tempfile import mkdtemp
 from testgres.utils import get_bin_path
 from testgres.exceptions import StartNodeException, QueryException
 
 from .base_test import BaseTest, ThreadQueryExecutor, wait_stopevent
+
+# Rows enough to overflow the backend-local WAL buffer, so the open
+# transaction's records reach WAL before the crash.
+CRASH_XACT_ROWS = 1000
+
+# Backends to commit from after the crash.  A logical xid depends on the
+# backend's proc number, so one of them reuses the crashed transaction's
+# logical xid.
+CRASH_REUSE_BACKENDS = 4
+
+
+class XactShape(Enum):
+	"""Where the open transaction runs its DML."""
+	TOPLEVEL = 1
+	SUBXACT = 2
+	# Heap DML first: the heap xid becomes the top-level transaction in the
+	# reorder buffer, the orioledb logical xid its subtransaction.
+	HEAP_FIRST = 3
+	# Orioledb DML first: the logical xid is decoded as a top-level
+	# transaction of its own.
+	ORIOLE_FIRST = 4
 
 
 def clear_table(
@@ -277,6 +299,117 @@ class LogicalTest(BaseTest):
 		    "table public.data: INSERT: id[integer]:2 data[text]:'kept'\n"
 		    "table public.data: INSERT: id[integer]:4 data[text]:'final'\n"
 		    "COMMIT\n")
+
+	def crash_open_xact(self, shape):
+		"""Crash with an open transaction, then commit from new backends.
+
+		After the crash, recovery writes a ROLLBACK for the open
+		transaction.  If neither that ROLLBACK nor ReorderBufferAbortOld()
+		drops every reorder buffer transaction the open one left behind:
+		  - a transaction after restart may get the same logical xid, and
+		    the rolled-back changes are decoded as part of its commit;
+		  - the leftover transaction holds the slot's restart_lsn before
+		    the crash point."""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE data(id int primary key, data text) USING orioledb;\n"
+		    "CREATE TABLE h(id int primary key);\n")
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding');\n"
+		)
+
+		con = node.connect()
+		con.begin()
+		self.run_open_xact(con, shape)
+
+		# Flush WAL, so the open transaction's records survive the crash.
+		node.execute("SELECT pg_switch_wal();")
+		node.stop(['-m', 'immediate'])
+		node.start()
+
+		after_crash = node.execute("SELECT pg_current_wal_insert_lsn();")[0][0]
+
+		# Let ReorderBufferAbortOld() run before the commits below.
+		node.execute("SELECT pg_log_standby_snapshot();")
+
+		cons = [node.connect() for _ in range(CRASH_REUSE_BACKENDS)]
+		expected = ""
+		for i, c in enumerate(cons):
+			c.execute(f"INSERT INTO data VALUES ({-1 - i}, 'after_crash');")
+			c.commit()
+			expected += ("BEGIN\n"
+			             f"table public.data: INSERT: id[integer]:{-1 - i} "
+			             "data[text]:'after_crash'\n"
+			             "COMMIT\n")
+		for c in cons:
+			c.close()
+
+		self.assertEqual(self.retrieve_logical_changes(), expected)
+
+		# Decode past a fresh RUNNING_XACTS, so the slot can move
+		# restart_lsn past the crash point.
+		node.safe_psql(
+		    'postgres', "SELECT pg_log_standby_snapshot();\n"
+		    "CHECKPOINT;\n"
+		    "SELECT pg_log_standby_snapshot();\n")
+		self.assertEqual(self.retrieve_logical_changes(), "")
+
+		advanced = node.execute(
+		    "SELECT restart_lsn > '%s'::pg_lsn FROM pg_replication_slots "
+		    "WHERE slot_name = 'regression_slot';" % after_crash)[0][0]
+		self.assertTrue(advanced, "restart_lsn stuck before the crash point")
+
+	def run_open_xact(self, con, shape):
+		"""Run the open transaction's DML for the given shape."""
+		lost = ("INSERT INTO data SELECT i, 'lost' "
+		        "FROM generate_series(%d, %d) i;")
+
+		if shape == XactShape.TOPLEVEL:
+			con.execute(lost % (1, CRASH_XACT_ROWS))
+			return
+
+		if shape == XactShape.SUBXACT:
+			# Leave the top-level transaction without DML of its own.  The
+			# INSERT below runs in a subtransaction, linked to the
+			# top-level one by a SAVEPOINT record.
+			con.execute("SAVEPOINT s1;")
+			con.execute("INSERT INTO data VALUES (0, 'rolled_back');")
+			con.execute("ROLLBACK TO SAVEPOINT s1;")
+			con.execute(lost % (1, CRASH_XACT_ROWS))
+			return
+
+		if shape == XactShape.HEAP_FIRST:
+			con.execute("INSERT INTO h VALUES (1);")
+			con.execute(lost % (1, CRASH_XACT_ROWS))
+			return
+
+		# ORIOLE_FIRST: more orioledb DML after the heap xid is assigned.
+		con.execute(lost % (1, CRASH_XACT_ROWS))
+		con.execute("INSERT INTO h VALUES (1);")
+		con.execute(lost % (CRASH_XACT_ROWS + 1, 2 * CRASH_XACT_ROWS))
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_crash_open_xact_subxact(self):
+		self.crash_open_xact(XactShape.SUBXACT)
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_crash_open_xact_toplevel(self):
+		self.crash_open_xact(XactShape.TOPLEVEL)
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_crash_open_xact_heap_first(self):
+		self.crash_open_xact(XactShape.HEAP_FIRST)
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_crash_open_xact_oriole_first(self):
+		self.crash_open_xact(XactShape.ORIOLE_FIRST)
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
