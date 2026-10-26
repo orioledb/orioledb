@@ -2282,6 +2282,18 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 						newLink = curLink;
 			LockChainWalk peek = walk;
 			UndoLocation prevLocation;
+			bool		deletedFinal;
+
+			/*
+			 * A finished locker whose mode conflicts with ours counts as the
+			 * final record.  But it is about to leave the chain, and it is
+			 * not a version of the row: the caller would judge the row by the
+			 * locker's csn.  The record it stood on is the candidate now.
+			 */
+			deletedFinal = foundFinal &&
+				finalUndoLocation == curUndoLocation &&
+				finalTuphdr.xactInfo == curTuphdr.xactInfo &&
+				finalTuphdr.undoLocation == curTuphdr.undoLocation;
 
 			prev_tuphdr = curTuphdr;
 			if (!lock_chain_step(undoType, &peek, &prev_tuphdr, &prevLink,
@@ -2361,6 +2373,12 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 													 &stored,
 													 curUndoLocation);
 
+			}
+
+			if (deletedFinal)
+			{
+				finalTuphdr = curTuphdr;
+				foundFinal = false;
 			}
 		}
 
