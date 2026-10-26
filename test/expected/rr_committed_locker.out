@@ -1,0 +1,75 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_begin s1_select s2_begin s2_fu s2_commit s1_update s1_commit s1_check
+step s1_begin: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s1_select: SELECT * FROM o_rr_committed_locker;
+id|v
+--+-
+ 1|0
+(1 row)
+
+step s2_begin: BEGIN;
+step s2_fu: SELECT * FROM o_rr_committed_locker WHERE id = 1 FOR UPDATE;
+id|v
+--+-
+ 1|0
+(1 row)
+
+step s2_commit: COMMIT;
+step s1_update: UPDATE o_rr_committed_locker SET v = v + 1 WHERE id = 1;
+step s1_commit: COMMIT;
+step s1_check: SELECT * FROM o_rr_committed_locker;
+id|v
+--+-
+ 1|1
+(1 row)
+
+
+starting permutation: s1_begin s1_select s2_begin s2_fnku s2_commit s1_delete s1_commit s1_check
+step s1_begin: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s1_select: SELECT * FROM o_rr_committed_locker;
+id|v
+--+-
+ 1|0
+(1 row)
+
+step s2_begin: BEGIN;
+step s2_fnku: SELECT * FROM o_rr_committed_locker WHERE id = 1 FOR NO KEY UPDATE;
+id|v
+--+-
+ 1|0
+(1 row)
+
+step s2_commit: COMMIT;
+step s1_delete: DELETE FROM o_rr_committed_locker WHERE id = 1;
+step s1_commit: COMMIT;
+step s1_check: SELECT * FROM o_rr_committed_locker;
+id|v
+--+-
+(0 rows)
+
+
+starting permutation: s1_begin s1_select s2_begin s2_fu s2_rollback s1_update s1_commit s1_check
+step s1_begin: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s1_select: SELECT * FROM o_rr_committed_locker;
+id|v
+--+-
+ 1|0
+(1 row)
+
+step s2_begin: BEGIN;
+step s2_fu: SELECT * FROM o_rr_committed_locker WHERE id = 1 FOR UPDATE;
+id|v
+--+-
+ 1|0
+(1 row)
+
+step s2_rollback: ROLLBACK;
+step s1_update: UPDATE o_rr_committed_locker SET v = v + 1 WHERE id = 1;
+step s1_commit: COMMIT;
+step s1_check: SELECT * FROM o_rr_committed_locker;
+id|v
+--+-
+ 1|1
+(1 row)
+
