@@ -446,6 +446,64 @@ record_pending_sk_fixup(OXid oxid, UndoLocation firstLocation,
 }
 
 /*
+ * Rebuild the version of the row an update undo record holds, by following
+ * the undo chain of the row from the page down to the record at target.
+ * The record may hold a difference from the version above it, and the page
+ * may have moved on since.  Returns false if the chain doesn't lead there.
+ */
+static bool
+rebuild_version_from_undo(BTreeDescr *desc, Page page,
+						  BTreePageItemLocator *loc, UndoLocation target,
+						  OTuple *result)
+{
+	BTreeLeafTuphdr *pageTuphdr,
+				tuphdr;
+	OTuple		tuple;
+	bool		allocated = false;
+
+	BTREE_PAGE_READ_LEAF_ITEM(pageTuphdr, tuple, page, loc);
+	tuphdr = *pageTuphdr;
+	(void) find_non_lock_only_undo_record(desc->undoType, &tuphdr);
+
+	while (UndoLocationIsValid(tuphdr.undoLocation) &&
+		   tuphdr.undoLocation >= target &&
+		   UNDO_REC_EXISTS(desc->undoType, tuphdr.undoLocation))
+	{
+		bool		isTarget = tuphdr.undoLocation == target;
+
+		if (tuphdr.deleted != BTreeLeafTupleNonDeleted ||
+			XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo))
+		{
+			if (isTarget)
+				break;
+			get_prev_leaf_header_from_undo(desc->undoType, &tuphdr, false);
+		}
+		else
+		{
+			OTuple		newer = tuple;
+
+			get_prev_leaf_header_and_tuple_from_undo(desc->undoType, &tuphdr,
+													 &tuple,
+													 o_btree_len(desc, newer,
+																 OTupleLength),
+													 0);
+			if (allocated)
+				pfree(newer.data);
+			allocated = true;
+			if (isTarget)
+			{
+				*result = tuple;
+				return true;
+			}
+		}
+	}
+
+	if (allocated)
+		pfree(tuple.data);
+	return false;
+}
+
+/*
  * Apply the fix-up owed by one PK undo record at itemLoc: read the record
  * back, locate the current PK tuple, and for every secondary index whose
  * key differs between the pre-image and the post-image, dispatch a
@@ -479,6 +537,7 @@ apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
 	LocationIndex newTupleLen;
 	TupleTableSlot *newSlot;
 	TupleTableSlot *oldSlot;
+	bool		isDiff;
 	int			i;
 
 	*prevLoc = InvalidUndoLocation;
@@ -498,8 +557,10 @@ apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
 	 */
 	undo_read(UndoLogRegular, itemLoc, sizeof(header), (Pointer) &header);
 	*prevLoc = header.prev;
-	if (header.type != ModifyUndoItemType)
+	if (header.type != ModifyUndoItemType &&
+		header.type != UpdateDiffUndoItemType)
 		return true;
+	isDiff = header.type == UpdateDiffUndoItemType;
 
 	undo_read(UndoLogRegular, itemLoc, sizeof(item), (Pointer) &item);
 
@@ -530,16 +591,37 @@ apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
 		return true;
 	primary = GET_PRIMARY(descr);
 
-	/* The undo entry stores the pre-image tuple right after the header. */
-	oldTupleSize = validate_undo_item_size(item.header.itemSize);
-	if (oldTupleSize == 0)
-		return true;
-	oldTuple.formatFlags = item.tuphdr.formatFlags;
-	oldTuple.data = palloc(oldTupleSize);
-	undo_read(UndoLogRegular,
-			  itemLoc + sizeof(BTreeModifyUndoStackItem),
-			  oldTupleSize,
-			  oldTuple.data);
+	if (isDiff)
+	{
+		BTreeUpdateDiffUndoStackItem diffItem;
+
+		/*
+		 * The pre-image is a difference from the version that replaced it,
+		 * and is rebuilt below.  Find the row by the key the record keeps.
+		 */
+		undo_read(UndoLogRegular, itemLoc, sizeof(diffItem),
+				  (Pointer) &diffItem);
+		if (diffItem.keyLen == 0 ||
+			diffItem.keyLen > item.header.itemSize - sizeof(diffItem))
+			return true;
+		oldTuple.formatFlags = diffItem.keyFormatFlags;
+		oldTuple.data = palloc(diffItem.keyLen);
+		undo_read(UndoLogRegular, itemLoc + sizeof(diffItem),
+				  diffItem.keyLen, oldTuple.data);
+	}
+	else
+	{
+		/* The undo entry stores the pre-image tuple right after the header. */
+		oldTupleSize = validate_undo_item_size(item.header.itemSize);
+		if (oldTupleSize == 0)
+			return true;
+		oldTuple.formatFlags = item.tuphdr.formatFlags;
+		oldTuple.data = palloc(oldTupleSize);
+		undo_read(UndoLogRegular,
+				  itemLoc + sizeof(BTreeModifyUndoStackItem),
+				  oldTupleSize,
+				  oldTuple.data);
+	}
 
 	o_btree_load_shmem(&primary->desc);
 	O_TUPLE_SET_NULL(newTuple);
@@ -558,7 +640,7 @@ apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
 	 * For DELETE the on-page row is the row to be removed; we copy it back
 	 * into oldTuple so the SK loop can derive the SK key from full attrs.
 	 */
-	if (item.action == BTreeOperationDelete)
+	if (item.action == BTreeOperationDelete || isDiff)
 	{
 		OTuple		keyTuple;
 
@@ -612,6 +694,23 @@ apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
 		newTuple.formatFlags = pkOnPage.formatFlags;
 		newTuple.data = palloc(newTupleLen);
 		memcpy(newTuple.data, pkOnPage.data, newTupleLen);
+	}
+
+	if (isDiff)
+	{
+		OTuple		preImage;
+
+		if (!rebuild_version_from_undo(&primary->desc, pkPage, &pageLoc,
+									   itemLoc + offsetof(BTreeModifyUndoStackItem, tuphdr),
+									   &preImage))
+		{
+			unlock_page(context.items[context.index].blkno);
+			pfree(oldTuple.data);
+			pfree(newTuple.data);
+			return true;
+		}
+		pfree(oldTuple.data);
+		oldTuple = preImage;
 	}
 
 	unlock_page(context.items[context.index].blkno);
