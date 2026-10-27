@@ -352,9 +352,13 @@ o_convert_toast_chunk(ReorderBuffer *reorderbuf, OIndexDescr *indexDescr,
 	Assert((!attnum_isnull) && (!chunk_seq_isnull));
 	Assert(attnum > 0);
 
-	/* Toast chunk in VARATT_4B uncompressed format */
+	/*
+	 * The chunk may be stored with a one-byte header (short chunks, e.g. the
+	 * last one).  Heap TOAST chunks must have a four-byte header, so always
+	 * build a fresh chunk when the stored one does not have it.
+	 */
 	old_chunk = o_fastgetattr_ptr(tuple, pk_natts + DATA_POS, o_toast_tupDesc, &indexDescr->leafSpec);
-	old_chunk_size = VARSIZE(old_chunk) - VARHDRSZ;
+	old_chunk_size = VARSIZE_ANY_EXHDR(old_chunk);
 
 	/*
 	 * ReorderBufferToastReplace() expects first toasted chunk without the
@@ -365,14 +369,21 @@ o_convert_toast_chunk(ReorderBuffer *reorderbuf, OIndexDescr *indexDescr,
 	{
 		int			extra_header_size;
 
-		Assert(VARATT_IS_4B(VARDATA(old_chunk)));
+		Assert(VARATT_IS_4B(VARDATA_ANY(old_chunk)));
 		extra_header_size = VARHDRSZ;
 		new_chunk_size = old_chunk_size - extra_header_size;
 		need_to_free = true;
 		new_chunk = palloc0(new_chunk_size + VARHDRSZ);
-		memcpy(new_chunk, old_chunk, VARHDRSZ);
 		SET_VARSIZE(new_chunk, new_chunk_size + VARHDRSZ);
-		memcpy(VARDATA(new_chunk), VARDATA(old_chunk) + extra_header_size, new_chunk_size);
+		memcpy(VARDATA(new_chunk), VARDATA_ANY(old_chunk) + extra_header_size, new_chunk_size);
+	}
+	else if (VARATT_IS_SHORT(old_chunk))
+	{
+		new_chunk_size = old_chunk_size;
+		need_to_free = true;
+		new_chunk = palloc0(new_chunk_size + VARHDRSZ);
+		SET_VARSIZE(new_chunk, new_chunk_size + VARHDRSZ);
+		memcpy(VARDATA(new_chunk), VARDATA_ANY(old_chunk), new_chunk_size);
 	}
 	else
 	{
