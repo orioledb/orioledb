@@ -777,6 +777,39 @@ class LogicalTest(BaseTest):
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
+	def test_toast_short_last_chunk(self):
+		o_relname = self.o_relname
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', f"""
+		    CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id int primary key, data text) USING orioledb;
+		    ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;
+		""")
+
+		create_slot(node)
+
+		# The last TOAST chunk is stored with a one-byte varlena header when
+		# it is shorter than 127 bytes.  Cover every possible tail length by
+		# sweeping the value size over a few chunk sizes.
+		step = 50
+		sizes = range(7000, 9000, step)
+		node.safe_psql(
+		    'postgres', f"""
+			INSERT INTO {o_relname}
+				SELECT n, repeat('A', n) FROM generate_series(7000, 8999, {step}) n;
+		""")
+
+		rows = node.execute(
+		    "SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL) WHERE data LIKE '%%INSERT%%';"
+		)
+		self.assertEqual(len(rows), len(sizes))
+		for row, size in zip(rows, sizes):
+			self.assertTrue(row[0].endswith("'" + 'A' * size + "'"))
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
 	def test_systrees_versions_index_TOAST_INSERT_ALTER_ADD_COLUMN(self):
 		o_relname = self.o_relname
 		node = self.node
