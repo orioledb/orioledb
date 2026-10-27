@@ -8,6 +8,43 @@ from .base_test import ThreadQueryExecutor
 
 class TriggerTest(BaseTest):
 
+	def test_after_update_old_varlena(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_test (
+				id int PRIMARY KEY,
+				value text NOT NULL
+			) USING orioledb;
+
+			CREATE FUNCTION check_old_value() RETURNS trigger AS $$
+			BEGIN
+				IF OLD.value IS NOT DISTINCT FROM NEW.value THEN
+					RAISE EXCEPTION 'OLD contains the updated value for id %', NEW.id;
+				END IF;
+				RETURN NULL;
+			END;
+			$$ LANGUAGE plpgsql;
+
+			CREATE TRIGGER check_old_value
+				AFTER UPDATE ON o_test
+				FOR EACH ROW EXECUTE FUNCTION check_old_value();
+
+			CREATE PROCEDURE update_rows(iterations int) AS $$
+			BEGIN
+				FOR i IN 1..iterations LOOP
+					INSERT INTO o_test VALUES (i, 'a');
+					COMMIT;
+					UPDATE o_test SET value = 'a longer text value' WHERE id = i;
+					COMMIT;
+				END LOOP;
+			END;
+			$$ LANGUAGE plpgsql;
+		""")
+
+		node.safe_psql("CALL update_rows(500);")
+
 	def test_self_modified_update_deleted(self):
 		node = self.node
 		node.start()
