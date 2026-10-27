@@ -151,7 +151,10 @@ typedef struct
 static OTuple fetch_our_tuple_from_page(BTreeDescr *desc, Page p,
 										BTreePageItemLocator *loc, void *key,
 										BTreeKeyType kind, MemoryContext mcxt,
-										CommitSeqNo *out_csn, bool *deleted);
+										CommitSeqNo *out_csn, bool *deleted,
+										OSnapshot *oSnapshot,
+										TupleFetchCallback cb, void *arg,
+										bool *callbackStop);
 static OTuple fetch_tuple_from_page(BTreeDescr *desc, Page p,
 									BTreePageItemLocator *loc,
 									void *key, BTreeKeyType kind,
@@ -256,6 +259,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 	BTreePageHeader *header;
 	bool		combinedResult = false;
 	OTuple		result;
+	bool		callbackStop = false;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 	bool		forceFind = false;
 
@@ -304,8 +308,10 @@ retry:
 		 * the data page modified by us.
 		 */
 		result = fetch_our_tuple_from_page(desc, img, &loc, key, kind, mcxt,
-										   out_csn, deleted);
-		if (!O_TUPLE_IS_NULL(result))
+										   out_csn, deleted, read_o_snapshot,
+										   cb, arg,
+										   &callbackStop);
+		if (!O_TUPLE_IS_NULL(result) || callbackStop)
 			return result;
 
 		/*
@@ -354,6 +360,7 @@ o_btree_find_tuples_start(BTreeDescr *desc, void *key,
 	OBTreeFindPageContext *context;
 	BTreePageHeader *header;
 	OTuple		result;
+	bool		callbackStop = false;
 
 	/*
 	 * find_right_page()/find_left_page() navigate items[index - 1] through
@@ -457,8 +464,10 @@ o_btree_find_tuples_start(BTreeDescr *desc, void *key,
 		 * the data page modified by us.
 		 */
 		result = fetch_our_tuple_from_page(desc, img, &loc, key, kind, mcxt,
-										   out_csn, deleted);
-		if (!O_TUPLE_IS_NULL(result))
+										   out_csn, deleted, read_o_snapshot,
+										   cb, arg,
+										   &callbackStop);
+		if (!O_TUPLE_IS_NULL(result) || callbackStop)
 			return result;
 
 		load_page_from_undo(it, key, kind);
@@ -491,6 +500,7 @@ o_btree_find_tuples_continue(BTreeIterator *it,
 	Pointer		img = context->img;
 	BTreePageHeader *header = (BTreePageHeader *) img;
 	OTuple		result;
+	bool		callbackStop = false;
 
 	if (page_contains_key(it, key, kind, img, get_lokey_if_exists(it)))
 	{
@@ -561,8 +571,12 @@ o_btree_find_tuples_continue(BTreeIterator *it,
 		 * the data page modified by us.
 		 */
 		result = fetch_our_tuple_from_page(desc, img, loc, key, kind,
-										   it->tupleCxt, out_csn, deleted);
-		if (!O_TUPLE_IS_NULL(result))
+										   it->tupleCxt, out_csn, deleted,
+										   &it->oSnapshot,
+										   it->fetchCallback,
+										   it->fetchCallbackArg,
+										   &callbackStop);
+		if (!O_TUPLE_IS_NULL(result) || callbackStop)
 			return result;
 
 		if (it->combinedPage)
@@ -606,14 +620,18 @@ o_btree_find_tuples_finish(BTreeIterator *it)
 
 /*
  * Check if there is a matching tuple modified by us on the given location on
- * the page.  Return this tuple if so, or a null tuple otherwise.
+ * the page.  A callback may accept it, reject it and continue into page undo,
+ * or reject it and set callbackStop to end the lookup.
  */
 static OTuple
 fetch_our_tuple_from_page(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 						  void *key, BTreeKeyType kind, MemoryContext mcxt,
-						  CommitSeqNo *out_csn, bool *deleted)
+						  CommitSeqNo *out_csn, bool *deleted,
+						  OSnapshot *oSnapshot,
+						  TupleFetchCallback cb, void *arg,
+						  bool *callbackStop)
 {
-	OTuple		result;
+	OTuple		result = {0};
 
 	if (BTREE_PAGE_LOCATOR_IS_VALID(p, loc))
 	{
@@ -640,17 +658,31 @@ fetch_our_tuple_from_page(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 			if (!XACT_INFO_IS_LOCK_ONLY(tupHdr.xactInfo) &&
 				XACT_INFO_OXID_IS_CURRENT(tupHdr.xactInfo))
 			{
+				if (out_csn)
+					*out_csn = COMMITSEQNO_INPROGRESS;
+				if (deleted)
+					*deleted = (tupHdrPtr->deleted != BTreeLeafTupleNonDeleted);
+
+				if (cb)
+				{
+					TupleFetchCallbackResult cbResult;
+
+					cbResult = cb(curTuple,
+								  XACT_INFO_GET_OXID(tupHdr.xactInfo),
+								  oSnapshot, arg, false);
+					if (cbResult != OTupleFetchMatch)
+					{
+						*callbackStop = cbResult == OTupleFetchNotMatch;
+						O_TUPLE_SET_NULL(result);
+						return result;
+					}
+				}
+
 				/*
 				 * OK, we found the tuple modified by us.  It overrides
 				 * whatever we could have from the undo log page image. Return
 				 * it right away.
 				 */
-				if (out_csn)
-					*out_csn = COMMITSEQNO_INPROGRESS;
-
-				if (deleted)
-					*deleted = (tupHdrPtr->deleted != BTreeLeafTupleNonDeleted);
-
 				if (tupHdrPtr->deleted == BTreeLeafTupleNonDeleted)
 				{
 					result_size = o_btree_len(desc, curTuple, OTupleLength);
