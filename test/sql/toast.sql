@@ -747,6 +747,24 @@ SELECT count(*) AS rows_left FROM o_logical_small;
 SELECT * FROM pg_drop_replication_slot('regression_slot');
 DROP TABLE o_logical_small;
 
+-- Short-varlena TOAST chunks in logical decoding.
+-- When the last TOAST chunk is small enough (<=126 bytes), OrioleDB packs it
+-- with a 1-byte varlena header internally.  ReorderBufferToastReplace()
+-- requires 4-byte headers; without the expansion in o_convert_toast_chunk()
+-- VARSIZE() reads a garbage length and crashes.
+CREATE TABLE o_logical_short_chunk (
+	id integer PRIMARY KEY,
+	data text
+) USING orioledb WITH (compress = -1, toast_compress = -1, primary_compress = -1);
+SELECT slot_name FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);
+INSERT INTO o_logical_short_chunk
+	SELECT g, generate_string(g, g)
+	FROM generate_series(2000, 2200) g;
+SELECT count(*) > 0 AS ok
+	FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);
+SELECT * FROM pg_drop_replication_slot('regression_slot');
+DROP TABLE o_logical_short_chunk;
+
 CREATE TABLE IF NOT EXISTS o_test_toast_update_delete (
 	id integer PRIMARY KEY,
 	v1 text,
