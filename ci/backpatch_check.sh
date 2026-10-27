@@ -9,6 +9,10 @@
 # That is, a fix declares the backpatch decision for each of its commits, and
 # anything else declares nothing.
 #
+# When all commits say "Backpatch: stable", the script adds that line to the
+# pull request description so squash-merge commits carry it.  Removes it when
+# commits no longer declare backpatch.
+#
 # Environment: GH_TOKEN, GH_REPO (owner/name), PR_NUMBER, BASE_REF.
 # BUG_LABEL overrides the name of the label that marks a fix.
 #
@@ -129,6 +133,43 @@ fi
 
 if [ "$errors" -gt 0 ]; then
 	exit 1
+fi
+
+# Ensure the PR description carries "Backpatch: stable" for squash-merge
+# commit messages when all commits declare it; remove it when they don't.
+# Skip on "edited" events to avoid a loop: our own body edit triggers "edited".
+if [ "${EVENT_ACTION:-}" != "edited" ]; then
+	pr_body=$(gh_retry gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '.body // ""')
+	body_has_bp=false
+	if printf '%s\n' "$pr_body" | grep -qE '^Backpatch:[[:space:]]*stable[[:space:]]*$'; then
+		body_has_bp=true
+	fi
+
+	if [ "$n_bp_commits" -gt 0 ] && ! $body_has_bp; then
+		if [ -z "$pr_body" ]; then
+			new_body="Backpatch: stable"
+		else
+			new_body="${pr_body}"$'\n\n'"Backpatch: stable"
+		fi
+		bp_tmpfile=$(mktemp)
+		printf '%s' "$new_body" > "$bp_tmpfile"
+		if gh_retry gh pr edit "$PR_NUMBER" --repo "$GH_REPO" --body-file "$bp_tmpfile"; then
+			summary "Added \"Backpatch: stable\" to the pull request description for squash-merge."
+		else
+			echo "::warning::Could not update the pull request description (insufficient permissions?)."
+		fi
+		rm -f "$bp_tmpfile"
+	elif [ "$n_bp_commits" -eq 0 ] && $body_has_bp; then
+		new_body=$(printf '%s\n' "$pr_body" | sed '/^Backpatch:[[:space:]]*stable[[:space:]]*$/d')
+		bp_tmpfile=$(mktemp)
+		printf '%s' "$new_body" > "$bp_tmpfile"
+		if gh_retry gh pr edit "$PR_NUMBER" --repo "$GH_REPO" --body-file "$bp_tmpfile"; then
+			summary "Removed \"Backpatch: stable\" from the pull request description."
+		else
+			echo "::warning::Could not update the pull request description (insufficient permissions?)."
+		fi
+		rm -f "$bp_tmpfile"
+	fi
 fi
 
 if [ ${#declared[@]} -gt 0 ]; then
