@@ -27,7 +27,11 @@
    :ddl-operations 0
    :checkpoints-started 0
    :checkpoints-completed 0
+   :checkpoint-spanning-transactions 0
+   :checkpoint-spanning-commits 0
+   :checkpoint-spanning-rollbacks 0
    :verifications 0
+   :structural-verifications 0
    :recovery-probes 0
    :generation-changes 0
    :interrupted-checkpoints 0
@@ -53,6 +57,10 @@
                  (#{"57P01" "57P02" "57P03"} state))))
       (some? (re-find #"(?i)connection.*(closed|refused|reset)|broken pipe|socket|I/O error"
                       (or (.getMessage error) "")))))
+
+(defn serialization-failure? [^Throwable error]
+  (and (instance? SQLException error)
+       (= "40001" (.getSQLState ^SQLException error))))
 
 (defn atomic-json! [name value]
   (let [target (.toPath (io/file state-dir name))
@@ -260,6 +268,19 @@
          (verify-ddl-index-results! tx))
        {:phase phase :epoch epoch}))))
 
+(defn verify-ddl-state-retrying! [connection]
+  (loop [remaining 20]
+    (let [result (try
+                   {:value (verify-ddl-state! connection)}
+                   (catch Throwable error {:error error}))]
+      (if-let [error (:error result)]
+        (if (and (serialization-failure? error) (pos? remaining))
+          (do
+            (Thread/sleep 10)
+            (recur (dec remaining)))
+          (throw error))
+        (:value result)))))
+
 (defn verify-data! [connection]
   (let [result
         (in-transaction!
@@ -275,8 +296,12 @@
              (when-not (zero-values? bad-checksums)
                (throw (ex-info "deterministic checksum mismatch" bad-checksums)))
              (verify-indexes! tx)
-             {:differences differences :bad-checksums bad-checksums})))]
-    (verify-ddl-state! connection)
+             {:target-shadow-equal true
+              :checksums-valid true
+              :index-probes-valid true
+              :differences differences
+              :bad-checksums bad-checksums})))]
+    (verify-ddl-state-retrying! connection)
     (bump! :verifications)
     result))
 
@@ -438,6 +463,59 @@
     (bump! :checkpoints-completed)
     {:attempt attempt :generation [boot_id postmaster_start_time]}))
 
+(defn checkpoint-with-open-transaction! [checkpoint-connection transaction-connection process]
+  (let [auto-commit (.getAutoCommit ^Connection transaction-connection)]
+    (try
+      (.setAutoCommit ^Connection transaction-connection false)
+      (let [op-id (:op_id (execute-one!
+                           transaction-connection
+                           ["SELECT nextval('append_operation_id') AS op_id"]))
+            initial-payload (str "checkpoint-open:" op-id ":initial")
+            updated-payload (str "checkpoint-open:" op-id ":after-savepoint")
+            initial-checksum (md5 [op-id process initial-payload])
+            updated-checksum (md5 [op-id process updated-payload])
+            initial-values [op-id process initial-payload initial-checksum]]
+        (jdbc/execute! transaction-connection
+                       (into ["INSERT INTO o_append VALUES (?, ?, ?, ?)"]
+                             initial-values))
+        (jdbc/execute! transaction-connection
+                       (into ["INSERT INTO h_append VALUES (?, ?, ?, ?)"]
+                             initial-values))
+        (jdbc/execute! transaction-connection ["SAVEPOINT checkpoint_recovery_sp"])
+        (doseq [table ["o_append" "h_append"]]
+          (jdbc/execute! transaction-connection
+                         [(str "UPDATE " table
+                               " SET payload = ?, checksum = ? WHERE op_id = ?")
+                          updated-payload updated-checksum op-id]))
+        (let [savepoint-rolled-back? (random/bool)
+              commit? (random/bool)]
+          (when savepoint-rolled-back?
+            (jdbc/execute! transaction-connection
+                           ["ROLLBACK TO SAVEPOINT checkpoint_recovery_sp"]))
+          (let [checkpoint (checkpoint! checkpoint-connection "steady-state")]
+            (Thread/sleep (random/long 101))
+            (if commit?
+              (do
+                (.commit ^Connection transaction-connection)
+                (bump! :checkpoint-spanning-commits))
+              (do
+                (.rollback ^Connection transaction-connection)
+                (bump! :checkpoint-spanning-rollbacks)))
+            (bump! :checkpoint-spanning-transactions)
+            (assoc checkpoint
+                   :open-transaction {:op-id op-id
+                                      :outcome (if commit? :committed :rolled-back)
+                                      :savepoint-rolled-back savepoint-rolled-back?}))))
+      (catch Throwable error
+        (try (.rollback ^Connection transaction-connection) (catch Throwable _))
+        (throw error))
+      (finally
+        (try
+          (.setAutoCommit ^Connection transaction-connection auto-commit)
+          (catch Throwable _))))))
+
+(declare structural-verification!)
+
 (defn boot-number [boot-id]
   (some->> boot-id (re-find #"([0-9]+)$") second parse-long))
 
@@ -445,7 +523,6 @@
   (let [{:keys [boot_id postmaster_start_time] :as current} (generation connection)
         generation-key [boot_id postmaster_start_time]]
     (when-not (contains? @claimed-generations generation-key)
-      (swap! claimed-generations conj generation-key)
       (let [previous (execute-one!
                       connection
                       ["SELECT boot_id FROM recovery_probes
@@ -462,7 +539,15 @@
          (fn [tx]
            (jdbc/execute! tx ["INSERT INTO recovery_write_probe(note) VALUES ('rollback')"])
            (.rollback ^Connection tx)))
-        (verify-data! connection)
+        (try
+          (structural-verification! connection)
+          (verify-data! connection)
+          (catch Throwable error
+            ;; Retry connection interruptions, but report a safety failure only
+            ;; once for a generation whose recovered state was readable.
+            (when-not (retryable? error)
+              (swap! claimed-generations conj generation-key))
+            (throw error)))
         (let [interrupted (:count
                            (execute-one!
                             connection
@@ -476,6 +561,7 @@
                         boot_id postmaster_start_time])
         (bump! :recovery-probes)
         (checkpoint! connection "post-recovery")
+        (swap! claimed-generations conj generation-key)
         current))))
 
 (defn role [process]
@@ -527,7 +613,9 @@
                        opened))
             process (:process op)
             value (case (worker-role process)
-                    :checkpoint (checkpoint! conn "steady-state")
+                    :checkpoint (with-open [transaction-connection (pg/open test node)]
+                                  (checkpoint-with-open-transaction!
+                                   conn transaction-connection process))
                     :recovery (or (recovery-probe! conn) {:unchanged true})
                     :ddl (ddl! conn)
                     :append (append! conn process)
@@ -711,7 +799,9 @@
                               builder)]
       (when (seq rows)
         (throw (ex-info "verify_orioledb reported corruption"
-                        {:table table :rows (take 10 rows)}))))))
+                        {:table table :rows (take 10 rows)})))))
+  (bump! :structural-verifications)
+  true)
 
 (defn final-verification! []
   (let [test (environment-test)
@@ -723,40 +813,42 @@
          (fn [tx]
            (jdbc/execute! tx ["INSERT INTO recovery_write_probe(note) VALUES ('final rollback')"])
            (.rollback ^Connection tx)))
-        (verify-data! connection)
-        (checkpoint! connection "final")
-        (structural-verification! connection)
-        (verify-data! connection)
-        (let [ddl-verification (verify-ddl-state! connection)]
-        (jdbc/execute! connection
-                       ["INSERT INTO verification_epochs(boot_id, final) VALUES (?, true)"
-                        (:boot_id current)])
-        (let [database-counts (execute-one!
-                               connection
-                               ["SELECT
-                                   (SELECT count(*) FROM checkpoint_attempts WHERE completed_at IS NOT NULL) AS completed_checkpoints,
-                                   (SELECT count(*) FROM recovery_probes) AS recovery_probes,
-                                   (SELECT count(DISTINCT boot_id) FROM recovery_probes) AS ready_boots,
-                                   (SELECT count(*) FROM ddl_history) AS ddl_operations,
-                                   (SELECT count(DISTINCT boot_id) FROM ddl_history) AS ddl_boots,
-                                   (SELECT count(*) FROM checkpoint_attempts WHERE kind = 'post-recovery' AND completed_at IS NOT NULL) AS post_recovery_checkpoints,
-                                   (SELECT count(*) FROM checkpoint_attempts WHERE completed_boot_id = current_setting('cluster_name')) AS current_generation_checkpoints,
-                                   (SELECT count(*) FROM checkpoint_attempts WHERE completed_at IS NULL) AS incomplete_checkpoints"])
-              state-canary (io/file state-dir "volume-canary")
-              canary-verified (io/file state-dir "canary-verified-after-restart")
-              summary {:valid (and driver (:valid driver)
-                                   (zero? (:operation-failures driver 0)))
-                       :driver driver
-                       :database database-counts
-                       :generation current
-                       :boot-attempts (line-count (io/file state-dir "boot-attempts.jsonl"))
-                       :volume-canary-present (.isFile state-canary)
-                       :volume-canary-verified-after-restart (.isFile canary-verified)
-                       :ddl-verification ddl-verification
-                       :structural-verification true
-                       :finished-at (str (Instant/now))}]
-          (atomic-json! "final-summary.json" summary)
-          summary))))))
+        (let [pre-checkpoint-data-verification (verify-data! connection)]
+          (checkpoint! connection "final")
+          (let [structural-verification (structural-verification! connection)
+                data-verification (verify-data! connection)
+                ddl-verification (verify-ddl-state! connection)]
+            (jdbc/execute! connection
+                           ["INSERT INTO verification_epochs(boot_id, final) VALUES (?, true)"
+                            (:boot_id current)])
+            (let [database-counts (execute-one!
+                                   connection
+                                   ["SELECT
+                                       (SELECT count(*) FROM checkpoint_attempts WHERE completed_at IS NOT NULL) AS completed_checkpoints,
+                                       (SELECT count(*) FROM recovery_probes) AS recovery_probes,
+                                       (SELECT count(DISTINCT boot_id) FROM recovery_probes) AS ready_boots,
+                                       (SELECT count(*) FROM ddl_history) AS ddl_operations,
+                                       (SELECT count(DISTINCT boot_id) FROM ddl_history) AS ddl_boots,
+                                       (SELECT count(*) FROM checkpoint_attempts WHERE kind = 'post-recovery' AND completed_at IS NOT NULL) AS post_recovery_checkpoints,
+                                       (SELECT count(*) FROM checkpoint_attempts WHERE completed_boot_id = current_setting('cluster_name')) AS current_generation_checkpoints,
+                                       (SELECT count(*) FROM checkpoint_attempts WHERE completed_at IS NULL) AS incomplete_checkpoints"])
+                  state-canary (io/file state-dir "volume-canary")
+                  canary-verified (io/file state-dir "canary-verified-after-restart")
+                  summary {:valid (and driver (:valid driver)
+                                       (zero? (:operation-failures driver 0)))
+                           :driver driver
+                           :database database-counts
+                           :generation current
+                           :boot-attempts (line-count (io/file state-dir "boot-attempts.jsonl"))
+                           :volume-canary-present (.isFile state-canary)
+                           :volume-canary-verified-after-restart (.isFile canary-verified)
+                           :pre-checkpoint-data-verification pre-checkpoint-data-verification
+                           :data-verification data-verification
+                           :ddl-verification ddl-verification
+                           :structural-verification structural-verification
+                           :finished-at (str (Instant/now))}]
+              (atomic-json! "final-summary.json" summary)
+              summary)))))))
 
 (defn -main [& [mode]]
   (case mode

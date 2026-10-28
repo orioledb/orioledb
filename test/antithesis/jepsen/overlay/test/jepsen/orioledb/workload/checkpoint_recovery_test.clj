@@ -36,4 +36,8 @@
 (deftest retryable-errors
   (is (workload/retryable? (java.sql.SQLException. "closed" "08006")))
   (is (workload/retryable? (java.net.SocketException. "connection reset")))
-  (is (not (workload/retryable? (java.sql.SQLException. "bad data" "23514")))))
+  (is (not (workload/retryable? (java.sql.SQLException. "bad data" "23514"))))
+  (is (workload/serialization-failure?
+       (java.sql.SQLException. "concurrent update" "40001")))
+  (is (not (workload/serialization-failure?
+            (java.sql.SQLException. "bad data" "23514")))))

@@ -19,6 +19,7 @@
    "checkpoint recovery: transactional DDL remained consistent"
    "checkpoint recovery: DDL worker made progress"
    "checkpoint recovery: checkpoints made progress"
+   "checkpoint recovery: checkpoint overlapped an open transaction"
    "checkpoint recovery: verifier made progress"
    "checkpoint recovery: result artifact is readable"])
 
@@ -67,10 +68,11 @@
   (let [summary (read-summary)
         driver (:driver summary)
         database (:database summary)
+        data-verification (:data-verification summary)
         checks {"checkpoint recovery: final verification completed" (true? (:valid summary))
-                "checkpoint recovery: target and shadow data are equal" (true? (:structural-verification summary))
-                "checkpoint recovery: deterministic checksums are valid" (true? (:structural-verification summary))
-                "checkpoint recovery: native index probes are valid" (true? (:structural-verification summary))
+                "checkpoint recovery: target and shadow data are equal" (true? (:target-shadow-equal data-verification))
+                "checkpoint recovery: deterministic checksums are valid" (true? (:checksums-valid data-verification))
+                "checkpoint recovery: native index probes are valid" (true? (:index-probes-valid data-verification))
                 "checkpoint recovery: structural verification passed" (true? (:structural-verification summary))
                 "checkpoint recovery: driver reported no safety failures" (and (true? (:valid driver))
                                                                                  (zero? (:operation-failures driver 0)))
@@ -80,6 +82,7 @@
                 "checkpoint recovery: transactional DDL remained consistent" (map? (:ddl-verification summary))
                 "checkpoint recovery: DDL worker made progress" (pos? (:ddl_operations database 0))
                 "checkpoint recovery: checkpoints made progress" (pos? (:completed_checkpoints database 0))
+                "checkpoint recovery: checkpoint overlapped an open transaction" (pos? (:checkpoint-spanning-transactions driver 0))
                 "checkpoint recovery: verifier made progress" (pos? (:verifications driver 0))
                 "checkpoint recovery: result artifact is readable" (and (map? summary) (nil? (:read-error summary)))
                 "checkpoint recovery: postmaster generation changed" (pos? (:generation-changes driver 0))
