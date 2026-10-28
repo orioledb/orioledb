@@ -794,7 +794,7 @@ ANALYZE bitmap_test;
 
 SET enable_seqscan = off;
 SET cpu_tuple_cost = 0.5;
-SET random_page_cost = 1.0;
+SET random_page_cost = 0;
 
 CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND h < 100 OR j < 100 LIMIT 20);
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
