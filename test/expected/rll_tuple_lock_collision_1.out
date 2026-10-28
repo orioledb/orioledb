@@ -1,0 +1,185 @@
+Parsed test spec with 4 sessions
+
+starting permutation: begin_1 begin_3 ks_1_211 ks_1_9660 fu_3_211 begin_2 ks_2_211 fu_2_9660 rb_1 rb_2 rb_3
+step begin_1: BEGIN;
+step begin_3: BEGIN;
+step ks_1_211: SELECT id FROM o_hwlock WHERE id = 211 FOR KEY SHARE;
+ id
+---
+211
+(1 row)
+
+step ks_1_9660: SELECT id FROM o_hwlock WHERE id = 9660 FOR KEY SHARE;
+  id
+----
+9660
+(1 row)
+
+step fu_3_211: SELECT id FROM o_hwlock WHERE id = 211 FOR UPDATE; <waiting ...>
+step begin_2: BEGIN;
+step ks_2_211: SELECT id FROM o_hwlock WHERE id = 211 FOR KEY SHARE;
+ id
+---
+211
+(1 row)
+
+step fu_2_9660: SELECT id FROM o_hwlock WHERE id = 9660 FOR UPDATE; <waiting ...>
+step rb_1: ROLLBACK;
+step fu_2_9660: <... completed>
+  id
+----
+9660
+(1 row)
+
+step rb_2: ROLLBACK;
+step fu_3_211: <... completed>
+ id
+---
+211
+(1 row)
+
+step rb_3: ROLLBACK;
+
+starting permutation: begin_1 begin_3 begin_4 ks_4_211 ks_1_1 ks_3_9660 fu_3_1 begin_2 fu_2_9660 fu_1_211 rb_4 rb_1 rb_3 rb_2
+step begin_1: BEGIN;
+step begin_3: BEGIN;
+step begin_4: BEGIN;
+step ks_4_211: SELECT id FROM o_hwlock WHERE id = 211 FOR KEY SHARE;
+ id
+---
+211
+(1 row)
+
+step ks_1_1: SELECT id FROM o_hwlock WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step ks_3_9660: SELECT id FROM o_hwlock WHERE id = 9660 FOR KEY SHARE;
+  id
+----
+9660
+(1 row)
+
+step fu_3_1: SELECT id FROM o_hwlock WHERE id = 1 FOR UPDATE; <waiting ...>
+step begin_2: BEGIN;
+step fu_2_9660: SELECT id FROM o_hwlock WHERE id = 9660 FOR UPDATE; <waiting ...>
+step fu_1_211: SELECT id FROM o_hwlock WHERE id = 211 FOR UPDATE; <waiting ...>
+step rb_4: ROLLBACK;
+step fu_1_211: <... completed>
+ id
+---
+211
+(1 row)
+
+step rb_1: ROLLBACK;
+step fu_3_1: <... completed>
+id
+--
+ 1
+(1 row)
+
+step rb_3: ROLLBACK;
+step fu_2_9660: <... completed>
+  id
+----
+9660
+(1 row)
+
+step rb_2: ROLLBACK;
+
+starting permutation: begin_1 begin_3 ks_1_small8 fu_3_small8 show_tag rb_1 rb_3 begin_1 begin_3 ks_1_large8 fu_3_large8 show_tag rb_1 rb_3
+step begin_1: BEGIN;
+step begin_3: BEGIN;
+step ks_1_small8: SELECT id FROM o_hwlock8 WHERE id = 5000000000000 FOR KEY SHARE;
+           id
+-------------
+5000000000000
+(1 row)
+
+step fu_3_small8: SELECT id FROM o_hwlock8 WHERE id = 5000000000000 FOR UPDATE; <waiting ...>
+step show_tag: 
+	SELECT CASE WHEN tuple & 32768 <> 0
+				THEN 'key ' || ((tuple & 32767)::bigint << 32 | (page::bigint & 4294967295))
+				ELSE 'hash' END AS tuple_lock_id
+	FROM pg_locks WHERE locktype = 'tuple' AND granted;
+
+tuple_lock_id    
+-----------------
+key 5000000000000
+(1 row)
+
+step rb_1: ROLLBACK;
+step fu_3_small8: <... completed>
+           id
+-------------
+5000000000000
+(1 row)
+
+step rb_3: ROLLBACK;
+step begin_1: BEGIN;
+step begin_3: BEGIN;
+step ks_1_large8: SELECT id FROM o_hwlock8 WHERE id = 1125899906842624 FOR KEY SHARE;
+              id
+----------------
+1125899906842624
+(1 row)
+
+step fu_3_large8: SELECT id FROM o_hwlock8 WHERE id = 1125899906842624 FOR UPDATE; <waiting ...>
+step show_tag: 
+	SELECT CASE WHEN tuple & 32768 <> 0
+				THEN 'key ' || ((tuple & 32767)::bigint << 32 | (page::bigint & 4294967295))
+				ELSE 'hash' END AS tuple_lock_id
+	FROM pg_locks WHERE locktype = 'tuple' AND granted;
+
+tuple_lock_id
+-------------
+hash         
+(1 row)
+
+step rb_1: ROLLBACK;
+step fu_3_large8: <... completed>
+              id
+----------------
+1125899906842624
+(1 row)
+
+step rb_3: ROLLBACK;
+
+starting permutation: set_dt_short_3 begin_1 begin_3 ks_1_coll_A ks_1_coll_B fu_3_coll_A begin_2 ks_2_coll_A fu_2_coll_B rb_1 rb_3 rb_2
+step set_dt_short_3: SET deadlock_timeout = '10ms';
+step begin_1: BEGIN;
+step begin_3: BEGIN;
+step ks_1_coll_A: SELECT id FROM o_hwlock_coll WHERE id = 140737490556223 FOR KEY SHARE;
+             id
+---------------
+140737490556223
+(1 row)
+
+step ks_1_coll_B: SELECT id FROM o_hwlock_coll WHERE id = 140737501603420 FOR KEY SHARE;
+             id
+---------------
+140737501603420
+(1 row)
+
+step fu_3_coll_A: SELECT id FROM o_hwlock_coll WHERE id = 140737490556223 FOR UPDATE; <waiting ...>
+step begin_2: BEGIN;
+step ks_2_coll_A: SELECT id FROM o_hwlock_coll WHERE id = 140737490556223 FOR KEY SHARE;
+             id
+---------------
+140737490556223
+(1 row)
+
+step fu_2_coll_B: SELECT id FROM o_hwlock_coll WHERE id = 140737501603420 FOR UPDATE; <waiting ...>
+step rb_1: ROLLBACK;
+step fu_2_coll_B: <... completed>
+             id
+---------------
+140737501603420
+(1 row)
+
+step fu_3_coll_A: <... completed>
+ERROR:  deadlock detected
+step rb_3: ROLLBACK;
+step rb_2: ROLLBACK;
