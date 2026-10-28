@@ -250,6 +250,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/partial_index_recovery_test.py \
 						test/t/indices_build_test.py \
 						test/t/logical_test.py \
+						test/t/logical_heap_oriole_test.py \
 						test/t/logical_undo_retain_test.py \
 						test/t/logical_xid_leak_test.py \
 						test/t/logical_xid_subxacts_test.py \
