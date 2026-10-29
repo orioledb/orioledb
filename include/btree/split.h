@@ -26,6 +26,7 @@ typedef struct
 	int			maxKeyLen;
 	int			hikeysEnd;
 	bool		leaf;
+	bool		droppedTuple;	/* a finished deleted tuple was not copied */
 } BTreeSplitItems;
 
 extern void make_split_items(BTreeDescr *desc, Page page,
