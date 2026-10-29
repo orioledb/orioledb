@@ -1395,7 +1395,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 
 	if (forkNumber != MAIN_FORKNUM)
 	{
-		elog(DEBUG3, "Uunexpected fork number");
+		elog(DEBUG3, "Unexpected fork number");
 		return 0;
 	}
 
@@ -1406,7 +1406,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 
 		if (!is_orioledb_rel(rel))
 			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-							errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
+							errmsg("\"%s\" is not an orioledb table", NameStr(rel->rd_rel->relname))));
 		descr = relation_get_descr(rel);
 
 		if (method == TOTAL_SIZE)
@@ -1688,7 +1688,7 @@ orioledb_parallelscan_estimate(Relation rel)
 {
 	if (!is_orioledb_rel(rel))
 		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-						errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
+						errmsg("\"%s\" is not an orioledb table", NameStr(rel->rd_rel->relname))));
 
 	return sizeof(ParallelOScanDescData);
 }
@@ -1729,7 +1729,7 @@ orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan)
 
 	if (!is_orioledb_rel(rel))
 		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-						errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
+						errmsg("\"%s\" is not an orioledb table", NameStr(rel->rd_rel->relname))));
 
 #if PG_VERSION_NUM >= 180000
 	poscan->phs_base.phs_locator = rel->rd_locator;
@@ -1763,7 +1763,7 @@ orioledb_parallelscan_reinitialize(Relation rel, ParallelTableScanDesc pscan)
 {
 	if (!is_orioledb_rel(rel))
 		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-						errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
+						errmsg("\"%s\" is not an orioledb table", NameStr(rel->rd_rel->relname))));
 
 	orioledb_parallelscan_initialize_internal(pscan);
 }
@@ -2685,7 +2685,7 @@ relation_get_descr(Relation rel)
 	if (!is_orioledb_rel(rel))
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
+				 errmsg("\"%s\" is not an orioledb table", NameStr(rel->rd_rel->relname))));
 
 	if (rel->rd_amcache)
 		return (OTableDescr *) rel->rd_amcache;

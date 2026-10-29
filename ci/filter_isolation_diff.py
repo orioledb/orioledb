@@ -35,7 +35,7 @@ allowedRegexes = {
 	r"ERROR:  tuple to be locked has its primary key changed due to concurrent update": ["*"],
 	r"ERROR:  Not implemented: orioledb_tuple_tid_valid": ["*"],
 	r"ERROR:  Not implemented: orioledb_set_tidrange": ["*"],
-	r"ERROR:  orioledb tables does not support CLUSTER": ["*"],
+	r"ERROR:  orioledb tables do not support CLUSTER": ["*"],
 	r"ERROR:  orioledb table \"[a-z0-9_]+\" does not support VACUUM FULL": ["*"],
 	r"ERROR:  cannot use PREPARE TRANSACTION in transaction that uses orioledb table": ["*"],
 	r"c1      |(0,1) |0|0|4": ['eval-plan-qual'],

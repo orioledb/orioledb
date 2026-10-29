@@ -325,7 +325,7 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 		o_table = o_tables_get(oids);
 		if (o_table == NULL)
 		{
-			elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",
+			elog(FATAL, "orioledb table does not exist for oids = %u, %u, %u",
 				 (unsigned) oids.datoid, (unsigned) oids.reloid,
 				 (unsigned) oids.relnode);
 		}
@@ -351,7 +351,7 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 
 			if (nattrs_max + nattrs > INDEX_MAX_KEYS)
 			{
-				elog(ERROR, "too many fields in the primary index for exiting indices");
+				elog(ERROR, "too many fields in the primary index for existing indices");
 			}
 		}
 	}
@@ -508,7 +508,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	old_o_table = o_tables_get(oids);
 	if (old_o_table == NULL)
 	{
-		elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",
+		elog(FATAL, "orioledb table does not exist for oids = %u, %u, %u",
 			 (unsigned) oids.datoid, (unsigned) oids.reloid,
 			 (unsigned) oids.relnode);
 	}
@@ -538,7 +538,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 				old_o_table = o_tables_get(oids);
 				if (old_o_table == NULL)
 				{
-					elog(FATAL, "orioledb table does not exists "
+					elog(FATAL, "orioledb table does not exist "
 						 "for oids = %u, %u, %u",
 						 oids.datoid, oids.reloid, oids.relnode);
 				}
@@ -2776,7 +2776,7 @@ o_index_drop(Relation tbl, OIndexNumber ix_num)
 
 	if (o_table == NULL)
 	{
-		elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",
+		elog(FATAL, "orioledb table does not exist for oids = %u, %u, %u",
 			 (unsigned) oids.datoid, (unsigned) oids.reloid, (unsigned) oids.relnode);
 	}
 

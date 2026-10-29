@@ -559,7 +559,7 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 	}
 
 	att = SystemAttributeDefinition(attnum);
-	elog(ERROR, "orioledb tuples does not have system attribute: %s",
+	elog(ERROR, "orioledb tuples do not have system attribute: %s",
 		 att->attname.data);
 
 	return 0;					/* silence compiler warnings */

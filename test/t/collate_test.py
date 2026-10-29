@@ -445,8 +445,8 @@ class CollateTest(BaseTest):
 		self.assertErrorMessageEquals(
 		    e, "Cannot create database with encoding \"SQL_ASCII\" "
 		    "that is different from cluster encoding \"UTF8\"",
-		    "OrioleDB now only supports single encoding for all databases. "
-		    "It is easier to use single one during checkpoint.", "DETAIL")
+		    "OrioleDB now only supports a single encoding for all databases. "
+		    "It is easier to use a single one during checkpoint.", "DETAIL")
 
 		node.safe_psql('postgres',
 		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")

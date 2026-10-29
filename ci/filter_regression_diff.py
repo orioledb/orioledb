@@ -38,7 +38,7 @@ knownErrors = {
     r"ERROR:  tuple to be locked has its primary key changed due to concurrent update":
     ["*"],
     r"ERROR:  Not implemented: orioledb_tuple_tid_valid": ["*"],
-    r"ERROR:  orioledb tables does not support CLUSTER": ["*"],
+    r"ERROR:  orioledb tables do not support CLUSTER": ["*"],
     r"ERROR:  orioledb table \"[a-z0-9_]+\" does not support VACUUM FULL":
     ["*"],
     r"ERROR:  cannot use PREPARE TRANSACTION in transaction that uses orioledb table":
@@ -130,7 +130,7 @@ knownErrors = {
 
 # Regexps that allow us to completely skip comparasion of hunks containing these regexprs
 skip_hunk_errors = {
-	r"ERROR:  orioledb tuples does not have system attribute: xm(in|ax)":
+	r"ERROR:  orioledb tuples do not have system attribute: xm(in|ax)":
 	["update"],
 	# A cursor declared without SCROLL can be fetched backward only when the
 	# plan can run backward, and o_scan cannot: it fixes the scan direction at

@@ -1233,7 +1233,7 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 		ODBProcData *curProcData = GET_CUR_PROCDATA();
 
 		elog(PANIC,
-			 "undo_item_buf_read_item(): read of unexisting undo record with "
+			 "undo_item_buf_read_item(): read of nonexistent undo record with "
 			 "undoType = %d, location = %llu, "
 			 "transactionUndoRetainLocation = %llu, "
 			 "minProcRetainLocation = %llu, "
@@ -2273,7 +2273,7 @@ get_undo_record(UndoLogType undoType, UndoLocation *undoLocation, Size size)
 		UndoLocation location;
 
 		if (reserved_undo_sizes[(int) undoType] < size)
-			elog(PANIC, "get_undo_record(): not enough reserved undo (undoType: %d, reservedSize %u, requestedSize: %u",
+			elog(PANIC, "get_undo_record(): not enough reserved undo (undoType: %d, reservedSize: %u, requestedSize: %u)",
 				 (int) undoType,
 				 (unsigned int) reserved_undo_sizes[(int) undoType],
 				 (unsigned int) size);

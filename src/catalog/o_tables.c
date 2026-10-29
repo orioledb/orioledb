@@ -1563,7 +1563,7 @@ o_tables_evict_callback(OTable *o_table, void *arg)
 	if (!descr)
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("relation oid %u does not exists", o_table->oids.reloid)));
+				 errmsg("relation oid %u does not exist", o_table->oids.reloid)));
 
 	table_descr_inc_refcnt(descr);
 

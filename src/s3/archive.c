@@ -74,7 +74,7 @@ make_preload_hash(void)
 	hash_ctl.match = preload_item_match;
 	hash_ctl.hcxt = TopMemoryContext;
 	preloadHash =
-		hash_create("WAL files to be archieved to S3",
+		hash_create("WAL files to be archived to S3",
 					32L,
 					&hash_ctl,
 					HASH_ELEM | HASH_FUNCTION | HASH_COMPARE | HASH_CONTEXT);

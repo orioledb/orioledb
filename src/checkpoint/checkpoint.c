@@ -3446,7 +3446,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 						  WAIT_EVENT_DATA_FILE_READ) != map_extents_bytes)
 			{
 				ereport(FATAL, (errcode_for_file_access(),
-								errmsg("could not to read extents from file %s: %m",
+								errmsg("could not read extents from file %s: %m",
 									   filename)));
 			}
 
@@ -3459,7 +3459,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 							 WAIT_EVENT_DATA_FILE_TRUNCATE) < 0)
 			{
 				ereport(FATAL, (errcode_for_file_access(),
-								errmsg("could not to truncate file %s: %m",
+								errmsg("could not truncate file %s: %m",
 									   filename)));
 			}
 		}
@@ -3474,7 +3474,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 						   write_bytes, write_offset, WAIT_EVENT_SLRU_WRITE) != write_bytes)
 			{
 				ereport(FATAL, (errcode_for_file_access(),
-								errmsg("could not to write extents to file %s: %m",
+								errmsg("could not write extents to file %s: %m",
 									   filename)));
 			}
 			header.numFreeBlocks = free_extents->size;
@@ -3521,7 +3521,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 								   WAIT_EVENT_SLRU_WRITE) != write_buf_len)
 					{
 						ereport(FATAL, (errcode_for_file_access(),
-										errmsg("could not to write extents to file %s: %m",
+										errmsg("could not write extents to file %s: %m",
 											   filename)));
 					}
 					write_offset += write_buf_len;
@@ -3539,7 +3539,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 							   WAIT_EVENT_SLRU_WRITE) != write_buf_len)
 				{
 					ereport(FATAL, (errcode_for_file_access(),
-									errmsg("could not to write extents to file %s: %m",
+									errmsg("could not write extents to file %s: %m",
 										   filename)));
 				}
 			}
@@ -6125,7 +6125,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			if (ferror)
 			{
 				ereport(FATAL, (errcode_for_file_access(),
-								errmsg("could not to read header of map file %s: %m",
+								errmsg("could not read header of map file %s: %m",
 									   prev_chkp_fname)));
 			}
 			FileClose(prev_chkp_file);

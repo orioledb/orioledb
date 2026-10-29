@@ -745,7 +745,7 @@ _PG_init(void)
 							NULL);
 
 	DefineCustomIntVariable("orioledb.catalog_buffers",
-							"Size of orioledb engine shared buffers for free extents BTrees.",
+							"Size of orioledb engine shared buffers for catalog BTrees.",
 							NULL,
 							&catalog_buffers_guc,
 							min_pool_size,
@@ -788,7 +788,7 @@ _PG_init(void)
 
 
 	DefineCustomRealVariable("orioledb.regular_block_undo_circular_buffer_fraction",
-							 "Fraction of cirucular buffer for block-level undo of regular tables.",
+							 "Fraction of circular buffer for block-level undo of regular tables.",
 							 NULL,
 							 &regular_block_undo_circular_buffer_fraction,
 							 0.45,
@@ -801,7 +801,7 @@ _PG_init(void)
 							 NULL);
 
 	DefineCustomRealVariable("orioledb.system_undo_circular_buffer_fraction",
-							 "Fraction of cirucular buffer for undo of system trees.",
+							 "Fraction of circular buffer for undo of system trees.",
 							 NULL,
 							 &system_undo_circular_buffer_fraction,
 							 0.10,
@@ -1525,7 +1525,7 @@ _PG_init(void)
 												 ALLOCSET_DEFAULT_SIZES);
 
 	btree_seqscan_context = AllocSetContextCreate(TopMemoryContext,
-												  "orioledb B-tree seqential scans context",
+												  "orioledb B-tree sequential scans context",
 												  ALLOCSET_DEFAULT_SIZES);
 
 	/* Setup the required hooks. */
@@ -1775,7 +1775,7 @@ orioledb_shmem_startup(void)
 	 */
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
 
-	shared_segment = ShmemInitStruct("orioledb_enigne",
+	shared_segment = ShmemInitStruct("orioledb_engine",
 									 orioledb_memsize(),
 									 &found);
 	ptr = shared_segment;

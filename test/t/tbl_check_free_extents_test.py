@@ -14,8 +14,8 @@ class TblCheckFreeExtentsTest(BaseTest):
 	file was written -- by the bgwriter rewriting a page, by a merge, by a
 	copy-blkno rewrite -- belonged to neither set:
 
-	    NOTICE:  Extent 0 460 is neither free or busy
-	    NOTICE:  Extent 461 322 is neither free or busy
+	    NOTICE:  Extent 0 460 is neither free nor busy
+	    NOTICE:  Extent 461 322 is neither free nor busy
 
 	against a tree that is perfectly sound.  A checkpoint right before the
 	check hid it, which is why it surfaced as a flake: `evict_stale_descr_test`
