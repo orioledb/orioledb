@@ -14,7 +14,7 @@ from testgres.enums import NodeStatus
 from testgres.exceptions import StartNodeException, QueryException
 
 from .s3_base_test import S3BaseTest, s3_test_attrs, mock_put_object, \
- mock_put_object_conflict, mock_moto_unkown_error
+ mock_put_object_conflict, mock_moto_unknown_error
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
@@ -854,9 +854,9 @@ class S3Test(S3BaseTest):
 				    'FATAL:  failed to create a lock file "data/orioledb_data/s3_lock" because of a concurrent process',
 				    f.read())
 
-		# Test unkown error handling
+		# Test unknown error handling
 		with patch("moto.s3.responses.S3Response.put_object",
-		           new=mock_moto_unkown_error):
+		           new=mock_moto_unknown_error):
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
 

@@ -314,7 +314,7 @@ class PageFitItemsTest(BaseTest):
 	# Temporary commented failing test, for review,
 	# need to check startup_page_filling for correctness
 	#
-	#	def test_new_tuple_free_space_enought_fit_as_is(self):
+	#	def test_new_tuple_free_space_enough_fit_as_is(self):
 	#
 	#		node = self.node
 	#
@@ -332,7 +332,7 @@ class PageFitItemsTest(BaseTest):
 		TupleNew >  FreeSpace (No Vacated)
 	'''
 
-	def test_new_tuple_free_space_not_enought_fit_split(self):
+	def test_new_tuple_free_space_not_enough_fit_split(self):
 
 		node = self.node
 
@@ -353,7 +353,7 @@ class PageFitItemsTest(BaseTest):
 		TupleNew <  FreeSpace + Vacated
 	'''
 
-	def test_new_tuple_sum_free_and_vacated_enought_fit_compact(self):
+	def test_new_tuple_sum_free_and_vacated_enough_fit_compact(self):
 
 		node = self.node
 
@@ -385,7 +385,7 @@ class PageFitItemsTest(BaseTest):
 		TupleNew >  FreeSpace + Vacated
 	'''
 
-	def test_new_tuple_free_and_vacated_not_enought_fit_split(self):
+	def test_new_tuple_free_and_vacated_not_enough_fit_split(self):
 
 		node = self.node
 
@@ -446,7 +446,7 @@ class PageFitItemsTest(BaseTest):
 		TupleReplace < FreeSpace + TupleOld
 	'''
 
-	def test_replace_free_space_enought_fit_as_is(self):
+	def test_replace_free_space_enough_fit_as_is(self):
 
 		node = self.node
 
@@ -541,7 +541,7 @@ class PageFitItemsTest(BaseTest):
 		TupleReplace < FreeeSpace + Vacated(self tuple)
 	'''
 
-	def test_replace_encrease_self_vacated_enought_fit_compact(self):
+	def test_replace_increase_self_vacated_enough_fit_compact(self):
 
 		node = self.node
 
@@ -574,7 +574,7 @@ class PageFitItemsTest(BaseTest):
 		TupleReplace > FreeeSpace + Vacated(self tuple)
 	'''
 
-	def test_replace_encrease_self_vacated_fit_split(self):
+	def test_replace_increase_self_vacated_fit_split(self):
 
 		node = self.node
 
@@ -599,7 +599,7 @@ class PageFitItemsTest(BaseTest):
 
 		node.stop()
 
-	def test_replace_drop_in_first_trasaction_commit(self):
+	def test_replace_drop_in_first_transaction_commit(self):
 
 		node = self.node
 
@@ -637,7 +637,7 @@ class PageFitItemsTest(BaseTest):
 		con2.close()
 		node.stop()
 
-	def test_replace_drop_in_first_trasaction_rollback(self):
+	def test_replace_drop_in_first_transaction_rollback(self):
 
 		node = self.node
 
@@ -672,7 +672,7 @@ class PageFitItemsTest(BaseTest):
 		con2.close()
 		node.stop()
 
-	def test_replace_drop_in_second_trasaction_rollback(self):
+	def test_replace_drop_in_second_transaction_rollback(self):
 
 		node = self.node
 

@@ -876,7 +876,7 @@ orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
 	field->align = attr->attalign;
 	field->storage = attr->attstorage;
 	field->compression = attr->attcompression;
-	field->droped = attr->attisdropped;
+	field->dropped = attr->attisdropped;
 	field->notnull = attr->attnotnull;
 	field->hasmissing = attr->atthasmissing;
 	field->hasdef = attr->atthasdef;
@@ -2027,7 +2027,7 @@ describe_table(ORelOids oids)
 						 typename,
 						 colname ? colname : "(null)",
 						 field->notnull ? "false" : "true",
-						 field->droped ? "true" : "false");
+						 field->dropped ? "true" : "false");
 		if (orioledb_table_description_compress)
 		{
 			const char *compression = "";
@@ -2240,7 +2240,7 @@ o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name,
 	att->attgenerated = field->generated;
 	att->atthasmissing = field->hasmissing;
 	att->attidentity = '\0';
-	att->attisdropped = field->droped;
+	att->attisdropped = field->dropped;
 	att->attislocal = true;
 	att->attinhcount = 0;
 
@@ -2640,9 +2640,9 @@ o_tables_drop_columns_with_type_callback(OTable *o_table, void *arg)
 	{
 		OTableField *o_field = &o_table->fields[i];
 
-		if (drop_arg->type_oid == o_field->typid && !o_field->droped)
+		if (drop_arg->type_oid == o_field->typid && !o_field->dropped)
 		{
-			o_field->droped = true;
+			o_field->dropped = true;
 			updated = true;
 		}
 	}

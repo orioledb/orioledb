@@ -73,7 +73,7 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 		    [0][0])
 		node.stop()
 
-	def test_checkpoint_split_concurrent_midle(self):
+	def test_checkpoint_split_concurrent_middle(self):
 		node = self.node
 		node.append_conf('postgresql.conf',
 		                 "orioledb.enable_stopevents = true\n")

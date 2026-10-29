@@ -5915,7 +5915,7 @@ workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 
 	Assert(cur_recovery_xid_state);
 
-	msg.header.type = RecoveryMsgTypeRollbackToSavepointt;
+	msg.header.type = RecoveryMsgTypeRollbackToSavepoint;
 	msg.oxid = cur_recovery_xid_state->oxid;
 	msg.ptr = ptr;
 	msg.parentSubId = parentSubId;

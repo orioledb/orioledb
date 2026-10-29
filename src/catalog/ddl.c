@@ -3816,12 +3816,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				{
 					o_field = &o_table->fields[subId - 1];
 
-					if (o_field && !o_field->droped)
+					if (o_field && !o_field->dropped)
 					{
 						OSnapshot	oSnapshot;
 						OXid		oxid;
 
-						o_field->droped = true;
+						o_field->dropped = true;
 
 						fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 						o_tables_rel_meta_lock(rel);
@@ -5326,7 +5326,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					{
 						int			attnum = attnums[i];
 
-						if (attnum > 0 && attnum <= o_table->nfields && !o_table->fields[attnum - 1].droped)
+						if (attnum > 0 && attnum <= o_table->nfields && !o_table->fields[attnum - 1].dropped)
 						{
 							if (o_table->fields[attnum - 1].notnull != is_add)
 							{

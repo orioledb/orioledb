@@ -794,7 +794,7 @@ try_lock_page(OInMemoryBlkno blkno)
  * No existing callers.
  */
 void
-delare_page_as_locked(OInMemoryBlkno blkno)
+declare_page_as_locked(OInMemoryBlkno blkno)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 

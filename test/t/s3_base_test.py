@@ -77,8 +77,8 @@ def mock_put_object_conflict(self) -> TYPE_RESPONSE:
 	raise ConditionalRequestConflict("If-None-Match")
 
 
-def mock_moto_unkown_error(self) -> TYPE_RESPONSE:
-	raise InvalidRequest("mock_moto_unkown_error")
+def mock_moto_unknown_error(self) -> TYPE_RESPONSE:
+	raise InvalidRequest("mock_moto_unknown_error")
 
 
 # TODO: re-enable under valgrind once s3_header_mark_part_loaded race is fixed

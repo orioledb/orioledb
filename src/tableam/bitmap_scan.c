@@ -220,7 +220,7 @@ uint64_get_val(uint64 val, Oid typeoid, Pointer ptr)
 }
 
 static uint64
-seconary_tuple_get_pk_data(OTuple tuple, OIndexDescr *ix_descr)
+secondary_tuple_get_pk_data(OTuple tuple, OIndexDescr *ix_descr)
 {
 	AttrNumber	attnum;
 	Form_pg_attribute attr;
@@ -854,7 +854,7 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 					if (indexDescr->desc.type == oIndexPrimary)
 						data = primary_tuple_get_data(tuple, indexDescr, false);
 					else
-						data = seconary_tuple_get_pk_data(tuple, indexDescr);
+						data = secondary_tuple_get_pk_data(tuple, indexDescr);
 					o_keybitmap_insert(bitmap, data);
 				}
 			}
@@ -2291,7 +2291,7 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 				}
 				else
 				{
-					data = seconary_tuple_get_pk_data(bridge_tup, bridge);
+					data = secondary_tuple_get_pk_data(bridge_tup, bridge);
 					o_keybitmap_insert(scan->arg.bitmap, data);
 				}
 
@@ -2355,7 +2355,7 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 			if (O_TUPLE_IS_NULL(tup))
 				break;
 
-			data = seconary_tuple_get_pk_data(tup, bridge);
+			data = secondary_tuple_get_pk_data(tup, bridge);
 			o_keybitmap_insert(scan->arg.bitmap, data);
 			iter->page_ntuples++;
 

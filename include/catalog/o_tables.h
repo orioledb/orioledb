@@ -35,7 +35,7 @@ typedef struct
 	int32		typmod BKI_DEFAULT(-1);
 	int32		ndims;
 	bool		byval;
-	bool		droped;
+	bool		dropped;
 	bool		notnull;
 	int16		typlen;
 	char		align;
@@ -335,7 +335,7 @@ o_table_fieldnum(OTable *table, const char *name)
 
 	for (i = 0; i < table->nfields; i++)
 	{
-		if (table->fields[i].droped)
+		if (table->fields[i].dropped)
 			continue;
 		if (pg_strcasecmp(NameStr(table->fields[i].name), name) == 0)
 			return i;
