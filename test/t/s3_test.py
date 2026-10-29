@@ -13,6 +13,7 @@ from testgres.defaults import default_dbname
 from testgres.enums import NodeStatus
 from testgres.exceptions import StartNodeException, QueryException
 
+from .base_test import BaseTest
 from .s3_base_test import S3BaseTest, s3_test_attrs, mock_put_object, \
  mock_put_object_conflict, mock_moto_unkown_error
 
@@ -1079,3 +1080,14 @@ class S3Test(S3BaseTest):
 				)
 
 				new_node.cleanup()
+
+
+class S3QueueTest(BaseTest):
+
+	def test_s3_queue_wraparound(self):
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		self.assertEqual(
+		    node.execute("SELECT orioledb_test_s3_queue_wraparound();")[0][0],
+		    0)
