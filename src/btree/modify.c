@@ -74,6 +74,7 @@ typedef struct
 	UndoLocation savepointUndoLocation;
 	BTreeModifyCallbackInfo *callbackInfo;
 	int			conflictRetries;
+	bool		hwLockCollisionSkip;
 } BTreeModifyInternalContext;
 
 typedef enum ConflictResolution
@@ -158,6 +159,7 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	context.pageReserveKind = pageReserveKind;
 	context.callbackInfo = callbackInfo;
 	context.conflictRetries = 0;
+	context.hwLockCollisionSkip = false;
 
 	Assert(callbackInfo);
 	Assert((action != BTreeOperationInsert) || (tupleType == BTreeKeyLeafTuple));
@@ -457,7 +459,10 @@ unlock_release(BTreeModifyInternalContext *context, bool unlock)
 		ppool_release_reserved(desc->ppool,
 							   PPOOL_KIND_GET_MASK(context->pageReserveKind));
 	if (context->hwLockMode != NoLock)
+	{
 		LockRelease(&context->hwLockTag, context->hwLockMode, false);
+		GET_CUR_PROCDATA()->tupleLockActive = false;
+	}
 }
 
 /*
@@ -512,14 +517,68 @@ make_tuple_lock_tag(BTreeDescr *desc, OTuple tuple, LOCKTAG *tag)
 		id = PG_UINT64_MAX;
 
 	if (id <= TUPLE_LOCK_ID_MASK)
+	{
 		id |= TUPLE_LOCK_EXACT_KEY;
+	}
 	else
+	{
+		ODBProcData *my = GET_CUR_PROCDATA();
+
 		id = hash_bytes_extended((const unsigned char *) key.tuple.data,
 								 len, key.tuple.formatFlags) &
 			TUPLE_LOCK_ID_MASK;
 
+		my->tupleLockKeyFingerprint =
+			hash_bytes_extended((const unsigned char *) key.tuple.data,
+								len, key.tuple.formatFlags + 1);
+		SET_LOCKTAG_TUPLE(my->tupleLockTag,
+						  desc->oids.datoid, desc->oids.reloid,
+						  (uint32) id, (uint16) (id >> 32));
+		pg_write_barrier();
+		my->tupleLockActive = true;
+	}
+
 	SET_LOCKTAG_TUPLE(*tag, desc->oids.datoid, desc->oids.reloid,
 					  (uint32) id, (uint16) (id >> 32));
+}
+
+/*
+ * deadlock_resolve_hook callback: called from CheckDeadLock when a hard
+ * deadlock is detected, while all lock-manager partition locks are held.
+ *
+ * Check whether this backend published a hashed LOCKTAG_TUPLE and another
+ * backend holds the same tag with a different key fingerprint.  If so, the
+ * deadlock is a false cycle caused by a hash collision; return true so
+ * LockAcquire returns LOCKACQUIRE_NOT_AVAIL instead of raising ERROR.
+ */
+bool
+o_deadlock_resolve_hook(PGPROC *proc, LOCK *waitLock)
+{
+	ODBProcData *my = GET_CUR_PROCDATA();
+	int			i;
+
+	if (!my->tupleLockActive)
+		return false;
+
+	for (i = 0; i < max_procs; i++)
+	{
+		ODBProcData *other = &oProcData[i];
+
+		if (other == my || !other->tupleLockActive)
+			continue;
+
+		pg_read_barrier();
+
+		if (memcmp(&other->tupleLockTag, &my->tupleLockTag,
+				   sizeof(LOCKTAG)) == 0 &&
+			other->tupleLockKeyFingerprint != my->tupleLockKeyFingerprint)
+		{
+			my->tupleLockCollisionDetected = true;
+			return true;
+		}
+	}
+
+	return false;
 }
 
 /*
@@ -527,23 +586,44 @@ make_tuple_lock_tag(BTreeDescr *desc, OTuple tuple, LOCKTAG *tag)
  *
  * *hwLockTag must have been made by make_tuple_lock_tag() if we are going to
  * queue on the tuple lock: when we hold no lock on the tuple yet.
+ *
+ * *collisionSkip is set when a prior call caught a hash-collision deadlock on
+ * the tuple lock, in which case the lock is skipped to avoid re-entering the
+ * same false cycle.
  */
 static void
 wait_for_tuple(OXid oxid, RowLockMode lockMode,
 			   BTreeModifyLockStatus lockStatus,
-			   LOCKTAG *hwLockTag, LOCKMODE *hwLockMode)
+			   LOCKTAG *hwLockTag, LOCKMODE *hwLockMode,
+			   bool *collisionSkip)
 {
-	/*
-	 * Acquire the lock, if necessary (but skip it when we're requesting a
-	 * lock and already have one; avoids deadlock).
-	 */
-	if (*hwLockMode == NoLock && lockStatus == BTreeModifyNoLock)
+	if (*hwLockMode == NoLock && lockStatus == BTreeModifyNoLock &&
+		!*collisionSkip)
 	{
 		*hwLockMode = hwLockModes[lockMode];
-		(void) LockAcquire(hwLockTag, *hwLockMode, false, false);
+		if (LockAcquire(hwLockTag, *hwLockMode, false, false) == LOCKACQUIRE_NOT_AVAIL)
+		{
+			*hwLockMode = NoLock;
+			*collisionSkip = true;
+			GET_CUR_PROCDATA()->tupleLockActive = false;
+			GET_CUR_PROCDATA()->tupleLockCollisionDetected = false;
+			return;
+		}
 	}
 
 	wait_for_oxid(oxid, false);
+
+	if (GET_CUR_PROCDATA()->tupleLockCollisionDetected)
+	{
+		GET_CUR_PROCDATA()->tupleLockCollisionDetected = false;
+		if (*hwLockMode != NoLock)
+		{
+			LockRelease(hwLockTag, *hwLockMode, false);
+			*hwLockMode = NoLock;
+		}
+		*collisionSkip = true;
+		GET_CUR_PROCDATA()->tupleLockActive = false;
+	}
 }
 
 /*
@@ -750,7 +830,8 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 								   context->lockMode,
 								   context->lockStatus,
 								   &context->hwLockTag,
-								   &context->hwLockMode);
+								   &context->hwLockMode,
+								   &context->hwLockCollisionSkip);
 				else if (cbAction == OBTreeCallbackActionXidExit)
 					return ConflictResolutionFound;
 				else

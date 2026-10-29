@@ -299,6 +299,22 @@ typedef struct
 	 * published per backend and read by the one process that cares.
 	 */
 	pg_atomic_uint32 pinnedMetaPageBlkno;
+
+	/*
+	 * When this backend holds a hashed LOCKTAG_TUPLE (bit 47 clear in the
+	 * id), these fields let the deadlock_resolve_hook tell a real conflict
+	 * (same key) from a hash collision (different key, safe to retry).
+	 * Written before LockAcquire, cleared after LockRelease; tupleLockActive
+	 * == false means inactive.
+	 *
+	 * tupleLockCollisionDetected is set by the hook when it resolves a
+	 * collision deadlock; the caller checks and clears it afterward.
+	 */
+	LOCKTAG		tupleLockTag;
+	uint64		tupleLockKeyFingerprint;
+	bool		tupleLockActive;
+	bool		tupleLockCollisionDetected;
+
 	UndoStackSharedLocations undoStackLocations[PROC_XID_ARRAY_SIZE][(int) UndoLogsCount];
 	XidVXidMapElement vxids[PROC_XID_ARRAY_SIZE];
 } ODBProcData;
