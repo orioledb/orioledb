@@ -69,13 +69,19 @@ class LogicalHeapOrioleMixin:
 		end = "ROLLBACK" if rollback else "COMMIT"
 		node.safe_psql(";".join(["BEGIN"] + statements + [end]))
 
-	def wait_for_log(self, node, text, timeout=WAIT_TIMEOUT_S):
-		"""Wait until `text` shows up in the server log of `node`."""
+	def wait_for_log(self, node, texts, timeout=WAIT_TIMEOUT_S):
+		"""
+		Wait until one of `texts` (a string or a list of strings) shows up in
+		the server log of `node`.
+		"""
+		if isinstance(texts, str):
+			texts = [texts]
 		deadline = time.time() + timeout
 		while time.time() < deadline:
 			with open(node.pg_log_file) as f:
-				if text in f.read():
-					return True
+				log = f.read()
+			if any(text in log for text in texts):
+				return True
 			time.sleep(0.2)
 		return False
 
@@ -461,10 +467,13 @@ class LogicalHeapOrioleMixin:
 				]
 				publisher.safe_psql(";".join(sql))
 
+				# PostgreSQL 18 reports a heap subscriber's conflict as
+				# "conflict=insert_exists" instead of a plain unique violation
 				self.assertTrue(
-				    self.wait_for_log(
-				        subscriber,
-				        "duplicate key value violates unique constraint"))
+				    self.wait_for_log(subscriber, [
+				        "duplicate key value violates unique constraint",
+				        "conflict=insert_exists",
+				    ]))
 				# The transaction is applied as a whole or not at all
 				self.assertListEqual(
 				    subscriber.execute('SELECT * FROM t ORDER BY id'),
