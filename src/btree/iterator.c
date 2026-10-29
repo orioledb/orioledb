@@ -172,9 +172,9 @@ static bool btree_iterator_check_load_next_page(BTreeIterator *it,
 static OTuple o_btree_iterator_fetch_internal(BTreeIterator *it,
 											  CommitSeqNo *tupleCsn,
 											  BtreeIterationEnd *end);
-static bool o_btree_interator_can_fetch_from_undo(BTreeDescr *desc,
-												  BTreeIterator *it,
-												  BtreeIterationEnd *end);
+static bool o_btree_iterator_can_fetch_from_undo(BTreeDescr *desc,
+												 BTreeIterator *it,
+												 BtreeIterationEnd *end);
 static bool can_fetch_from_undo(BTreeIterator *it);
 static void undo_it_create(UndoIterator *undoIt, BTreeIterator *it);
 static void undo_it_init(UndoIterator *undoIt, UndoLocation location, void *key, BTreeKeyType kind);
@@ -1957,7 +1957,7 @@ btree_iterator_check_load_next_page(BTreeIterator *it, BtreeIterationEnd *end)
 	BTreeDescr *desc = context->desc;
 	OFixedKey	key_buf;
 
-	if (o_btree_interator_can_fetch_from_undo(context->desc, it, end))
+	if (o_btree_iterator_can_fetch_from_undo(context->desc, it, end))
 		return true;
 
 	while (!BTREE_PAGE_LOCATOR_IS_VALID(img, &context->items[context->index].locator))
@@ -2035,7 +2035,7 @@ btree_iterator_check_load_next_page(BTreeIterator *it, BtreeIterationEnd *end)
 			bool		reload = true;
 
 			if (it->combinedPage)
-				reload = !o_btree_interator_can_fetch_from_undo(context->desc, it, NULL);
+				reload = !o_btree_iterator_can_fetch_from_undo(context->desc, it, NULL);
 
 			if (reload)
 			{
@@ -2077,8 +2077,8 @@ btree_iterator_check_load_next_page(BTreeIterator *it, BtreeIterationEnd *end)
  * Can we fetch more pages form undo page image?
  */
 static bool
-o_btree_interator_can_fetch_from_undo(BTreeDescr *desc, BTreeIterator *it,
-									  BtreeIterationEnd *end)
+o_btree_iterator_can_fetch_from_undo(BTreeDescr *desc, BTreeIterator *it,
+									 BtreeIterationEnd *end)
 {
 	Page		hImg = it->undoIt.image,
 				img = it->context.img;

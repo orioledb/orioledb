@@ -571,7 +571,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				setup_sql = """
 					CREATE EXTENSION IF NOT EXISTS orioledb;
@@ -639,7 +639,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				setup_sql = """
 					CREATE EXTENSION IF NOT EXISTS orioledb;
@@ -791,7 +791,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 
 				publisher.safe_psql(setup_sql)
@@ -1045,7 +1045,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 
 				publisher.safe_psql(setup_sql)
@@ -1132,7 +1132,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 
 				publisher.safe_psql(setup_sql)
@@ -1527,7 +1527,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				create_sql = f"""
 					CREATE EXTENSION IF NOT EXISTS orioledb;
@@ -2165,7 +2165,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				create_sql = """
 					CREATE EXTENSION IF NOT EXISTS orioledb;
@@ -2271,7 +2271,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 
 			with subscriber.start() as subscriber:
 				create_sql = """
@@ -2478,7 +2478,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 
 			with subscriber.start() as subscriber:
 				create_sql = """
@@ -2562,7 +2562,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 
 			with subscriber.start() as subscriber:
 				create_sql = """
@@ -2836,7 +2836,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 
 			with subscriber.start() as subscriber:
 				create_sql = """
@@ -3069,7 +3069,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				setup_sql = """
 					CREATE EXTENSION IF NOT EXISTS orioledb;
@@ -3120,7 +3120,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				publisher.safe_psql("""
 					CREATE EXTENSION IF NOT EXISTS orioledb;
@@ -3158,7 +3158,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				setup_sql = "CREATE EXTENSION IF NOT EXISTS orioledb;"
 				publisher.safe_psql(setup_sql)
@@ -3360,7 +3360,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				sub = self.setup_rewrite_crash_subscription(
 				    publisher, subscriber)
@@ -3393,7 +3393,7 @@ COMMIT\n""")
 			                      "orioledb.enable_stopevents = true\n")
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				sub = self.setup_rewrite_crash_subscription(
 				    publisher, subscriber)

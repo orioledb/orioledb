@@ -3109,7 +3109,7 @@ void
 undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 					  SubTransactionId parentSubid, void *arg)
 {
-	TransactionId prentLogicalXid;
+	TransactionId parentLogicalXid;
 	int			i;
 	LogicalXidCtx logicalXidContext;
 
@@ -3132,9 +3132,9 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 				 * Name the top-level transaction without assigning it a heap
 				 * xid -- see get_savepoint_parent_xid().
 				 */
-				prentLogicalXid = get_savepoint_parent_xid();
+				parentLogicalXid = get_savepoint_parent_xid();
 				assign_subtransaction_logical_xid(mySubid);
-				add_savepoint_wal_record(parentSubid, prentLogicalXid);
+				add_savepoint_wal_record(parentSubid, parentLogicalXid);
 				if (minParentSubId == InvalidSubTransactionId)
 					minParentSubId = parentSubid;
 			}

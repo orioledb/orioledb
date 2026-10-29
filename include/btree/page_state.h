@@ -86,7 +86,7 @@ extern void relock_page(OInMemoryBlkno blkno);
 extern bool try_lock_page(OInMemoryBlkno blkno);
 extern bool try_lock_page_and_check(OInMemoryBlkno blkno, uint16 level,
 									uint32 pageChangeCount);
-extern void delare_page_as_locked(OInMemoryBlkno blkno);
+extern void declare_page_as_locked(OInMemoryBlkno blkno);
 extern bool page_is_locked(OInMemoryBlkno blkno);
 extern void page_block_reads(OInMemoryBlkno blkno);
 extern void unlock_page(OInMemoryBlkno blkno);

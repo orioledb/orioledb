@@ -2438,7 +2438,7 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 						 typename,
 						 colname ? colname : "(null)",
 						 field->notnull ? "false" : "true",
-						 field->droped ? "true" : "false");
+						 field->dropped ? "true" : "false");
 	}
 
 	appendStringInfo(&buf, "\nKey fields: (");

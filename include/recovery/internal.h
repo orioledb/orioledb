@@ -57,7 +57,7 @@ typedef enum
 	RecoveryMsgTypeSynchronize,
 	RecoveryMsgTypeToastConsistent,
 	RecoveryMsgTypeSavepoint,
-	RecoveryMsgTypeRollbackToSavepointt,
+	RecoveryMsgTypeRollbackToSavepoint,
 	RecoveryMsgTypeLeaderParallelIndexBuild,
 	RecoveryMsgTypeWorkerParallelIndexBuild,
 	RecoveryMsgTypeInit,

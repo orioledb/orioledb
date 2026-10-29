@@ -1129,7 +1129,7 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 			OTuple		tup;
 			ItemPointer iptr;
 			bool		isnull;
-			bool		tuple_can_be_vaccumed;
+			bool		tuple_can_be_vacuumed;
 
 			BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tup, p, &loc);
 
@@ -1140,11 +1140,11 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 			 * row: the delete has to be older than every snapshot's xmin, not
 			 * just finished.
 			 */
-			tuple_can_be_vaccumed = XACT_INFO_GET_OXID(tupHdr->xactInfo) <
+			tuple_can_be_vacuumed = XACT_INFO_GET_OXID(tupHdr->xactInfo) <
 				horizon;
 
 			if (tupHdr->deleted != BTreeLeafTupleNonDeleted &&
-				tuple_can_be_vaccumed)
+				tuple_can_be_vacuumed)
 			{
 				Assert(tupHdr->deleted == BTreeLeafTupleDeleted);
 

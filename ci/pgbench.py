@@ -401,7 +401,7 @@ def parse_data_size(value):
 	grp = match.groups()
 	return grp[0] + grp[1]
 
-def parse_clinets(value):
+def parse_clients(value):
 	result = []
 	for c in value.split(','):
 		c = int(c)
@@ -490,7 +490,7 @@ class PgBenchTest:
 		parser.add_argument('--max_wal_size', type=parse_data_size,
 							dest='max_wal_size', default='1GB')
 		parser.add_argument('--max_connections', type=int, default=100)
-		parser.add_argument('--clients', type=parse_clinets,
+		parser.add_argument('--clients', type=parse_clients,
 							default=[1, 5, 10, 20])
 		parser.add_argument('--time', type=check_positive,
 							default=5)

@@ -2479,7 +2479,7 @@ single_leaf_page_rel(BTreeSeqScan *scan)
 }
 
 static void
-init_checkpoit_number(BTreeSeqScan *scan)
+init_checkpoint_number(BTreeSeqScan *scan)
 {
 	uint32		checkpointNumberBefore,
 				checkpointNumberAfter;
@@ -2595,8 +2595,8 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 		SpinLockRelease(&poscan->workerStart);
 
 		/*
-		 * Scan leader.  init_checkpoit_number() and dsm_create() can raise an
-		 * error (dsm_create() does when /dev/shm is out of space), so they
+		 * Scan leader.  init_checkpoint_number() and dsm_create() can raise
+		 * an error (dsm_create() does when /dev/shm is out of space), so they
 		 * run after workerStart is released: an error does not release a
 		 * spinlock, and the participants still to take a number would spin on
 		 * it until "stuck spinlock".  The others wait below for
@@ -2607,7 +2607,7 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 			uint32		numLeafPages;
 			uint64		allocSize;
 
-			init_checkpoit_number(scan);
+			init_checkpoint_number(scan);
 
 			/*
 			 * Create a shared DSM segment for on-disk downlinks upfront,
@@ -2651,7 +2651,7 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 	else
 	{
 		scan->workerNumber = -1;
-		init_checkpoit_number(scan);
+		init_checkpoint_number(scan);
 	}
 
 	if (sampler)
@@ -3437,7 +3437,7 @@ btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
 }
 
 /*
- * Give back the registration a scan took in init_checkpoit_number().
+ * Give back the registration a scan took in init_checkpoint_number().
  *
  * It goes to the page that took it, which is not necessarily the one
  * desc->rootInfo names now: the tree can be evicted and loaded again while

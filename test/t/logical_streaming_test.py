@@ -73,7 +73,7 @@ class LogicalStreamingTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				publisher.safe_psql(self.setup_sql)
 				subscriber.safe_psql(self.setup_sql)
@@ -122,7 +122,7 @@ class LogicalStreamingTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				publisher.safe_psql(self.setup_sql)
 				subscriber.safe_psql(self.setup_sql)
