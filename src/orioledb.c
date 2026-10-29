@@ -18,6 +18,7 @@
 
 #include "btree/find.h"
 #include "btree/io.h"
+#include "btree/modify.h"
 #include "btree/scan.h"
 #include "catalog/cic_spool.h"
 #include "catalog/o_tables.h"
@@ -1573,6 +1574,7 @@ _PG_init(void)
 	prev_reindex_concurrently_skip_hook = ReindexConcurrentlySkipHook;
 	ReindexConcurrentlySkipHook = orioledb_reindex_concurrently_skip;
 	RecoveryStopsBeforeHook = orioledb_recovery_stops_before_hook;
+	deadlock_resolve_hook = o_deadlock_resolve_hook;
 
 	if (enable_rewind)
 		VacuumHorizonHook = orioledb_vacuum_horizon_hook;
@@ -1632,6 +1634,8 @@ o_proc_shmem_init(Pointer ptr, bool found)
 			pg_atomic_init_u64(&oProcData[i].pendingSkUndoTail, InvalidUndoLocation);
 			pg_atomic_init_u32(&oProcData[i].pinnedMetaPageBlkno,
 							   (uint32) OInvalidInMemoryBlkno);
+			oProcData[i].tupleLockActive = false;
+			oProcData[i].tupleLockCollisionDetected = false;
 			oProcData[i].autonomousNestingLevel = 0;
 			memset(&oProcData[i].vxids, 0, sizeof(oProcData[i].vxids));
 			LWLockInitialize(&oProcData[i].undoStackLocationsFlushLock,

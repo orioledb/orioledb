@@ -15,6 +15,7 @@
 #define __BTREE_MODIFY_H__
 
 #include "btree.h"
+#include "storage/lock.h"
 
 typedef struct BTreeModifyCallbackInfo
 {
@@ -101,5 +102,7 @@ extern OBTreeModifyResult o_btree_insert_unique(BTreeDescr *desc,
 												BTreeLocationHint *hint,
 												BTreeModifyCallbackInfo *callbackInfo,
 												IndexUniqueCheck checkUnique);
+
+extern bool o_deadlock_resolve_hook(PGPROC *proc, LOCK *waitLock);
 
 #endif							/* __BTREE_MODIFY_H__ */
