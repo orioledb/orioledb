@@ -176,6 +176,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  load_refind_page \
 				  merge \
 				  parallel_idx_scan \
+				  parallel_idx_scan_disk \
 				  parallel_ordered_scan \
 				  parallel_bitmap_scan \
 				  raw_iterate_refind \
