@@ -12,7 +12,7 @@ from .base_test import wait_bgwriter_stopevent, tbl_structure_to_json
 
 class CheckpointConcurrentTest(BaseTest):
 
-	def test_checkpoint_on_droped_table(self):
+	def test_checkpoint_on_dropped_table(self):
 		node = self.node
 		node.append_conf('postgresql.conf',
 		                 "orioledb.enable_stopevents = true\n")

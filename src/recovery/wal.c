@@ -759,7 +759,7 @@ add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId lo
 
 void
 add_savepoint_wal_record(SubTransactionId parentSubid,
-						 TransactionId prentLogicalXid)
+						 TransactionId parentLogicalXid)
 {
 	WALRecSavepoint *rec;
 	TransactionId logicalXid = get_current_logical_xid();
@@ -774,7 +774,7 @@ add_savepoint_wal_record(SubTransactionId parentSubid,
 
 	rec->recType = WAL_REC_SAVEPOINT;
 	memcpy(rec->parentSubid, &parentSubid, sizeof(SubTransactionId));
-	memcpy(rec->parentLogicalXid, &prentLogicalXid, sizeof(TransactionId));
+	memcpy(rec->parentLogicalXid, &parentLogicalXid, sizeof(TransactionId));
 	memcpy(rec->logicalXid, &logicalXid, sizeof(TransactionId));
 
 	local_wal.buffer_offset += sizeof(*rec);

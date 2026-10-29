@@ -300,7 +300,7 @@ class BaseTest(unittest.TestCase):
 
 		return self.replica
 
-	def getSubsriber(self) -> testgres.PostgresNode:
+	def getSubscriber(self) -> testgres.PostgresNode:
 		if self.subscriber is None:
 			(test_path, t) = os.path.split(
 			    os.path.dirname(inspect.getfile(self.__class__)))

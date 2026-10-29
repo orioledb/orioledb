@@ -1962,7 +1962,7 @@ class RecoveryTest(BaseTest):
 
 		node.stop()
 
-	def test_recovery_partiton(self):
+	def test_recovery_partition(self):
 		node = self.node
 		node.start()
 		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
@@ -2068,7 +2068,7 @@ class RecoveryTest(BaseTest):
 		"""), [('(0,1)', 3, 'b')])
 		node.stop()
 
-	def test_recovery_row_expresion_index(self):
+	def test_recovery_row_expression_index(self):
 		node = self.node
 		node.append_conf('postgresql.conf', "checkpoint_timeout = 1d\n")
 		node.start()
