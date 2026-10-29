@@ -21,7 +21,7 @@ a future of more powerful storage models that are optimized for cloud and
 modern hardware architectures.
 
 1. Designed for modern hardware.  OrioleDB design avoids legacy CPU bottlenecks
-   on modern servers containing dozens and hundreds CPU cores, providing
+   on modern servers containing dozens and hundreds of CPU cores, providing
    optimized usage of modern storage technologies such as SSD and NVRAM.
 
 2. Reduced maintenance needs.  OrioleDB implements the concepts of undo log
@@ -79,7 +79,7 @@ the PostgreSQL License.
 See [LICENSE-APACHE.txt](./LICENSE-APACHE.txt) and
 [LICENSE-POSTGRESQL.txt](./LICENSE-POSTGRESQL.txt) for details.
 
-**Patent Grant:**. Supabase provides a separate patent grant for OrioleDB.
+**Patent Grant:** Supabase provides a separate patent grant for OrioleDB.
 See [PATENTS.txt](./PATENTS.txt) for details.
 
 ## Status

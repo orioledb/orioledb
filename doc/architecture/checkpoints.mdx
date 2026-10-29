@@ -21,7 +21,7 @@ Checkpointer comes to the root page `n1` with the `WalkDownwards` message (step 
 
 ## Checkpoint state
 
-While the checkpointer is writing children of non-leaf page, concurrent splits and merges could happen. Therefore, the checkpoint state contains images of non-leaf pages under checkpointing as its reconstructed as the checkpointer visits the downlinks. If there are no concurrent changes to the non-leaf page, the reconstructed state finally matches the page state. Otherwise, the reconstructed page state could not even match to page state at any moment of time but always match the history of the checkpointer tree walk.
+While the checkpointer is writing children of non-leaf page, concurrent splits and merges could happen. Therefore, the checkpoint state contains images of non-leaf pages under checkpointing as it's reconstructed as the checkpointer visits the downlinks. If there are no concurrent changes to the non-leaf page, the reconstructed state finally matches the page state. Otherwise, the reconstructed page state could not even match to page state at any moment of time but always match the history of the checkpointer tree walk.
 
 Note that the reconstructed state does not contain in-memory downlinks. In-memory downlinks are replaced with on-disk downlinks as we wrote the children's pages.
 
@@ -31,7 +31,7 @@ The picture below represents an example of a checkpoint state.
 
 The root page `n1`, internal page `n3`, and leaf page `n8` are currently under checkpointing. The downlink `l2` is written to the reconstructed state. The downlink `l3` is the `next downlink` in the reconstructed state. Its key is known, but the link is not because the corresponding children were not written yet. Similarly, downlink `l6` is written, downlink `l7` is the `next downlink`, and downlink `l8` is not processed yet.
 
-Let us imagine that the following event happened:
+Let us imagine that the following events happened:
 
 1.  Page `n7` was written by checkpointer.
 2.  Page `n8` was split into `n8` and `n9`.
@@ -40,7 +40,7 @@ Let us imagine that the following event happened:
 
 The resulting state is given in the picture below. Note that the reconstructed page image contains links `l6` and `l7` (as we visited them before the merge) but contains `l8` and the `next downlink` corresponding to `l9` (as we visited those downlinks after the split).
 
-![Checkpoint state 1](../images/checkpoint_state_2.svg)
+![Checkpoint state 2](../images/checkpoint_state_2.svg)
 
 ## Autonomous non-leaf pages
 
@@ -51,7 +51,7 @@ If the non-leaf page under checkpointing gets modified concurrently, it becomes 
 3.  The autonomous page will be processed until its hikey is met, disregarding how many pages will be visited to meet this target (due to concurrent insertion, it could be many pages).
 4.  Even if the initial page corresponding to the autonomous page has been split. The page holding the initial hikey is tracked. The merge, which would remove that hikey, is prevented.
 5.  If the autonomous page is full, but the corresponding hikey is not yet met, current contents are flushed to the disk (and parent got the corresponding downlink with `WalkUpwards`), but processing of the autonomous page continues till the hikey is met.
-6.  When flushing autonomous, the corresponding "on-disk" location is marked as free for the future checkpoint.
+6.  When flushing an autonomous page, the corresponding "on-disk" location is marked as free for the future checkpoint.
 
 ## Checkpointer messages
 

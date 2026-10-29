@@ -9,7 +9,7 @@ OrioleDB structures data in index-organized tables, employs dual pointers for ef
 
 ## Indexes
 
-OrioleDB stored data in index-organized tables. Consider the example of the `vegetables` table, which has a primary index on `id` and a secondary index on `count`.
+OrioleDB stores data in index-organized tables. Consider the example of the `vegetables` table, which has a primary index on `id` and a secondary index on `count`.
 
 | Id  | Name     | Count |
 | --- | -------- | ----- |
@@ -18,7 +18,7 @@ OrioleDB stored data in index-organized tables. Consider the example of the `veg
 | 3   | Cabbage  | 7     |
 | 4   | Melon    | 6     |
 
-The data structure behind the `vegetables` table is given below. Both primary and secondary indexes comprise variations of B+-tree. Leaf tuples are marked blue, non-leaf tuples are marked green, high-keys are marked yellow. The primary index's non-leaf tuples and high keys consist of the primary key columns; leaf tuples are table rows themselves. Non-leaf and leaf tuples, high keys of the secondary index consists of secondary index columns and primary index columns.
+The data structure behind the `vegetables` table is given below. Both primary and secondary indexes comprise variations of B+-tree. Leaf tuples are marked blue, non-leaf tuples are marked green, high-keys are marked yellow. The primary index's non-leaf tuples and high keys consist of the primary key columns; leaf tuples are table rows themselves. Non-leaf and leaf tuples, high keys of the secondary index consist of secondary index columns and primary index columns.
 
 ![Indexes of vegetables table](../images/vegetables_indexes.svg)
 
@@ -36,7 +36,7 @@ The main memory page could refer to both main memory and storage pages. However,
 
 In order to implement this scheme, we have to sacrifice rightlinks. That would be too complex (and slow?) to toggle downlinks and rightlinks between in-memory and storage pointers.
 
-Technically, OrioleDB B-trees still contain rightlinks, but they have only temporary usage during page splits. Rightlink exists only between splitting a new page and insertion downlink to the parent. Therefore, if the completed split happens concurrently with locating a tree page, one must retry from the parent (see find_page() function). Stepping tree pages right and left become more complex too. Instead of using rightlinks (and leftlinks) one have to find siblings from parent (see find_right_page() and find_left_page()). However, this complexity is more than justified by better vertical scalability.
+Technically, OrioleDB B-trees still contain rightlinks, but they have only temporary usage during page splits. Rightlink exists only between splitting a new page and insertion of downlink to the parent. Therefore, if the completed split happens concurrently with locating a tree page, one must retry from the parent (see find_page() function). Stepping tree pages right and left becomes more complex too. Instead of using rightlinks (and leftlinks) one has to find siblings from parent (see find_right_page() and find_left_page()). However, this complexity is more than justified by better vertical scalability.
 
 See [concurrency algorithms in OrioleDB B-tree](concurrency.mdx) for details.
 
@@ -52,7 +52,7 @@ There is a `state` atomic variable in a page header. This atomic variable provid
 
 See `src/btree/page_state.c` for details.
 
-The tuples on the page are split into chunks. There is also an area of high keys, where each chunk has an associated high key. The high key of the last chunk is simultaneously the high key of the page. Thank this, if one needs a particular tuple on the page, he does not need to copy the whole page. It is enough to copy the high keys area, find the appropriate page chunk, and copy it. `PartialPageState` structure is responsible for tracking partially read pages.
+The tuples on the page are split into chunks. There is also an area of high keys, where each chunk has an associated high key. The high key of the last chunk is simultaneously the high key of the page. Thanks to this, if one needs a particular tuple on the page, he does not need to copy the whole page. It is enough to copy the high keys area, find the appropriate page chunk, and copy it. `PartialPageState` structure is responsible for tracking partially read pages.
 
 ![Page structure](../images/page_structure.svg)
 
@@ -60,7 +60,7 @@ In the future, we plan to get rid of copying in the majority of page access patt
 
 ## Copy-on-write checkpoints
 
-OrioleDB utilized copy-on-write checkpoints and row-level WAL. The example below illustrates the big picture of copy-on-write checkpoints.
+OrioleDB utilizes copy-on-write checkpoints and row-level WAL. The example below illustrates the big picture of copy-on-write checkpoints.
 
 For example, page number `7` was modified. It was marked as `7*`.
 
@@ -104,7 +104,7 @@ See [the detailed description of checkpointing algorithm](checkpoints.mdx).
 
 ## Undo log
 
-OrioleDB implements transactions and MVCC using UNDO log. The row-level undo records comprises chains of row versions. Particularly, tuple headers are connected in lists, where the head is located on the data page, and the rest of the elements are located in undo log. See the diagram below.
+OrioleDB implements transactions and MVCC using UNDO log. The row-level undo records comprise chains of row versions. Particularly, tuple headers are connected in lists, where the head is located on the data page, and the rest of the elements are located in undo log. See the diagram below.
 
 ![Row level undo](../images/row_level_undo.svg)
 
@@ -114,13 +114,13 @@ Besides a presence in row versions chains, undo records are also present in tran
 
 The snapshot of undo log is written out during checkpointing. We need this because, during recovery, we might need to rollback some of the transactions that were in progress during checkpointing. Besides checkpointing, we do not have to write the undo log to the storage except when it does not fit to corresponding shared memory.
 
-Sometimes we need to replay only part of the transaction chain. For instance, OrioleDB's implementation of `ROLLBACK TO SAVEPOINT` replays the transaction's undo log chain to the given point. Aborting speculative insertions during `INSERT ... ON CONFLICT ...` works the same way. However, once we replay some part of the transaction undo the chain, we might still need it during recovery because corresponding data could be (partially) checkpointed before replay. In order to track this, we add special `branch` undo records, which gives recovery a possibility to walk already replayed branches.
+Sometimes we need to replay only part of the transaction chain. For instance, OrioleDB's implementation of `ROLLBACK TO SAVEPOINT` replays the transaction's undo log chain to the given point. Aborting speculative insertions during `INSERT ... ON CONFLICT ...` works the same way. However, once we replay some part of the transaction undo chain, we might still need it during recovery because corresponding data could be (partially) checkpointed before replay. In order to track this, we add special `branch` undo records, which gives recovery a possibility to walk already replayed branches.
 
 Some undo records also require some action on commit. For instance, our implementation of `TRUNCATE` issues an undo record, which deletes old relfilenodes on transaction commit and deletes new relfilenodes on a transaction abort. We track the separate list for undo records requiring on-commit actions.
 
 OrioleDB also supports block-level undo records. The block-level undo records are the changes applied to the whole page.
 
-The diagram below gives an example of a `compact` block-level undo record. Here the data pages contains tuples `t1`, `t2` and `t5`. However, a page image in the undo log contains tuples `t1`, `t2`, `t3`, and `t4`. That means, when tuples `t3` and `t4` were deleted, we lacked space for a new tuple `t5`. In order to do this, we made a `compaction` first. Therefore, we issue a page-level undo record and erase tuples `t3` and `t4` to fit `t5`.
+The diagram below gives an example of a `compact` block-level undo record. Here the data page contains tuples `t1`, `t2` and `t5`. However, a page image in the undo log contains tuples `t1`, `t2`, `t3`, and `t4`. That means, when tuples `t3` and `t4` were deleted, we lacked space for a new tuple `t5`. In order to do this, we made a `compaction` first. Therefore, we issue a page-level undo record and erase tuples `t3` and `t4` to fit `t5`.
 
 ![Block level undo](../images/block_level_undo.svg)
 
@@ -142,13 +142,13 @@ OrioleDB table has the following B-trees for its data:
 2.  Primary key tree,
 3.  Secondary keys trees.
 
-TOAST and primary key trees are subjects of WAL-logging, while secondary keys trees aren't. Secondary keys are recovering based on changes in TOAST and primary key.
+TOAST and primary key trees are subjects of WAL-logging, while secondary keys trees aren't. Secondary keys are recovered based on changes in TOAST and primary key.
 
 Since OrioleDB implements fuzzy checkpointing, we require idempotency property here. Checkpointer visits TOAST and primary key before secondary keys. Therefore, secondary keys might have a newer state than TOAST and primary keys in the checkpoint. Idempotency guarantees that if some changes are applied to secondary keys twice or more, it does not affect the final state.
 
 OrioleDB implements parallel application of WAL records. It launches `orioledb.recovery_pool_size` number of workers. Each worker is responsible for its own set of primary key values (according to hash value). The startup process distributes row-level WAL records to the queues connected to workers.
 
-![Block level undo](../images/recovery_wokers.svg)
+![Recovery workers](../images/recovery_wokers.svg)
 
 Queues might be processed at different paces. In order to avoid MVCC anomalies, we assume the transaction to be committed and visible for readers only once all the workers have completed all the pieces of work associated with that transaction.
 

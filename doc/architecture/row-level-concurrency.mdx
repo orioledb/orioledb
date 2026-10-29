@@ -9,7 +9,7 @@ Row-level concurrency in OrioleDB is as close as possible to regular PostgreSQL 
 
 ## Update of the primary key
 
-Update of primary key is typically rare and unusual situation in index-organized table. Unlike regular update, update of primary key is implemented as a sequence of delete and insert. Concurrent update and delete can't follow this update and may result in error. See the example below. Session 2 gets an error due to concurrent primary key update in session 1.
+Update of primary key is typically a rare and unusual situation in index-organized table. Unlike regular update, update of primary key is implemented as a sequence of delete and insert. Concurrent update and delete can't follow this update and may result in error. See the example below. Session 2 gets an error due to concurrent primary key update in session 1.
 
 ```sql
 CREATE TABLE tbl
@@ -40,7 +40,7 @@ ROLLBACK
 
 ## Following the update chain
 
-If some row was deleted and then new row with same primary key value is immediately inserted, then concurrent update or delete may consider the new row as a new version of the old row. See the example below. Session 1 deletes row and then inserts row with same primary key value. Session 2 were intended to update initial row, but finally updates the newly inserted row.
+If some row was deleted and then new row with same primary key value is immediately inserted, then concurrent update or delete may consider the new row as a new version of the old row. See the example below. Session 1 deletes row and then inserts row with same primary key value. Session 2 was intended to update initial row, but finally updates the newly inserted row.
 
 ```sql
 CREATE TABLE tbl
