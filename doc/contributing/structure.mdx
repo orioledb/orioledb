@@ -25,9 +25,9 @@ orioledb
 |  |- Dockerfile -- Alpine based Dockerfile used within docker.yml and dockertest.yml workflows
 |  |- Dockerfile.ubuntu -- Ubuntu based Dockerfile used within docker.yml and dockertest.yml workflows
 |  |- README.md -- Docker images tests documentation
-|  |- docker-entrypoint.sh -- entrypoint file for Docker images
+|  |- init/docker-entrypoint.sh -- entrypoint file for Docker images
 |  |- orioledb-config.sh -- Docker images tests configuration
-|  |- postgresql.docker.conf -- configuration file used by Docker images
+|  |- init/postgresql.docker.conf -- configuration file used by Docker images
 |- include -- C-headers of extension
 |- perf -- performance benchmarks
 |- sql -- installation scripts with definitions of the extension's SQL-level objects
@@ -43,7 +43,7 @@ orioledb
 |- Makefile -- defines make targets
 |- README.md -- main documentation entrypoint
 |- orioledb.control -- extension control file
-|- stopevents.txt -- list of "stop event"
+|- stopevents.txt -- list of "stop events"
 |- stopevents_gen.py -- generates include/utils/stopevents_(defs|data).h from stopevents.txt
 |- typedefs_gen.py -- generates list of C-symbols in orioledb.so to orioledb.typedefs
 |- valgrind.supp -- suppression rules for valgrind checks
@@ -125,7 +125,7 @@ OrioleDB has 3 groups of tests described below.
   conjunction with stop events.
 
 - Python [testgres](https://pypi.org/project/testgres/) tests are located in
-  `t`. These are the most powerful and complex tests. Additionally to the
+  `t`. These are the most powerful and complex tests. In addition to the
   ability to simulate multiple simultaneous connections, they can perform
   actions with the whole PostgreSQL instance such as start, stop, backup,
   replication, etc. See the [testgres

@@ -220,7 +220,7 @@ docker build -t orioletest:17 -f docker/Dockerfile --pull --network=host --progr
 
 ## Supported environment variables
 
-This project aims to maintain compatibility with the Docker Official PostgreSQL image, and therefore, it also supports the environmental variables found there:
+This project aims to maintain compatibility with the Docker Official PostgreSQL image, and therefore, it also supports the environment variables found there:
 
 - `POSTGRES_PASSWORD`
 - `POSTGRES_USER`
@@ -289,9 +289,9 @@ docker build --pull --network=host --progress=plain \
     -t orioletest:17-gcc-alpine3.21 .
 ```
 
-#### Step2: Build the `oriolegis:17-3.5-alpine` image.
+#### Step 2: Build the `oriolegis:17-3.5-alpine` image.
 
-in a new directory, run this commands:
+In a new directory, run these commands:
 
 ```bash
 git clone --depth=1 https://github.com/postgis/docker-postgis.git

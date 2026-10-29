@@ -41,7 +41,7 @@ create table analytics_data
   id int8,
   created_at timestamptz,
   event text
-) using parquet; -- Store data in a analytical optimized storage engine
+) using parquet; -- Store data in an analytical optimized storage engine
 
 create table timeseries_data
 (
@@ -107,7 +107,7 @@ OrioleDB is distributed under the standard PostgreSQL license. The goal is to up
 
 ### Designed for modern hardware
 
-OrioleDB design avoids legacy CPU bottlenecks on modern servers containing dozens and hundreds CPU cores, providing optimized usage of modern storage technologies such as SSD and NVRAM.
+OrioleDB design avoids legacy CPU bottlenecks on modern servers containing dozens and hundreds of CPU cores, providing optimized usage of modern storage technologies such as SSD and NVRAM.
 
 ### Reduced maintenance needs
 

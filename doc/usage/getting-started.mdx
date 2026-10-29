@@ -110,7 +110,7 @@ EXPLAIN SELECT * FROM blog_post WHERE id = 1;
 
 ### Use OrioleDB tables by default
 
-If you want all your created tables use `orioledb` access method without explicitly specifying this each time at `CREATE
+If you want all your created tables to use `orioledb` access method without explicitly specifying this each time at `CREATE
 TABLE`, add in your PostgreSQL config file:
 
 `default_table_access_method = 'orioledb'`
@@ -122,7 +122,7 @@ retain their previous access method.
 
 OrioleDB tables support ICU, C, POSIX, and PostgreSQL 17 or later builtin collations. Make sure the cluster or database is set up with a default collation that uses one of those providers; otherwise, specify `COLLATE` for every `text` field of the table.
 
-ALTER COLLATION REFRESH VERSION is also disabled for collations that used for fields and indexes of orioledb tables.
+ALTER COLLATION REFRESH VERSION is also disabled for collations that are used for fields and indexes of orioledb tables.
 
 ### Block-level data compression
 
@@ -147,7 +147,7 @@ CREATE TABLE compression_test
    WITH (compress = 5, toast_compress = 10, primary_compress = -1);
 
 CREATE INDEX compression_test_value1_idx ON compression_test(value1)
-    WITH (compress = 22)
+    WITH (compress = 22);
 CREATE INDEX compression_test_value2_idx ON compression_test(value2);
 ```
 
@@ -244,7 +244,7 @@ OrioleDB has its own recovery mechanism: copy-on-write checkpoints and row-level
 
 Recovery using row-level WAL records might require significant CPU resources. Therefore parallel recovery of OrioleDB's tables is implemented. OrioleDB launches its own pool of recovery workers, each of them responsible for replaying a particular part of WAL records.
 
-OrioleDB has its own pool background writer processes (the `orioledb.bgwriter_num_workers` GUC parameter defines the pool size). Usage of multiple background writers increases the effectiveness of IO-utilization on modern hardware.
+OrioleDB has its own pool of background writer processes (the `orioledb.bgwriter_num_workers` GUC parameter defines the pool size). Usage of multiple background writers increases the effectiveness of IO-utilization on modern hardware.
 
 ### Experimental support of the block devices
 
@@ -291,14 +291,14 @@ OrioleDB is currently in the development stage. Therefore it has the following t
 4.  OrioleDB support of non-btree indexes is experimental yet.
 5.  OrioleDB supports bitmap scan only for int4, int8 and ctid primary keys.
 6.  Row-level concurrency in OrioleDB has some [differences](../architecture/row-level-concurrency.mdx).
-7.  OrioleDB doesn't support `CLUSTER` and `VACUUM FULL` commands yet, because we don't implement rewrite of the tables for these commands. And also `CLUSTER` doesn't really makes much sense for index-organized tables.
+7.  OrioleDB doesn't support `CLUSTER` and `VACUUM FULL` commands yet, because we don't implement rewrite of the tables for these commands. And also `CLUSTER` doesn't really make much sense for index-organized tables.
 8.  `CREATE INDEX/REINDEX CONCURRENTLY` are supported with [limitations](../architecture/concurrent-index.mdx).
 9.  OrioleDB tables don't support `Sample Scans` yet.
 10. OrioleDB does not implement true SERIALIZABLE Snapshot Isolation. The `orioledb.serializable` GUC controls how SERIALIZABLE transactions are handled:
     - `table_lock` (default): every relation a SERIALIZABLE transaction touches is protected by a coarse heavyweight `ExclusiveLock`. Correct, but pessimistic — concurrent non-conflicting workloads degrade to serial execution.
     - `error`: reject SERIALIZABLE transactions with `ERRCODE_FEATURE_NOT_SUPPORTED` (the legacy behavior).
     - `repeatable_read`: treat SERIALIZABLE as `REPEATABLE READ` for OrioleDB tables only — no extra locks are taken, OrioleDB's CSN snapshot already provides per-transaction stable reads. Heap tables in the same transaction continue to use PG's SSI as usual.
-11. Backward fetches from a cursor is supported only when the cursor is declared with `SCROLL`.
+11. Backward fetches from a cursor are supported only when the cursor is declared with `SCROLL`.
 12. OrioleDB always uses checksums on data pages and initializing a database cluster without data checksums doesn't have effect on OrioleDB tables.
 13. PostgreSQL sequences are backed by heap relations. Accessing them (e.g., via `nextval()`) forces full PostgreSQL Transaction ID (XID) allocation, bypassing OrioleDB's optimized transaction mechanics unless sequence caching is utilized.
 14. Logical decoding doesn't stream in-progress transactions. This applies to all logical replication slots in the cluster, including databases without OrioleDB tables. Subscriptions with `streaming = on` or `streaming = parallel` still work, but large transactions are spilled to disk and sent at commit.
