@@ -1321,7 +1321,7 @@ o_recovery_start_hook(void)
 				ereport(WARNING,
 						(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
 						 errmsg("unable to start recovery workers"),
-						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_pool_size value.  Fallback to recovery in single-process mode.")));
+						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_pool_size value.  Falling back to recovery in single-process mode.")));
 
 				break;
 			}
@@ -1922,7 +1922,7 @@ recovery_init(int worker_id)
 				ereport(WARNING,
 						(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
 						 errmsg("unable to start recovery workers"),
-						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_idx_pool_size value. Fallback to index build in single-process mode.")));
+						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_idx_pool_size value. Falling back to index build in single-process mode.")));
 			}
 			state->queue = shm_mq_attach(GET_WORKER_QUEUE(i), NULL, workers_pool[i].handle);
 			state->queue_buf_len = 0;

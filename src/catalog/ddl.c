@@ -1314,8 +1314,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			if (orioledb)
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("orioledb tables does not support CLUSTER")),
-						errdetail("CLUSTER makes no much sense for index-organized tables."));
+						 errmsg("orioledb tables do not support CLUSTER")),
+						errdetail("CLUSTER makes little sense for index-organized tables."));
 		}
 	}
 	else if (IsA(pstmt->utilityStmt, VacuumStmt))
@@ -2296,7 +2296,7 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 			o_table_free(o_table);
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("temp and unlogged orioledb tables does not "
+					 errmsg("temp and unlogged orioledb tables do not "
 							"support compression options")));
 		}
 
@@ -5051,8 +5051,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						   "that is different from cluster encoding \"%s\"",
 						   pg_encoding_to_char(dbform->encoding),
 						   pg_encoding_to_char(cluster_encoding)),
-					errdetail("OrioleDB now only supports single encoding for all databases. "
-							  "It is easier to use single one during checkpoint."));
+					errdetail("OrioleDB now only supports a single encoding for all databases. "
+							  "It is easier to use a single one during checkpoint."));
 		ReleaseSysCache(dbTuple);
 	}
 	else if (access == OAT_POST_ALTER && classId == DatabaseRelationId)

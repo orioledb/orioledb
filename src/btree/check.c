@@ -216,7 +216,7 @@ check_btree(BTreeDescr *desc, bool force_file_check, bool wait_for_checkpoint)
 		}
 		else if (found)
 		{
-			elog(NOTICE, "%s not exist", get_seq_buf_filename(&tag));
+			elog(NOTICE, "%s does not exist", get_seq_buf_filename(&tag));
 			status.hasError = true;
 		}
 
@@ -306,7 +306,7 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 		 * extent freed since -- by the bgwriter rewriting a page, by a merge,
 		 * by a copy-blkno rewrite -- is in a .tmp file or still buffered in
 		 * the matching desc->tmpBuf[], and without them each of those shows
-		 * up as an "Extent ... is neither free or busy" against a tree that
+		 * up as an "Extent ... is neither free nor busy" against a tree that
 		 * is perfectly sound.  The branch below already reads both for the
 		 * non-forced path; do the same here.
 		 */
@@ -345,7 +345,7 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 		 * Mirrors the compressed branch below, which already extends the
 		 * range to chkp_num + 1.  Stopping at chkp_num leaves out frees that
 		 * are sitting in chkp.{chkp_num+1}.tmp and produces a phantom "Extent
-		 * ... is neither free or busy" report.
+		 * ... is neither free nor busy" report.
 		 *
 		 * For each .tmp file we also drain the matching desc->tmpBuf[] in
 		 * shared memory.  free_extent_for_checkpoint() buffers small writes
@@ -532,7 +532,7 @@ check_extents(ExtentsArray *busy, ExtentsArray *free)
 		{
 			if (next_off != busy->extents[b].off)
 			{
-				elog(NOTICE, "Extent %lu %u is neither free or busy",
+				elog(NOTICE, "Extent %lu %u is neither free nor busy",
 					 (unsigned long) (next_off),
 					 (unsigned) (busy->extents[b].off - next_off));
 				result = false;
@@ -543,7 +543,7 @@ check_extents(ExtentsArray *busy, ExtentsArray *free)
 		{
 			if (next_off != free->extents[f].off)
 			{
-				elog(NOTICE, "Extent %lu %u is neither free or busy",
+				elog(NOTICE, "Extent %lu %u is neither free nor busy",
 					 (unsigned long) (next_off),
 					 (unsigned) (free->extents[f].off - next_off));
 				result = false;

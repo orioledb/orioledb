@@ -98,7 +98,7 @@ check_checkpoint_control(CheckpointControl *control)
 		 */
 		ereport(FATAL,
 				(errmsg("checkpoint files are incompatible with server"),
-				 errdetail("OrioleDB checkpount control file was initialized with version %d,"
+				 errdetail("OrioleDB checkpoint control file was initialized with version %d,"
 						   " but the currently required version is %d.",
 						   control->controlFileVersion, ORIOLEDB_CHECKPOINT_CONTROL_VERSION)));
 	}

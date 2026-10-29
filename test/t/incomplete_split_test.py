@@ -505,7 +505,7 @@ class SplitTest(BaseTest):
 		that free_extent_for_checkpoint() writes to before the next
 		CHECKPOINT finalises them.  This test deterministically forces
 		the read-side path that used to produce phantom "Extent N M is
-		neither free or busy" reports.
+		neither free nor busy" reports.
 
 		Setup mirrors test_incomplete_leaf_checkpoint_fix but the
 		assertion order is named after the read-side property: right

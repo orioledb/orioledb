@@ -1329,7 +1329,7 @@ store_read_page_checkpoint_stats(uint32 checkpointNum)
 	/* Remember for checkpoint read test only */
 	max_read_page_checkpoint = Max(max_read_page_checkpoint, checkpointNum);
 	min_read_page_checkpoint = Min(min_read_page_checkpoint, checkpointNum);
-	elog(DEBUG1, "Remember read_page_checkpoin: min %u max %u", min_read_page_checkpoint, max_read_page_checkpoint);
+	elog(DEBUG1, "Remember read_page_checkpoint: min %u max %u", min_read_page_checkpoint, max_read_page_checkpoint);
 }
 
 #endif
@@ -3674,7 +3674,7 @@ write_relation_pages(Oid relid, int maxLevel, bool evict)
 	if (!rel)
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("relation oid %u does not exists", relid)));
+				 errmsg("relation oid %u does not exist", relid)));
 
 	descr = relation_get_descr(rel);
 

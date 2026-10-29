@@ -45,7 +45,7 @@ class NotSupportedYetTest(BaseTest):
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "ERROR:  orioledb tables does not support CLUSTER")
+		    "ERROR:  orioledb tables do not support CLUSTER")
 
 		node.stop()
 
@@ -269,5 +269,5 @@ class NotSupportedYetTest(BaseTest):
 			""")
 
 		self.assertErrorMessageEquals(
-		    e, "temp and unlogged orioledb tables does not "
+		    e, "temp and unlogged orioledb tables do not "
 		    "support compression options")

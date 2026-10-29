@@ -111,7 +111,7 @@ class DDLTest(BaseTest):
 		for field in error_fields:
 			with self.assertRaises(QueryException) as e:
 				node.safe_psql(f"SELECT {field}, * FROM o_test_1;")
-			self.assertErrorMessageEquals(e, (f"orioledb tuples does not have "
+			self.assertErrorMessageEquals(e, (f"orioledb tuples do not have "
 			                                  f"system attribute: {field}"))
 
 	def test_non_trx_recreate_expr_index(self):

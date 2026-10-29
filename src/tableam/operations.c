@@ -2874,7 +2874,7 @@ o_check_tbl_delete_mres(OTableModifyResult mres,
 
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Unable to remove value TOASTed value in \"%s\"",
+				 errmsg("Unable to remove TOASTed value in \"%s\"",
 						RelationGetRelationName(rel)),
 				 errdetail("For primary key %s.",
 						   tss_orioledb_print_idx_key(oldSlot,
