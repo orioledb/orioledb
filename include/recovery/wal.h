@@ -272,7 +272,7 @@ extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
 extern void add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId logicalXid_sub);
 extern void add_savepoint_wal_record(SubTransactionId parentSubid,
-									 TransactionId prentLogicalXid);
+									 TransactionId parentLogicalXid);
 extern void add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid);
 extern void add_database_copy_wal_record(Oid dboid, Oid src_tblspc, Oid dst_tblspc);
 extern void add_database_create_copy_wal_record(Oid src_datoid, Oid dst_datoid);

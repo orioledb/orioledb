@@ -123,7 +123,7 @@ static S3HeadersBuffersGroup *groups;
 #define S3_PART_GET_USAGE_COUNT(p) (((p) & S3_PART_USAGE_COUNT_MASK) >> S3_PART_USAGE_COUNT_SHIFT)
 #define S3_PART_SET_USAGE_COUNT(p, u) (((p) & (~S3_PART_USAGE_COUNT_MASK)) | ((uint64) (u) << S3_PART_USAGE_COUNT_SHIFT))
 
-static void initial_parts_conting(void);
+static void initial_parts_counting(void);
 static void sync_buffer(S3HeaderBuffer *buffer);
 
 Size
@@ -182,7 +182,7 @@ s3_headers_shmem_init(Pointer buf, bool found)
 						  "S3HeadersBufferTranche");
 
 	if (orioledb_s3_mode)
-		initial_parts_conting();
+		initial_parts_counting();
 }
 
 void
@@ -1214,7 +1214,7 @@ initial_parts_counting_callback(S3HeaderTag tag)
 }
 
 static void
-initial_parts_conting(void)
+initial_parts_counting(void)
 {
 	totalFilesSize = 0;
 	totalOccupiedSize = 0;

@@ -38,7 +38,7 @@ class EvictSeqScanRaceTest(BaseTest):
 	    if (!recovery && !(state->indexRegularLock = ...))
 
 	-- and the scan side asks for nothing in its place: relation_get_descr()
-	answers out of rel->rd_amcache, and init_checkpoit_number() counts the
+	answers out of rel->rd_amcache, and init_checkpoint_number() counts the
 	scan into the meta page under no lock at all.  So a read-only query on a
 	standby walks straight into the gap, which is issue #1133:
 
