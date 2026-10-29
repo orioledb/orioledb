@@ -4933,6 +4933,64 @@ autonomous_stack_flush_to_disk(BTreeDescr *descr, CheckpointState *state,
 }
 
 
+/*
+ * Returns true if every downlink of a locked internal page leads where the
+ * corresponding downlink of its non-autonomous checkpoint image leads.
+ *
+ * The image records each child where the checkpointer found it.  A child the
+ * checkpointer has already passed may since have been written to a new
+ * location, by eviction or by the background writer.  The page must then stay
+ * dirty: evicted clean, it would be read back from the image and lead to the
+ * child's old location.
+ */
+static bool
+checkpoint_image_matches_page(Page page, Page img)
+{
+	BTreePageItemLocator pageLoc,
+				imgLoc;
+
+	Assert(BTREE_PAGE_ITEMS_COUNT(page) == BTREE_PAGE_ITEMS_COUNT(img));
+
+	BTREE_PAGE_LOCATOR_FIRST(img, &imgLoc);
+	BTREE_PAGE_FOREACH_ITEMS(page, &pageLoc)
+	{
+		BTreeNonLeafTuphdr *pageTuphdr,
+				   *imgTuphdr;
+		uint64		downlink;
+
+		pageTuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(page, &pageLoc);
+		imgTuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(img, &imgLoc);
+		downlink = pageTuphdr->downlink;
+
+		if (DOWNLINK_IS_IN_MEMORY(downlink))
+		{
+			OInMemoryBlkno child = DOWNLINK_GET_IN_MEMORY_BLKNO(downlink);
+			OrioleDBPageDesc *childDesc = O_GET_IN_MEMORY_PAGEDESC(child);
+			bool		matches;
+
+			/* IO in progress can move the child without holding its lock */
+			if (!try_lock_page(child))
+				return false;
+			matches = childDesc->ionum < 0 &&
+				FileExtentIsValid(childDesc->fileExtent) &&
+				MAKE_ON_DISK_DOWNLINK(childDesc->fileExtent) == imgTuphdr->downlink;
+			unlock_page(child);
+
+			if (!matches)
+				return false;
+		}
+		else if (downlink != imgTuphdr->downlink)
+		{
+			/* on disk somewhere else, or IO in progress */
+			return false;
+		}
+
+		BTREE_PAGE_LOCATOR_NEXT(img, &imgLoc);
+	}
+
+	return true;
+}
+
 static void
 checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 						 CheckpointWriteBack *writeback,
@@ -5473,8 +5531,9 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		PAGE_SET_LEVEL(img, level);
 
 		/*
-		 * We don't allow concurrent downlinks inserts into processed part of
-		 * the page.  So, just cleaning dirty flag should be correct.
+		 * Concurrent downlink inserts make the page autonomous, so a finished
+		 * non-autonomous image has the same items as the page.  Clean the
+		 * page only if its children are still where the image has them.
 		 */
 		was_dirty = IS_DIRTY(blkno);
 		if (was_dirty)
@@ -5487,7 +5546,8 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 			 * we assume that concurrent eviction of the parent is forbidden
 			 * by get_checkpoint_number() in walk_page()
 			 */
-			CLEAN_DIRTY(descr->ppool, blkno);
+			if (checkpoint_image_matches_page(page, img))
+				CLEAN_DIRTY(descr->ppool, blkno);
 		}
 
 		/* We've finished operation with the page, allow concurrent operations */
