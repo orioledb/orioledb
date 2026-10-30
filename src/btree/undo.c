@@ -2138,7 +2138,10 @@ clean_chain_has_locks_flag(UndoLogType undoType, UndoLocation location,
  * Returns true if lock conflict.  On lock conflict places the conflicting undo
  * record info *conflictTuphdr.
  *
- * Otherwise, places the first csn undo record info *conflictTuphdr.
+ * Otherwise, places the first csn undo record info *conflictTuphdr.  A
+ * lock-only record does not count as that record: its transaction locked the
+ * row rather than wrote it, and an in-progress locker's csn is below the csn
+ * of any regular snapshot.
  * If there is no such undo records, then *conflictTuphdr is set to
  * *pageTuphdr.
  *
@@ -2188,7 +2191,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 		xactIsFinished = !COMMITSEQNO_IS_INPROGRESS(csn);
 		xactIsFinal = (csn < my_csn);
 	}
-	foundFinal = xactIsFinal;
+	foundFinal = xactIsFinal && !XACT_INFO_IS_LOCK_ONLY(xactInfo);
 	undoLocation = curTuphdr.undoLocation;
 
 	while (curTuphdr.chainHasLocks ||
@@ -2282,18 +2285,6 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 						newLink = curLink;
 			LockChainWalk peek = walk;
 			UndoLocation prevLocation;
-			bool		deletedFinal;
-
-			/*
-			 * A finished locker whose mode conflicts with ours counts as the
-			 * final record.  But it is about to leave the chain, and it is
-			 * not a version of the row: the caller would judge the row by the
-			 * locker's csn.  The record it stood on is the candidate now.
-			 */
-			deletedFinal = foundFinal &&
-				finalUndoLocation == curUndoLocation &&
-				finalTuphdr.xactInfo == curTuphdr.xactInfo &&
-				finalTuphdr.undoLocation == curTuphdr.undoLocation;
 
 			prev_tuphdr = curTuphdr;
 			if (!lock_chain_step(undoType, &peek, &prev_tuphdr, &prevLink,
@@ -2373,12 +2364,6 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 													 &stored,
 													 curUndoLocation);
 
-			}
-
-			if (deletedFinal)
-			{
-				finalTuphdr = curTuphdr;
-				foundFinal = false;
 			}
 		}
 
@@ -2462,7 +2447,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			lastLockOnlyUndoLocation = InvalidUndoLocation;
 		}
 
-		if (!foundFinal && xactIsFinal)
+		if (!foundFinal && xactIsFinal && !XACT_INFO_IS_LOCK_ONLY(xactInfo))
 		{
 			finalTuphdr = curTuphdr;
 			finalUndoLocation = curUndoLocation;
