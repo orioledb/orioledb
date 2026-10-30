@@ -3753,10 +3753,19 @@ recovery_on_proc_exit(int code, Datum arg)
 static void
 o_handle_startup_proc_interrupts_hook(void)
 {
+	static bool version_file_written = false;
+
 	if (is_recovery_in_progress())
 		update_proc_retain_undo_location(-1);
 
 	update_recovery_undo_loc_flush(*recovery_single_process, -1);
+
+	/* One-shot: this hook fires repeatedly, avoid re-writing each time. */
+	if (!version_file_written && reachedConsistency)
+	{
+		write_orioledb_version_file();
+		version_file_written = true;
+	}
 }
 
 static void

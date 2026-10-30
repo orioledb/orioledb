@@ -8,11 +8,12 @@ EXTENSION = orioledb
 PGFILEDESC = "orioledb - orioledb transactional storage engine via TableAm"
 SHLIB_LINK += -lzstd -lcurl -lssl -lcrypto
 
-DATA_built = $(patsubst %_prod.sql,%.sql,$(wildcard sql/*_prod.sql))
+DATA_built = $(patsubst %_prod.sql,%.sql,$(wildcard sql/*_prod.sql)) orioledb_version.txt
 DATA = $(filter-out $(wildcard sql/*_*.sql) $(DATA_built), $(wildcard sql/*sql))
 
 EXTRA_CLEAN = include/utils/stopevents_defs.h \
-			  include/utils/stopevents_data.h
+			  include/utils/stopevents_data.h \
+			  orioledb_version.txt
 OBJS = src/btree/btree.o \
 	   src/btree/build.o \
 	   src/btree/check.o \
@@ -427,6 +428,9 @@ endif
 ifdef USE_DM_LOG_WRITES
 override with_temp_install += USE_DM_LOG_WRITES=1
 endif
+
+orioledb_version.txt: include/orioledb.h
+	@sed -n 's/^#define ORIOLEDB_VERSION "\(.*\)"/\1/p' include/orioledb.h > $@
 
 include/utils/stopevents_data.h: include/utils/stopevents_defs.h
 
