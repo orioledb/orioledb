@@ -1,0 +1,43 @@
+#!/bin/sh
+set -eu
+
+state_dir=${RUNTIME_STATE_DIR:-/runtime-state}
+counter_file="$state_dir/boot-counter"
+boot_file="$state_dir/boot-id"
+boot_log="$state_dir/boot-attempts.jsonl"
+state_canary="$state_dir/volume-canary"
+pg_canary="$PGDATA/.antithesis-volume-canary"
+
+mkdir -p "$state_dir" "$PGDATA"
+
+previous=0
+if [ -s "$counter_file" ]; then
+	previous=$(cat "$counter_file")
+	case "$previous" in
+	*[!0-9]*) echo "invalid boot counter: $previous" >&2; exit 1 ;;
+	esac
+fi
+
+boot_id=$((previous + 1))
+if [ "$boot_id" -eq 1 ]; then
+	canary="orioledb-$boot_id-$$-$(date +%s)"
+	printf '%s\n' "$canary" > "$state_canary"
+else
+	test -s "$state_canary"
+	test -s "$pg_canary"
+	cmp "$state_canary" "$pg_canary"
+	: > "$state_dir/canary-verified-after-restart"
+fi
+
+tmp="$counter_file.tmp.$$"
+printf '%s\n' "$boot_id" > "$tmp"
+mv "$tmp" "$counter_file"
+printf '%s\n' "$boot_id" > "$boot_file"
+printf '{"boot_id":%s,"started_unix":%s}\n' "$boot_id" "$(date +%s)" >> "$boot_log"
+sync "$state_dir" "$PGDATA"
+
+if [ "${1:-}" = postgres ]; then
+	set -- "$@" -c "cluster_name=orioledb-boot-$boot_id"
+fi
+
+exec docker-entrypoint.sh "$@"
