@@ -184,6 +184,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  rll \
 				  rll_deadlock \
 				  rll_key_share_lost_update \
+				  rll_hidden_key_update \
 				  rll_mix \
 				  rll_mode_raise \
 				  rll_subtrans \
