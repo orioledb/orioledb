@@ -1,0 +1,407 @@
+Parsed test spec with 4 sessions
+
+starting permutation: s1_begin s2_begin s3_begin s1_inc s2_update s3_key_share s1_commit s2_commit s3_commit s3_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_update: UPDATE ks_parent SET other = other + 1 WHERE id = 1; <waiting ...>
+step s3_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_commit: COMMIT;
+step s3_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    1
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s3_begin s1_inc s2_update s3_fk_insert s1_commit s2_commit s3_commit s3_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_update: UPDATE ks_parent SET other = other + 1 WHERE id = 1; <waiting ...>
+step s3_fk_insert: INSERT INTO ks_child VALUES (1, 1);
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_commit: COMMIT;
+step s3_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    1
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s3_begin s1_inc s2_update s3_key_share s3_rollback s1_commit s2_commit s3_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_update: UPDATE ks_parent SET other = other + 1 WHERE id = 1; <waiting ...>
+step s3_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s3_rollback: ROLLBACK;
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    1
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_inc s2_key_share s2_update s1_commit s2_commit s3_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s2_update: UPDATE ks_parent SET other = other + 1 WHERE id = 1; <waiting ...>
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    1
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s3_begin s1_inc s2_delete s3_key_share s1_commit s3_commit s2_commit s3_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_delete: DELETE FROM ks_parent WHERE id = 1 AND counter = 0; <waiting ...>
+step s3_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s1_commit: COMMIT;
+step s3_commit: COMMIT;
+step s2_delete: <... completed>
+step s2_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    0
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s3_begin s1_inc s2_for_no_key_update s3_key_share s1_commit s2_commit s3_commit s3_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_for_no_key_update: SELECT counter, other FROM ks_parent WHERE id = 1 FOR NO KEY UPDATE; <waiting ...>
+step s3_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_for_no_key_update: <... completed>
+counter|other
+-------+-----
+      1|    0
+(1 row)
+
+step s2_commit: COMMIT;
+step s3_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    0
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s3_begin s1_inc s2_for_share s3_key_share s1_commit s2_commit s3_commit s3_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_for_share: SELECT counter, other FROM ks_parent WHERE id = 1 FOR SHARE; <waiting ...>
+step s3_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_for_share: <... completed>
+counter|other
+-------+-----
+      1|    0
+(1 row)
+
+step s2_commit: COMMIT;
+step s3_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    0
+(1 row)
+
+
+starting permutation: s2_begin_rr s2_snapshot s1_begin s3_begin s1_inc s2_update s3_key_share s1_commit s2_commit s3_commit s3_select
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_snapshot: SELECT counter, other FROM ks_parent WHERE id = 1;
+counter|other
+-------+-----
+      0|    0
+(1 row)
+
+step s1_begin: BEGIN;
+step s3_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_update: UPDATE ks_parent SET other = other + 1 WHERE id = 1; <waiting ...>
+step s3_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s2_commit: COMMIT;
+step s3_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    0
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s3_begin s1_grandchild_insert s2_child_update s3_parent_for_update_nowait s1_commit s2_commit s3_commit
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s1_grandchild_insert: INSERT INTO ks_grandchild VALUES (1, 10);
+step s2_child_update: UPDATE ks_child SET note = note + 1 WHERE id = 10;
+step s3_parent_for_update_nowait: SELECT id FROM ks_parent WHERE id = 1 FOR UPDATE NOWAIT;
+id
+--
+ 1
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_commit: COMMIT;
+step s3_commit: COMMIT;
+
+starting permutation: s1_begin s2_begin s3_begin s4_begin s1_inc s2_update s3_key_share s4_key_share s1_commit s2_commit s3_commit s4_commit s3_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s4_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_update: UPDATE ks_parent SET other = other + 1 WHERE id = 1; <waiting ...>
+step s3_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s4_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_commit: COMMIT;
+step s3_commit: COMMIT;
+step s4_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    1
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s3_begin s4_begin s1_inc s2_for_share s3_key_share s4_key_share s1_commit s2_commit s3_commit s4_commit s3_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s4_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_for_share: SELECT counter, other FROM ks_parent WHERE id = 1 FOR SHARE; <waiting ...>
+step s3_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s4_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_for_share: <... completed>
+counter|other
+-------+-----
+      1|    0
+(1 row)
+
+step s2_commit: COMMIT;
+step s3_commit: COMMIT;
+step s4_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    0
+(1 row)
+
+
+starting permutation: s2_begin_rr s2_snapshot s1_begin s3_begin s4_begin s1_inc s2_update s3_key_share s4_key_share s1_commit s2_commit s3_commit s4_commit s3_select
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_snapshot: SELECT counter, other FROM ks_parent WHERE id = 1;
+counter|other
+-------+-----
+      0|    0
+(1 row)
+
+step s1_begin: BEGIN;
+step s3_begin: BEGIN;
+step s4_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_update: UPDATE ks_parent SET other = other + 1 WHERE id = 1; <waiting ...>
+step s3_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s4_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s2_commit: COMMIT;
+step s3_commit: COMMIT;
+step s4_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    0
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s3_begin s4_begin s1_inc s2_update s3_key_share s4_key_share s1_rollback s2_commit s3_commit s4_commit s3_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s4_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_update: UPDATE ks_parent SET other = other + 1 WHERE id = 1; <waiting ...>
+step s3_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s4_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s1_rollback: ROLLBACK;
+step s2_update: <... completed>
+step s2_commit: COMMIT;
+step s3_commit: COMMIT;
+step s4_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      0|    1
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s3_begin s4_begin s1_inc s2_update s3_key_share s4_key_share s3_commit s1_commit s2_commit s4_commit s3_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s4_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_update: UPDATE ks_parent SET other = other + 1 WHERE id = 1; <waiting ...>
+step s3_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s4_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s3_commit: COMMIT;
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_commit: COMMIT;
+step s4_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    1
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s3_begin s1_inc s2_key_share s3_key_share s2_update s1_commit s2_commit s3_commit s3_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s1_inc: UPDATE ks_parent SET counter = counter + 1 WHERE id = 1;
+step s2_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s3_key_share: SELECT id FROM ks_parent WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step s2_update: UPDATE ks_parent SET other = other + 1 WHERE id = 1; <waiting ...>
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_commit: COMMIT;
+step s3_commit: COMMIT;
+step s3_select: SELECT * FROM ks_parent;
+id|counter|other
+--+-------+-----
+ 1|      1|    1
+(1 row)
+
