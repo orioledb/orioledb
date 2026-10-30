@@ -1312,7 +1312,7 @@ _PG_init(void)
 							"Maximum number of xacts (Orioledb + heap) retained for orioledb rewind.",
 							NULL,
 							&rewind_max_transactions,
-							84600,
+							86400,
 							1,
 							INT_MAX,
 							PGC_POSTMASTER,
