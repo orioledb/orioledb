@@ -27,6 +27,7 @@
 #include "commands/defrem.h"
 #include "common/file_perm.h"
 #include "indexam/handler.h"
+#include "recovery/internal.h"
 #include "recovery/logical.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -72,6 +73,7 @@
 #include "postmaster/startup.h"
 #include "replication/message.h"
 #include "replication/walsender.h"
+#include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
 #include "storage/proclist.h"
@@ -522,6 +524,7 @@ o_recovery_shutdown_hook(void)
 static void
 o_recovery_cleanup(void)
 {
+	*was_in_recovery = true;
 	o_recovery_finish_hook(true);
 	cic_spool_cleanup_orphans();
 }
