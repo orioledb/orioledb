@@ -18,6 +18,7 @@
 #include "btree/io.h"
 #include "btree/page_contents.h"
 #include "btree/undo.h"
+#include "catalog/o_sys_cache.h"
 #include "checkpoint/checkpoint.h"
 #include "tableam/handler.h"
 #include "transam/undo.h"
@@ -445,6 +446,8 @@ o_ppool_run_maintenance(PagePool *pool, bool evict,
 	skippedLocalEvictionsLimit = (uint64) o_pool->size * UCM_USAGE_LEVELS;
 	lastPageEvictSharedCount = pg_atomic_read_u64(o_pool->pageEvictCount);
 
+	o_set_syscache_hooks();
+
 	while (true)
 	{
 		if (shutdown_requested != NULL && *shutdown_requested)
@@ -488,6 +491,8 @@ o_ppool_run_maintenance(PagePool *pool, bool evict,
 			}
 		}
 	}
+
+	o_unset_syscache_hooks();
 
 	ppool_run_clock_depth--;
 	if (ppool_run_clock_depth == 0)
