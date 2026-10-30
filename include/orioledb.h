@@ -106,6 +106,7 @@
 
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
+#define ORIOLEDB_VERSION_FILENAME ORIOLEDB_DATA_DIR "/ORIOLEDB_VERSION"
 #define ORIOLEDB_RMGR_ID (129)
 #define ORIOLEDB_XLOG_CONTAINER (0x00)
 
@@ -609,6 +610,7 @@ struct BTreeDescr;
 extern LocalPagePool local_ppool;
 
 extern void o_verify_dir_exists_or_create(char *dirname, bool *created, bool *found);
+extern void write_orioledb_version_file(void);
 extern uint64 orioledb_device_alloc(struct BTreeDescr *descr, uint32 size);
 extern PagePool *get_ppool(OPagePoolType type);
 extern PagePool *get_ppool_by_blkno(OInMemoryBlkno blkno);

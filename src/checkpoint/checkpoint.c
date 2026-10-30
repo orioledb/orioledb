@@ -2423,17 +2423,22 @@ o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
 	S3TaskLocation location;
 	uint32		chkpNum = checkpoint_state->lastCheckpointNumber;
 
-	/* called at the end of StartupXLOG */
-	*was_in_recovery = flags == 0;
-
 	/*
-	 * Right after end-of-recovery, XLog inserts have just been enabled. Flush
-	 * WAL_REC_ROLLBACK markers for in-flight oxids that recovery_finish()
-	 * aborted in memory, so streaming standbys can resolve them too (issue
-	 * #876).
+	 * End of StartupXLOG (flags == 0).  *was_in_recovery was already set by
+	 * o_recovery_cleanup when actual WAL replay happened.
 	 */
 	if (flags == 0)
-		o_emit_recovery_finish_rollbacks();
+	{
+		/*
+		 * After recovery, flush WAL_REC_ROLLBACK markers for in-flight oxids
+		 * that recovery_finish() aborted in memory, so streaming standbys can
+		 * resolve them too (issue #876).
+		 */
+		if (*was_in_recovery)
+			o_emit_recovery_finish_rollbacks();
+
+		write_orioledb_version_file();
+	}
 
 	if (!(flags & (CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_END_OF_RECOVERY)))
 	{

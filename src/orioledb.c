@@ -27,6 +27,7 @@
 #include "commands/defrem.h"
 #include "common/file_perm.h"
 #include "indexam/handler.h"
+#include "recovery/internal.h"
 #include "recovery/logical.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -72,6 +73,7 @@
 #include "postmaster/startup.h"
 #include "replication/message.h"
 #include "replication/walsender.h"
+#include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
 #include "storage/proclist.h"
@@ -522,6 +524,7 @@ o_recovery_shutdown_hook(void)
 static void
 o_recovery_cleanup(void)
 {
+	*was_in_recovery = true;
 	o_recovery_finish_hook(true);
 	cic_spool_cleanup_orphans();
 }
@@ -1818,6 +1821,40 @@ orioledb_device_alloc(struct BTreeDescr *descr, uint32 size)
 		elog(ERROR, "device file overflow");
 
 	return result;
+}
+
+#define ORIOLEDB_VERSION_TMP_FILENAME	ORIOLEDB_VERSION_FILENAME ".tmp"
+
+void
+write_orioledb_version_file(void)
+{
+	FILE	   *f;
+
+	f = fopen(ORIOLEDB_VERSION_TMP_FILENAME, PG_BINARY_W);
+	if (f == NULL)
+	{
+		ereport(WARNING,
+				(errcode_for_file_access(),
+				 errmsg("could not open file \"%s\" for writing: %m",
+						ORIOLEDB_VERSION_TMP_FILENAME)));
+		return;
+	}
+
+	fprintf(f, "%s\n", ORIOLEDB_VERSION);
+
+	if (fflush(f) || fsync(fileno(f)))
+	{
+		fclose(f);
+		ereport(WARNING,
+				(errcode_for_file_access(),
+				 errmsg("could not flush file \"%s\": %m",
+						ORIOLEDB_VERSION_TMP_FILENAME)));
+		return;
+	}
+	fclose(f);
+
+	durable_rename(ORIOLEDB_VERSION_TMP_FILENAME,
+				   ORIOLEDB_VERSION_FILENAME, WARNING);
 }
 
 void
