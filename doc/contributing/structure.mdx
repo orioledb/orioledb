@@ -64,6 +64,8 @@ types of concurrency errors.
 - `testgrescheck_part_1` -- first half of testgres checks. Testgres tests are
   split into two nearly equal halves to avoid overly long individual CI runs.
 - `testgrescheck_part_2` -- second half of testgres checks.
+- `testgrescheck_part_3` -- testgres checks that the Valgrind CI jobs skip,
+  usually because they take too long under Valgrind.
 - `installcheck` -- run all types of tests when installed using the PostgreSQL
   extension system (`USE_PGXS=1`).
 - `check` -- run all types of tests when installed from the `contrib` folder of
@@ -143,7 +145,7 @@ OrioleDB uses GitHub CI. The CI workflows are described below.
 ### `check.yml`
 
 This workflow runs the following tests for each of the two compilers (gcc and
-clang) and each of the supported PostgreSQL major versions (16 and 17).
+clang) and each of the supported PostgreSQL major versions (16, 17 and 18).
 
 - `normal` -- run tests without asserts and without debug symbols.
 - `debug` -- run tests with asserts and with debug symbols.
@@ -159,7 +161,13 @@ clang) and each of the supported PostgreSQL major versions (16 and 17).
   `testgrescheck_part_1` under valgrind with asserts and with debug symbols.
 - `valgrind_2` -- runs `testgrescheck_part_2` under Valgrind with asserts and
   with debug symbols.
-- `static` -- runs `clang-analyzer` or `cppcheck` over sources.
+- `pg_tests` -- runs PostgreSQL's own regression, isolation and subscription
+  tests, then runs the regression and isolation tests again with
+  `default_table_access_method = 'orioledb'` (on PostgreSQL 17 and 18 also the
+  subscription and recovery tests).
+- `dm_log_writes` -- runs `test/t/recovery_test.py` on a `dm-log-writes`
+  device, so that a simulated crash also loses writes that were still in the
+  OS page cache.
 
 ### `docker.yml`
 

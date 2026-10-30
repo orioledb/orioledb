@@ -24,9 +24,9 @@ The following parameters control the rewind subsystem. These must be set in `pos
 | Parameter | Type | Default | Range | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `orioledb.enable_rewind` | `boolean` | `off` | on/off | Enables the collection of rewind data and starts the Rewind Worker. |
-| `orioledb.rewind_max_time` | `integer` | `3600` | 1 - 86400 | Maximum age (in seconds) a transaction record is retained for rewind. |
-| `orioledb.rewind_max_transactions` | `integer` | `100000` | 1 - `INT_MAX` | Maximum number of transactions to retain in the rewind queue. |
-| `orioledb.rewind_buffers` | `integer` | `1024` | 6 - `INT_MAX` | Number of shared memory buffers for rewind metadata. |
+| `orioledb.rewind_max_time` | `integer` | `500` | 1 - 86400 | Maximum age (in seconds) a transaction record is retained for rewind. |
+| `orioledb.rewind_max_transactions` | `integer` | `86400` | 1 - `INT_MAX` | Maximum number of transactions to retain in the rewind queue. |
+| `orioledb.rewind_buffers` | `integer` | `128` | 6 - `INT_MAX` | Number of shared memory buffers for rewind metadata. |
 
 :::note
 Enabling rewind increases the number of background processes. Ensure that `max_worker_processes` is configured with sufficient overhead to accommodate the Rewind Worker.
@@ -51,21 +51,21 @@ While the Rewind Worker manages its "to-do list" in a fixed-size circular buffer
 
 ## Rewind Functions
 
-### `orioledb_rewind_by_time(seconds int4[, attempt_restart bool])`
+### `orioledb_rewind_by_time(rewind_time int4[, attempt_restart bool])`
 Rewinds the cluster state by the specified number of seconds from the current time.
 
 * **Parameters:**
-  * `seconds`: The number of seconds to rewind the cluster state.
+  * `rewind_time`: The number of seconds to rewind the cluster state.
   * `attempt_restart`: If `true`, the database system will automatically restart after the rewind. If `false`, the database will only be shut down. Default is `false`.
 * **Examples:**
-  * `SELECT orioledb_rewind_by_time(600);` — Rewinds by 10 minutes and shuts down the database without restarting.
-  * `SELECT orioledb_rewind_by_time(600, true);` — Rewinds by 10 minutes and restarts the database.
+  * `SELECT orioledb_rewind_by_time(300);` — Rewinds by 5 minutes and shuts down the database without restarting.
+  * `SELECT orioledb_rewind_by_time(300, true);` — Rewinds by 5 minutes and restarts the database.
 
-### `orioledb_rewind_to_timestamp(target_time timestamptz[, attempt_restart bool])`
+### `orioledb_rewind_to_timestamp(rewind_timestamp timestamptz[, attempt_restart bool])`
 Rewinds the cluster to a specific point in time.
 
 * **Parameters:**
-  * `target_time`: The exact timestamp to which the cluster state will be rewound.
+  * `rewind_timestamp`: The exact timestamp to which the cluster state will be rewound.
   * `attempt_restart`: If `true`, the database system will automatically restart after the rewind. If `false`, the database will only be shut down.  Default is `false`.
 * **Examples:**
   * `SELECT orioledb_rewind_to_timestamp('2025-01-01 12:00:00 UTC', true);` — Rewinds to January 1, 2025, at 12:00:00 UTC, and restarts the database.

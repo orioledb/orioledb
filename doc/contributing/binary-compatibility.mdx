@@ -15,10 +15,15 @@ related version variables. Currently it contains the following version variables
 - `ORIOLEDB_PAGE_VERSION` - version of OrioleDB pages format
 - `ORIOLEDB_COMPRESS_VERSION` - version of OrioleDB pages compression format
 
+Two more version variables are defined in other files:
+
+- `ORIOLEDB_WAL_VERSION` (`include/recovery/wal.h`) - version of OrioleDB WAL format
+- `ORIOLEDB_CHECKPOINT_CONTROL_VERSION` (`include/checkpoint/control.h`) - version of OrioleDB control file format
+
 If you change the relevant format and its version wasn't incremented since the last
 release, you need to increment it. To check whether it was already bumped,
-compare `include/orioledb.h` against the last release tag, e.g.
-`git diff <last-tag> -- include/orioledb.h`.
+compare these files against the last release tag, e.g.
+`git diff <last-tag> -- include/orioledb.h include/recovery/wal.h include/checkpoint/control.h`.
 
 ## Cross-architecture support
 

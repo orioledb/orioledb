@@ -67,7 +67,7 @@ Until then, you can use our [pre-built Docker image](https://hub.docker.com/r/or
 
 ## Patch set
 
-You can get the full set of patches [here](https://github.com/orioledb/postgres/commits/patches16/).
+You can get the full set of patches for PostgreSQL [16](https://github.com/orioledb/postgres/commits/patches16/), [17](https://github.com/orioledb/postgres/commits/patches17/) and [18](https://github.com/orioledb/postgres/commits/patches18/).
 The following patches have been submitted to the PostgreSQL community to enhance the TAM interface and other subsystems.
 
 |                    | Name                                                              | Link                                                                                         | Version          |
@@ -84,9 +84,9 @@ The following patches have been submitted to the PostgreSQL community to enhance
 | :white_check_mark: | Support for custom slots in the custom executor nodes             | [Link](https://github.com/postgres/postgres/commit/cee120951427fe39a54ab800abfa2834d85b8771) | PostgreSQL 16    |
 | :email:            | Allow table AM to store complex data structures in rd_amcache     | [Link](https://commitfest.postgresql.org/48/4958/)                                           | PostgreSQL 18    |
 | :email:            | Allow table AM tuple_insert() method to return the different slot | [Link](https://commitfest.postgresql.org/48/4958/)                                           | PostgreSQL 18    |
-| :email:            | Add TupleTableSlotOps.is_current_xact_tuple() method              | [Link](https://commitfest.postgresql.org/48/4958/)                                           | PostgreSQL 18    |
+| :white_check_mark: | Add TupleTableSlotOps.is_current_xact_tuple() method              | [Link](https://github.com/postgres/postgres/commit/0997e0af273d80add75bcf5616eee000d0a78397) | PostgreSQL 17    |
 | :email:            | Allow locking updated tuples in tuple_update() and tuple_delete() | [Link](https://commitfest.postgresql.org/48/4958/)                                           | PostgreSQL 18    |
-| :email:            | Add EvalPlanQual delete returning isolation test                  | [Link](https://commitfest.postgresql.org/48/4958/)                                           | PostgreSQL 18    |
+| :white_check_mark: | Add EvalPlanQual delete returning isolation test                  | [Link](https://github.com/postgres/postgres/commit/8ffc2aa720a2bdef33b16609ed4f8ed07932c141) | PostgreSQL 17    |
 | :email:            | Generalize relation analyze in table AM interface                 | [Link](https://commitfest.postgresql.org/48/4958/)                                           | PostgreSQL 18    |
 | :email:            | Custom reloptions for table AM                                    | [Link](https://commitfest.postgresql.org/48/4958/)                                           | PostgreSQL 18    |
 | :email:            | Let table AM insertion methods control index insertion            | [Link](https://commitfest.postgresql.org/48/4958/)                                           | PostgreSQL 18    |
@@ -103,7 +103,7 @@ OrioleDB opens the door to a future of more powerful storage models that are opt
 
 ### Open source
 
-OrioleDB is distributed under the standard PostgreSQL license. The goal is to upstream all the patches required to run OrioleDB on any PostgreSQL installation without any modifications.
+OrioleDB is dual-licensed under the Apache License 2.0 and the PostgreSQL License. The goal is to upstream all the patches required to run OrioleDB on any PostgreSQL installation without any modifications.
 
 ### Designed for modern hardware
 

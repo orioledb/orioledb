@@ -7,7 +7,7 @@ sidebar_label: Configuration
 
 ## Main parameters
 
-All the GUC parameters require the postmaster restart.
+Most GUC parameters require a postmaster restart. Any user can change `orioledb.serializable`, `orioledb.default_compress`, `orioledb.default_primary_compress`, `orioledb.default_toast_compress`, `orioledb.table_description_compress` and `orioledb.debug_disable_downlink_fastpath` in a session; a superuser can change `orioledb.enable_stopevents` and `orioledb.trace_stopevents` in a session; `orioledb.checksums_enabled` is read-only.
 
 ### `orioledb.main_buffers`
 
@@ -21,7 +21,7 @@ the size of shared memory, where hot data pages of OrioleDB tables are cached.  
 
 |             |      |
 | ----------- | ---- |
-| **Default** | 1 MB |
+| **Default** | 1 MB or `16 * max_procs` blocks, whichever is larger |
 
 The shared memory ring buffer size for older versions of rows and pages.
 
@@ -39,7 +39,7 @@ The number of recovery workers for row-level WAL based recovery.
 
 Increasing the sum value of `orioledb.recovery_pool_size` and `orioledb.recovery_idx_pool_size` to 50-100% of number of
 available CPU cores speeds up recovery process for the cluster. You need to set `max_worker_processes` to more than
-this sum amount, otherwise OrioleDB will fallback to single-process index build in recovery or to single-process recovery.
+this sum amount, otherwise OrioleDB will fall back to single-process index build in recovery or to single-process recovery.
 
 ### `orioledb.recovery_idx_pool_size`
 
@@ -51,15 +51,15 @@ The number of recovery parallel index build workers.
 
 Increasing the sum value of `orioledb.recovery_pool_size` and `orioledb.recovery_idx_pool_size` to 50-100% of number of
 available CPU cores speeds up recovery process for the cluster. You need to set `max_worker_processes` to more than
-this sum amount, otherwise OrioleDB will fallback to single-process index build in recovery or to single-process recovery.
+this sum amount, otherwise OrioleDB will fall back to single-process index build in recovery or to single-process recovery.
 
 ### `orioledb.recovery_queue_size`
 
 |             |      |
 | ----------- | ---- |
-| **Default** | 8 MB |
+| **Default** | 1 MB |
 
-The size of shared memory for message queues related to recovery workers.
+The size of shared memory for the message queue of each recovery worker.
 
 ### `orioledb.checkpoint_completion_ratio`
 
@@ -176,7 +176,7 @@ Path to the block device for block device mode.
 
 |             |      |
 | ----------- | ---- |
-| **Default** | 1 GB |
+| **Default** | 0    |
 
 The length of the block device.
 

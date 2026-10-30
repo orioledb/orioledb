@@ -93,7 +93,7 @@ If you are interested in OrioleDB's benefits in production, please
 
 ### Use docker container
 
-We provide docker images for `amd64` and `arm64v8` architectures under Alpine Linux.
+We provide docker images for `amd64` and `arm64v8` architectures under Alpine and Ubuntu Linux.
 
 ```
 docker pull orioledb/orioledb:latest-pg17
@@ -110,9 +110,9 @@ See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details on o
 
 Before building and installing OrioleDB, one should ensure to have the following:
 
- * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres) checked out at the exact commit/tag listed for your major version in [`.pgtags`](.pgtags) (`16: …` and `17: …`).  The build verifies this and refuses to compile against any other patchset.
+ * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres) checked out at the exact commit/tag listed for your major version in [`.pgtags`](.pgtags) (`16: …`, `17: …` and `18: …`).  The build verifies this and refuses to compile against any other patchset.
  * Development package of libzstd;
- * python 3.5+ with testgres package.
+ * python 3.10+ with testgres package.
 
 Typical installation procedure may look like this:
 
@@ -122,8 +122,9 @@ Typical installation procedure may look like this:
  $ git clone https://github.com/orioledb/orioledb
  $ cd orioledb
  $ cat .pgtags
- 17: 7050019fd74d0d841040edc49ee1e16364a8b589
- 16: e5ef9e6a6d21f8e69e1d4bddcd4cdb83f054ca0b
+ 18: 4984e90ed7e12346830faed56984ea0b0ace3f14
+ 17: 48a9a8ff96b01ad2db32b2782e2a4f0cff78097c
+ 16: b0208cae2f18ad834eb91c5759d32e5c8ac0b0f2
 
  # 2. Build patched PostgreSQL at the commit listed for your major
  # version (substitute the value from .pgtags, do not copy-paste this
