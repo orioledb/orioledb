@@ -2133,17 +2133,37 @@ clean_chain_has_locks_flag(UndoLogType undoType, UndoLocation location,
 
 
 /*
+ * Is a record whose mode does not conflict with ours the one the caller should
+ * judge the row by?  That is the newest version committed before our snapshot,
+ * or our own version.  A row lock is not a version at all.  An in-progress or
+ * aborted version of another transaction is not final either: a change that
+ * conflicts with us may lie below it.
+ */
+static inline bool
+nonconflicting_record_is_final(OTupleXactInfo xactInfo, CommitSeqNo csn,
+							   OXid my_oxid, CommitSeqNo my_csn)
+{
+	if (XACT_INFO_IS_LOCK_ONLY(xactInfo))
+		return false;
+	if (COMMITSEQNO_IS_NORMAL(csn) || COMMITSEQNO_IS_FROZEN(csn))
+		return csn < my_csn;
+	return COMMITSEQNO_IS_INPROGRESS(csn) &&
+		XACT_INFO_GET_OXID(xactInfo) == my_oxid;
+}
+
+/*
  * Check for row-level lock conflict
  *
  * Returns true if lock conflict.  On lock conflict places the conflicting undo
  * record info *conflictTuphdr.
  *
- * Otherwise, places the first csn undo record info *conflictTuphdr.  A
- * lock-only record does not count as that record: its transaction locked the
- * row rather than wrote it, and an in-progress locker's csn is below the csn
- * of any regular snapshot.
- * If there is no such undo records, then *conflictTuphdr is set to
- * *pageTuphdr.
+ * Otherwise, places the version the caller should judge the row by into
+ * *conflictTuphdr: the newest version whose transaction is finished, when its
+ * mode conflicts with ours, or else the newest version committed before
+ * my_csn or written by us (see nonconflicting_record_is_final()).  Row locks
+ * are never versions.  If the walk ends before it finds that version, the
+ * newest version it passed is placed instead, or the record it started from
+ * if it passed none.
  *
  * Lock-only undo records from committed and aborted transactions are removed.
  * Own lock-only undo records of the same or weaker level are removed.
@@ -2169,6 +2189,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				finalUndoLocation;
 	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location(undoType);
 	bool		foundFinal;
+	bool		haveVersion;
 	bool		result = false;
 	LockChainLink curLink;
 	LockChainWalk walk = {InvalidUndoLocation};
@@ -2189,9 +2210,11 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 		CommitSeqNo csn = XACT_INFO_MAP_CSN(xactInfo);
 
 		xactIsFinished = !COMMITSEQNO_IS_INPROGRESS(csn);
-		xactIsFinal = (csn < my_csn);
+		xactIsFinal = nonconflicting_record_is_final(xactInfo, csn,
+													 my_oxid, my_csn);
 	}
 	foundFinal = xactIsFinal && !XACT_INFO_IS_LOCK_ONLY(xactInfo);
+	haveVersion = !XACT_INFO_IS_LOCK_ONLY(xactInfo);
 	undoLocation = curTuphdr.undoLocation;
 
 	while (curTuphdr.chainHasLocks ||
@@ -2428,7 +2451,8 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			CommitSeqNo csn = XACT_INFO_MAP_CSN(xactInfo);
 
 			xactIsFinished = !COMMITSEQNO_IS_INPROGRESS(csn);
-			xactIsFinal = (csn < my_csn);
+			xactIsFinal = nonconflicting_record_is_final(xactInfo, csn,
+														 my_oxid, my_csn);
 		}
 		undoLocation = curTuphdr.undoLocation;
 
@@ -2447,11 +2471,17 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			lastLockOnlyUndoLocation = InvalidUndoLocation;
 		}
 
-		if (!foundFinal && xactIsFinal && !XACT_INFO_IS_LOCK_ONLY(xactInfo))
+		/*
+		 * Until the final record turns up, keep the newest version as the
+		 * answer, so a walk that ends early never returns a row lock.
+		 */
+		if (!foundFinal && !XACT_INFO_IS_LOCK_ONLY(xactInfo) &&
+			(xactIsFinal || !haveVersion))
 		{
 			finalTuphdr = curTuphdr;
 			finalUndoLocation = curUndoLocation;
-			foundFinal = true;
+			foundFinal = xactIsFinal;
+			haveVersion = true;
 		}
 	}
 
