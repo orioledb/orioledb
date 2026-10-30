@@ -93,5 +93,6 @@ typedef struct
 extern bool get_checkpoint_control_data(CheckpointControl *control);
 extern void check_checkpoint_control(CheckpointControl *control);
 extern void write_checkpoint_control(CheckpointControl *control);
+extern void write_orioledb_version_file(void);
 
 #endif							/* __CHECKPOINT_CONTROL_H__ */
