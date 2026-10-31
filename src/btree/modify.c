@@ -1393,6 +1393,13 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 		return false;
 
 	/*
+	 * Doing the work under the waiter's own oxid is experimental: it loses an
+	 * update in a few million under heavy contention.
+	 */
+	if (!orioledb_delegate_updates)
+		return false;
+
+	/*
 	 * The half of the caller's callback that belongs on the page runs here.
 	 * It may amend the new tuple and refuse outright; it also settles the
 	 * lock mode, so it has to run before the conflict question is asked.

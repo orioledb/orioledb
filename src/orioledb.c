@@ -107,6 +107,7 @@ OrioleDBPageDesc *local_ppool_page_descs = NULL;
 /* Custom GUC variables */
 int			orioledb_serializable_mode = O_SERIALIZABLE_TABLE_LOCK;
 bool		orioledb_debug_disable_multi_insert = false;
+bool		orioledb_delegate_updates = false;
 bool		orioledb_debug_disable_downlink_fastpath = false;
 
 static const struct config_enum_entry serializable_mode_options[] = {
@@ -700,6 +701,18 @@ _PG_init(void)
 							 O_SERIALIZABLE_TABLE_LOCK,
 							 serializable_mode_options,
 							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomBoolVariable("orioledb.delegate_updates",
+							 "Let the holder of a leaf page do the updates queued on it.",
+							 "Experimental, and known to lose an update in a few "
+							 "million under heavy contention.",
+							 &orioledb_delegate_updates,
+							 false,
+							 PGC_SUSET,
 							 0,
 							 NULL,
 							 NULL,
