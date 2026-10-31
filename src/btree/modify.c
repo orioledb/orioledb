@@ -444,7 +444,14 @@ unlock_release(BTreeModifyInternalContext *context, bool unlock)
 	blkno = pageFindContext->items[pageFindContext->index].blkno;
 
 	if (unlock)
+	{
+		/*
+		 * Our own work on this page is done and we are about to let it go, so
+		 * this is the moment to do the queued processes' work for them.
+		 */
+		btree_apply_waiter_ops(desc, blkno);
 		unlock_page(blkno);
+	}
 	if (context->undoIsReserved)
 	{
 		release_undo_size(desc->undoType);
@@ -1325,6 +1332,15 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 			return false;
 	}
 
+	/*
+	 * Decline unless what the waiter reserved already covers the record we
+	 * would write.  Asking for more is not an option here: reserving undo is
+	 * not allowed while holding a page, as reserve_undo_size() asserts, and
+	 * there is no way to hand a reservation back once taken.
+	 */
+	if (lockerState->reservedUndoSize < O_UPDATE_MAX_UNDO_SIZE)
+		return false;
+
 	steal_reserved_undo_size(desc->undoType, lockerState->reservedUndoSize);
 	undoLocation = make_waiter_modify_undo_record(desc, curTuple, true,
 												  lockerState->action, blkno,
@@ -1420,6 +1436,16 @@ btree_apply_waiter_ops(BTreeDescr *desc, OInMemoryBlkno blkno)
 			pg_write_barrier();
 			lockerState->serviced = true;
 		}
+
+		/*
+		 * One per page hold.  Making an undo record publishes a reserved undo
+		 * location, and anybody flushing or evicting undo spins until every
+		 * backend's has moved on; doing that repeatedly while holding a page
+		 * others are queued on is how a stuck spinlock happens.  Whoever is
+		 * left is picked up by the next holder, which is where they would
+		 * have been anyway.
+		 */
+		break;
 	}
 }
 
@@ -1454,6 +1480,63 @@ reserve_undo_for_modification(UndoLogType undoType)
 		(void) reserve_undo_size(undoType, 2 * O_UPDATE_MAX_UNDO_SIZE);
 		(void) reserve_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(undoType), 2 * O_MAX_SPLIT_UNDO_IMAGE_SIZE);
 	}
+}
+
+/*
+ * Can the process holding the leaf page finish this operation for us?
+ *
+ * The holder works with nothing but the page and what we leave in shared
+ * memory, so everything that needs more than that has to answer no here:
+ * callbacks, because they are ours to run; a savepoint, because the holder
+ * records undo without one; a key we cannot hand over as a tuple; a deletion
+ * status other than the plain one the holder stamps.
+ *
+ * Saying no is never wrong, only slower, and the cases below are the ones
+ * where saying yes would be.
+ */
+static bool
+modify_can_be_delegated(BTreeDescr *desc, BTreeOperationType action,
+						OTuple tuple, BTreeKeyType tupleType,
+						BTreeKeyType keyType, OXid opOxid,
+						BTreeLeafTupleDeletedStatus deleted,
+						BTreeModifyCallbackInfo *callbackInfo)
+{
+	if (action != BTreeOperationUpdate &&
+		action != BTreeOperationDelete &&
+		action != BTreeOperationLock)
+		return false;
+
+	/* Undo is how the holder makes the change ours rather than its own. */
+	if (desc->undoType == UndoLogNone || !OXidIsValid(opOxid))
+		return false;
+
+	if (is_recovery_process())
+		return false;
+
+	if (callbackInfo &&
+		(callbackInfo->modifyCallback || callbackInfo->modifyDeletedCallback ||
+		 callbackInfo->waitCallback || callbackInfo->postUndoRecorded))
+		return false;
+
+	if (keyType != BTreeKeyLeafTuple && keyType != BTreeKeyNonLeafKey)
+		return false;
+
+	if (action == BTreeOperationUpdate &&
+		(tupleType != BTreeKeyLeafTuple || O_TUPLE_IS_NULL(tuple)))
+		return false;
+
+	if (action == BTreeOperationDelete && deleted != BTreeLeafTupleDeleted)
+		return false;
+
+	/*
+	 * A row this transaction has already touched, or a savepoint to roll back
+	 * to, both mean the holder would have to reason about our history.  It
+	 * cannot, so stay on the normal path.
+	 */
+	if (UndoLocationIsValid(get_subxact_undo_location(desc->undoType)))
+		return false;
+
+	return true;
 }
 
 static OBTreeModifyResult
@@ -1505,6 +1588,25 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 			pageFindContext.insertXactInfo = OXID_GET_XACT_INFO(opOxid, lockMode, false);
 		else
 			pageFindContext.insertXactInfo = OXID_GET_XACT_INFO(BootstrapTransactionId, lockMode, false);
+	}
+	else if (modify_can_be_delegated(desc, action, tuple, tupleType,
+									 keyType, opOxid, deleted, callbackInfo))
+	{
+		/*
+		 * Describe the operation to whoever holds the leaf, so it can finish
+		 * it for us instead of just handing the page over.  What travels is
+		 * the new tuple for an update and the key for a delete or a lock.
+		 */
+		pageFindContext.insertTuple = (action == BTreeOperationUpdate) ?
+			tuple : *((OTuple *) key);
+		pageFindContext.waiterAction = action;
+		pageFindContext.waiterLockMode = lockMode;
+		pageFindContext.waiterOpCsn = opCsn;
+		pageFindContext.waiterKeyType = (action == BTreeOperationUpdate) ?
+			BTreeKeyLeafTuple : keyType;
+		pageFindContext.insertXactInfo =
+			OXID_GET_XACT_INFO(opOxid, lockMode,
+							   action == BTreeOperationLock);
 	}
 
 	if (hint && OInMemoryBlknoIsValid(hint->blkno))
