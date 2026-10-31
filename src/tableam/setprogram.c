@@ -734,7 +734,7 @@ batch_end(bool commit)
 	batchOxid = InvalidOXid;
 
 	/* The work we took over is now as committed as ours */
-	btree_wake_deferred_waiters(false);
+	(void) btree_wake_deferred_waiters(false);
 }
 
 #if PG_VERSION_NUM >= 180000

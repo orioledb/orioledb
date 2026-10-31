@@ -1391,6 +1391,7 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 				{
 					steal_reserved_undo_size(desc->undoType,
 											 lockerState->reservedUndoSize);
+					lockerState->reservationStolen = true;
 					make_waiter_undo_record(desc, blkno,
 											waiterInfo->pgprocno,
 											lockerState);
@@ -1456,6 +1457,7 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 
 				steal_reserved_undo_size(desc->undoType,
 										 lockerState->reservedUndoSize);
+				lockerState->reservationStolen = true;
 				make_waiter_undo_record(desc, blkno,
 										tupleWaiterInfos[i].pgprocno,
 										lockerState);
