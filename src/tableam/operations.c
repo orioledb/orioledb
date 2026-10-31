@@ -235,7 +235,60 @@ o_update_delegated_apply(BTreeDescr *desc, BTreeDelegatedModifyResult *result,
 		o_tuple_get_version(((OTableSlot *) o_arg->newSlot)->tuple);
 }
 
-int			o_update_delegated_id = 0;
+/*
+ * The delegated half of o_delete_callback(): the same two refusals as for an
+ * update, and nothing to complete.
+ */
+static OBTreeModifyCallbackAction
+o_delete_delegated_modify(BTreeDescr *desc, OTuple curTuple, OTuple *newTuple,
+						  OXid oxid, CommitSeqNo csn, OTupleXactInfo xactInfo,
+						  UndoLocation location, RowLockMode *lockMode,
+						  BTreeDelegatedModifyResult *result)
+{
+	if (desc->type != oIndexPrimary)
+		return OBTreeCallbackActionDoNothing;
+
+	if (XACT_INFO_OXID_EQ(xactInfo, oxid))
+		return OBTreeCallbackActionDoNothing;
+
+	if (XACT_INFO_IS_FINISHED(xactInfo) && XACT_INFO_MAP_CSN(xactInfo) >= csn)
+		return OBTreeCallbackActionDoNothing;
+
+	Assert(*lockMode == RowLockUpdate);
+
+	result->xactInfo = xactInfo;
+	result->undoLocation = location;
+	result->deleted = true;
+
+	return OBTreeCallbackActionDelete;
+}
+
+/*
+ * The caller's half of a delegated delete: the row the holder deleted goes
+ * where o_delete_callback() would have put it.
+ */
+static void
+o_delete_delegated_apply(BTreeDescr *desc, BTreeDelegatedModifyResult *result,
+						 void *arg)
+{
+	OModifyCallbackArg *o_arg = (OModifyCallbackArg *) arg;
+	OTuple		oldTuple = result->oldTuple;
+	int			len = lockerStates[MYPROCNUMBER].oldTupleLen;
+
+	o_arg->modified = false;
+	o_arg->selfModified = false;
+	o_arg->tup_undo_location = result->undoLocation;
+
+	Assert(!O_TUPLE_IS_NULL(oldTuple));
+	oldTuple.data = palloc(len);
+	memcpy(oldTuple.data, result->oldTuple.data, len);
+	copy_tuple_to_slot(oldTuple, update_arg_get_slot(o_arg),
+					   o_arg->descr, o_arg->csn, PrimaryIndexNumber, NULL);
+	slot_getallattrs(update_arg_get_slot(o_arg));
+}
+
+static int	o_update_delegated_id = 0;
+static int	o_delete_delegated_id = 0;
 
 void
 o_register_delegated_callbacks(void)
@@ -244,6 +297,34 @@ o_register_delegated_callbacks(void)
 		btree_register_delegated_callbacks(o_update_delegated_modify,
 										   o_update_delegated_post_undo,
 										   o_update_delegated_apply);
+	o_delete_delegated_id =
+		btree_register_delegated_callbacks(o_delete_delegated_modify,
+										   o_update_delegated_post_undo,
+										   o_delete_delegated_apply);
+}
+
+/*
+ * The primary key as a key tuple, for a delete to hand to the page holder:
+ * a key bound points into our own memory, which the holder cannot read.
+ */
+static OTuple
+form_primary_key_tuple(OIndexDescr *primary, OBTreeKeyBound *bound)
+{
+	Datum		values[INDEX_MAX_KEYS];
+	bool		isnull[INDEX_MAX_KEYS];
+	int			i;
+
+	Assert(bound->nkeys == primary->nonLeafTupdesc->natts);
+	for (i = 0; i < bound->nkeys; i++)
+	{
+		int			attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyNonLeafKey,
+														  primary, i + 1);
+
+		values[attnum - 1] = bound->keys[i].value;
+		isnull[attnum - 1] = (bound->keys[i].flags & O_VALUE_BOUND_NULL) != 0;
+	}
+	return o_form_tuple(primary->nonLeafTupdesc, &primary->nonLeafSpec, 0,
+						values, isnull, NULL);
 }
 
 static void
@@ -2936,14 +3017,7 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
 		.needsUndoForSelfCreated = false,
 		.arg = arg,
 		.postUndoRecorded = set_pending_sk_marker_from_modify_arg,
-
-		/*
-		 * Offer the update for delegation only where the holder's half is the
-		 * whole of what the page needs: with a secondary index there is also
-		 * the PK/SK marker and the index maintenance itself, neither of which
-		 * it can do for us.
-		 */
-		.delegatedCallbackId = (descr->nIndices < 2) ? o_update_delegated_id : 0
+		.delegatedCallbackId = 0
 	};
 
 	memset(&result, 0, sizeof(result));
@@ -2951,7 +3025,25 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
 
 	O_TUPLE_SET_NULL(nullTup);
 
-	if (!arg->changingPart)
+	/*
+	 * Offer the delete for delegation only where the holder's half is the
+	 * whole of what the page needs, as for an update.  A bridged table also
+	 * has its bridge index to keep in step.
+	 */
+	if (!arg->changingPart && orioledb_delegate_updates &&
+		descr->nIndices < 2 && !descr->bridge)
+	{
+		OTuple		keyTuple = form_primary_key_tuple(GET_PRIMARY(descr), key);
+
+		callbackInfo.delegatedCallbackId = o_delete_delegated_id;
+		res = o_btree_modify(&GET_PRIMARY(descr)->desc, BTreeOperationDelete,
+							 nullTup, BTreeKeyNone,
+							 (Pointer) &keyTuple, BTreeKeyNonLeafKey,
+							 oxid, csn, RowLockUpdate,
+							 hint, &callbackInfo);
+		pfree(keyTuple.data);
+	}
+	else if (!arg->changingPart)
 		res = o_btree_modify(&GET_PRIMARY(descr)->desc, BTreeOperationDelete,
 							 nullTup, BTreeKeyNone,
 							 (Pointer) key, BTreeKeyBound,

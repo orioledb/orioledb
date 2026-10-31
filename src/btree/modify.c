@@ -2188,6 +2188,24 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 			return false;
 		lockerState->lockMode = RowLockUpdate;
 	}
+	else if (lockerState->delegatedCallbackId != 0 &&
+			 lockerState->action == BTreeOperationDelete)
+	{
+		BTreeDelegatedModifyCallback delegated;
+
+		delegated = btree_get_delegated_modify_callback(lockerState->delegatedCallbackId);
+		memset(&lockerPayloads[pgprocno].delegatedResult, 0,
+			   sizeof(lockerPayloads[pgprocno].delegatedResult));
+
+		/* What travels for a delete is the key: there is no new tuple. */
+		O_TUPLE_SET_NULL(delegatedTuple);
+		if (delegated &&
+			delegated(desc, curTuple, &delegatedTuple, oxid, lockerState->opCsn,
+					  tuphdr->xactInfo, tuphdr->undoLocation,
+					  &lockerState->lockMode,
+					  &lockerPayloads[pgprocno].delegatedResult) != OBTreeCallbackActionDelete)
+			return false;
+	}
 	else if (lockerState->delegatedCallbackId != 0)
 	{
 		BTreeDelegatedModifyCallback delegated;
@@ -2368,6 +2386,18 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 	}
 	else
 	{
+		/* As for an update: the caller needs the row it deleted. */
+		if (lockerState->delegatedCallbackId != 0)
+		{
+			LocationIndex oldTuplen = o_btree_len(desc, curTuple, OTupleLength);
+
+			Assert(oldTuplen <= O_BTREE_MAX_TUPLE_SIZE);
+			memcpy(lockerPayloads[pgprocno].oldTupleData.fixedData,
+				   curTuple.data, oldTuplen);
+			lockerState->oldTupleFlags = curTuple.formatFlags;
+			lockerState->oldTupleLen = oldTuplen;
+		}
+
 		tuphdr->xactInfo = waiterTuphdr->xactInfo;
 		tuphdr->deleted = waiterTuphdr->deleted == BTreeLeafTupleNonDeleted ?
 			BTreeLeafTupleDeleted : waiterTuphdr->deleted;
@@ -2628,7 +2658,14 @@ modify_can_be_delegated(BTreeDescr *desc, BTreeOperationType action,
 		(tupleType != BTreeKeyLeafTuple || O_TUPLE_IS_NULL(tuple)))
 		return false;
 
-	if (action == BTreeOperationDelete && deleted != BTreeLeafTupleDeleted)
+	/*
+	 * A plain delete only, and only one whose caller can take the row back:
+	 * the holder hands the deleted row over, and that is all the caller gets
+	 * to remove its TOAST and log the delete with.
+	 */
+	if (action == BTreeOperationDelete &&
+		(deleted != BTreeLeafTupleNonDeleted ||
+		 !callbackInfo || callbackInfo->delegatedCallbackId == 0))
 		return false;
 
 	/*
