@@ -72,6 +72,12 @@ typedef struct
 	bool		changingPart;
 	Bitmapset  *keyAttrs;
 	int			options;
+
+	/*
+	 * The page holder took the update into its batch transaction, which logs
+	 * it: there is no WAL record left for us to write.
+	 */
+	bool		absorbed;
 } OModifyCallbackArg;
 
 typedef struct
@@ -91,6 +97,7 @@ typedef struct
 	bool		selfModified;
 } OLockCallbackArg;
 
+extern char wal_relreplident(Relation rel);
 extern void o_register_delegated_callbacks(void);
 extern TupleTableSlot *o_tbl_insert(OTableDescr *descr, Relation relation,
 									TupleTableSlot *slot, OXid oxid,

@@ -104,8 +104,9 @@ extern int	get_page_waiters(BTreeDescr *desc, OInMemoryBlkno blkno,
 extern uint64 page_locked_state(OInMemoryBlkno blkno);
 extern void mark_waiter_tuples_inserted(int procnums[BTREE_PAGE_MAX_SPLIT_ITEMS],
 										int count);
-extern void btree_wake_deferred_waiters(void);
+extern void btree_wake_deferred_waiters(bool batchFailed);
 extern bool btree_has_deferred_waiters(void);
+extern void btree_defer_waiter(int pgprocno);
 extern void lock_page(OInMemoryBlkno blkno);
 extern OLockPageWithTupleResult lock_page_with_tuple(BTreeDescr *desc,
 													 OInMemoryBlkno *blkno,

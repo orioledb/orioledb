@@ -66,7 +66,7 @@
  * neither the old tuple of REPLICA IDENTITY FULL nor the record naming the
  * identity.
  */
-static char
+char
 wal_relreplident(Relation rel)
 {
 	if (!RelationIsLogicallyLogged(rel))
@@ -185,6 +185,7 @@ o_update_delegated_apply(BTreeDescr *desc, BTreeDelegatedModifyResult *result,
 	o_arg->modified = false;
 	o_arg->selfModified = false;
 	o_arg->tup_undo_location = result->undoLocation;
+	o_arg->absorbed = result->absorbed;
 
 	/*
 	 * Both rows are in our shared state, and the slots must not point there:
@@ -2249,7 +2250,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			mres.success = tts_orioledb_update_toast_values(oldSlot, slot, descr,
 															oxid, csn);
 
-			if (mres.success &&
+			if (mres.success && !arg->absorbed &&
 				primary->desc.storageType == BTreeStoragePersistence)
 			{
 				OTuple		final_tup = tts_orioledb_form_tuple(slot, descr);
@@ -2620,6 +2621,16 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 			memcpy(&myPayload->program, program, sizeof(OSetProgram));
 		else
 			myPayload->program.nops = 0;
+
+		/*
+		 * A holder whose batch has written the row may take the update into
+		 * its batch -- if ours is a batch too, so that nothing of our
+		 * transaction is left to see that somebody else committed it.
+		 */
+		myPayload->delegatedResult.absorbed = false;
+		lockerStates[MYPROCNUMBER].absorbable = program != NULL &&
+			OXidIsValid(btree_batch_oxid) && btree_batch_oxid == oxid &&
+			btree_batch_desc == &GET_PRIMARY(descr)->desc;
 	}
 
 	newTup = tts_orioledb_form_tuple(newSlot, descr);
@@ -2629,6 +2640,7 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 								   (Pointer) oldPkey, BTreeKeyBound,
 								   oxid, csn, RowLockNoKeyUpdate,
 								   hint, &callbackInfo);
+	lockerStates[MYPROCNUMBER].absorbable = false;
 	fire_sk_modify_pending_stopevent(descr, 1, false);
 
 	if (modify_result == OBTreeModifyResultLocked)

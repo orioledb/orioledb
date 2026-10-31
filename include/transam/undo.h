@@ -296,6 +296,13 @@ typedef struct
 											 * xact */
 	OXid		oxid;
 	LogicalXidCtx logicalXidContext;
+
+	/*
+	 * The transaction's changes are somebody's data, not catalog bookkeeping:
+	 * its commit has to be as durable as an ordinary one before anybody can
+	 * see it.  Set by the caller after start_autonomous_transaction().
+	 */
+	bool		durable;
 } OAutonomousTxState;
 
 /*
