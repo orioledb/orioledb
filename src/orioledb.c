@@ -1578,6 +1578,7 @@ _PG_init(void)
 	if (enable_rewind)
 		VacuumHorizonHook = orioledb_vacuum_horizon_hook;
 	orioledb_setup_ddl_hooks();
+	o_register_delegated_callbacks();
 	stopevents_make_cxt();
 }
 
