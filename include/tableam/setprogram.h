@@ -64,7 +64,7 @@ typedef struct
 #define O_SET_PROGRAM_MAX_OPS		16
 #define O_SET_PROGRAM_CONST_SPACE	2048
 
-typedef struct
+typedef struct OSetProgram
 {
 	int			nops;			/* 0 means "nothing here" */
 	int			constUsed;
@@ -78,6 +78,7 @@ typedef struct
  * single result relation.
  */
 extern OSetProgram *o_current_set_program(Oid relid);
+extern bool o_current_program_is_upsert(void);
 
 extern void o_setprogram_init(void);
 struct BTreeDescr;

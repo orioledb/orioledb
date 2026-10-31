@@ -1280,6 +1280,26 @@ set_oxid_batch_locktag(LOCKTAG *tag, OXid oxid)
 }
 
 /*
+ * The csn of an oxid, without waiting out a commit in progress: one that is
+ * still running or committing reads as COMMITSEQNO_INPROGRESS.  For callers
+ * holding a page, who must not spin for the length of somebody's fsync.
+ */
+CommitSeqNo
+oxid_get_csn_nowait(OXid oxid)
+{
+	CommitSeqNo csn;
+
+	if (oxid == BootstrapTransactionId ||
+		oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
+		return COMMITSEQNO_FROZEN;
+
+	map_oxid(oxid, &csn, NULL, false);
+	if (COMMITSEQNO_IS_SPECIAL(csn) || csn == COMMITSEQNO_COMMITTING)
+		return COMMITSEQNO_INPROGRESS;
+	return csn;
+}
+
+/*
  * The process running an oxid, if the oxid is an autonomous transaction's and
  * still running.
  */

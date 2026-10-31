@@ -724,7 +724,8 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 * end and then do it ourselves.
 				 */
 				if (cbAction == OBTreeCallbackActionXidWait &&
-					context->action == BTreeOperationUpdate &&
+					(context->action == BTreeOperationUpdate ||
+					 context->action == BTreeOperationInsert) &&
 					lockerStates[MYPROCNUMBER].absorbable &&
 					oxid_get_autonomous_owner(oxid, &batchOwner))
 				{
@@ -986,7 +987,9 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 	 * update anything else, so other rows may be taken into the batch.
 	 */
 	if (OXidIsValid(btree_batch_oxid) && context->opOxid == btree_batch_oxid &&
-		desc == btree_batch_desc && context->action == BTreeOperationUpdate)
+		desc == btree_batch_desc &&
+		(context->action == BTreeOperationUpdate ||
+		 context->action == BTreeOperationInsert))
 		btree_batch_written = true;
 
 	if (context->undoIsReserved && context->needsUndo)
@@ -1534,7 +1537,8 @@ absorb_row_group(BTreeDescr *desc, OInMemoryBlkno blkno, int *procnos, int n,
 		 */
 		if (!btree_batch_written)
 			return 0;
-		rowCsn = oxid_get_csn(rowOxid, false);
+		/* Not waiting for a commit in progress: we hold the page */
+		rowCsn = oxid_get_csn_nowait(rowOxid);
 		if (!COMMITSEQNO_IS_NORMAL(rowCsn) && !COMMITSEQNO_IS_FROZEN(rowCsn))
 			return 0;
 
@@ -1583,8 +1587,14 @@ absorb_row_group(BTreeDescr *desc, OInMemoryBlkno blkno, int *procnos, int n,
 			OSetProgram *program = &lockerPayloads[procnos[i]].program;
 
 			absorbed[i] = false;
+
+			/*
+			 * An update, or the insert of an upsert whose row is there: its
+			 * ON CONFLICT action is this same update, row lock and all.
+			 */
 			if (!lockerState->absorbable ||
-				lockerState->action != BTreeOperationUpdate ||
+				(lockerState->action != BTreeOperationUpdate &&
+				 lockerState->action != BTreeOperationInsert) ||
 				program->nops == 0)
 				continue;
 
@@ -2417,16 +2427,21 @@ btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 
 	/*
 	 * The updates our batch can take, all at once and a row at a time.  They
-	 * stay asleep until the batch is durable.
+	 * stay asleep until the batch is durable.  Not before our batch has
+	 * written its row: until then it may take none but that row, which it has
+	 * yet to write, and looking would only cost every waiter a search of the
+	 * page while we hold it.
 	 */
-	if (OXidIsValid(btree_batch_oxid) && desc == btree_batch_desc)
+	if (OXidIsValid(btree_batch_oxid) && desc == btree_batch_desc &&
+		btree_batch_written)
 	{
 		for (i = 0; i < count; i++)
 		{
 			OPageWaiterShmemState *lockerState = &lockerStates[procnums[i]];
 
-			if (lockerState->action == BTreeOperationUpdate &&
-				lockerState->absorbable)
+			if ((lockerState->action == BTreeOperationUpdate ||
+				 lockerState->action == BTreeOperationInsert) &&
+				lockerState->absorbable && !lockerState->serviced)
 				cand[ncand++] = procnums[i];
 		}
 		if (ncand > 0 &&

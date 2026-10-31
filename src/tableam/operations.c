@@ -393,6 +393,8 @@ static OBTreeModifyCallbackAction o_insert_callback(BTreeDescr *descr,
 													RowLockMode *lock_mode,
 													BTreeLocationHint *hint,
 													void *arg);
+static void publish_set_program(OTableDescr *descr, OXid oxid, bool absorbable);
+static OSetProgram *usable_set_program(OTableDescr *descr);
 static OBTreeWaitCallbackAction o_insert_with_arbiter_wait_callback(BTreeDescr *descr,
 																	OTuple tup, OTuple *newtup,
 																	OXid oxid, OTupleXactInfo xactInfo,
@@ -1435,6 +1437,15 @@ o_tbl_insert_with_arbiter(Relation rel,
 	ioc_arg.scanSlot = lockedSlot;
 	ioc_arg.tupUndoLocation = InvalidUndoLocation;
 
+	/*
+	 * Only with the primary key as the one index to write, and a WAL record
+	 * that needs nothing but the new row.
+	 */
+	ioc_arg.selfProgram = NULL;
+	if (lockedSlot && descr->nIndices < 2 &&
+		wal_relreplident(rel) != REPLICA_IDENTITY_FULL)
+		ioc_arg.selfProgram = usable_set_program(descr);
+
 	while (true)
 	{
 		CommitSeqNo save_csn = csn;
@@ -1456,6 +1467,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 		ioc_arg.copyPrimaryOxid = false;
 		ioc_arg.conflictOxid = InvalidOXid;
 		ioc_arg.csn = csn;
+		ioc_arg.selfUpdated = false;
 
 		for (i = 0; (i < descr->nIndices) && success; i++)
 		{
@@ -1491,9 +1503,50 @@ o_tbl_insert_with_arbiter(Relation rel,
 			callbackInfo.postUndoRecorded = (i == PrimaryIndexNumber)
 				? set_pending_sk_marker_from_ioc_arg : NULL;
 
+			/*
+			 * Should the row be a batch's, the batch may do our ON CONFLICT
+			 * update for us: offer it the assignment.
+			 */
+			if (i == PrimaryIndexNumber)
+				publish_set_program(descr, oxid, true);
+
 			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
 										oxid, csn, &callbackInfo,
 										descr->indices[i]->desc.type == oIndexExclusion ? UNIQUE_CHECK_NO : UNIQUE_CHECK_YES);
+
+			if (i == PrimaryIndexNumber)
+			{
+				lockerStates[MYPROCNUMBER].absorbable = false;
+
+				/*
+				 * It did: the row was there, and the batch updated it as our
+				 * ON CONFLICT action would have, logging it too.  The
+				 * statement is done; there is nothing left for the executor
+				 * to do on conflict.
+				 */
+				if (result == OBTreeModifyResultUpdated &&
+					lockerPayloads[MYPROCNUMBER].delegatedResult.absorbed)
+				{
+					pgstat_count_heap_update(rel, false, false);
+					return slot;
+				}
+
+				/*
+				 * We did the ON CONFLICT update ourselves, at the conflict.
+				 * Log it, and the statement is done.
+				 */
+				if (result == OBTreeModifyResultUpdated && ioc_arg.selfUpdated)
+				{
+					OIndexDescr *primary = GET_PRIMARY(descr);
+
+					pgstat_count_heap_update(rel, false, false);
+					if (primary->desc.storageType == BTreeStoragePersistence)
+						o_wal_update(&primary->desc, ioc_arg.selfTuple,
+									 ioc_arg.selfTuple, wal_relreplident(rel),
+									 descr->version);
+					return slot;
+				}
+			}
 
 			/*
 			 * Marker (if any) was installed under page lock by the
@@ -2584,6 +2637,29 @@ usable_set_program(OTableDescr *descr)
 	return program;
 }
 
+/*
+ * Publish the statement's assignment before we descend, while the payload is
+ * still nobody's business but ours, and say whether a batch may take our
+ * update over: only if ours is a batch too, so that nothing of our
+ * transaction is left to see that somebody else committed it.
+ */
+static void
+publish_set_program(OTableDescr *descr, OXid oxid, bool absorbable)
+{
+	OSetProgram *program = usable_set_program(descr);
+	OPageWaiterPayload *myPayload = &lockerPayloads[MYPROCNUMBER];
+
+	if (program != NULL)
+		memcpy(&myPayload->program, program, sizeof(OSetProgram));
+	else
+		myPayload->program.nops = 0;
+
+	myPayload->delegatedResult.absorbed = false;
+	lockerStates[MYPROCNUMBER].absorbable = absorbable && program != NULL &&
+		OXidIsValid(btree_batch_oxid) && btree_batch_oxid == oxid &&
+		btree_batch_desc == &GET_PRIMARY(descr)->desc;
+}
+
 static OTableModifyResult
 o_tbl_indices_overwrite(OTableDescr *descr,
 						OBTreeKeyBound *oldPkey,
@@ -2617,29 +2693,10 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 	result.oldTuple = NULL;
 
 	/*
-	 * Publish the assignment before we descend, while the payload is still
-	 * nobody's business but ours.  An empty program says "copy what I
-	 * computed", which is all phase 1 ever offered.
+	 * The update half of an upsert finds the row locked for our own batch:
+	 * nobody else's batch can take it over, so do not ask holders to try.
 	 */
-	{
-		OSetProgram *program = usable_set_program(descr);
-		OPageWaiterPayload *myPayload = &lockerPayloads[MYPROCNUMBER];
-
-		if (program != NULL)
-			memcpy(&myPayload->program, program, sizeof(OSetProgram));
-		else
-			myPayload->program.nops = 0;
-
-		/*
-		 * A holder whose batch has written the row may take the update into
-		 * its batch -- if ours is a batch too, so that nothing of our
-		 * transaction is left to see that somebody else committed it.
-		 */
-		myPayload->delegatedResult.absorbed = false;
-		lockerStates[MYPROCNUMBER].absorbable = program != NULL &&
-			OXidIsValid(btree_batch_oxid) && btree_batch_oxid == oxid &&
-			btree_batch_desc == &GET_PRIMARY(descr)->desc;
-	}
+	publish_set_program(descr, oxid, !o_current_program_is_upsert());
 
 	newTup = tts_orioledb_form_tuple(newSlot, descr);
 
@@ -3199,6 +3256,52 @@ o_insert_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 	return OBTreeCallbackActionUpdate;
 }
 
+/*
+ * Apply a SET program to a primary key row: the row the executor's ON
+ * CONFLICT update would store.  Called holding the page, so anything that
+ * raises is caught and reported as "could not": the caller then does what it
+ * did before.
+ */
+static bool
+apply_program_to_row(OIndexDescr *primary, OSetProgram *program, OTuple cur,
+					 OTuple *result, int *resultLen)
+{
+	TupleDesc	tupdesc = primary->leafTupdesc;
+	int			natts = tupdesc->natts;
+	bool		ok = false;
+	MemoryContext oldcxt = CurrentMemoryContext;
+
+	PG_TRY();
+	{
+		OTupleReaderState reader;
+		Datum	   *values = (Datum *) palloc(natts * sizeof(Datum));
+		bool	   *isnull = (bool *) palloc(natts * sizeof(bool));
+		int			i;
+
+		o_tuple_init_reader(&reader, cur, tupdesc, &primary->leafSpec);
+		for (i = 0; i < natts; i++)
+			values[i] = o_tuple_read_next_field(&reader, &isnull[i]);
+
+		if (o_set_program_apply(program, values, isnull, natts))
+		{
+			*result = o_form_tuple(tupdesc, &primary->leafSpec,
+								   o_tuple_get_version(cur) + 1,
+								   values, isnull, NULL);
+			*resultLen = o_btree_len(&primary->desc, *result, OTupleLength);
+			ok = (*resultLen <= O_BTREE_MAX_TUPLE_SIZE);
+		}
+	}
+	PG_CATCH();
+	{
+		MemoryContextSwitchTo(oldcxt);
+		FlushErrorState();
+		ok = false;
+	}
+	PG_END_TRY();
+
+	return ok;
+}
+
 static OBTreeWaitCallbackAction
 o_insert_with_arbiter_wait_callback(BTreeDescr *descr,
 									OTuple tup, OTuple *newtup,
@@ -3254,6 +3357,24 @@ o_insert_with_arbiter_modify_callback(BTreeDescr *descr,
 									  void *arg)
 {
 	InsertOnConflictCallbackArg *ioc_arg = (InsertOnConflictCallbackArg *) arg;
+
+	/*
+	 * Our ON CONFLICT action is a program and the row is somebody else's,
+	 * committed: do the update now instead of only locking the row for the
+	 * executor to update next.  A row of our own transaction is left to the
+	 * executor, which knows about command ids.
+	 */
+	if (ioc_arg->selfProgram && ioc_arg->conflictIxNum == PrimaryIndexNumber &&
+		descr->type == oIndexPrimary && XACT_INFO_IS_FINISHED(xactInfo) &&
+		!XACT_INFO_OXID_IS_CURRENT(xactInfo) &&
+		apply_program_to_row((OIndexDescr *) descr->arg, ioc_arg->selfProgram,
+							 tup, newtup, &ioc_arg->selfTupleLen))
+	{
+		ioc_arg->selfTuple = *newtup;
+		ioc_arg->selfUpdated = true;
+		*lock_mode = RowLockNoKeyUpdate;
+		return OBTreeCallbackActionUpdate;
+	}
 
 	if (ioc_arg->scanSlot && ioc_arg->conflictIxNum != InvalidIndexNumber)
 	{
