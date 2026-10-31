@@ -2563,6 +2563,13 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 		if (evict)
 		{
 			unlock_page(blkno);
+			if (STOPEVENTS_ENABLED())
+			{
+				Jsonb	   *params;
+
+				params = btree_page_stopevent_params(desc, p);
+				STOPEVENT(STOPEVENT_AFTER_EVICT_IONUM_SET, params);
+			}
 			new_downlink = perform_page_io(desc, blkno, p,
 										   checkpoint_number, copy_blkno, &dirty_parent);
 
