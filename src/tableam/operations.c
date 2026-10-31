@@ -31,6 +31,7 @@
 #include "tableam/descr.h"
 #include "tableam/handler.h"
 #include "tableam/operations.h"
+#include "tableam/setprogram.h"
 #include "tableam/tree.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
@@ -185,9 +186,49 @@ o_update_delegated_apply(BTreeDescr *desc, BTreeDelegatedModifyResult *result,
 	o_arg->selfModified = false;
 	o_arg->tup_undo_location = result->undoLocation;
 
+	/*
+	 * Both rows are in our shared state, and the slots must not point there:
+	 * it is not ours alone once we are awake.  Copy them out.
+	 */
 	if (!O_TUPLE_IS_NULL(result->oldTuple))
-		copy_tuple_to_slot(result->oldTuple, update_arg_get_slot(o_arg),
+	{
+		OTuple		oldTuple = result->oldTuple;
+		int			len = lockerStates[MYPROCNUMBER].oldTupleLen;
+
+		oldTuple.data = palloc(len);
+		memcpy(oldTuple.data, result->oldTuple.data, len);
+		copy_tuple_to_slot(oldTuple, update_arg_get_slot(o_arg),
 						   o_arg->descr, o_arg->csn, PrimaryIndexNumber, NULL);
+		slot_getallattrs(update_arg_get_slot(o_arg));
+	}
+
+	/*
+	 * If the holder worked the new row out from the row it found, our slot
+	 * still holds what we computed from a row that has since been replaced.
+	 * Take the holder's version, so that whatever reads the slot afterwards
+	 * sees the row that was actually stored.
+	 */
+	if (result->newTupleLen > 0)
+	{
+		OPageWaiterPayload *myPayload = &lockerPayloads[MYPROCNUMBER];
+		OTuple		newTuple;
+
+		newTuple.formatFlags = lockerStates[MYPROCNUMBER].tupleFlags;
+		newTuple.data = palloc(result->newTupleLen);
+		memcpy(newTuple.data,
+			   &myPayload->tupleData.fixedData[BTreeLeafTuphdrSize],
+			   result->newTupleLen);
+		copy_tuple_to_slot(newTuple, (TupleTableSlot *) o_arg->newSlot,
+						   o_arg->descr, o_arg->csn, PrimaryIndexNumber, NULL);
+
+		/*
+		 * What reads the slot next -- the TOAST and key handling of
+		 * o_tbl_update() -- takes tts_values as it is, so deform now: the
+		 * slot still holds the values we computed, and for a varlena those
+		 * point at memory that is no longer ours.
+		 */
+		slot_getallattrs((TupleTableSlot *) o_arg->newSlot);
+	}
 
 	((OTableSlot *) o_arg->newSlot)->version =
 		o_tuple_get_version(((OTableSlot *) o_arg->newSlot)->tuple);
@@ -2492,6 +2533,48 @@ o_update_secondary_index(OIndexDescr *id,
 }
 
 /* returns TupleTableSlot of old tuple as OTableModifyResul.result */
+/*
+ * Can the holder of the leaf be asked to work this update out for itself
+ * rather than copy the tuple we have already computed?
+ *
+ * Only if we can hand it the assignment, and only if the row it will find is
+ * one it can rebuild without us: no ctid primary key and no bridge, so the
+ * tuple is nothing but the columns; and no assignment to a key column, since
+ * the holder re-applies the assignment to whatever row is there now, and that
+ * is only the same row if the key cannot move.
+ */
+static OSetProgram *
+usable_set_program(OTableDescr *descr)
+{
+	OIndexDescr *id = GET_PRIMARY(descr);
+	OSetProgram *program;
+	int			i,
+				j;
+
+	program = o_current_set_program(descr->oids.reloid);
+	if (program == NULL || program->nops == 0)
+		return NULL;
+
+	if (id->primaryIsCtid || id->bridging || descr->bridge != NULL)
+		return NULL;
+
+	for (i = 0; i < program->nops; i++)
+	{
+		AttrNumber	attnum = program->ops[i].attnum;
+
+		if (attnum < 1 || attnum > id->leafTupdesc->natts)
+			return NULL;
+
+		for (j = 0; j < id->nKeyFields; j++)
+		{
+			if (id->tableAttnums[j] == attnum)
+				return NULL;
+		}
+	}
+
+	return program;
+}
+
 static OTableModifyResult
 o_tbl_indices_overwrite(OTableDescr *descr,
 						OBTreeKeyBound *oldPkey,
@@ -2523,6 +2606,21 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 	memset(&result, 0, sizeof(result));
 	result.success = true;
 	result.oldTuple = NULL;
+
+	/*
+	 * Publish the assignment before we descend, while the payload is still
+	 * nobody's business but ours.  An empty program says "copy what I
+	 * computed", which is all phase 1 ever offered.
+	 */
+	{
+		OSetProgram *program = usable_set_program(descr);
+		OPageWaiterPayload *myPayload = &lockerPayloads[MYPROCNUMBER];
+
+		if (program != NULL)
+			memcpy(&myPayload->program, program, sizeof(OSetProgram));
+		else
+			myPayload->program.nops = 0;
+	}
 
 	newTup = tts_orioledb_form_tuple(newSlot, descr);
 

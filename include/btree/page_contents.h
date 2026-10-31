@@ -17,6 +17,7 @@
 #include "btree/modify.h"
 #include "btree/page_state.h"
 #include "s3/queue.h"
+#include "tableam/setprogram.h"
 
 #define NUM_SEQ_SCANS_ARRAY_SIZE	32
 
@@ -548,6 +549,13 @@ typedef struct
 typedef struct
 {
 	BTreeDelegatedModifyResult delegatedResult;
+
+	/*
+	 * The assignment itself, for an update the holder is to work out rather
+	 * than copy.  Empty when there is nothing to work out, which is every
+	 * operation phase 1 handles.
+	 */
+	OSetProgram program;
 	union
 	{
 		char		fixedData[BTreeLeafTuphdrSize + O_BTREE_MAX_KEY_SIZE];

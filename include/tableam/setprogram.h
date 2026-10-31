@@ -27,8 +27,6 @@
 #include "postgres.h"
 
 #include "access/attnum.h"
-#include "executor/execdesc.h"
-#include "nodes/execnodes.h"
 
 /*
  * The assignments we are able to carry.  Anything else means the statement is

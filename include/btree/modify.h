@@ -89,6 +89,13 @@ typedef struct BTreeDelegatedModifyResult
 	 * nobody else touches once it has been woken.
 	 */
 	OTuple		oldTuple;
+
+	/*
+	 * The row the holder worked out, when it worked it out rather than taking
+	 * the one we computed.  Zero length means "the one you computed still
+	 * stands".
+	 */
+	LocationIndex newTupleLen;
 } BTreeDelegatedModifyResult;
 
 /*
