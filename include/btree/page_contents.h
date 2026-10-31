@@ -14,6 +14,7 @@
 #ifndef __BTREE_PAGE_CONTENTS_H__
 #define __BTREE_PAGE_CONTENTS_H__
 
+#include "btree/modify.h"
 #include "btree/page_state.h"
 #include "s3/queue.h"
 
@@ -472,21 +473,6 @@ typedef enum
 } OPageWaiterStatus;
 
 /*
- * Outcome the lock holder recorded for a waiter's operation.  Only meaningful
- * once OPageWaiterShmemState.serviced is set -- that flag is what tells the
- * waiter the holder did the work on its behalf.
- */
-typedef enum
-{
-	OPageWaiterOpNotApplied = 0,
-	OPageWaiterOpInserted,
-	OPageWaiterOpUpdated,
-	OPageWaiterOpDeleted,
-	OPageWaiterOpLocked,
-	OPageWaiterOpNotFound
-} OPageWaiterOpResult;
-
-/*
  * Shared-memory state for a process waiting to modify a tuple on a page (or
  * lock it).  When the lock holder performs the group modification
  * optimization, it applies the waiter's operation and creates undo records on
@@ -527,6 +513,22 @@ typedef struct
 	/* How to read the payload: leaf tuple or bare key. */
 	BTreeKeyType keyType;
 
+	/*
+	 * Which delegated callbacks the holder may run for us, and where it
+	 * leaves what we have to record for ourselves afterwards.
+	 */
+	int			delegatedCallbackId;
+	BTreeDelegatedModifyResult delegatedResult;
+
+	/*
+	 * The row as the holder found it, handed back because the caller of an
+	 * update needs the old values -- for its secondary indexes, RETURNING and
+	 * triggers -- and cannot read them once the row has been replaced. Valid
+	 * only when opResult says the holder updated something.
+	 */
+	uint8		oldTupleFlags;
+	LocationIndex oldTupleLen;
+
 	/* Set by the holder once it has finished the waiter's operation. */
 	bool		serviced;
 	OPageWaiterOpResult opResult;
@@ -538,6 +540,11 @@ typedef struct
 		char		fixedData[BTreeLeafTuphdrSize + O_BTREE_MAX_KEY_SIZE];
 		Datum		datum;		/* keep here for alignment */
 	}			tupleData;
+	union
+	{
+		char		fixedData[O_BTREE_MAX_TUPLE_SIZE];
+		Datum		datum;		/* keep here for alignment */
+	}			oldTupleData;
 } OPageWaiterShmemState;
 
 extern OPageWaiterShmemState *lockerStates;

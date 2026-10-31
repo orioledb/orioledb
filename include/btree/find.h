@@ -71,6 +71,10 @@ typedef struct
 	RowLockMode waiterLockMode;
 	CommitSeqNo waiterOpCsn;
 	BTreeKeyType waiterKeyType;
+	int			waiterDelegatedCallbackId;
+
+	/* What the holder did for us, once find_page() reports it acted. */
+	OPageWaiterOpResult waiterOpResult;
 
 	/*
 	 * When BTREE_PAGE_FIND_LOKEY_SIBLING is not set, then lokey contains
@@ -142,7 +146,7 @@ typedef enum
 {
 	OFindPageResultSuccess,
 	OFindPageResultFailure,
-	OFindPageResultInserted
+	OFindPageResultServiced
 } OFindPageResult;
 
 extern bool btree_page_search(BTreeDescr *desc, Page p, Pointer key,
