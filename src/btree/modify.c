@@ -449,7 +449,7 @@ unlock_release(BTreeModifyInternalContext *context, bool unlock)
 		 * Our own work on this page is done and we are about to let it go, so
 		 * this is the moment to do the queued processes' work for them.
 		 */
-		btree_apply_waiter_ops(desc, blkno);
+		btree_do_queued_work(desc, blkno);
 		unlock_page(blkno);
 	}
 	if (context->undoIsReserved)
@@ -1483,9 +1483,15 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
  * able to finish for them.  Called by the holder once its own modification is
  * done and the page is still locked.
  */
+/*
+ * Test the hint, and if the queue holds work for us, collect it and do what
+ * we can of it.  The page state must be one we already hold: an extra read of
+ * the page's state word is the most expensive thing this code could do.
+ */
 void
-btree_apply_waiter_ops(BTreeDescr *desc, OInMemoryBlkno blkno)
+btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 {
+	uint64		state;
 	int			procnums[BTREE_PAGE_MAX_SPLIT_ITEMS];
 	int			count,
 				i;
@@ -1493,16 +1499,22 @@ btree_apply_waiter_ops(BTreeDescr *desc, OInMemoryBlkno blkno)
 	if (O_PAGE_IS_LOCAL(blkno) || desc->undoType == UndoLogNone)
 		return;
 
-	count = get_waiters_with_ops(desc, blkno, procnums);
+	state = page_locked_state(blkno);
+
+	if (!(state & PAGE_STATE_HAS_OP_WAITER_FLAG))
+		return;
+
+	count = get_page_waiters(desc, blkno, state, procnums);
 
 	for (i = 0; i < count; i++)
 	{
 		OPageWaiterShmemState *lockerState = &lockerStates[procnums[i]];
-		bool		serviced = false;
 
-		serviced = apply_waiter_op(desc, blkno, procnums[i]);
+		/* Inserts are merged into the page by the insert path itself. */
+		if (lockerState->action == BTreeOperationInsert)
+			continue;
 
-		if (serviced)
+		if (apply_waiter_op(desc, blkno, procnums[i]))
 		{
 			pg_write_barrier();
 			lockerState->serviced = true;
@@ -1732,6 +1744,12 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		 * Describe the operation to whoever holds the leaf, so it can finish
 		 * it for us instead of just handing the page over.  What travels is
 		 * the new tuple for an update and the key for a delete or a lock.
+		 *
+		 * This is the same channel an insert uses, and it has to be: waiting
+		 * on the plain page lock instead would leave nobody to notice that
+		 * the work came back done.  Only lock_page_with_tuple() reads the
+		 * serviced flag, and a waiter that misses it goes on to repeat an
+		 * operation another process has already recorded in its undo.
 		 */
 		pageFindContext.insertTuple = (action == BTreeOperationUpdate) ?
 			tuple : *((OTuple *) key);
@@ -1756,12 +1774,16 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	{
 		OPageWaiterShmemState *myState = &lockerStates[MYPROCNUMBER];
 
-		if (desc->undoType != UndoLogNone)
-		{
-			release_undo_size(desc->undoType);
-			if (GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType) != desc->undoType)
-				release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
-		}
+		/*
+		 * lock_page_with_tuple() has already handed our undo reservation to
+		 * the holder that used it, and retained the record the holder wrote.
+		 * What is left is the page-level reservation, which the holder never
+		 * touches because it does not split the page for us.
+		 */
+		if (desc->undoType != UndoLogNone &&
+			GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType) != desc->undoType)
+			release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+
 		ppool_release_reserved(desc->ppool, PPOOL_RESERVE_INSERT);
 		Assert(!have_locked_pages());
 
