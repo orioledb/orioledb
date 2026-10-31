@@ -65,6 +65,7 @@ typedef struct BTreeModifyCallbackInfo
 } BTreeModifyCallbackInfo;
 
 extern BTreeModifyCallbackInfo nullCallbackInfo;
+extern void btree_apply_waiter_ops(BTreeDescr *desc, OInMemoryBlkno blkno);
 
 extern bool o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple);
 extern bool o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
