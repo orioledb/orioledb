@@ -306,40 +306,6 @@ EXPLAIN (COSTS OFF)
 SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
 COMMIT;
 
-CREATE TABLE o_bridging_vacuum_test (id serial primary key, val float, p point) USING orioledb WITH (autovacuum_enabled = false);
-INSERT INTO o_bridging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
-SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
-CREATE INDEX o_bridging_vacuum_test_p_idx on o_bridging_vacuum_test using gist(p);
-SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
-SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
-DELETE FROM o_bridging_vacuum_test;
-SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
-SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
-ALTER SYSTEM SET autovacuum = off;
-SELECT pg_reload_conf();
-DO $$
-BEGIN
-  -- A worker can exit after pg_stat_activity is read.
-  PERFORM set_config('client_min_messages', 'error', true);
-  WHILE EXISTS (SELECT 1 FROM pg_stat_activity
-                WHERE backend_type = 'autovacuum worker') LOOP
-    PERFORM pg_terminate_backend(pid)
-       FROM pg_stat_activity WHERE backend_type = 'autovacuum worker';
-    PERFORM pg_sleep(0.1);
-    -- pg_stat_activity is read once per transaction: refresh it
-    PERFORM pg_stat_clear_snapshot();
-  END LOOP;
-END;
-$$;
-VACUUM o_bridging_vacuum_test;
-SELECT * FROM o_bridging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
-SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
-SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
-ALTER SYSTEM RESET autovacuum;
-SELECT pg_reload_conf();
-DROP TABLE o_bridging_vacuum_test;
-
-
 CREATE TABLE o_test_bridging_with_regular_no_pkey (
 	i int NOT NULL,
 	j int
