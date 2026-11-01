@@ -1278,7 +1278,6 @@ class IndexBridgingTest(BaseTest):
 		live rows.
 		"""
 		node = self.node
-		node.append_conf("autovacuum = off")
 		node.start()
 		node.safe_psql("CREATE EXTENSION orioledb;")
 		node.safe_psql("""
