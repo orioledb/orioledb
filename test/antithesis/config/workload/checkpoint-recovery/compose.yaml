@@ -1,0 +1,69 @@
+volumes:
+  checkpoint_recovery_pgdata:
+    name: checkpoint_recovery_pgdata
+  checkpoint_recovery_runtime_state:
+    name: checkpoint_recovery_runtime_state
+
+services:
+  test.orioledb:
+    restart: !reset null
+    entrypoint: ["boot-entrypoint"]
+    command: ["postgres", "-D", "/etc/postgresql"]
+    volumes:
+      - checkpoint_recovery_pgdata:/var/lib/postgresql/data
+      - checkpoint_recovery_runtime_state:/runtime-state
+      - ./config/workload/checkpoint-recovery/postgres.conf:/etc/postgresql/conf.d/checkpoint-recovery.conf:ro
+
+  checkpoint-recovery-initializer:
+    image: "${IMAGE_REPO}jepsen-client:${IMAGE_TAG}"
+    container_name: checkpoint-recovery-initializer
+    hostname: checkpoint-recovery-initializer
+    init: true
+    platform: "${JEPSEN_PLATFORM}"
+    build: ./jepsen
+    environment:
+      JEPSEN_MODE: initialize
+      JEPSEN_NODE: orioledb
+      JEPSEN_POSTGRES_USER: "${POSTGRES_USER}"
+      JEPSEN_POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      CHECKPOINT_RECOVERY_INITIAL_ROWS: "${CHECKPOINT_RECOVERY_INITIAL_ROWS:-8192}"
+      CHECKPOINT_RECOVERY_WORKING_SET_MULTIPLIER: "${CHECKPOINT_RECOVERY_WORKING_SET_MULTIPLIER:-8}"
+      RUNTIME_STATE_DIR: /runtime-state
+    volumes:
+      - checkpoint_recovery_runtime_state:/runtime-state
+    depends_on:
+      test.orioledb:
+        condition: service_healthy
+
+  checkpoint-recovery-client:
+    image: "${IMAGE_REPO}jepsen-client:${IMAGE_TAG}"
+    container_name: checkpoint-recovery-client
+    hostname: checkpoint-recovery-client
+    init: true
+    platform: "${JEPSEN_PLATFORM}"
+    build: ./jepsen
+    environment:
+      JEPSEN_TEST_SUITE: orioledb-checkpoint-recovery
+      JEPSEN_NODE: orioledb
+      JEPSEN_POSTGRES_USER: "${POSTGRES_USER}"
+      JEPSEN_POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      JEPSEN_WORKLOAD: orioledb-checkpoint-recovery
+      JEPSEN_CONCURRENCY: "${JEPSEN_CONCURRENCY:-8}"
+      JEPSEN_RATE: "${JEPSEN_RATE:-80}"
+      JEPSEN_TIME_LIMIT: "${JEPSEN_TIME_LIMIT:-300}"
+      JEPSEN_NEMESIS: none
+      RUNTIME_STATE_DIR: /runtime-state
+    volumes:
+      - checkpoint_recovery_runtime_state:/runtime-state
+    depends_on:
+      checkpoint-recovery-initializer:
+        condition: service_completed_successfully
+
+  health-checker:
+    environment:
+      SETUP_READY_FILE: /runtime-state/setup.ready
+    volumes:
+      - checkpoint_recovery_runtime_state:/runtime-state:ro
+    depends_on:
+      checkpoint-recovery-initializer:
+        condition: service_completed_successfully

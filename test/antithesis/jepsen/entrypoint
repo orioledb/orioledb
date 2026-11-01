@@ -1,16 +1,22 @@
 #!/bin/sh
 set -eu
 
+if [ "${JEPSEN_MODE:-}" = initialize ]; then
+	exec java -ea -cp '/opt/jepsen/*' -Djava.awt.headless=true clojure.main \
+		-m jepsen.orioledb.workload.checkpoint-recovery initialize
+fi
+
 # Under Antithesis, sleep indefinitely: Antithesis runs the test template scripts.
 if [ -n "${ANTITHESIS_OUTPUT_DIR:-}" ]; then
 	exec sleep infinity
 fi
 
 # Outside antithesis, simulate test-driver actions
-cd /opt/antithesis/test/v1/jepsen-postgres
+cd "/opt/antithesis/test/v1/${JEPSEN_TEST_SUITE:-jepsen-postgres}"
 
 rc=0
-./first_register-anomaly-catalog || rc=$?
-./singleton_driver_jepsen-postgres "$@" || rc=$?
-./finally_jepsen-results || rc=$?
+for command in first_* singleton_driver_* eventually_* finally_*; do
+	[ -x "$command" ] || continue
+	./"$command" "$@" || rc=$?
+done
 exit "$rc"
