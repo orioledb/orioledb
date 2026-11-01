@@ -1654,6 +1654,8 @@ SELECT pg_reload_conf();
 
 DO $$
 BEGIN
+  -- A worker can exit after pg_stat_activity is read.
+  PERFORM set_config('client_min_messages', 'error', true);
   WHILE EXISTS (SELECT 1 FROM pg_stat_activity
                 WHERE backend_type = 'autovacuum worker') LOOP
     PERFORM pg_terminate_backend(pid)
