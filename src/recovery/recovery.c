@@ -101,7 +101,6 @@ static void recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num,
 									  ORelOids old_oids, uint32 old_o_table_version,
 									  bool isrebuild);
 static void workers_send_finish(bool send_to_idx_pool);
-static XLogRecPtr recovery_get_current_ptr(void);
 
 /*
  * Recovery worker state in pool.
@@ -845,6 +844,8 @@ RecoveryWorkerPtrs *worker_ptrs;
 pg_atomic_uint64 *recovery_ptr;
 static pg_atomic_uint64 *recovery_main_retain_ptr;
 pg_atomic_uint64 *recovery_finished_list_ptr;
+pg_atomic_uint64 *recovery_rewind_keys_generation;
+pg_atomic_uint32 *recovery_rewind_keys_participants;
 bool	   *recovery_single_process;
 bool	   *was_in_recovery;
 pg_atomic_uint32 *after_recovery_cleaned;
@@ -873,18 +874,12 @@ static bool replay_container(Pointer startPtr, Pointer endPtr,
 static void worker_send_modify(int worker_id, BTreeDescr *desc,
 							   RecoveryMsgType recType,
 							   OTuple tuple, int tuple_len);
-static void workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback,
-									 bool commit);
 static void workers_send_savepoint(SubTransactionId parentSubId);
 static void workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 											   SubTransactionId parentSubId);
-static void workers_synchronize(XLogRecPtr ptr, bool send_synchronize);
 static void workers_notify_toast_consistent(void);
 static void worker_wait_shutdown(RecoveryWorkerState *worker);
 
-static inline bool apply_sys_tree_modify_record(int sys_tree_num, uint16 type,
-												OTuple tup,
-												OXid oxid, CommitSeqNo csn);
 static inline void spread_idx_modify(BTreeDescr *desc,
 									 RecoveryMsgType recType,
 									 OTuple rec);
@@ -915,6 +910,8 @@ recovery_shmem_needs(void)
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint64)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint64)));
 	size = add_size(size, CACHELINEALIGN(sizeof(ConditionVariable)));
+	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint64)));
+	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 
 	return size;
 }
@@ -973,6 +970,12 @@ recovery_shmem_init(Pointer ptr, bool found)
 	recovery_index_cv = (ConditionVariable *) ptr;
 	ptr += CACHELINEALIGN(sizeof(ConditionVariable));
 
+	recovery_rewind_keys_generation = (pg_atomic_uint64 *) ptr;
+	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint64));
+
+	recovery_rewind_keys_participants = (pg_atomic_uint32 *) ptr;
+	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint32));
+
 	if (!found)
 	{
 		int			i;
@@ -1005,6 +1008,8 @@ recovery_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(recovery_index_next_pos, 0);
 		pg_atomic_init_u64(recovery_index_completed_pos, 0);
 		ConditionVariableInit(recovery_index_cv);
+		pg_atomic_init_u64(recovery_rewind_keys_generation, InvalidXLogRecPtr);
+		pg_atomic_init_u32(recovery_rewind_keys_participants, 0);
 	}
 }
 
@@ -1350,6 +1355,7 @@ o_recovery_start_hook(void)
 
 	if (checkpoint_state->lastCheckpointNumber > 0)
 		apply_xids_branches();
+	replay_rewind();
 }
 
 void
@@ -1359,7 +1365,8 @@ orioledb_redo(XLogReaderState *record)
 	int			msg_len = XLogRecGetDataLen(record);
 	bool		recovery_single;
 
-	Assert((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_CONTAINER);
+	Assert((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_CONTAINER ||
+		   (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_KEYS);
 	recovery_single = *recovery_single_process;
 
 	/*
@@ -1475,7 +1482,9 @@ orioledb_redo(XLogReaderState *record)
 			workers_notify_toast_consistent();
 	}
 
-	if (record->ReadRecPtr >= checkpoint_state->controlSysTreesStartPtr)
+	if ((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_KEYS)
+		rewind_keys_redo(record);
+	else if (record->ReadRecPtr >= checkpoint_state->controlSysTreesStartPtr)
 	{
 		if (!replay_container(msg_start, msg_start + msg_len, recovery_single,
 							  record->ReadRecPtr, record->EndRecPtr))
@@ -1499,8 +1508,25 @@ o_recovery_finish_hook(bool cleanup)
 	int			i,
 				num_workers = recovery_idx_pool_size_guc ? recovery_pool_size_guc + 1 : recovery_pool_size_guc;
 	bool		recovery_single;
+	XLogRecPtr	rewind_generation = InvalidXLogRecPtr;
+	int			rewind_participants = 0;
 
 	recovery_single = *recovery_single_process;
+	if (ArchiveRecoveryRequested)
+	{
+		rewind_generation = GetXLogReplayRecPtr(NULL);
+		rewind_participants = (recovery_single ? 0 : num_workers) + 1;
+		pg_atomic_write_u64(recovery_rewind_keys_generation,
+							rewind_generation);
+		pg_atomic_write_u32(recovery_rewind_keys_participants,
+							rewind_participants);
+	}
+	else
+	{
+		pg_atomic_write_u64(recovery_rewind_keys_generation,
+							InvalidXLogRecPtr);
+		pg_atomic_write_u32(recovery_rewind_keys_participants, 0);
+	}
 
 	if (!recovery_single)
 	{
@@ -1513,6 +1539,10 @@ o_recovery_finish_hook(bool cleanup)
 
 	update_proc_retain_undo_location(-1);
 	recovery_finish(-1);
+	if (ArchiveRecoveryRequested)
+		rewind_keys_prepare(rewind_generation, rewind_participants);
+	else
+		rewind_keys_resume_prepare();
 
 	if (!recovery_single)
 	{
@@ -1593,7 +1623,7 @@ get_workers_commit_ptr(void)
 /*
  * Returns minimum ptr which is already reached by all recovery workers.
  */
-static XLogRecPtr
+XLogRecPtr
 recovery_get_current_ptr(void)
 {
 	Assert(RecoveryInProgress());
@@ -1690,6 +1720,9 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 
 	/* Currently we consider only recovery_target_time */
 	if (recoveryTarget != RECOVERY_TARGET_TIME)
+		return false;
+
+	if ((XLogRecGetInfo(record) & ~XLR_INFO_MASK) != ORIOLEDB_XLOG_CONTAINER)
 		return false;
 
 	/* If for some reason data is empty just exit */
@@ -2108,6 +2141,13 @@ recovery_finish(int worker_id)
 		replay_start_reached = true;
 	}
 
+	/*
+	 * Record the rows the in-progress transactions are rolled back on, for
+	 * pg_rewind of the old primary (see rewind_keys_capture()).
+	 */
+	rewind_keys_capturing =
+		XLogRecPtrIsValid(pg_atomic_read_u64(recovery_rewind_keys_generation));
+
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
 	while ((cur_state = (RecoveryXidState *) hash_seq_search(&hash_seq)) != NULL)
 	{
@@ -2245,6 +2285,9 @@ recovery_finish(int worker_id)
 		if (cur_state->used_by)
 			pfree(cur_state->used_by);
 	}
+	/* Index-build children have no state independent of their leader. */
+	if (worker_id <= index_build_leader)
+		rewind_keys_finish_process(worker_id);
 	HandleStartupProcInterrupts_hook = NULL;
 	hash_destroy(recovery_xid_state_hash);
 	recovery_xid_state_hash = NULL;
@@ -2450,7 +2493,6 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			else
 				cur_state->used_by = NULL;
 		}
-
 		cur_recovery_xid_state = cur_state;
 		update_proc_retain_undo_location(worker_id);
 	}
@@ -5942,7 +5984,7 @@ workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 /*
  * Sends commit or rollback message to workers with active the oxid in the pool.
  */
-static void
+void
 workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback, bool commit)
 {
 	RecoveryWorkerState *state;
@@ -5995,7 +6037,7 @@ workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback, bool commit)
  * used by workers and synchronize only with needed workers. But we assume that
  * it does not happen too often and we can use this simple solution.
  */
-static void
+void
 workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 {
 	int			i;
@@ -6137,14 +6179,14 @@ worker_queue_flush(int worker_id)
  * Worker can not fetch table description because another worker does not
  * commit transaction yet.
  */
-static bool
-apply_sys_tree_modify_record(int sys_tree_num, uint16 type, OTuple tup,
+bool
+apply_sys_tree_modify_record(int sys_tree_num, RecoveryMsgType recType, OTuple tup,
 							 OXid oxid, CommitSeqNo csn)
 {
 	bool		result;
 
 	result = apply_btree_modify_record(get_sys_tree(sys_tree_num),
-									   type, tup, oxid, csn);
+									   recType, tup, oxid, csn);
 
 	return result;
 }
