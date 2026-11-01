@@ -4,6 +4,9 @@ CREATE EXTENSION orioledb;
 
 SELECT orioledb_version();
 
+SELECT pg_read_file('orioledb_data/ORIOLEDB_VERSION') =
+       format(E'%s\n', orioledb_version());
+
 SELECT translate(orioledb_commit_hash(), '0123456789abcdef', '################');
 
 CREATE VIEW db_o_tables AS (SELECT c.relname, ot.description

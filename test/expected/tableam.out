@@ -7,6 +7,13 @@ SELECT orioledb_version();
  OrioleDB beta 19
 (1 row)
 
+SELECT pg_read_file('orioledb_data/ORIOLEDB_VERSION') =
+       format(E'%s\n', orioledb_version());
+ ?column? 
+----------
+ t
+(1 row)
+
 SELECT translate(orioledb_commit_hash(), '0123456789abcdef', '################');
                 translate                 
 ------------------------------------------
