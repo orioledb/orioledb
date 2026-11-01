@@ -571,6 +571,13 @@ typedef struct
 	 */
 	uint32		forwardTo;
 
+	/*
+	 * Where the batch that did the waiter's work logged its commit, set
+	 * before the waiter is woken: the waiter waits for synchronous standbys
+	 * up to there itself.
+	 */
+	XLogRecPtr	batchCommitLsn;
+
 	/* The holder took over the waiter's undo reservation */
 	bool		reservationStolen;
 	OPageWaiterOpResult opResult;

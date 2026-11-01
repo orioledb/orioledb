@@ -3260,6 +3260,7 @@ start_autonomous_transaction(OAutonomousTxState *state)
 	xidless_commit_lsn = InvalidXLogRecPtr;
 	reset_current_oxid();
 	state->durable = false;
+	state->commitLsn = InvalidXLogRecPtr;
 	GET_CUR_PROCDATA()->autonomousNestingLevel++;
 }
 
@@ -3356,13 +3357,12 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 				free_retained_undo_location((UndoLogType) i);
 		}
 
-		/* And to synchronous standbys, as an ordinary commit waits for */
-		if (state->durable && !XLogRecPtrIsInvalid(commitLsn))
-		{
-			HOLD_INTERRUPTS();
-			SyncRepWaitForLSN(commitLsn, true);
-			RESUME_INTERRUPTS();
-		}
+		/*
+		 * Synchronous standbys are waited for by each backend whose work went
+		 * into the transaction, as its own commit would: a cancel in one of
+		 * them must not cut the wait short for the others.
+		 */
+		state->commitLsn = commitLsn;
 	}
 
 	oxid_needs_wal_flush = state->needs_wal_flush;

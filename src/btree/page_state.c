@@ -1070,7 +1070,7 @@ unlock_check_page(OInMemoryBlkno blkno)
 static uint32 deferredWakeHead = PAGE_STATE_INVALID_PROCNO;
 
 int
-btree_wake_deferred_waiters(bool batchFailed)
+btree_wake_deferred_waiters(bool batchFailed, XLogRecPtr commitLsn)
 {
 	int			nwoken = 0;
 
@@ -1084,6 +1084,7 @@ btree_wake_deferred_waiters(bool batchFailed)
 
 		lockState->deferWake = false;
 		lockState->batchFailed = batchFailed;
+		lockState->batchCommitLsn = batchFailed ? InvalidXLogRecPtr : commitLsn;
 
 		pg_memory_barrier();
 		lockState->status = OPageWaitWakeUp;

@@ -27,6 +27,7 @@
 #include "postgres.h"
 
 #include "access/attnum.h"
+#include "access/xlogdefs.h"
 
 /*
  * The assignments we are able to carry.  Anything else means the statement is
@@ -84,7 +85,7 @@ extern void o_setprogram_init(void);
 struct BTreeDescr;
 extern bool o_batch_begin(Oid relid, struct BTreeDescr *pkDesc,
 						  char replident, uint32 version);
-extern void o_batch_note_committed(void);
+extern void o_batch_note_committed(XLogRecPtr commitLsn);
 extern void o_batch_xact_end(bool commit);
 
 /*

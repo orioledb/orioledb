@@ -32,12 +32,18 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
 #include "parser/parsetree.h"
+#include "replication/syncrep.h"
+#include "replication/walsender.h"
+#include "replication/walsender_private.h"
+#include "storage/latch.h"
+#include "tcop/tcopprot.h"
 #include "tcop/pquery.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/portal.h"
 #include "utils/timeout.h"
 #include "utils/typcache.h"
+#include "utils/wait_event.h"
 #include "storage/ipc.h"
 #include "catalog/pg_class.h"
 
@@ -853,29 +859,142 @@ compile_current_program(QueryDesc *queryDesc)
  * middle of the statement, so we hold cancel interrupts from there until the
  * client's transaction commits, and turn one that arrived meanwhile into a
  * WARNING, as SyncRepWaitForLSN() does for a cancel after the commit.
+ *
+ * The client's commit is also where a backend whose update went into somebody
+ * else's batch finishes waiting for synchronous standbys, if the owner of the
+ * batch stopped waiting before they confirmed: a cancel cuts the wait short
+ * only for the backend it was meant for.
  */
 static bool committedHoldoff = false;
+static XLogRecPtr committedSyncRepLsn = InvalidXLogRecPtr;
+
+/* SyncRepWaitMode is syncrep.c's own; work it out the same way */
+static int
+sync_rep_commit_wait_mode(void)
+{
+	switch (synchronous_commit)
+	{
+		case SYNCHRONOUS_COMMIT_REMOTE_WRITE:
+			return SYNC_REP_WAIT_WRITE;
+		case SYNCHRONOUS_COMMIT_REMOTE_FLUSH:
+			return SYNC_REP_WAIT_FLUSH;
+		case SYNCHRONOUS_COMMIT_REMOTE_APPLY:
+			return SYNC_REP_WAIT_APPLY;
+		default:
+			return SYNC_REP_NO_WAIT;
+	}
+}
+
+/*
+ * Have the synchronous standbys confirmed lsn, as a commit of ours would need
+ * them to?  The same test SyncRepWaitForLSN() makes before it queues.
+ */
+static bool
+sync_rep_confirmed(XLogRecPtr lsn)
+{
+	int			mode = sync_rep_commit_wait_mode();
+	bool		confirmed;
+
+	if (!SyncRepRequested() || mode == SYNC_REP_NO_WAIT)
+		return true;
+
+	LWLockAcquire(SyncRepLock, LW_SHARED);
+	if (WalSndCtl->sync_standbys_status & SYNC_STANDBY_INIT)
+		confirmed = (WalSndCtl->sync_standbys_status & SYNC_STANDBY_DEFINED) == 0 ||
+			lsn <= WalSndCtl->lsn[mode];
+	else
+		confirmed = SyncRepStandbyNames == NULL ||
+			SyncRepStandbyNames[0] == '\0' ||
+			lsn <= WalSndCtl->lsn[mode];
+	LWLockRelease(SyncRepLock);
+
+	return confirmed;
+}
+
+/*
+ * Wait for synchronous standbys to confirm lsn, the commit of a batch that
+ * did our update and whose owner stopped waiting for them.  We cannot join
+ * the queue SyncRepWaitForLSN() keeps: it holds one process per LSN, and the
+ * owner, or another waiter of the same batch, may be in it already.  So poll,
+ * which only this rare path pays for.  Cancel and termination end the wait
+ * as they end SyncRepWaitForLSN()'s, with the same warnings.
+ */
+static void
+sync_rep_wait_polling(XLogRecPtr lsn)
+{
+	while (!sync_rep_confirmed(lsn))
+	{
+		if (ProcDiePending)
+		{
+			ereport(WARNING,
+					(errcode(ERRCODE_ADMIN_SHUTDOWN),
+					 errmsg("canceling the wait for synchronous replication and terminating connection due to administrator command"),
+					 errdetail("The transaction has already committed locally, but might not have been replicated to the standby.")));
+			whereToSendOutput = DestNone;
+			break;
+		}
+		if (QueryCancelPending)
+		{
+			QueryCancelPending = false;
+			ereport(WARNING,
+					(errmsg("canceling wait for synchronous replication due to user request"),
+					 errdetail("The transaction has already committed locally, but might not have been replicated to the standby.")));
+			break;
+		}
+
+		(void) WaitLatch(MyLatch, WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
+						 10, WAIT_EVENT_SYNC_REP);
+		ResetLatch(MyLatch);
+	}
+}
+
+/*
+ * Wait, as the owner of a batch, for synchronous standbys to confirm its
+ * commit, and say whether they did: a cancel or termination may end the wait
+ * before, and the backends whose updates are in the batch then have to wait
+ * on their own.
+ */
+static bool
+batch_wait_sync_rep(XLogRecPtr lsn)
+{
+	if (XLogRecPtrIsInvalid(lsn))
+		return true;
+
+	HOLD_INTERRUPTS();
+	SyncRepWaitForLSN(lsn, true);
+	RESUME_INTERRUPTS();
+
+	return sync_rep_confirmed(lsn);
+}
 
 void
-o_batch_note_committed(void)
+o_batch_note_committed(XLogRecPtr syncRepLsn)
 {
 	if (!committedHoldoff)
 	{
 		HOLD_CANCEL_INTERRUPTS();
 		committedHoldoff = true;
 	}
+	if (syncRepLsn > committedSyncRepLsn)
+		committedSyncRepLsn = syncRepLsn;
 }
 
 void
 o_batch_xact_end(bool commit)
 {
+	XLogRecPtr	lsn = committedSyncRepLsn;
+
 	if (!committedHoldoff)
 		return;
 	committedHoldoff = false;
+	committedSyncRepLsn = InvalidXLogRecPtr;
 
 	/* The error that aborts the transaction has reset the holdoff count */
 	if (!commit)
 		return;
+
+	if (!XLogRecPtrIsInvalid(lsn))
+		sync_rep_wait_polling(lsn);
 
 	/* Unless an error caught along the way has reset it already */
 	if (QueryCancelHoldoffCount > 0)
@@ -904,7 +1023,7 @@ batch_before_shmem_exit(int code, Datum arg)
 	btree_absorbed_reset();
 	btree_batch_oxid = InvalidOXid;
 	btree_batch_desc = NULL;
-	btree_wake_deferred_waiters(true);
+	btree_wake_deferred_waiters(true, InvalidXLogRecPtr);
 }
 
 /*
@@ -975,18 +1094,20 @@ batch_abort(void)
 	batchOxid = InvalidOXid;
 
 	/* What we took over went with the batch: its owners do it again */
-	btree_wake_deferred_waiters(true);
+	btree_wake_deferred_waiters(true, InvalidXLogRecPtr);
 }
 
 /*
  * Commit the open batch.  Errors before the commit record is written abort
  * it instead.  "own" is for the batch with our statement's update in it: from
- * its commit on, the statement has succeeded.
+ * its commit on, the statement has succeeded.  Returns whether synchronous
+ * standbys confirmed the commit.
  */
-static void
+static bool
 batch_commit(bool own)
 {
 	ListCell   *lc;
+	bool		syncRepConfirmed;
 
 	STOPEVENT(STOPEVENT_BATCH_COMMIT_START, NULL);
 
@@ -1025,13 +1146,24 @@ batch_commit(bool own)
 
 	/* Before the commit record, so that no cancel can come in between */
 	if (own)
-		o_batch_note_committed();
+		o_batch_note_committed(InvalidXLogRecPtr);
 	finish_autonomous_transaction(&batchState);
 	oxid_batch_unlock(batchOxid);
 	batchOxid = InvalidOXid;
 
+	/*
+	 * As an ordinary commit does, wait for synchronous standbys -- for our
+	 * own update and for the ones we took over.  If a cancel ends the wait
+	 * early, the WARNING is ours, and those whose updates we took wait on
+	 * their own.
+	 */
+	syncRepConfirmed = batch_wait_sync_rep(batchState.commitLsn);
+
 	/* The work we took over is now as committed as ours */
-	(void) btree_wake_deferred_waiters(false);
+	(void) btree_wake_deferred_waiters(false, syncRepConfirmed ?
+									   InvalidXLogRecPtr :
+									   batchState.commitLsn);
+	return syncRepConfirmed;
 }
 
 #define BATCH_MAX_CONTINUATIONS 4
@@ -1059,17 +1191,19 @@ batch_end(bool commit)
 	 */
 	for (n = 0;; n++)
 	{
-		batch_commit(n == 0);
+		bool		syncRepConfirmed = batch_commit(n == 0);
+
 		if (n == 0)
 			STOPEVENT(STOPEVENT_BATCH_AFTER_COMMIT, NULL);
 
 		/*
 		 * A continuation is work for others, and a cancel or a timeout --
-		 * held off since our own commit -- is a reason to stop doing it:
-		 * whoever is left does its update itself.
+		 * held off since our own commit, or spent on ending a wait for
+		 * synchronous standbys -- is a reason to stop doing it: whoever is
+		 * left does its update itself.
 		 */
 		if (batchDesc == NULL || n >= BATCH_MAX_CONTINUATIONS ||
-			QueryCancelPending || ProcDiePending ||
+			!syncRepConfirmed || QueryCancelPending || ProcDiePending ||
 			!btree_batch_queue_pending())
 			break;
 		batch_open(true);

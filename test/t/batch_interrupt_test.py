@@ -35,6 +35,11 @@ class BatchInterruptTest(BaseTest):
 
 	def tearDown(self):
 		try:
+			self.ctrl.execute("ALTER SYSTEM RESET synchronous_standby_names")
+			self.ctrl.execute("SELECT pg_reload_conf()")
+		except Exception:
+			pass
+		try:
 			self.node.stop()
 		except Exception:
 			pass
@@ -88,6 +93,15 @@ class BatchInterruptTest(BaseTest):
 		    "%s is committed, but its statement reported: %s" %
 		    (what, outcome))
 
+	def _sync_rep_unreachable(self, on):
+		if on:
+			self.ctrl.execute(
+			    "ALTER SYSTEM SET synchronous_standby_names = 'nosuch'")
+		else:
+			self.ctrl.execute("ALTER SYSTEM RESET synchronous_standby_names")
+		self.ctrl.execute("SELECT pg_reload_conf()")
+		time.sleep(0.5)
+
 	# ---------------------------- owner ----------------------------
 
 	def _owner_interrupted_after_commit(self, interrupt):
@@ -133,6 +147,31 @@ class BatchInterruptTest(BaseTest):
 		                            "UPDATE t SET v = v + 10 WHERE id = 1")
 		wait_for_wait_event(self.node, waiter_pid, 'OrioleBatchQueue')
 		return owner_thread, owner_pid, waiter_thread, waiter_pid
+
+	def test_waiter_waits_for_its_own_sync_rep(self):
+		"""
+		The owner gives up waiting for the synchronous standby.  A waiter
+		whose update went into the same batch has not, and must go on
+		waiting, as its own commit would.
+		"""
+		self._sync_rep_unreachable(True)
+		owner_thread, owner_pid, waiter_thread, waiter_pid = \
+            self._queue_waiter_behind_owner('batch_commit_start')
+
+		self._release('batch_commit_start')
+		wait_for_wait_event(self.node, owner_pid, 'SyncRep')
+		self.ctrl.execute("SELECT pg_cancel_backend(%d)" % owner_pid)
+		self._assertSucceeded(self._statement_result(owner_thread),
+		                      "the owner's update")
+
+		# Still waiting for the standby, as it was never told to stop
+		self.assertFalse(self._wait_finished(waiter_thread, 2))
+		wait_for_wait_event(self.node, waiter_pid, 'SyncRep')
+
+		self._sync_rep_unreachable(False)
+		outcome = self._statement_result(waiter_thread)
+		self.assertEqual(self._value(1), 11)
+		self._assertSucceeded(outcome, "the waiter's update")
 
 	def test_waiter_cancel_after_taken(self):
 		"""

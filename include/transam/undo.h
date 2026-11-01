@@ -303,6 +303,13 @@ typedef struct
 	 * see it.  Set by the caller after start_autonomous_transaction().
 	 */
 	bool		durable;
+
+	/*
+	 * Where finish_autonomous_transaction() logged the commit, for a durable
+	 * transaction whose participants wait for synchronous standbys on their
+	 * own.  Invalid if nothing was logged.
+	 */
+	XLogRecPtr	commitLsn;
 } OAutonomousTxState;
 
 /*

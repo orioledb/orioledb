@@ -1608,7 +1608,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 				if (result == OBTreeModifyResultUpdated &&
 					lockerPayloads[MYPROCNUMBER].delegatedResult.absorbed)
 				{
-					o_batch_note_committed();
+					o_batch_note_committed(lockerStates[MYPROCNUMBER].batchCommitLsn);
 					pgstat_count_heap_update(rel, false, false);
 					return slot;
 				}

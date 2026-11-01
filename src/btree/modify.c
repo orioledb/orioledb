@@ -2047,7 +2047,7 @@ batch_queue_join(BTreeDescr *desc, int owner, OTuple tuple, CommitSeqNo opCsn)
 	if (me->serviced && !me->batchFailed)
 	{
 		me->serviced = false;
-		o_batch_note_committed();
+		o_batch_note_committed(me->batchCommitLsn);
 		return true;
 	}
 	me->serviced = false;
@@ -2815,7 +2815,7 @@ restart:
 		/* A batch did our update and has committed it: we have succeeded */
 		if (myState->absorbable &&
 			lockerPayloads[MYPROCNUMBER].delegatedResult.absorbed)
-			o_batch_note_committed();
+			o_batch_note_committed(myState->batchCommitLsn);
 
 		/*
 		 * lock_page_with_tuple() has already handed our undo reservation to
