@@ -412,7 +412,7 @@ COMMIT_HASH := $(shell git rev-parse HEAD 2>/dev/null)
 ifeq ($(strip $(COMMIT_HASH)),)
 	COMMIT_HASH := 0000000000000000000000000000000000000000
 endif
-override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH) -Wno-error=deprecated-declarations
+override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH)
 
 ifdef VALGRIND
 override with_temp_install += USE_VALGRIND=1 \
