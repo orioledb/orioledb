@@ -1090,7 +1090,10 @@ btree_wake_deferred_waiters(bool batchFailed, XLogRecPtr commitLsn)
 		lockState->status = OPageWaitWakeUp;
 		pg_memory_barrier();
 
-		PGSemaphoreUnlock(proc->sem);
+		if (lockState->sleepsOnLatch)
+			SetLatch(&proc->procLatch);
+		else
+			PGSemaphoreUnlock(proc->sem);
 		deferredWakeHead = next;
 	}
 	return nwoken;

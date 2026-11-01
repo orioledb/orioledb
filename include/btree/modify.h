@@ -174,6 +174,11 @@ extern void btree_absorbed_reset(void);
 #define BATCH_QUEUE_PROCNO(v)	((int) (v) - 2)
 #define BATCH_QUEUE_VALUE(procno)	((uint32) (procno) + 2)
 
+#define BATCH_CLAIM_FREE		0
+#define BATCH_CLAIM_QUEUED		1
+#define BATCH_CLAIM_TAKEN		2
+#define BATCH_CLAIM_CANCELLED	3
+
 extern void btree_batch_queue_open(void);
 extern void btree_batch_queue_drain(bool absorb);
 extern bool btree_batch_queue_pending(void);

@@ -143,6 +143,7 @@ class BatchInterruptTest(BaseTest):
 		owner_thread = self._start(owner,
 		                           "UPDATE t SET v = v + 1 WHERE id = 1")
 		self._wait_at(event, owner_pid)
+		self.waiter_conn = waiter
 		waiter_thread = self._start(waiter,
 		                            "UPDATE t SET v = v + 10 WHERE id = 1")
 		wait_for_wait_event(self.node, waiter_pid, 'OrioleBatchQueue')
@@ -172,6 +173,37 @@ class BatchInterruptTest(BaseTest):
 		outcome = self._statement_result(waiter_thread)
 		self.assertEqual(self._value(1), 11)
 		self._assertSucceeded(outcome, "the waiter's update")
+
+	def test_waiter_cancel_in_queue(self):
+		"""
+		A waiter the batch has not taken yet can be cancelled, and its
+		update is then not done by anybody.
+		"""
+		owner_thread, owner_pid, waiter_thread, waiter_pid = \
+            self._queue_waiter_behind_owner('batch_commit_start')
+
+		self.ctrl.execute("SELECT pg_cancel_backend(%d)" % waiter_pid)
+		self.assertTrue(self._wait_finished(waiter_thread, 10),
+		                "the waiter did not react to the cancel")
+		outcome = waiter_thread._return
+		self.assertIsInstance(outcome, Exception)
+		self.assertIn("canceling statement due to user request", str(outcome))
+
+		# The owner has not gone past the cancelled entry yet, so the same
+		# backend must not queue again: it waits the ordinary way instead
+		retry_thread = self._start(self.waiter_conn,
+		                           "UPDATE t SET v = v + 100 WHERE id = 1")
+		while self.ctrl.execute(
+		    "SELECT wait_event_type FROM pg_stat_activity WHERE pid = %d" %
+		    waiter_pid)[0][0] != 'Lock':
+			time.sleep(0.1)
+
+		self._release('batch_commit_start')
+		self._assertSucceeded(self._statement_result(owner_thread),
+		                      "the owner's update")
+		self._assertSucceeded(self._statement_result(retry_thread),
+		                      "the retried update")
+		self.assertEqual(self._value(1), 101)
 
 	def test_waiter_cancel_after_taken(self):
 		"""

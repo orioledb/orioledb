@@ -565,6 +565,21 @@ typedef struct
 	uint32		batchNext;
 
 	/*
+	 * Where this process stands in the batch queue it was put in last:
+	 * BATCH_CLAIM_*.  The owner takes a queued process by moving it from
+	 * QUEUED to TAKEN; a process cancelled while still QUEUED leaves by
+	 * moving it to CANCELLED, and must not be queued again -- which rewrites
+	 * batchNext -- until the owner has gone past it and set it back to FREE.
+	 */
+	pg_atomic_uint32 batchClaim;
+
+	/*
+	 * Asleep on its latch rather than its semaphore, as a process waiting in
+	 * a batch queue is, so that a cancel wakes it: wake it with SetLatch().
+	 */
+	bool		sleepsOnLatch;
+
+	/*
 	 * Set by a page holder that found the waiter's row written by another
 	 * process's batch: owner procno + 1.  The unlock then leaves the waiter
 	 * in that batch's queue instead of waking it.

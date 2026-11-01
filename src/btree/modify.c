@@ -33,6 +33,7 @@
 #include "utils/stopevent.h"
 
 #include "miscadmin.h"
+#include "storage/latch.h"
 #include "pgstat.h"
 #include "utils/wait_event.h"
 #include "storage/lwlock.h"
@@ -1738,7 +1739,10 @@ wake_batch_waiter(int pgprocno)
 	pg_memory_barrier();
 	lockerStates[pgprocno].status = OPageWaitWakeUp;
 	pg_memory_barrier();
-	PGSemaphoreUnlock(GetPGProcByNumber(pgprocno)->sem);
+	if (lockerStates[pgprocno].sleepsOnLatch)
+		SetLatch(&GetPGProcByNumber(pgprocno)->procLatch);
+	else
+		PGSemaphoreUnlock(GetPGProcByNumber(pgprocno)->sem);
 }
 
 /*
@@ -1749,8 +1753,15 @@ bool
 btree_batch_queue_push(int owner, int pgprocno)
 {
 	pg_atomic_uint32 *queue = &lockerStates[owner].batchQueue;
-	uint32		value = pg_atomic_read_u32(queue);
+	uint32		value;
 
+	/* An owner may still be about to read its link from an earlier queue */
+	if (pg_atomic_read_u32(&lockerStates[pgprocno].batchClaim) ==
+		BATCH_CLAIM_CANCELLED)
+		return false;
+	pg_atomic_write_u32(&lockerStates[pgprocno].batchClaim, BATCH_CLAIM_QUEUED);
+
+	value = pg_atomic_read_u32(queue);
 	for (;;)
 	{
 		if (value == BATCH_QUEUE_CLOSED)
@@ -1921,9 +1932,23 @@ batch_queue_settle(uint32 value, bool absorb)
 	pg_read_barrier();
 	while (value != BATCH_QUEUE_EMPTY && value != BATCH_QUEUE_CLOSED)
 	{
-		procnos[n] = BATCH_QUEUE_PROCNO(value);
+		int			procno = BATCH_QUEUE_PROCNO(value);
+		uint32		claim = BATCH_CLAIM_QUEUED;
+
+		/* Its link first: once we let a cancelled one go, it may reuse it */
+		value = lockerStates[procno].batchNext;
+
+		if (!pg_atomic_compare_exchange_u32(&lockerStates[procno].batchClaim,
+											&claim, BATCH_CLAIM_TAKEN))
+		{
+			/* It left on a cancel; we are past it, so it may queue again */
+			Assert(claim == BATCH_CLAIM_CANCELLED);
+			pg_atomic_write_u32(&lockerStates[procno].batchClaim,
+								BATCH_CLAIM_FREE);
+			continue;
+		}
+		procnos[n] = procno;
 		absorbed[n] = false;
-		value = lockerStates[procnos[n]].batchNext;
 		n++;
 	}
 
@@ -1998,9 +2023,12 @@ batch_queue_join(BTreeDescr *desc, int owner, OTuple tuple, CommitSeqNo opCsn)
 	pg_atomic_uint32 *queue = &lockerStates[owner].batchQueue;
 	LocationIndex tuplen;
 	uint32		value;
-	int			extraWaits = 0;
 
 	if (owner == MYPROCNUMBER || O_TUPLE_IS_NULL(tuple))
+		return false;
+
+	/* An owner may still be about to read our link from an earlier queue */
+	if (pg_atomic_read_u32(&me->batchClaim) == BATCH_CLAIM_CANCELLED)
 		return false;
 
 	tuplen = o_btree_len(desc, tuple, OTupleLength);
@@ -2018,12 +2046,17 @@ batch_queue_join(BTreeDescr *desc, int owner, OTuple tuple, CommitSeqNo opCsn)
 	me->serviced = false;
 	me->batchFailed = false;
 	me->status = OPageWaitInsert;
+	me->sleepsOnLatch = true;
+	pg_atomic_write_u32(&me->batchClaim, BATCH_CLAIM_QUEUED);
 
 	value = pg_atomic_read_u32(queue);
 	for (;;)
 	{
 		if (value == BATCH_QUEUE_CLOSED)
+		{
+			me->sleepsOnLatch = false;
 			return false;
+		}
 		me->batchNext = value;
 		pg_write_barrier();
 		if (pg_atomic_compare_exchange_u32(queue, &value,
@@ -2031,17 +2064,38 @@ batch_queue_join(BTreeDescr *desc, int owner, OTuple tuple, CommitSeqNo opCsn)
 			break;
 	}
 
-	pgstat_report_wait_start(batch_queue_wait_info());
+	/*
+	 * Sleep on our latch, so that a cancel or a termination wakes us, as it
+	 * would in a row lock wait.  Until the owner has taken our update we may
+	 * leave; once it has, the update is the batch's, and we wait for the
+	 * batch whatever arrives.
+	 */
 	for (;;)
 	{
-		PGSemaphoreLock(MyProc->sem);
+		ResetLatch(MyLatch);
+		pg_read_barrier();
 		if (me->status == OPageWaitWakeUp)
 			break;
-		extraWaits++;
+
+		if (QueryCancelPending || ProcDiePending)
+		{
+			uint32		claim = BATCH_CLAIM_QUEUED;
+
+			if (pg_atomic_compare_exchange_u32(&me->batchClaim, &claim,
+											   BATCH_CLAIM_CANCELLED))
+			{
+				me->sleepsOnLatch = false;
+				CHECK_FOR_INTERRUPTS();
+
+				/* Held off: nobody has our update, so go on without */
+				return false;
+			}
+		}
+
+		(void) WaitLatch(MyLatch, WL_LATCH_SET | WL_EXIT_ON_PM_DEATH, -1,
+						 batch_queue_wait_info());
 	}
-	pgstat_report_wait_end();
-	while (extraWaits-- > 0)
-		PGSemaphoreUnlock(MyProc->sem);
+	me->sleepsOnLatch = false;
 
 	pg_read_barrier();
 	if (me->serviced && !me->batchFailed)
