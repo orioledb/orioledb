@@ -106,6 +106,7 @@ REGRESSCHECKS = btree_sys_check \
 				bitmap_fixed_types \
 				btree_compression \
 				btree_print \
+				checksum \
 				createas \
 				database \
 				ddl \
@@ -414,6 +415,12 @@ ifeq ($(strip $(COMMIT_HASH)),)
 endif
 override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH) -Wno-error=deprecated-declarations
 
+# Build the AVX2 page checksum where the compiler has cpuid.h, so only on x86,
+# and accepts the avx2 target, as PostgreSQL's configure checks.
+ifeq ($(shell echo '__attribute__((target("avx2"))) int main(void) { return 0; }' | $(CC) -include cpuid.h -x c - -c -o /dev/null 2>/dev/null && echo yes),yes)
+override CFLAGS_SL += -DHAVE_AVX2_TARGET
+endif
+
 ifdef VALGRIND
 override with_temp_install += USE_VALGRIND=1 \
 	PGCTLTIMEOUT=3000 PG_TEST_TIMEOUT_DEFAULT=500 \
@@ -471,7 +478,8 @@ pgindent: orioledb.typedefs
 	src/*.c \
 	src/*/*.c \
 	include/*.h \
-	include/*/*.h
+	include/*/*.h \
+	include/*/*.inc.c
 
 yapf:
 	yapf -i test/t/*.py
