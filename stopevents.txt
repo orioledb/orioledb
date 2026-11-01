@@ -59,3 +59,6 @@ split_fix_before_downlink
 oxid_notify_woke
 seq_scan_parallel_join
 seq_scan_dsm_create_fail
+batch_commit_start
+batch_commit_absorbed
+batch_after_commit

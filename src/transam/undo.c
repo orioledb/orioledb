@@ -32,6 +32,7 @@
 #include "storage/procarray.h"
 #include "tableam/descr.h"
 #include "tableam/handler.h"
+#include "tableam/setprogram.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "utils/o_buffers.h"
@@ -2567,7 +2568,10 @@ undo_xact_callback(XactEvent event, void *arg)
 	ea_counters = NULL;
 
 	if (event == XACT_EVENT_COMMIT || event == XACT_EVENT_ABORT)
+	{
 		seq_scans_cleanup();
+		o_batch_xact_end(event == XACT_EVENT_COMMIT);
+	}
 
 	if (enable_rewind && event == XACT_EVENT_PRE_COMMIT)
 	{

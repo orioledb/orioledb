@@ -22,6 +22,7 @@
 #include "tableam/setprogram.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
+#include "utils/stopevent.h"
 
 #include "access/xact.h"
 #include "common/int.h"
@@ -35,6 +36,7 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/portal.h"
+#include "utils/timeout.h"
 #include "utils/typcache.h"
 #include "storage/ipc.h"
 #include "catalog/pg_class.h"
@@ -842,6 +844,55 @@ compile_current_program(QueryDesc *queryDesc)
 }
 
 /*
+ * Once the update of the client's statement is committed -- by our own batch,
+ * or by another backend's that took it over -- the statement has succeeded,
+ * whatever comes after.  An ordinary transaction gets that from
+ * finish_xact_command(), which stops the statement timeout before it commits,
+ * and from CommitTransaction(), which holds interrupts across the commit;
+ * nothing that arrives later turns into an ERROR.  A batch commits in the
+ * middle of the statement, so we hold cancel interrupts from there until the
+ * client's transaction commits, and turn one that arrived meanwhile into a
+ * WARNING, as SyncRepWaitForLSN() does for a cancel after the commit.
+ */
+static bool committedHoldoff = false;
+
+void
+o_batch_note_committed(void)
+{
+	if (!committedHoldoff)
+	{
+		HOLD_CANCEL_INTERRUPTS();
+		committedHoldoff = true;
+	}
+}
+
+void
+o_batch_xact_end(bool commit)
+{
+	if (!committedHoldoff)
+		return;
+	committedHoldoff = false;
+
+	/* The error that aborts the transaction has reset the holdoff count */
+	if (!commit)
+		return;
+
+	/* Unless an error caught along the way has reset it already */
+	if (QueryCancelHoldoffCount > 0)
+		RESUME_CANCEL_INTERRUPTS();
+
+	if (QueryCancelPending)
+	{
+		QueryCancelPending = false;
+		(void) get_timeout_indicator(STATEMENT_TIMEOUT, true);
+		(void) get_timeout_indicator(LOCK_TIMEOUT, true);
+		ereport(WARNING,
+				(errmsg("canceling statement after its update was committed"),
+				 errdetail("The update was committed by a batch transaction before the cancel request or the statement timeout could take effect.")));
+	}
+}
+
+/*
  * Waiters our batch took over sleep until it ends.  A backend that exits
  * without ending its statement -- FATAL skips ExecutorRun()'s catch -- would
  * leave them asleep for good; tell them to do their work themselves.
@@ -929,12 +980,15 @@ batch_abort(void)
 
 /*
  * Commit the open batch.  Errors before the commit record is written abort
- * it instead.
+ * it instead.  "own" is for the batch with our statement's update in it: from
+ * its commit on, the statement has succeeded.
  */
 static void
-batch_commit(void)
+batch_commit(bool own)
 {
 	ListCell   *lc;
+
+	STOPEVENT(STOPEVENT_BATCH_COMMIT_START, NULL);
 
 	PG_TRY();
 	{
@@ -962,10 +1016,16 @@ batch_commit(void)
 	}
 	PG_END_TRY();
 
+	STOPEVENT(STOPEVENT_BATCH_COMMIT_ABSORBED, NULL);
+
 	batchOpen = false;
 	btree_batch_oxid = InvalidOXid;
 	btree_batch_desc = NULL;
 	btree_absorbed_reset();
+
+	/* Before the commit record, so that no cancel can come in between */
+	if (own)
+		o_batch_note_committed();
 	finish_autonomous_transaction(&batchState);
 	oxid_batch_unlock(batchOxid);
 	batchOxid = InvalidOXid;
@@ -999,8 +1059,17 @@ batch_end(bool commit)
 	 */
 	for (n = 0;; n++)
 	{
-		batch_commit();
+		batch_commit(n == 0);
+		if (n == 0)
+			STOPEVENT(STOPEVENT_BATCH_AFTER_COMMIT, NULL);
+
+		/*
+		 * A continuation is work for others, and a cancel or a timeout --
+		 * held off since our own commit -- is a reason to stop doing it:
+		 * whoever is left does its update itself.
+		 */
 		if (batchDesc == NULL || n >= BATCH_MAX_CONTINUATIONS ||
+			QueryCancelPending || ProcDiePending ||
 			!btree_batch_queue_pending())
 			break;
 		batch_open(true);

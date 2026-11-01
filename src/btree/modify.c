@@ -2047,6 +2047,7 @@ batch_queue_join(BTreeDescr *desc, int owner, OTuple tuple, CommitSeqNo opCsn)
 	if (me->serviced && !me->batchFailed)
 	{
 		me->serviced = false;
+		o_batch_note_committed();
 		return true;
 	}
 	me->serviced = false;
@@ -2810,6 +2811,11 @@ restart:
 			ppool_release_reserved(desc->ppool, PPOOL_RESERVE_INSERT);
 			goto restart;
 		}
+
+		/* A batch did our update and has committed it: we have succeeded */
+		if (myState->absorbable &&
+			lockerPayloads[MYPROCNUMBER].delegatedResult.absorbed)
+			o_batch_note_committed();
 
 		/*
 		 * lock_page_with_tuple() has already handed our undo reservation to

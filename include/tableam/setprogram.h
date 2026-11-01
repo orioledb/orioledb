@@ -84,6 +84,8 @@ extern void o_setprogram_init(void);
 struct BTreeDescr;
 extern bool o_batch_begin(Oid relid, struct BTreeDescr *pkDesc,
 						  char replident, uint32 version);
+extern void o_batch_note_committed(void);
+extern void o_batch_xact_end(bool commit);
 
 /*
  * Apply a program to a tuple's values.  Returns false when an assignment
