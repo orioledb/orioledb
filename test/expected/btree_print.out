@@ -3627,6 +3627,37 @@ SELECT orioledb_tbl_structure('o_test_is_null_assert'::regclass, 'nue');
 (1 row)
 
 COMMIT;
+-- NULL arguments
+SELECT orioledb_tbl_structure('o_test1'::regclass, NULL);
+ orioledb_tbl_structure 
+------------------------
+ 
+(1 row)
+
+SELECT orioledb_idx_structure('o_test1'::regclass, NULL);
+ orioledb_idx_structure 
+------------------------
+ 
+(1 row)
+
+SELECT orioledb_idx_structure('o_test_is_null_assert'::regclass, 'o_test_is_null_assert_pkey', NULL);
+ orioledb_idx_structure 
+------------------------
+ 
+(1 row)
+
+SELECT orioledb_sys_tree_structure(1, NULL);
+ orioledb_sys_tree_structure 
+-----------------------------
+ 
+(1 row)
+
+SELECT * FROM orioledb_index_description(0, 0, 0, NULL);
+ name | description 
+------+-------------
+      | 
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table o_print_evicted

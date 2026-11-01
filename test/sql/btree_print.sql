@@ -46,6 +46,13 @@ UPDATE o_test_is_null_assert SET val2 = val2 WHERE key = 2;
 SELECT orioledb_tbl_structure('o_test_is_null_assert'::regclass, 'nue');
 COMMIT;
 
+-- NULL arguments
+SELECT orioledb_tbl_structure('o_test1'::regclass, NULL);
+SELECT orioledb_idx_structure('o_test1'::regclass, NULL);
+SELECT orioledb_idx_structure('o_test_is_null_assert'::regclass, 'o_test_is_null_assert_pkey', NULL);
+SELECT orioledb_sys_tree_structure(1, NULL);
+SELECT * FROM orioledb_index_description(0, 0, 0, NULL);
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA btree_print CASCADE;
 RESET search_path;
