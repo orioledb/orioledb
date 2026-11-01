@@ -1275,7 +1275,8 @@ class IndexBridgingTest(BaseTest):
 		tree pages for a split, delete every third row, then VACUUM
 		VERBOSE.  The dead bridge ctids must be reaped (reported in
 		vacuum output) and subsequent bridge scans must return only
-		live rows.
+		live rows.  Delete the remaining rows and repeat to cover
+		vacuuming the bridged index to an empty state.
 		"""
 		node = self.node
 		node.start()
@@ -1306,6 +1307,17 @@ class IndexBridgingTest(BaseTest):
 		self.assertEqual(live,
 		                 self._gist_scan_count(node, "((0,0),(3000,3000))"))
 		self.assertEqual(live,
+		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
+
+		node.safe_psql("DELETE FROM o_test;")
+		_, _, err = node.psql("VACUUM VERBOSE o_test;")
+		m = re.search(r'had (\d+) dead item identifiers removed',
+		              err.decode("utf-8"))
+		self.assertIsNotNone(m)
+		self.assertEqual(live, int(m.group(1)))
+		self.assertEqual(0,
+		                 self._gist_scan_count(node, "((0,0),(3000,3000))"))
+		self.assertEqual(0,
 		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
 		node.stop()
 
