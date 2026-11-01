@@ -2533,7 +2533,13 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 
 	Assert(cur_recovery_xid_state != NULL);
 
-	delay_if_queued_for_idxbuild();
+	/*
+	 * Data workers must finish their OXids before a queued index rebuild
+	 * scans the source tree.  The startup process still waits for the rebuild
+	 * before publishing recovery progress.
+	 */
+	if (worker_id < 0)
+		delay_if_queued_for_idxbuild();
 
 	/*
 	 * The callbacks below drop the relnodes this transaction left behind, and
