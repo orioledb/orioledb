@@ -861,6 +861,9 @@ o_define_index_concurrent_finish(Relation heap, Relation index)
 	idx = descr->indices[o_table->has_primary ? ix_num : ix_num + 1];
 
 	/* Phase-2 build under the BUILDING state.  Concurrent writers spool. */
+	if (STOPEVENTS_ENABLED())
+		STOPEVENT(STOPEVENT_CIC_BEFORE_BUILD,
+				  cic_stopevent_params(idx_oids, idx->name.data));
 	build_secondary_index(InvalidOid, o_table, descr, ix_num, false, &result_local);
 
 	/*
