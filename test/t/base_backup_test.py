@@ -91,13 +91,16 @@ class BaseBackupTest(BaseTest):
 	def cleanupNode(self, node, attempts=5, delay=1):
 		"""
 		testgres' node.cleanup() retry logic never actually retries (its
-		rmdirs() has a bug: `if attempt < attempt` is always False).
+		rmdirs() has a bug: `if attempt < attempt` is always False). Worse,
+		that dead branch falls through to `assert attempt == attempts`,
+		which fails immediately and raises AssertionError instead of the
+		original OSError - so that's what we must catch here too.
 		"""
 		for attempt in range(attempts):
 			try:
 				node.cleanup()
 				return
-			except OSError:
+			except (OSError, AssertionError):
 				if attempt == attempts - 1:
 					raise
 				time.sleep(delay)
