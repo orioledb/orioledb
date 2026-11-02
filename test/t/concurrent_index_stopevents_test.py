@@ -31,15 +31,6 @@ class ConcurrentIndexStopEventsTest(BaseTest):
 	`wait_stopevent`, performs assertions / stages background DML, then
 	resets the gate and joins.
 
-	Note: a stop event placed between PG's phase-2 commit and the
-	concurrent-finish AccessExclusive (i.e. inside the BUILDING window
-	where writers route to the spool) previously exposed an unrelated
-	hang in `o_tuple_compute_data_size` for DELETEs on the BUILDING
-	secondary. This was attributed to racy initialization of
-	`nonLeafTupdesc` for a BUILDING-state OIndex; that diagnosis and
-	the DELETE hang have not been rechecked here. DELETE-during-BUILDING
-	scenarios remain tested by natural timing in `concurrent_index_test.py`
-	rather than by a deterministic stop event here.
 	"""
 
 	def setUp(self):
