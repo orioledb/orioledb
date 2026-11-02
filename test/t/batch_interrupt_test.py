@@ -156,8 +156,8 @@ class BatchInterruptTest(BaseTest):
 		waiting, as its own commit would.
 		"""
 		self._sync_rep_unreachable(True)
-		owner_thread, owner_pid, waiter_thread, waiter_pid = \
-            self._queue_waiter_behind_owner('batch_commit_start')
+		queued = self._queue_waiter_behind_owner('batch_commit_start')
+		owner_thread, owner_pid, waiter_thread, waiter_pid = queued
 
 		self._release('batch_commit_start')
 		wait_for_wait_event(self.node, owner_pid, 'SyncRep')
@@ -179,8 +179,8 @@ class BatchInterruptTest(BaseTest):
 		A waiter the batch has not taken yet can be cancelled, and its
 		update is then not done by anybody.
 		"""
-		owner_thread, owner_pid, waiter_thread, waiter_pid = \
-            self._queue_waiter_behind_owner('batch_commit_start')
+		queued = self._queue_waiter_behind_owner('batch_commit_start')
+		owner_thread, owner_pid, waiter_thread, waiter_pid = queued
 
 		self.ctrl.execute("SELECT pg_cancel_backend(%d)" % waiter_pid)
 		self.assertTrue(self._wait_finished(waiter_thread, 10),
@@ -205,14 +205,33 @@ class BatchInterruptTest(BaseTest):
 		                      "the retried update")
 		self.assertEqual(self._value(1), 101)
 
+	def test_invisible_until_sync_rep_confirms(self):
+		"""
+		An ordinary commit becomes visible only once synchronous standbys
+		confirm it; a batch's must not become visible before either.
+		"""
+		self._sync_rep_unreachable(True)
+		owner, owner_pid = self._session()
+		owner_thread = self._start(owner,
+		                           "UPDATE t SET v = v + 1 WHERE id = 1")
+		wait_for_wait_event(self.node, owner_pid, 'SyncRep')
+
+		# Committed locally, but not confirmed: nobody may see it yet
+		self.assertEqual(self._value(1), 0)
+
+		self._sync_rep_unreachable(False)
+		self._assertSucceeded(self._statement_result(owner_thread),
+		                      "the owner's update")
+		self.assertEqual(self._value(1), 1)
+
 	def test_waiter_cancel_after_taken(self):
 		"""
 		Once the batch has taken the waiter's update, the cancel has to wait
 		for the batch, and since the batch commits it, the waiter's statement
 		succeeds.
 		"""
-		owner_thread, owner_pid, waiter_thread, waiter_pid = \
-            self._queue_waiter_behind_owner('batch_commit_start')
+		queued = self._queue_waiter_behind_owner('batch_commit_start')
+		owner_thread, owner_pid, waiter_thread, waiter_pid = queued
 
 		# Let the owner take the waiter's update, then stop before commit
 		self._arm('batch_commit_absorbed')

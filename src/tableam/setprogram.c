@@ -948,25 +948,6 @@ sync_rep_wait_polling(XLogRecPtr lsn)
 	}
 }
 
-/*
- * Wait, as the owner of a batch, for synchronous standbys to confirm its
- * commit, and say whether they did: a cancel or termination may end the wait
- * before, and the backends whose updates are in the batch then have to wait
- * on their own.
- */
-static bool
-batch_wait_sync_rep(XLogRecPtr lsn)
-{
-	if (XLogRecPtrIsInvalid(lsn))
-		return true;
-
-	HOLD_INTERRUPTS();
-	SyncRepWaitForLSN(lsn, true);
-	RESUME_INTERRUPTS();
-
-	return sync_rep_confirmed(lsn);
-}
-
 void
 o_batch_note_committed(XLogRecPtr syncRepLsn)
 {
@@ -1152,12 +1133,13 @@ batch_commit(bool own)
 	batchOxid = InvalidOXid;
 
 	/*
-	 * As an ordinary commit does, wait for synchronous standbys -- for our
-	 * own update and for the ones we took over.  If a cancel ends the wait
-	 * early, the WARNING is ours, and those whose updates we took wait on
-	 * their own.
+	 * finish_autonomous_transaction() has waited for synchronous standbys,
+	 * for our own update and for the ones we took over, before making them
+	 * visible.  If a cancel ended that wait early, the WARNING is ours, and
+	 * those whose updates we took wait on their own.
 	 */
-	syncRepConfirmed = batch_wait_sync_rep(batchState.commitLsn);
+	syncRepConfirmed = XLogRecPtrIsInvalid(batchState.commitLsn) ||
+		sync_rep_confirmed(batchState.commitLsn);
 
 	/* The work we took over is now as committed as ours */
 	(void) btree_wake_deferred_waiters(false, syncRepConfirmed ?

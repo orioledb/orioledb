@@ -305,9 +305,9 @@ typedef struct
 	bool		durable;
 
 	/*
-	 * Where finish_autonomous_transaction() logged the commit, for a durable
-	 * transaction whose participants wait for synchronous standbys on their
-	 * own.  Invalid if nothing was logged.
+	 * Where finish_autonomous_transaction() logged the commit, so that the
+	 * caller can tell whether synchronous standbys confirmed it.  Invalid if
+	 * nothing was logged.
 	 */
 	XLogRecPtr	commitLsn;
 } OAutonomousTxState;

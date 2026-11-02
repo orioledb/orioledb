@@ -3339,6 +3339,24 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 			synchronous_commit > SYNCHRONOUS_COMMIT_OFF)
 			XLogFlush(commitLsn);
 
+		/*
+		 * And to synchronous standbys, before the csn lets anybody see it, as
+		 * RecordTransactionCommit() waits before ProcArrayEndTransaction().
+		 * The wait raises no error -- a cancel or a termination ends it with
+		 * a WARNING -- so it may stand outside the critical section, which is
+		 * only there to keep an error from undoing a logged commit.  Only a
+		 * durable transaction waits: the others do catalog bookkeeping that
+		 * nobody waits for.
+		 */
+		if (state->durable && !XLogRecPtrIsInvalid(commitLsn))
+		{
+			END_CRIT_SECTION();
+			HOLD_INTERRUPTS();
+			SyncRepWaitForLSN(commitLsn, true);
+			RESUME_INTERRUPTS();
+			START_CRIT_SECTION();
+		}
+
 		current_oxid_precommit();
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 		current_oxid_commit(csn);
@@ -3357,11 +3375,6 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 				free_retained_undo_location((UndoLogType) i);
 		}
 
-		/*
-		 * Synchronous standbys are waited for by each backend whose work went
-		 * into the transaction, as its own commit would: a cancel in one of
-		 * them must not cut the wait short for the others.
-		 */
 		state->commitLsn = commitLsn;
 	}
 
