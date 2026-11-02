@@ -474,7 +474,8 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val1, val2 FROM o_explain WHERE val2 > 0
 					AND val2 < 1000 ORDER BY val2; $$) as t
-	WHERE t NOT LIKE ' Planning:' AND t NOT LIKE '   Buffers: shared hit=%';
+	WHERE ltrim(t) NOT LIKE 'Planning:' AND
+		  ltrim(t) NOT LIKE 'Buffers: shared hit=%';
                                       regexp_replace                                       
 -------------------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
@@ -546,7 +547,8 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					 FROM generate_series(1, 100, 1) id)
 					ON CONFLICT (key) DO UPDATE
 					SET val = o_explain.val + 1; $$) as t
-	WHERE t NOT LIKE ' Planning:' AND t NOT LIKE '   Buffers: shared hit=%';
+	WHERE ltrim(t) NOT LIKE 'Planning:' AND
+		  ltrim(t) NOT LIKE 'Buffers: shared hit=%';
                                           regexp_replace                                           
 ---------------------------------------------------------------------------------------------------
  Insert on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
@@ -567,7 +569,8 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					 FROM generate_series(1, 100, 1) id)
 					ON CONFLICT (key) DO UPDATE
 					SET val = o_explain.val + 1, t = EXCLUDED.t; $$) as t
-	WHERE t NOT LIKE ' Planning:' AND t NOT LIKE '   Buffers: shared hit=%';
+	WHERE ltrim(t) NOT LIKE 'Planning:' AND
+		  ltrim(t) NOT LIKE 'Buffers: shared hit=%';
                                           regexp_replace                                           
 ---------------------------------------------------------------------------------------------------
  Insert on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)

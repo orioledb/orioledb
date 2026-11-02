@@ -216,7 +216,8 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val1, val2 FROM o_explain WHERE val2 > 0
 					AND val2 < 1000 ORDER BY val2; $$) as t
-	WHERE t NOT LIKE ' Planning:' AND t NOT LIKE '   Buffers: shared hit=%';
+	WHERE ltrim(t) NOT LIKE 'Planning:' AND
+		  ltrim(t) NOT LIKE 'Buffers: shared hit=%';
 -- uses only secondary index for fetching values from secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
@@ -248,7 +249,8 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					 FROM generate_series(1, 100, 1) id)
 					ON CONFLICT (key) DO UPDATE
 					SET val = o_explain.val + 1; $$) as t
-	WHERE t NOT LIKE ' Planning:' AND t NOT LIKE '   Buffers: shared hit=%';
+	WHERE ltrim(t) NOT LIKE 'Planning:' AND
+		  ltrim(t) NOT LIKE 'Buffers: shared hit=%';
 
 -- UPDATE TOAST with equal values (only TOAST reads for compare values)
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -258,7 +260,8 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					 FROM generate_series(1, 100, 1) id)
 					ON CONFLICT (key) DO UPDATE
 					SET val = o_explain.val + 1, t = EXCLUDED.t; $$) as t
-	WHERE t NOT LIKE ' Planning:' AND t NOT LIKE '   Buffers: shared hit=%';
+	WHERE ltrim(t) NOT LIKE 'Planning:' AND
+		  ltrim(t) NOT LIKE 'Buffers: shared hit=%';
 
 CREATE TABLE o_test_explain_verbose_rowid (
   val_1 int,
