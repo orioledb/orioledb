@@ -722,8 +722,7 @@ _PG_init(void)
 
 	DefineCustomBoolVariable("orioledb.delegate_updates",
 							 "Let the holder of a leaf page do the updates queued on it.",
-							 "Experimental, and known to lose an update in a few "
-							 "million under heavy contention.",
+							 "Experimental.",
 							 &orioledb_delegate_updates,
 							 false,
 							 PGC_SUSET,

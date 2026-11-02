@@ -2208,40 +2208,76 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 		}
 	}
 
-	/*
-	 * Doing the work under the waiter's own oxid is experimental: it loses an
-	 * update in a few million under heavy contention.
-	 */
+	/* Doing the work under the waiter's own oxid is still experimental */
 	if (!orioledb_delegate_updates)
 		return false;
 
 	/*
+	 * An update or delete we do through a callback or a program takes the
+	 * stronger of the two update modes: working out whether the key
+	 * attributes changed would mean comparing through the waiter's slots,
+	 * which are not ours to read.
+	 */
+	if ((lockerState->action == BTreeOperationUpdate &&
+		 lockerPayloads[pgprocno].program.nops > 0) ||
+		(lockerState->action != BTreeOperationLock &&
+		 lockerState->delegatedCallbackId != 0))
+		lockerState->lockMode = RowLockUpdate;
+
+	/*
+	 * Anything the waiter would have had to wait for stays the waiter's own
+	 * business.  The waiter has no savepoint -- the entry conditions only let
+	 * it get here as the first modification of its transaction -- so there is
+	 * none to pass.
+	 *
+	 * This comes before the callback, as it does on the normal path: the
+	 * callback has to judge the row by its last version, which is what
+	 * conflictTupHdr holds, not by the header on the page.  Under contention
+	 * that header is often a lock-only record -- of an EvalPlanQual lock that
+	 * finished or aborted, say -- and a writer committed after the waiter's
+	 * snapshot sits below it.  Judged by the header, the waiter's tuple, made
+	 * from a version that is no longer the last, was written over that
+	 * writer's update.
+	 */
+	if (row_lock_conflicts(tuphdr, &conflictTupHdr, desc->undoType,
+						   &conflictUndoLocation, lockerState->lockMode,
+						   oxid, lockerState->opCsn, blkno,
+						   InvalidUndoLocation, &redundantRowLocks,
+						   &lockStatus))
+		return false;
+
+	if (redundantRowLocks)
+		return false;
+
+	/* Taking a lock we already hold, or a weaker one, is nothing to do. */
+	if (lockerState->action == BTreeOperationLock &&
+		lockStatus == BTreeModifySameOrStrongerLock)
+	{
+		lockerState->opResult = OPageWaiterOpLocked;
+		return true;
+	}
+
+	/*
 	 * The half of the caller's callback that belongs on the page runs here.
-	 * It may amend the new tuple and refuse outright; it also settles the
-	 * lock mode, so it has to run before the conflict question is asked.
+	 * It may amend the new tuple and refuse outright.
 	 */
 	if (lockerState->action == BTreeOperationUpdate &&
 		lockerPayloads[pgprocno].program.nops > 0)
 	{
 		/*
 		 * We were given the assignment rather than a tuple, so the row having
-		 * moved on is no reason to decline: rebuild from what is there.  The
-		 * lock has to be the stronger of the two update modes, since working
-		 * out whether the key attributes changed would mean comparing through
-		 * the waiter's slots, which are not ours to read.
-		 */
-		/*
+		 * moved on is no reason to decline: rebuild from what is there.
+		 *
 		 * A row this same transaction wrote needs command-id bookkeeping only
 		 * its own backend can do.
 		 */
-		if (XACT_INFO_OXID_EQ(tuphdr->xactInfo, oxid))
+		if (XACT_INFO_OXID_EQ(conflictTupHdr.xactInfo, oxid))
 			return false;
 
 		rebuiltTuple = rebuild_waiter_tuple(desc, curTuple, pgprocno,
 											&newTuplen);
 		if (O_TUPLE_IS_NULL(rebuiltTuple))
 			return false;
-		lockerState->lockMode = RowLockUpdate;
 	}
 	else if (lockerState->delegatedCallbackId != 0 &&
 			 lockerState->action == BTreeOperationDelete)
@@ -2256,7 +2292,7 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 		O_TUPLE_SET_NULL(delegatedTuple);
 		if (delegated &&
 			delegated(desc, curTuple, &delegatedTuple, oxid, lockerState->opCsn,
-					  tuphdr->xactInfo, tuphdr->undoLocation,
+					  conflictTupHdr.xactInfo, conflictTupHdr.undoLocation,
 					  &lockerState->lockMode,
 					  &lockerPayloads[pgprocno].delegatedResult) != OBTreeCallbackActionDelete)
 			return false;
@@ -2287,34 +2323,10 @@ apply_waiter_op(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno)
 
 		if (delegated &&
 			delegated(desc, curTuple, &delegatedTuple, oxid, lockerState->opCsn,
-					  tuphdr->xactInfo, tuphdr->undoLocation,
+					  conflictTupHdr.xactInfo, conflictTupHdr.undoLocation,
 					  &lockerState->lockMode,
 					  &lockerPayloads[pgprocno].delegatedResult) != OBTreeCallbackActionUpdate)
 			return false;
-	}
-
-	/*
-	 * Anything the waiter would have had to wait for stays the waiter's own
-	 * business.  The waiter has no savepoint -- the entry conditions only let
-	 * it get here as the first modification of its transaction -- so there is
-	 * none to pass.
-	 */
-	if (row_lock_conflicts(tuphdr, &conflictTupHdr, desc->undoType,
-						   &conflictUndoLocation, lockerState->lockMode,
-						   oxid, lockerState->opCsn, blkno,
-						   InvalidUndoLocation, &redundantRowLocks,
-						   &lockStatus))
-		return false;
-
-	if (redundantRowLocks)
-		return false;
-
-	/* Taking a lock we already hold, or a weaker one, is nothing to do. */
-	if (lockerState->action == BTreeOperationLock &&
-		lockStatus == BTreeModifySameOrStrongerLock)
-	{
-		lockerState->opResult = OPageWaiterOpLocked;
-		return true;
 	}
 
 	/*

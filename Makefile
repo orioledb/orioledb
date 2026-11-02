@@ -238,6 +238,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/move_database_test.py \
 						test/t/database_template_test.py
 TESTGRESCHECKS_PART_2 = test/t/batch_interrupt_test.py \
+						test/t/delegated_update_test.py \
 						test/t/checkpoint_concurrent_test.py \
 						test/t/checkpoint_error_test.py \
 						test/t/truncate_under_checkpoint_test.py \
