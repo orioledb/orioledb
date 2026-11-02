@@ -18,10 +18,10 @@ ap.add_argument("--diff", "-d", help="path to diff output file")
 args = ap.parse_args()
 
 if args.diff:
-    with open(args.diff, "r", encoding="utf-8", errors="replace") as f:
-        diff_text = f.read()
+	with open(args.diff, "r", encoding="utf-8", errors="replace") as f:
+		diff_text = f.read()
 else:
-    diff_text = sys.stdin.read()
+	diff_text = sys.stdin.read()
 
 patch_set = PatchSet(diff_text)
 result = PatchSet([])
@@ -30,11 +30,11 @@ removed = []
 added = []
 
 for patched_file in list(patch_set):
-    for hunk in patched_file:
-        removed += [line.value for line in hunk if line.is_removed]
-        added += [line.value for line in hunk if line.is_added]
+	for hunk in patched_file:
+		removed += [line.value for line in hunk if line.is_removed]
+		added += [line.value for line in hunk if line.is_added]
 
 if sorted(removed) != sorted(added):
-    sys.exit(1)
+	sys.exit(1)
 else:
-    sys.exit(0)
+	sys.exit(0)

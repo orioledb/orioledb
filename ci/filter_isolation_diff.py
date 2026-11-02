@@ -8,6 +8,7 @@ import io
 import re
 import os
 
+
 def get_permutation_lines(filepath):
 	output = []
 	f = open(filepath, 'r')
@@ -18,8 +19,14 @@ def get_permutation_lines(filepath):
 		i = i + 1
 	return output
 
-ap = argparse.ArgumentParser(description="Найти первую отличающуюся строку по permutation-блокам .out-файлов из unified diff.")
-ap.add_argument("--diff", "-d", help="Путь к файлу diff (если не указан — читаем из stdin).")
+
+ap = argparse.ArgumentParser(
+    description=
+    "Найти первую отличающуюся строку по permutation-блокам .out-файлов из unified diff."
+)
+ap.add_argument("--diff",
+                "-d",
+                help="Путь к файлу diff (если не указан — читаем из stdin).")
 args = ap.parse_args()
 
 if args.diff:
@@ -31,40 +38,49 @@ else:
 patch_set = PatchSet(diff_text)
 
 allowedRegexes = {
-	r"ERROR:  orioledb does not support SERIALIZABLE isolation level": ["*"],
-	r"ERROR:  tuple to be locked has its primary key changed due to concurrent update": ["*"],
-	r"ERROR:  Not implemented: orioledb_tuple_tid_valid": ["*"],
-	r"ERROR:  Not implemented: orioledb_set_tidrange": ["*"],
-	r"ERROR:  orioledb tables do not support CLUSTER": ["*"],
-	r"ERROR:  orioledb table \"[a-z0-9_]+\" does not support VACUUM FULL": ["*"],
-	r"ERROR:  cannot use PREPARE TRANSACTION in transaction that uses orioledb table": ["*"],
-	r"c1      |(0,1) |0|0|4": ['eval-plan-qual'],
-	r"QUERY PLAN": ['eval-plan-qual', 'merge-join', 'drop-index-concurrently-1',
-					'horizons'],
-	r"\s+\d+(|\s+\d+)*": ['vacuum-no-cleanup-lock', 'stats', 'horizons'],
-	r"setup of session s1 failed: ERROR:  current transaction is aborted, commands ignored until end of transaction block": ['stats'],
-	r"key  |data": ['eval-plan-qual-trigger'],
-	r"ERROR:  tuple concurrently updated": ['intra-grant-inplace'],
-	r"\s*\d+": ['inherit-temp'],
-	r"setup failed: ERROR:  function \"[a-z0-9_]+\" cannot be used here": ['insert-conflict-specconflict'],
-	r"  3|setup1 updated by merge1 source not matched by merge2a": ['merge-update'],
-	r"  2|setup1 updated by merge1": ['merge-update'],
-	r"ERROR:  REFRESH MATERIALIZED VIEW CONCURRENTLY is not supported for orioledb tables yet": ['*'],
-	r"ERROR:  could not serialize access due to concurrent delete": ['partition-key-update-3'],
-	r"ERROR:  orioledb does not support TID scan": ['*'],
-	r"ERROR:  orioledb does not support TID range scan": ['*'],
-	r"\s*->\s+Custom Scan \(o_scan\) on ios_bitmap": ['index-only-bitmapscan'],
-	r"\s+Bitmap heap scan": ['index-only-bitmapscan'],
-	r"\s*(->\s+)?Index (Only )?Scan\b": ['*'],
-	r"\s*(->\s+)?Custom Scan \(o_scan\)": ['*'],
-	r"\s+(Forward|Backward) index( only)? scan of:": ['*'],
-	r"\s+Conds:": ['*'],
-	# A line of nothing but spaces is column padding: OrioleDB's node text has
-	# a different width, so every line of the plan shifts.
-	r"\s+$": ['*'],
-	r"\s*(->\s+)?Bitmap (Heap|Index) Scan\b": ['*'],
-	r"\s+(Filter|Index Cond|Recheck Cond):": ['*'],
+    r"ERROR:  orioledb does not support SERIALIZABLE isolation level": ["*"],
+    r"ERROR:  tuple to be locked has its primary key changed due to concurrent update":
+    ["*"],
+    r"ERROR:  Not implemented: orioledb_tuple_tid_valid": ["*"],
+    r"ERROR:  Not implemented: orioledb_set_tidrange": ["*"],
+    r"ERROR:  orioledb tables do not support CLUSTER": ["*"],
+    r"ERROR:  orioledb table \"[a-z0-9_]+\" does not support VACUUM FULL":
+    ["*"],
+    r"ERROR:  cannot use PREPARE TRANSACTION in transaction that uses orioledb table":
+    ["*"],
+    r"c1      |(0,1) |0|0|4": ['eval-plan-qual'],
+    r"QUERY PLAN":
+    ['eval-plan-qual', 'merge-join', 'drop-index-concurrently-1', 'horizons'],
+    r"\s+\d+(|\s+\d+)*": ['vacuum-no-cleanup-lock', 'stats', 'horizons'],
+    r"setup of session s1 failed: ERROR:  current transaction is aborted, commands ignored until end of transaction block":
+    ['stats'],
+    r"key  |data": ['eval-plan-qual-trigger'],
+    r"ERROR:  tuple concurrently updated": ['intra-grant-inplace'],
+    r"\s*\d+": ['inherit-temp'],
+    r"setup failed: ERROR:  function \"[a-z0-9_]+\" cannot be used here":
+    ['insert-conflict-specconflict'],
+    r"  3|setup1 updated by merge1 source not matched by merge2a":
+    ['merge-update'],
+    r"  2|setup1 updated by merge1": ['merge-update'],
+    r"ERROR:  REFRESH MATERIALIZED VIEW CONCURRENTLY is not supported for orioledb tables yet":
+    ['*'],
+    r"ERROR:  could not serialize access due to concurrent delete":
+    ['partition-key-update-3'],
+    r"ERROR:  orioledb does not support TID scan": ['*'],
+    r"ERROR:  orioledb does not support TID range scan": ['*'],
+    r"\s*->\s+Custom Scan \(o_scan\) on ios_bitmap": ['index-only-bitmapscan'],
+    r"\s+Bitmap heap scan": ['index-only-bitmapscan'],
+    r"\s*(->\s+)?Index (Only )?Scan\b": ['*'],
+    r"\s*(->\s+)?Custom Scan \(o_scan\)": ['*'],
+    r"\s+(Forward|Backward) index( only)? scan of:": ['*'],
+    r"\s+Conds:": ['*'],
+    # A line of nothing but spaces is column padding: OrioleDB's node text has
+    # a different width, so every line of the plan shifts.
+    r"\s+$": ['*'],
+    r"\s*(->\s+)?Bitmap (Heap|Index) Scan\b": ['*'],
+    r"\s+(Filter|Index Cond|Recheck Cond):": ['*'],
 }
+
 
 def is_allowed_line(testName, line):
 	for regex, tests in allowedRegexes.items():
@@ -84,12 +100,15 @@ for patched_file in patch_set:
 	for hunk in patched_file:
 		for line in hunk:
 			if line.is_added:
-				while index < len(permutationLines) - 1 and line.target_line_no > permutationLines[index + 1]:
+				while index < len(
+				    permutationLines
+				) - 1 and line.target_line_no > permutationLines[index + 1]:
 					index = index + 1
 					clean = True
 				if clean:
 					value = line.value
-					if value.startswith('step ') or value == "\n" or re.match(r"[a-z0-9]+: (NOTICE|WARNING|DETAIL): ", value):
+					if value.startswith('step ') or value == "\n" or re.match(
+					    r"[a-z0-9]+: (NOTICE|WARNING|DETAIL): ", value):
 						pass
 					elif not is_allowed_line(testName, value):
 						lines.write(f"{value}")

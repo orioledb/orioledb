@@ -476,6 +476,7 @@ pgindent: orioledb.typedefs
 yapf:
 	yapf -i test/t/*.py
 	yapf -i test/integration/*.py
+	yapf -i ci/*.py
 	yapf -i *.py
 
 .PHONY: submake-orioledb submake-regress check \
