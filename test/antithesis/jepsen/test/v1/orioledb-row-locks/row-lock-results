@@ -1,0 +1,96 @@
+#!/usr/bin/env bb
+(require '[cheshire.core :as json]
+         '[clojure.java.io :as io])
+
+(def state-dir (or (System/getenv "RUNTIME_STATE_DIR") "/runtime-state"))
+(def output-dir (System/getenv "ANTITHESIS_OUTPUT_DIR"))
+(def final-file (io/file state-dir "row-lock-final-summary.json"))
+
+(def always
+  ["row locks: final verification completed"
+   "row locks: committed ledger matches account state"
+   "row locks: committed journal matches item state"
+   "row locks: foreign keys remain valid"
+   "row locks: structural verification passed"
+   "row locks: driver reported no unexpected failures"
+   "row locks: counter transactions made progress"
+   "row locks: compatibility probes made progress"
+   "row locks: savepoint probes made progress"
+   "row locks: delete and reinsert made progress"
+   "row locks: foreign-key transactions made progress"
+   "row locks: result artifact is readable"])
+
+(def sometimes
+  ["row locks: every lock mode was exercised"
+   "row locks: every compatibility pair was exercised"
+   "row locks: every savepoint scenario was exercised"
+   "row locks: conflicting NOWAIT acquisition was observed"
+   "row locks: whole transaction rollback was exercised"])
+
+(defn assertion [id type hit condition details]
+  {:antithesis_assert
+   {:id id :message id :hit hit :must_hit true
+    :assert_type type
+    :display_type (if (= type "always") "Always" "Sometimes")
+    :condition condition
+    :location {:class "" :function "row-lock-results"
+               :file (str (io/file *file*)) :begin_line 1 :begin_column 0}
+    :details details}})
+
+(defn emit! [value]
+  (println (json/generate-string value)))
+
+(defn writer []
+  (if output-dir
+    (io/writer (io/file output-dir "sdk.jsonl") :append true)
+    *out*))
+
+(defn declare! []
+  (with-open [out (writer)]
+    (binding [*out* out]
+      (doseq [id always] (emit! (assertion id "always" false false nil)))
+      (doseq [id sometimes] (emit! (assertion id "sometimes" false false nil)))))
+  0)
+
+(defn read-summary []
+  (try
+    (when (.isFile final-file)
+      (json/parse-string (slurp final-file) true))
+    (catch Throwable error
+      {:read-error (.getMessage error)})))
+
+(defn evaluate! []
+  (let [summary (read-summary)
+        driver (:driver summary)
+        checks {"row locks: final verification completed" (true? (:valid summary))
+                "row locks: committed ledger matches account state" (zero? (:ledger-mismatches summary -1))
+                "row locks: committed journal matches item state" (zero? (:journal-mismatches summary -1))
+                "row locks: foreign keys remain valid" (zero? (:foreign-key-orphans summary -1))
+                "row locks: structural verification passed" (true? (:structural-verification summary))
+                "row locks: driver reported no unexpected failures" (and (true? (:valid driver))
+                                                                            (zero? (:operation-failures driver -1)))
+                "row locks: counter transactions made progress" (pos? (:counter-writes driver 0))
+                "row locks: compatibility probes made progress" (pos? (:compatibility-probes driver 0))
+                "row locks: savepoint probes made progress" (pos? (:savepoint-probes driver 0))
+                "row locks: delete and reinsert made progress" (pos? (:item-writes driver 0))
+                "row locks: foreign-key transactions made progress" (pos? (:fk-writes driver 0))
+                "row locks: result artifact is readable" (and (map? summary) (nil? (:read-error summary)))
+                "row locks: every lock mode was exercised" (= 4 (count (:covered-modes driver)))
+                "row locks: every compatibility pair was exercised" (= 16 (:covered-pairs driver 0))
+                "row locks: every savepoint scenario was exercised" (= 3 (count (:covered-savepoints driver)))
+                "row locks: conflicting NOWAIT acquisition was observed" (pos? (:expected-lock-conflicts driver 0))
+                "row locks: whole transaction rollback was exercised" (pos? (:whole-rollbacks driver 0))}
+        always-ok? (every? true? (map checks always))]
+    (with-open [out (writer)]
+      (binding [*out* out]
+        (doseq [id always]
+          (emit! (assertion id "always" true (true? (checks id)) summary)))
+        (doseq [id sometimes]
+          (emit! (assertion id "sometimes" true (true? (checks id)) summary)))))
+    (if always-ok? 0 1)))
+
+(System/exit
+ (case (first *command-line-args*)
+   "declare" (declare!)
+   "evaluate" (evaluate!)
+   2))

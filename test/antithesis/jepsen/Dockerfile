@@ -35,6 +35,7 @@ RUN git apply --check /tmp/orioledb-cli.patch \
     && git apply /tmp/orioledb-cli.patch \
     && cd postgres \
     && lein test jepsen.orioledb.workload.checkpoint-recovery-test \
+                 jepsen.orioledb.workload.row-locks-test \
     && lein jar \
     && mkdir -p /opt/jepsen \
     && cp target/postgres-*.jar /opt/jepsen/jepsen-postgres.jar \

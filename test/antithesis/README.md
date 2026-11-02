@@ -29,6 +29,7 @@ Build via `make build` (see details under Usage)
 | [workload/jepsen-RR](./config/workload/jepsen-RR)  | configures jepsen in repeatable-read mode  |
 | [workload/jepsen-RC](./config/workload/jepsen-RC)  | configures jepsen in read committed mode  |
 | [workload/checkpoint-recovery](./config/workload/checkpoint-recovery) | stresses checkpoint, eviction, process restart, and crash recovery transitions |
+| [workload/row-locks](./config/workload/row-locks) | checks row-lock semantics and high-contention correctness |
 | flake repro  | todo  |
 
 - individual configuration sets are merged with `config/docker-compose.base.yaml` to define a simulation
@@ -163,6 +164,41 @@ Before interpreting a run, confirm that the Antithesis tenant preserves both
 named volumes across node termination. The property
 `checkpoint recovery: durable volume canary survived restart` records this as
 coverage rather than assuming the tenant storage model.
+
+#### Row locks
+
+The row-lock workload combines directed compatibility and savepoint probes with
+ledger-backed high-contention updates, guarded delete/reinsert operations, and
+foreign-key churn. Run it without network or container faults so lock errors
+and transaction outcomes remain unambiguous.
+
+```bash
+# OrioleDB smoke test
+make build up CFG='workload/row-locks' PG_MAJOR=18
+
+# Heap control for validating the workload oracle
+ROW_LOCK_TABLE_AM=heap \
+  make build up CFG='workload/row-locks' PG_MAJOR=18
+
+# Render and validate the Antithesis configuration
+make build CFG='workload/row-locks' PG_MAJOR=18
+snouty validate target/
+```
+
+Use the tenant-supported parameters for disabling both external fault classes,
+and confirm the resulting Antithesis report records that configuration.
+
+```bash
+snouty launch \
+  --config-image "$(make config-image CFG='workload/row-locks' PG_MAJOR=18)" \
+  --test-name 'orioledb-row-locks' \
+  --description 'OrioleDB row-lock semantics and contention' \
+  --duration 30m \
+  --ephemeral \
+  --param custom.network_faults_enable=false \
+  --param custom.container_faults_enable=false \
+  --webhook basic_test
+```
 
 ## Usage
 

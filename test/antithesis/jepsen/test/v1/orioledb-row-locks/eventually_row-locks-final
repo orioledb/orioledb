@@ -1,0 +1,9 @@
+#!/bin/sh
+set -u
+
+rm -f "${RUNTIME_STATE_DIR:-/runtime-state}/row-lock-final-summary.json"
+rc=0
+java -ea -cp '/opt/jepsen/*' -Djava.awt.headless=true clojure.main \
+	-m jepsen.orioledb.workload.row-locks final || rc=$?
+/opt/antithesis/test/v1/orioledb-row-locks/row-lock-results evaluate || rc=$?
+exit "$rc"
