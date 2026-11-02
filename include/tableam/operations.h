@@ -89,6 +89,14 @@ typedef struct
 	 * it: there is no WAL record left for us to write.
 	 */
 	bool		absorbed;
+
+	/*
+	 * The update changes no column any index uses -- key, INCLUDE, expression
+	 * or predicate -- so the secondary indexes stay as they are, and the page
+	 * holder may do the update for us: all it has to touch is the primary
+	 * index.
+	 */
+	bool		indexedUnchanged;
 } OModifyCallbackArg;
 
 typedef struct

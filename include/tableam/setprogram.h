@@ -80,6 +80,7 @@ typedef struct OSetProgram
  */
 extern OSetProgram *o_current_set_program(Oid relid);
 extern bool o_current_program_is_upsert(void);
+extern bool o_current_program_avoids_indexes(void);
 
 extern void o_setprogram_init(void);
 struct BTreeDescr;

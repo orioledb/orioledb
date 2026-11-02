@@ -62,3 +62,4 @@ seq_scan_dsm_create_fail
 batch_commit_start
 batch_commit_absorbed
 batch_after_commit
+waiter_op_applied

@@ -2702,6 +2702,14 @@ usable_set_program(OTableDescr *descr)
 	if (id->primaryIsCtid || id->bridging || descr->bridge != NULL)
 		return NULL;
 
+	/*
+	 * Applied to whatever row is there now, the program must leave the
+	 * secondary indexes as they are, which only one assigning no indexed
+	 * column does.
+	 */
+	if (descr->nIndices >= 2 && !o_current_program_avoids_indexes())
+		return NULL;
+
 	for (i = 0; i < program->nops; i++)
 	{
 		AttrNumber	attnum = program->ops[i].attnum;
@@ -2763,11 +2771,12 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 
 		/*
 		 * Offer the update for delegation only where the holder's half is the
-		 * whole of what the page needs: with a secondary index there is also
-		 * the PK/SK marker and the index maintenance itself, neither of which
-		 * it can do for us.
+		 * whole of what the page needs: with a secondary index that changes
+		 * there is also the PK/SK marker and the index maintenance itself,
+		 * neither of which it can do for us.
 		 */
-		.delegatedCallbackId = (descr->nIndices < 2) ? o_update_delegated_id : 0
+		.delegatedCallbackId = (descr->nIndices < 2 || arg->indexedUnchanged) ?
+		o_update_delegated_id : 0
 	};
 
 	memset(&result, 0, sizeof(result));

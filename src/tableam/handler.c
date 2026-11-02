@@ -620,7 +620,9 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 	 */
 	if (!descr->bridge)
 		(void) o_batch_begin(RelationGetRelid(rel),
-							 descr->nIndices < 2 ? &id->desc : NULL,
+							 (descr->nIndices < 2 ||
+							  o_current_program_avoids_indexes()) ?
+							 &id->desc : NULL,
 							 wal_relreplident(rel), descr->version);
 
 	slot = o_tbl_insert_with_arbiter(rel, descr, slot, arbiterIndexes, cid,
@@ -667,6 +669,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	marg.selfModified = false;
 	marg.deleted = BTreeLeafTupleNonDeleted;
 	marg.changingPart = changingPart;
+	marg.indexedUnchanged = false;
 	marg.keyAttrs = NULL;
 	marg.modifyCid = cid;
 	marg.tupleCid = InvalidCommandId;
@@ -758,7 +761,9 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	/* The statement's batch, if it has one, becomes our transaction */
 	if (!descr->bridge)
 		(void) o_batch_begin(RelationGetRelid(relation),
-							 descr->nIndices < 2 ? &GET_PRIMARY(descr)->desc : NULL,
+							 (descr->nIndices < 2 ||
+							  o_current_program_avoids_indexes()) ?
+							 &GET_PRIMARY(descr)->desc : NULL,
 							 wal_relreplident(relation), descr->version);
 	oxid = get_current_oxid();
 
@@ -787,6 +792,24 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	marg.modifyCid = cid;
 	marg.tupleCid = InvalidCommandId;
 	o_set_current_command(cid);
+
+	/*
+	 * oldSlot holds the version our new tuple was made from.  If no indexed
+	 * column differs between the two, the secondary indexes stay as they are.
+	 */
+	marg.indexedUnchanged = false;
+	if (descr->nIndices >= 2 && !descr->bridge && oldSlot != NULL &&
+		!TupIsNull(oldSlot))
+	{
+		Bitmapset  *indexed;
+
+		was_saving = o_start_saving_inval_messages();
+		indexed = RelationGetIndexAttrBitmap(relation,
+											 INDEX_ATTR_BITMAP_HOT_BLOCKING);
+		o_stop_saving_inval_messages(was_saving);
+		marg.indexedUnchanged = !tts_orioledb_modified(oldSlot, slot, indexed);
+		bms_free(indexed);
+	}
 
 	mres = o_tbl_update(descr, slot, &old_pkey, relation, oxid,
 						marg.csn, &hint, &marg, bridge_ctid);
@@ -831,6 +854,14 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	tmfd->xmax = InvalidTransactionId;
 	tmfd->cmax = InvalidCommandId;
 	o_check_tbl_update_mres(mres, descr, relation, slot);
+
+	/*
+	 * A batch did our update, and it changed no indexed column: there is
+	 * nothing for the secondary indexes to do, and nothing of it may be done
+	 * in our own transaction rather than the batch's.
+	 */
+	if (marg.absorbed)
+		*update_indexes = TU_None;
 
 	bms_free(marg.keyAttrs);
 	Assert(mres.success);

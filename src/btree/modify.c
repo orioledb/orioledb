@@ -2568,6 +2568,7 @@ btree_do_queued_work(BTreeDescr *desc, OInMemoryBlkno blkno)
 		{
 			pg_write_barrier();
 			lockerState->serviced = true;
+			STOPEVENT(STOPEVENT_WAITER_OP_APPLIED, NULL);
 		}
 		else if (lockerState->forwardTo != 0)
 			continue;			/* costs nothing here: no undo */

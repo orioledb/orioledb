@@ -18,12 +18,14 @@
 #include "btree/page_state.h"
 #include "recovery/wal.h"
 #include "tableam/descr.h"
+#include "tableam/handler.h"
 #include "tableam/scan.h"
 #include "tableam/setprogram.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "utils/stopevent.h"
 
+#include "access/sysattr.h"
 #include "access/xact.h"
 #include "common/int.h"
 #include "executor/executor.h"
@@ -41,6 +43,7 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/portal.h"
+#include "utils/relcache.h"
 #include "utils/timeout.h"
 #include "utils/typcache.h"
 #include "utils/wait_event.h"
@@ -77,6 +80,7 @@ static int	runDepth = 0;
  */
 static bool currentProgramCombinable = false;
 static bool currentProgramUpsert = false;
+static bool currentProgramAvoidsIndexes = false;
 static bool batchOpen = false;
 static OXid batchOxid = InvalidOXid;
 static OAutonomousTxState batchState;
@@ -103,6 +107,42 @@ bool
 o_current_program_is_upsert(void)
 {
 	return currentProgramUpsert;
+}
+
+/*
+ * Does the current program assign no column any index of the relation uses?
+ * Then the secondary indexes stay as they are, whatever row the program is
+ * applied to, and another process may apply it.
+ */
+bool
+o_current_program_avoids_indexes(void)
+{
+	return currentProgramAvoidsIndexes;
+}
+
+static bool
+program_avoids_indexes(OSetProgram *program, int nops, Relation rel)
+{
+	Bitmapset  *indexed;
+	bool		was_saving;
+	bool		result = true;
+	int			i;
+
+	was_saving = o_start_saving_inval_messages();
+	indexed = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_HOT_BLOCKING);
+	o_stop_saving_inval_messages(was_saving);
+
+	for (i = 0; i < nops; i++)
+	{
+		if (bms_is_member(program->ops[i].attnum -
+						  FirstLowInvalidHeapAttributeNumber, indexed))
+		{
+			result = false;
+			break;
+		}
+	}
+	bms_free(indexed);
+	return result;
 }
 
 OSetProgram *
@@ -761,6 +801,7 @@ compile_current_program(QueryDesc *queryDesc)
 	currentProgramRelid = InvalidOid;
 	currentProgramCombinable = false;
 	currentProgramUpsert = false;
+	currentProgramAvoidsIndexes = false;
 	currentProgram.nops = 0;
 	currentProgram.constUsed = 0;
 
@@ -841,6 +882,8 @@ compile_current_program(QueryDesc *queryDesc)
 	currentProgramRelid = rte->relid;
 	programQueryDesc = queryDesc;
 	currentProgramUpsert = (queryDesc->operation == CMD_INSERT);
+	currentProgramAvoidsIndexes = program_avoids_indexes(&currentProgram, nops,
+														 rri->ri_RelationDesc);
 
 	/*
 	 * A statement inside a transaction block, implicit ones included, is
@@ -1260,6 +1303,7 @@ o_ExecutorEnd(QueryDesc *queryDesc)
 		currentProgramRelid = InvalidOid;
 		currentProgram.nops = 0;
 		currentProgramCombinable = false;
+		currentProgramAvoidsIndexes = false;
 	}
 
 	if (next_ExecutorEnd_hook)
