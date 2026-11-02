@@ -50,6 +50,7 @@ make.flags
 /include/utils/stopevents_data.h
 /orioledb.typedefs
 !ci/antithesis/libvoidstar.so
+/ci/__pycache__/
 
 # Ignore generated scripts (also update .dockerignore when adding new entries here)
 sql/orioledb--1.0.sql

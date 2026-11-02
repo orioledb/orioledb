@@ -77,6 +77,7 @@ types with identical representation across architectures.
 - Add or update regression/isolation/Python tests for behavior changes.
 - No speculative fixes. Diagnose systematically, confirm the root cause, then
   fix. Don't hack around symptoms.
+- In Python code prefer f-strings for formatting.
 
 
 ## Release notes
