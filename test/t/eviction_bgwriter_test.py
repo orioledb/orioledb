@@ -89,7 +89,9 @@ class EvictionBGWriterTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.main_buffers = 8MB\n"
-		    "orioledb.bgwriter_num_workers = 1\n")
+		    "orioledb.bgwriter_num_workers = 1\n"
+		    "autovacuum_naptime = 1s\n"
+		    "log_autovacuum_min_duration = 0\n")
 		node.start()
 		node.safe_psql('postgres',
 		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
@@ -124,11 +126,12 @@ class EvictionBGWriterTest(BaseTest):
 				log = f.read()
 			for pattern in ('TRAP: failed Assert',
 			                'was terminated by signal 6',
+			                'type with OID',
 			                'terminating any other active server processes'):
 				self.assertNotIn(
 				    pattern, log,
-				    "%s: background writer crashed (%r in the server log) "
-				    "while handling catalog-dependent index keys" %
+				    "%s: maintenance failed (%r in the server log) while "
+				    "handling catalog-dependent index keys" %
 				    (stage, pattern))
 
 		before = wait_for_bgwriter()
