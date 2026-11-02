@@ -1,0 +1,66 @@
+volumes:
+  row_lock_runtime_state:
+    name: row_lock_runtime_state
+
+services:
+  test.orioledb:
+    restart: !reset null
+    entrypoint: ["boot-entrypoint"]
+    command: ["postgres", "-D", "/etc/postgresql"]
+    volumes:
+      - row_lock_runtime_state:/runtime-state
+
+  row-lock-initializer:
+    image: "${IMAGE_REPO}jepsen-client:${IMAGE_TAG}"
+    container_name: row-lock-initializer
+    hostname: row-lock-initializer
+    init: true
+    platform: "${JEPSEN_PLATFORM}"
+    build: ./jepsen
+    environment:
+      JEPSEN_MODE: initialize
+      JEPSEN_INITIALIZER: row-locks
+      JEPSEN_NODE: orioledb
+      JEPSEN_POSTGRES_USER: "${POSTGRES_USER}"
+      JEPSEN_POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      ROW_LOCK_TABLE_AM: "${ROW_LOCK_TABLE_AM:-orioledb}"
+      RUNTIME_STATE_DIR: /runtime-state
+    volumes:
+      - row_lock_runtime_state:/runtime-state
+    depends_on:
+      test.orioledb:
+        condition: service_healthy
+
+  row-lock-client:
+    image: "${IMAGE_REPO}jepsen-client:${IMAGE_TAG}"
+    container_name: row-lock-client
+    hostname: row-lock-client
+    init: true
+    platform: "${JEPSEN_PLATFORM}"
+    build: ./jepsen
+    environment:
+      JEPSEN_TEST_SUITE: orioledb-row-locks
+      JEPSEN_NODE: orioledb
+      JEPSEN_POSTGRES_USER: "${POSTGRES_USER}"
+      JEPSEN_POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      JEPSEN_WORKLOAD: orioledb-row-locks
+      JEPSEN_CONCURRENCY: "${JEPSEN_CONCURRENCY:-12}"
+      JEPSEN_RATE: "${JEPSEN_RATE:-120}"
+      JEPSEN_TIME_LIMIT: "${JEPSEN_TIME_LIMIT:-300}"
+      JEPSEN_NEMESIS: none
+      ROW_LOCK_TABLE_AM: "${ROW_LOCK_TABLE_AM:-orioledb}"
+      RUNTIME_STATE_DIR: /runtime-state
+    volumes:
+      - row_lock_runtime_state:/runtime-state
+    depends_on:
+      row-lock-initializer:
+        condition: service_completed_successfully
+
+  health-checker:
+    environment:
+      SETUP_READY_FILE: /runtime-state/row-lock-setup.ready
+    volumes:
+      - row_lock_runtime_state:/runtime-state:ro
+    depends_on:
+      row-lock-initializer:
+        condition: service_completed_successfully

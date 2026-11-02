@@ -2,8 +2,20 @@
 set -eu
 
 if [ "${JEPSEN_MODE:-}" = initialize ]; then
+	case "${JEPSEN_INITIALIZER:-checkpoint-recovery}" in
+	checkpoint-recovery)
+		namespace=jepsen.orioledb.workload.checkpoint-recovery
+		;;
+	row-locks)
+		namespace=jepsen.orioledb.workload.row-locks
+		;;
+	*)
+		echo "unknown JEPSEN_INITIALIZER=${JEPSEN_INITIALIZER}" >&2
+		exit 2
+		;;
+	esac
 	exec java -ea -cp '/opt/jepsen/*' -Djava.awt.headless=true clojure.main \
-		-m jepsen.orioledb.workload.checkpoint-recovery initialize
+		-m "$namespace" initialize
 fi
 
 # Under Antithesis, sleep indefinitely: Antithesis runs the test template scripts.
