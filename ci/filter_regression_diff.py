@@ -5,10 +5,10 @@
 #   - all known ERROR messages
 #   - all NOTICE|WARNING|DETAIL|INFO|HINT messages
 #   - all tables differences that only differ in order
-#   - all plans that basically equal for postgres and orioledb 
+#   - all plans that basically equal for postgres and orioledb
 #     but have some different node name
 #   - known plan differences which are processed in compare_trees
-#   - also for now all differences for \d output are ignored, 
+#   - also for now all differences for \d output are ignored,
 #     more smart filter should be added later
 
 from unidiff import PatchSet
@@ -45,12 +45,11 @@ knownErrors = {
     ["*"],
     r"ERROR:  replica identity type INDEX is not supported for OrioleDB tables yet":
     ["*"],
-	r"Options: index_bridging=true":
-	["*"],
+    r"Options: index_bridging=true": ["*"],
 
-	# errors for tests with EXPLAIN usage
-	r"^[-]+$": ["*"],
-	r"\s+QUERY PLAN": ["*"],
+    # errors for tests with EXPLAIN usage
+    r"^[-]+$": ["*"],
+    r"\s+QUERY PLAN": ["*"],
 
     # alter_table specific errors
     r"ERROR:  unsupported alter table subcommand": ["alter_table"],
@@ -64,8 +63,9 @@ knownErrors = {
     r"ERROR:  check constraint \"atacc1_chk\" of relation \"atacc1\" is violated by some row":
     ["alter_table"],
     # some errors related to ALTER TABLE ... OF ...
-    r"ERROR:  table has column \"y\" where type requires \"x\"":
-    ["alter_table"],
+    r"ERROR:  table has column \"y\" where type requires \"x\"": [
+        "alter_table"
+    ],
     r"ERROR:  table has extra column \"z\"": ["alter_table"],
     r"ERROR:  could not change table \"logged1\" to unlogged because it references logged table \"logged2\"":
     ["alter_table"],
@@ -80,112 +80,117 @@ knownErrors = {
     r"ERROR:  cannot REINDEX CONCURRENTLY primary index \"[a-z0-9_]+\" on an orioledb table":
     ["create_index"],
 
-	# insert specific error
-	# error related to OrioleDB vs heap internal page size
-	r"ERROR:  index row size \d+ exceeds orioledb maximum 2688 for table \"large_tuple_test\"" : ["insert"],
+    # insert specific error
+    # error related to OrioleDB vs heap internal page size
+    r"ERROR:  index row size \d+ exceeds orioledb maximum 2688 for table \"large_tuple_test\"":
+    ["insert"],
 
-	# insert_conflict specific errors
-	# error does not appear, because serializable isolation level error aborts transaction that must emit it
-	r"ERROR:  ON CONFLICT DO UPDATE command cannot affect row a second time": ["insert_conflict"],
+    # insert_conflict specific errors
+    # error does not appear, because serializable isolation level error aborts transaction that must emit it
+    r"ERROR:  ON CONFLICT DO UPDATE command cannot affect row a second time": [
+        "insert_conflict"
+    ],
 
-	# psql specific errors
-	r"^\s*List of access methods": ["psql"],
-	r"Susie": ["psql"],	
+    # psql specific errors
+    r"^\s*List of access methods": ["psql"],
+    r"Susie": ["psql"],
 
-	# foreign_key specific errors
-	#
-	# Orioledb fails the upstream NO ACTION / RESTRICT regression block
-	# because its UPDATE re-checks PK uniqueness against the not-yet-deleted
-	# old version of every row in the statement, so `UPDATE pp SET f1=f1+1`
-	# raises "duplicate key value" the moment a target key matches an old
-	# row's key.  That short-circuits the FK enforcement path, so the
-	# upstream "violates RESTRICT setting" error never fires.  Until the
-	# UPDATE path is rewritten to use snapshot-style PK checks (tracked as
-	# a separate orioledb bug -- see test/sql/foreign_keys.sql), accept
-	# both the orioledb dup-key and the FK errors as filterable.
-	r"ERROR:  duplicate key value violates unique constraint" : ["foreign_key"],
-	r"ERROR:  (insert or update|update or delete) on table \"[a-z]+\" violates foreign key constraint": ["foreign_key"],
-	r"ERROR:  update or delete on table \"[a-z]+\" violates RESTRICT setting of foreign key constraint": ["foreign_key"],
+    # foreign_key specific errors
+    #
+    # Orioledb fails the upstream NO ACTION / RESTRICT regression block
+    # because its UPDATE re-checks PK uniqueness against the not-yet-deleted
+    # old version of every row in the statement, so `UPDATE pp SET f1=f1+1`
+    # raises "duplicate key value" the moment a target key matches an old
+    # row's key.  That short-circuits the FK enforcement path, so the
+    # upstream "violates RESTRICT setting" error never fires.  Until the
+    # UPDATE path is rewritten to use snapshot-style PK checks (tracked as
+    # a separate orioledb bug -- see test/sql/foreign_keys.sql), accept
+    # both the orioledb dup-key and the FK errors as filterable.
+    r"ERROR:  duplicate key value violates unique constraint": ["foreign_key"],
+    r"ERROR:  (insert or update|update or delete) on table \"[a-z]+\" violates foreign key constraint":
+    ["foreign_key"],
+    r"ERROR:  update or delete on table \"[a-z]+\" violates RESTRICT setting of foreign key constraint":
+    ["foreign_key"],
 
     # privileges specific errors
     r"ERROR:  function \"sro_ifun\" cannot be used here": ["privileges"],
-    r"ERROR:  (index|relation) \"(sro_idx|sro_cluster_idx|sro_pidx)\" does not exist": ["privileges"],
-    r"ERROR:  permission denied for (table|materialized view) (maintain_test|refresh_test)": ["privileges"],
+    r"ERROR:  (index|relation) \"(sro_idx|sro_cluster_idx|sro_pidx)\" does not exist":
+    ["privileges"],
+    r"ERROR:  permission denied for (table|materialized view) (maintain_test|refresh_test)":
+    ["privileges"],
 
-	# union specific error
-	r"ERROR:  function \"expensivefunc\" cannot be used here": ["union"],
+    # union specific error
+    r"ERROR:  function \"expensivefunc\" cannot be used here": ["union"],
 
-	# collate.icu.utf8 specific error.  o_find_collation_dependencies()
-	# stops at the first hit, so depending on pg_depend scan order the
-	# error names either the table or one of its indexes — match both.
-	r"ERROR:  cannot refresh collation \"en-x-icu\" because orioledb (table|index) \"[a-z0-9_]+\" uses it": ["collate.icu.utf8"],
+    # collate.icu.utf8 specific error.  o_find_collation_dependencies()
+    # stops at the first hit, so depending on pg_depend scan order the
+    # error names either the table or one of its indexes — match both.
+    r"ERROR:  cannot refresh collation \"en-x-icu\" because orioledb (table|index) \"[a-z0-9_]+\" uses it":
+    ["collate.icu.utf8"],
 
-	# generated_stored and generated_virtual run in the same parallel
-	# group and both CREATE/DROP regress_user11.  The role-collision
-	# cascade is dropped wholesale via skip_hunk_errors below; only the
-	# psql \dp privilege-listing diff remains as a line-level filter
-	# (it appears outside the cascade hunk).
-	r"privileges for (column \w+ of table|table) generated_stored_tests\.\w+": ["generated_virtual"],
+    # generated_stored and generated_virtual run in the same parallel
+    # group and both CREATE/DROP regress_user11.  The role-collision
+    # cascade is dropped wholesale via skip_hunk_errors below; only the
+    # psql \dp privilege-listing diff remains as a line-level filter
+    # (it appears outside the cascade hunk).
+    r"privileges for (column \w+ of table|table) generated_stored_tests\.\w+":
+    ["generated_virtual"],
 }
 
 # Regexps that allow us to completely skip comparasion of hunks containing these regexprs
 skip_hunk_errors = {
-	r"ERROR:  orioledb tuples do not have system attribute: xm(in|ax)":
-	["update"],
-	# A cursor declared without SCROLL can be fetched backward only when the
-	# plan can run backward, and o_scan cannot: it fixes the scan direction at
-	# plan time.  Pre-existing -- the same FETCH BACKWARD fails on a
-	# primary-key-ordered cursor too -- and the hint tells the user what to do,
-	# so drop the hunk together with the rows the failed fetches did not
-	# return.
-	r"ERROR:  cursor can only scan forward":
-	["limit"],
-	# These two tests print plans through a helper function, so the output
-	# arrives as table rows and the plan-tree comparison never sees it: an
-	# o_scan node in place of an index scan then reads as a changed row, and
-	# its different width shifts the whole column.  Drop those hunks by their
-	# header line until the filter can parse a plan printed this way.
-	r"\s+explain_parallel_append\s*$":
-	["partition_prune"],
-	r"\s+explain_memoize\s*$":
-	["memoize"],
-	r"\s+->  Custom Scan \(o_scan\)":
-	["partition_prune", "memoize"],
-	# WHERE CURRENT OF cursor relies on TID scan; orioledb has none, so the
-	# UPDATE/DELETE fail and the rest of the cursor block aborts.  Drop the
-	# whole hunk so the cascaded "transaction is aborted" lines disappear.
-	r"ERROR:  orioledb does not support TID scan":
-	["generated_virtual"],
-	# generated_stored and generated_virtual both CREATE/DROP the shared
-	# role regress_user11.  Depending on which test the parallel scheduler
-	# starts first the other can hit CREATE USER ("already exists"),
-	# SET ROLE / GRANT ("does not exist"), or DROP USER ("cannot be
-	# dropped because some objects depend on it" / "does not exist").
-	# Each of those errors cascades: SELECT/CALL statements gated by
-	# SET ROLE return real rows instead of "permission denied", which
-	# leaves a multi-line table-vs-error diff -- sometimes in the same
-	# hunk as the role error, sometimes in a separate hunk further down
-	# whose only marker is the missing "permission denied" line.  Drop
-	# both shapes.
-	r"ERROR:  role \"regress_user11\" (already exists|does not exist|cannot be dropped because some objects depend on it)":
-	["generated_stored", "generated_virtual"],
-	# Same race, constraint-level variant: both CREATE USER statements
-	# pass the existence check, then the second hits the unique index.
-	r"ERROR:  duplicate key value violates unique constraint \"pg_authid_rolname_index\"":
-	["generated_stored", "generated_virtual"],
-	# Same regress_user11 race, OID-based variant: when the other test's
-	# concurrent DROP USER removes the role's pg_authid tuple between this
-	# DROP USER's catalog lookup and its delete, the error names the role by
-	# OID ("could not find tuple for role <oid>") instead of by name.
-	r"ERROR:  could not find tuple for role \d+":
-	["generated_stored", "generated_virtual"],
-	r"ERROR:  permission denied for (table gtest\w+|function gf\w+)":
-	["generated_stored", "generated_virtual"],
-	# Upstream anomaly 9a3ddeb519e8 is not reproduced on Oriole as it
-	# doesn't do IOS for bridged indices.
-	r"ERROR:  lossy distance functions are not supported in index-only scans":
-	["gist"],
+    r"ERROR:  orioledb tuples do not have system attribute: xm(in|ax)":
+    ["update"],
+    # A cursor declared without SCROLL can be fetched backward only when the
+    # plan can run backward, and o_scan cannot: it fixes the scan direction at
+    # plan time.  Pre-existing -- the same FETCH BACKWARD fails on a
+    # primary-key-ordered cursor too -- and the hint tells the user what to do,
+    # so drop the hunk together with the rows the failed fetches did not
+    # return.
+    r"ERROR:  cursor can only scan forward": ["limit"],
+    # These two tests print plans through a helper function, so the output
+    # arrives as table rows and the plan-tree comparison never sees it: an
+    # o_scan node in place of an index scan then reads as a changed row, and
+    # its different width shifts the whole column.  Drop those hunks by their
+    # header line until the filter can parse a plan printed this way.
+    r"\s+explain_parallel_append\s*$": ["partition_prune"],
+    r"\s+explain_memoize\s*$": ["memoize"],
+    r"\s+->  Custom Scan \(o_scan\)": ["partition_prune", "memoize"],
+    # WHERE CURRENT OF cursor relies on TID scan; orioledb has none, so the
+    # UPDATE/DELETE fail and the rest of the cursor block aborts.  Drop the
+    # whole hunk so the cascaded "transaction is aborted" lines disappear.
+    r"ERROR:  orioledb does not support TID scan": ["generated_virtual"],
+    # generated_stored and generated_virtual both CREATE/DROP the shared
+    # role regress_user11.  Depending on which test the parallel scheduler
+    # starts first the other can hit CREATE USER ("already exists"),
+    # SET ROLE / GRANT ("does not exist"), or DROP USER ("cannot be
+    # dropped because some objects depend on it" / "does not exist").
+    # Each of those errors cascades: SELECT/CALL statements gated by
+    # SET ROLE return real rows instead of "permission denied", which
+    # leaves a multi-line table-vs-error diff -- sometimes in the same
+    # hunk as the role error, sometimes in a separate hunk further down
+    # whose only marker is the missing "permission denied" line.  Drop
+    # both shapes.
+    r"ERROR:  role \"regress_user11\" (already exists|does not exist|cannot be dropped because some objects depend on it)":
+    ["generated_stored", "generated_virtual"],
+    # Same race, constraint-level variant: both CREATE USER statements
+    # pass the existence check, then the second hits the unique index.
+    r"ERROR:  duplicate key value violates unique constraint \"pg_authid_rolname_index\"":
+    ["generated_stored", "generated_virtual"],
+    # Same regress_user11 race, OID-based variant: when the other test's
+    # concurrent DROP USER removes the role's pg_authid tuple between this
+    # DROP USER's catalog lookup and its delete, the error names the role by
+    # OID ("could not find tuple for role <oid>") instead of by name.
+    r"ERROR:  could not find tuple for role \d+":
+    ["generated_stored", "generated_virtual"],
+    r"ERROR:  permission denied for (table gtest\w+|function gf\w+)":
+    ["generated_stored", "generated_virtual"],
+    # Upstream anomaly 9a3ddeb519e8 is not reproduced on Oriole as it
+    # doesn't do IOS for bridged indices.
+    r"ERROR:  lossy distance functions are not supported in index-only scans":
+    ["gist"],
 }
+
 
 def hunk_is_only_row_count(hunk):
 	"""Does this hunk change nothing but the "(N rows)" line of a plan?
@@ -204,8 +209,9 @@ def hunk_is_only_row_count(hunk):
 	for line in hunk:
 		if line.line_type != ' ':
 			continue
-		if re.search(r'(->  |Seq Scan|Index Scan|Index Only Scan|Custom Scan'
-					 r'|Aggregate|Append|Nested Loop|Sort Key)', line.value):
+		if re.search(
+		    r'(->  |Seq Scan|Index Scan|Index Only Scan|Custom Scan'
+		    r'|Aggregate|Append|Nested Loop|Sort Key)', line.value):
 			return True
 	return False
 
@@ -303,64 +309,52 @@ known_table_diffs = {
           ['logged1 toast table', 't', 'p'], ['logged1_f1_seq', 'S', 'p'],
           ['logged1_pkey', 'i', 'p']]],
     ],
-	"insert_conflict" : [
-		[[['3', '1']], []],
-	],
-	"create_am" : [
-		[[], [['orioledb', 'orioledb_tableam_handler', 't']]]
-	],
-	"psql" : [
-		[[['spgist', 'Index']], [['orioledb', 'Table'], ['spgist', 'Index']]],
-		[[['spgist', 'Index', 'spghandler', 'SP-GiST index access method']],
-		 [['orioledb', 'Table', 'orioledb_tableam_handler', ''],
-		 ['spgist', 'Index', 'spghandler', 'SP-GiST index access method']]]
-	],
-	"explain" : [
-		[[['Bitmap Heap Scan on tenk1  (cost=N.N..N.N rows=N width=N)']],
-		 [['Bitmap heap scan'], ['Custom Scan (o_scan) on tenk1  (cost=N.N..N.N rows=N width=N)']]]
-	],
-	"strings" : [
-		[[['f']], [['t']]]
-	],
-	"misc_functions": [
-		[[['t', 't']], [['t', 'f']]]
-	],
-	"vacuum_parallel": [
-		[[['t']], [['f']]]
-	],
-	# brin_summarize_range called with BRIN_ALL_BLOCKRANGES (4294967295)
-	# returns the number of newly-summarized page ranges, which on heap is
-	# 0 (a 3-page table is already fully summarized) but on orioledb is
-	# bounded by the bridge file's block count -- a function of how many
-	# rows the test happened to insert and orioledb's bridge ctid layout.
-	# Match any non-negative integer to avoid pinning a data-specific value.
-	"brin_bloom" : [
-		[[['0']], [['<N>']]]
-	],
-	"brin_multi" : [
-		[[['0']], [['<N>']]]
-	],
-	"aggregates": [
-		[[['']],  [['<N>']]],
-	],
-	"reloptions": [
-		[[['t']], [['f']]]
-	]
+    "insert_conflict": [
+        [[['3', '1']], []],
+    ],
+    "create_am": [[[], [['orioledb', 'orioledb_tableam_handler', 't']]]],
+    "psql":
+    [[[['spgist', 'Index']], [['orioledb', 'Table'], ['spgist', 'Index']]],
+     [[['spgist', 'Index', 'spghandler', 'SP-GiST index access method']],
+      [['orioledb', 'Table', 'orioledb_tableam_handler', ''],
+       ['spgist', 'Index', 'spghandler', 'SP-GiST index access method']]]],
+    "explain":
+    [[[['Bitmap Heap Scan on tenk1  (cost=N.N..N.N rows=N width=N)']],
+      [['Bitmap heap scan'],
+       ['Custom Scan (o_scan) on tenk1  (cost=N.N..N.N rows=N width=N)']]]],
+    "strings": [[[['f']], [['t']]]],
+    "misc_functions": [[[['t', 't']], [['t', 'f']]]],
+    "vacuum_parallel": [[[['t']], [['f']]]],
+    # brin_summarize_range called with BRIN_ALL_BLOCKRANGES (4294967295)
+    # returns the number of newly-summarized page ranges, which on heap is
+    # 0 (a 3-page table is already fully summarized) but on orioledb is
+    # bounded by the bridge file's block count -- a function of how many
+    # rows the test happened to insert and orioledb's bridge ctid layout.
+    # Match any non-negative integer to avoid pinning a data-specific value.
+    "brin_bloom": [[[['0']], [['<N>']]]],
+    "brin_multi": [[[['0']], [['<N>']]]],
+    "aggregates": [
+        [[['']], [['<N>']]],
+    ],
+    "reloptions": [[[['t']], [['f']]]]
 }
 
 known_stmt_diff = {
-	"limit" : [
-		[['declare c1 cursor for select * from int8_tbl limit 10;'],
-		 ['declare c1 scroll cursor for select * from int8_tbl limit 10;']],
-		[['declare c2 cursor for select * from int8_tbl limit 3;'],
-		 ['declare c2 scroll cursor for select * from int8_tbl limit 3;']],
-		[['declare c3 cursor for select * from int8_tbl offset 3;'],
-		 ['declare c3 scroll cursor for select * from int8_tbl offset 3;']],
-		[['declare c4 cursor for select * from int8_tbl offset 10;'],
-		 ['declare c4 scroll cursor for select * from int8_tbl offset 10;']],
-		[['declare c5 cursor for select * from int8_tbl order by q1 fetch first 2 rows with ties;'],
-		 ['declare c5 scroll cursor for select * from int8_tbl order by q1 fetch first 2 rows with ties;']]
-	]
+    "limit":
+    [[['declare c1 cursor for select * from int8_tbl limit 10;'],
+      ['declare c1 scroll cursor for select * from int8_tbl limit 10;']],
+     [['declare c2 cursor for select * from int8_tbl limit 3;'],
+      ['declare c2 scroll cursor for select * from int8_tbl limit 3;']],
+     [['declare c3 cursor for select * from int8_tbl offset 3;'],
+      ['declare c3 scroll cursor for select * from int8_tbl offset 3;']],
+     [['declare c4 cursor for select * from int8_tbl offset 10;'],
+      ['declare c4 scroll cursor for select * from int8_tbl offset 10;']],
+     [[
+         'declare c5 cursor for select * from int8_tbl order by q1 fetch first 2 rows with ties;'
+     ],
+      [
+          'declare c5 scroll cursor for select * from int8_tbl order by q1 fetch first 2 rows with ties;'
+      ]]]
 }
 
 
@@ -403,15 +397,16 @@ def is_commutative_cond_eq(s1: str, s2: str) -> bool:
 	if not m1 or not m2:
 		return False
 	return (m1.group(1) == m2.group(1)
-			and m1.group(2).strip() == m2.group(3).strip()
-			and m1.group(3).strip() == m2.group(2).strip())
+	        and m1.group(2).strip() == m2.group(3).strip()
+	        and m1.group(3).strip() == m2.group(2).strip())
 
 
 def o_scan_index_name(props):
 	"""Name of the index an o_scan node reports scanning, or None."""
 	for prop in props:
-		match = re.match(r'(?:Forward|Backward) index(?: only)? scan of: (\S+)',
-						 prop.strip())
+		match = re.match(
+		    r'(?:Forward|Backward) index(?: only)? scan of: (\S+)',
+		    prop.strip())
 		if match:
 			return match.group(1)
 	return None
@@ -447,7 +442,8 @@ def strip_double_parens(text):
 						depth -= 1
 						if depth == 0:
 							if j + 1 < len(text) and text[j + 1] == ')':
-								text = text[:i] + text[i + 1:j + 1] + text[j + 2:]
+								text = text[:i] + text[i + 1:j + 1] + text[j +
+								                                           2:]
 								removed = True
 							break
 				if removed:
@@ -458,6 +454,7 @@ def strip_double_parens(text):
 
 
 def compare_trees(src_tree: list, target_tree: list, test_name: str):
+
 	def goto_down_level(stack: list, cur_elem: list) -> bool:
 		if len(cur_elem[3]) > 0:
 			stack.insert(0, [cur_elem[3], 0])
@@ -473,7 +470,8 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 		src_cond = src_cond.replace("Index Cond", "Conds")
 		if src_cond == target_cond:
 			return True
-		return strip_double_parens(src_cond) == strip_double_parens(target_cond)
+		return strip_double_parens(src_cond) == strip_double_parens(
+		    target_cond)
 
 	equal = True
 	src_stack = [[src_tree, 0]]
@@ -508,47 +506,49 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			# so descend instead of pretending Output is the node value.
 			#
 			# TODO: May be better to rewrite tree builder?
-			if (len(target_cur[2]) and not target_cur[2][0].startswith("Output:")):
+			if (len(target_cur[2])
+			    and not target_cur[2][0].startswith("Output:")):
 				target_stack[0][0][target_stack[0][1]][1] = target_cur[2][0]
 			else:
 				target_down = True
 		elif src_cur_value.startswith("Result"):
 			src_down = True
 		elif (test_name == 'select'
-			  and src_cur_value == 'Bitmap Heap Scan on onek2'
-			  and target_cur[1] == 'Index Scan using onek2_u2_prtl on onek2'):
-				src_up = True
-				target_up = True
+		      and src_cur_value == 'Bitmap Heap Scan on onek2'
+		      and target_cur[1] == 'Index Scan using onek2_u2_prtl on onek2'):
+			src_up = True
+			target_up = True
 		elif (test_name == 'updatable_views'
-			  and src_cur_value.startswith('Bitmap Heap Scan')
-			  and target_cur[1].startswith('Custom Scan')
-			  and target_cur[2]
-			  and target_cur[2][0].startswith('Forward index scan')):
+		      and src_cur_value.startswith('Bitmap Heap Scan')
+		      and target_cur[1].startswith('Custom Scan') and target_cur[2]
+		      and target_cur[2][0].startswith('Forward index scan')):
 			src_up = True
 			target_up = True
 		elif (test_name == 'fast_default'
-				  and src_cur_value == 'Bitmap Heap Scan on fast_default.t'
-				  and target_cur[1] == 'Custom Scan (o_scan) on fast_default.t'):
-				src_up = True
-				target_up = True
+		      and src_cur_value == 'Bitmap Heap Scan on fast_default.t'
+		      and target_cur[1] == 'Custom Scan (o_scan) on fast_default.t'):
+			src_up = True
+			target_up = True
 		elif src_cur_value.startswith('Bitmap Heap Scan'):
 			# normalize_src_value() has already stripped a leading "Parallel "
 			# from the source, so a parallel bitmap heap scan on the heap side
 			# matches orioledb's "Parallel Custom Scan (o_scan)" too.
 			if (target_cur[1].startswith('Custom Scan')
-					or target_cur[1].startswith('Parallel Custom Scan')):
+			    or target_cur[1].startswith('Parallel Custom Scan')):
 				# EXPLAIN VERBOSE inserts "Output: ..." (and an optional
 				# "Filter: ..." in subplans that reference scan-level filters)
 				# ahead of the marker we look for, pushing it down the
 				# property list.  Skip past those leading properties.
 				target_props = target_cur[2]
 				while target_props and (target_props[0].startswith("Output:")
-				                        or target_props[0].startswith("Filter:")):
+				                        or
+				                        target_props[0].startswith("Filter:")):
 					target_props = target_props[1:]
 				if target_props and target_props[0] == 'Bitmap heap scan':
 					src_down = True
 					target_down = True
-				elif target_props and target_props[0].startswith('Forward index'):
+				elif target_props and target_props[0].startswith(
+				    'Forward index'):
 					# heap built a Bitmap Heap Scan with a child Bitmap Index
 					# Scan; orioledb collapsed both into a single Custom Scan
 					# whose first property is "Forward index (only) scan of".
@@ -559,7 +559,7 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				else:
 					equal = False
 			elif (target_cur[1].startswith('Index Only Scan')
-				  or target_cur[1].startswith('Index Scan')):
+			      or target_cur[1].startswith('Index Scan')):
 				src_up = True
 				target_up = True
 			else:
@@ -567,66 +567,65 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 		elif is_commutative_cond_eq(src_cur_value, target_cur[1]):
 			src_down = True
 			target_down = True
-		elif (test_name == 'aggregates'
-			  and src_cur_value == 'HashAggregate'
-			  and target_cur[1] == 'Group'):
+		elif (test_name == 'aggregates' and src_cur_value == 'HashAggregate'
+		      and target_cur[1] == 'Group'):
 			# allvisfrac=1 makes IOS cheap enough that the planner picks
 			# an index-only scan path, enabling Group instead of HashAggregate
 			src_down = True
 			target_down = True
-		elif (src_cur_value == 'Unique'
-			  and target_cur[1] == 'HashAggregate'):
+		elif (src_cur_value == 'Unique' and target_cur[1] == 'HashAggregate'):
 			# As source output uses Unique, it may need to sort values after scan,
 			# but target output use HashAggregate directly on scanned value, so
 			# need to skip "Sort" level for source
-			if (len(src_cur[3]) > 0
-				   and src_cur[3][0][1] == 'Sort'):
+			if (len(src_cur[3]) > 0 and src_cur[3][0][1] == 'Sort'):
 				if goto_down_level(src_stack, src_cur) == False:
-					raise RuntimeError("Failed to skip 'Sort' level in source query plan")
+					raise RuntimeError(
+					    "Failed to skip 'Sort' level in source query plan")
 				src_cur = src_stack[0][0][src_stack[0][1]]
 
 			src_down = True
 			target_down = True
-		elif (src_cur_value == 'HashAggregate'
-			  and target_cur[1] == 'Group'):
+		elif (src_cur_value == 'HashAggregate' and target_cur[1] == 'Group'):
 			src_up = True
 			target_up = True
-		elif (src_cur_value == 'Merge Append'
-			  and target_cur[1] == 'Append'):
+		elif (src_cur_value == 'Merge Append' and target_cur[1] == 'Append'):
 			src_down = True
 			target_down = True
 		elif src_cur_value == target_cur[1]:
 			src_down = True
 			target_down = True
-		elif (re.match(r'(Index( Only)? Scan|Bitmap Index Scan) using ', src_cur_value)
-			  and re.sub(r' using \S+', '', src_cur_value)
-			      == re.sub(r' using \S+', '', target_cur[1])):
+		elif (re.match(r'(Index( Only)? Scan|Bitmap Index Scan) using ',
+		               src_cur_value)
+		      and re.sub(r' using \S+', '', src_cur_value) == re.sub(
+		          r' using \S+', '', target_cur[1])):
 			src_up = True
 			target_up = True
 		elif (src_cur_value.startswith('Index Only Scan')
-			  and target_cur[1].startswith('Index Scan')):
+		      and target_cur[1].startswith('Index Scan')):
 			src_up = True
 			target_up = True
 		elif src_cur_value.startswith('Index Searches: '):
 			# A counter the index AM keeps and OrioleDB does not report.
 			src_up = True
-		elif re.match(r'(Forward|Backward) index( only)? scan of: ', target_cur[1]):
+		elif re.match(r'(Forward|Backward) index( only)? scan of: ',
+		              target_cur[1]):
 			# o_scan reports the index it scans on a line of its own, where the
 			# index AM puts the index into the node name.  There is nothing on
 			# the heap side to compare it with, so step over it alone.
 			target_up = True
 		elif (src_cur_value.startswith('Index Cond: ')
-			  and target_cur[1].startswith('Conds: ')
-			  and is_conds_eq(src_cur_value, target_cur[1])):
+		      and target_cur[1].startswith('Conds: ')
+		      and is_conds_eq(src_cur_value, target_cur[1])):
 			# The same qual, spelled the way each side spells it.
 			src_up = True
 			target_up = True
-		elif (re.match(r'Index( Only)? Scan( Backward)? using \S+ on ', src_cur_value)
-			  and target_cur[1].startswith('Custom Scan (o_scan) on ')
-			  and (o_scan_index_name(target_cur[2]) is not None
-				   or not target_cur[2])
-			  and re.sub(r'^.* on ', '', src_cur_value)
-				  == re.sub(r'^.* on ', '', target_cur[1])):
+		elif (
+		    re.match(r'Index( Only)? Scan( Backward)? using \S+ on ',
+		             src_cur_value)
+		    and target_cur[1].startswith('Custom Scan (o_scan) on ') and
+		    (o_scan_index_name(target_cur[2]) is not None or not target_cur[2])
+		    and re.sub(r'^.* on ', '', src_cur_value) == re.sub(
+		        r'^.* on ', '', target_cur[1])):
 			# An ordered scan of the same relation: heap names the index in
 			# the node line, OrioleDB runs it inside o_scan, which names it in
 			# a "scan of" property and carries the quals in "Conds".  The
@@ -646,7 +645,8 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				src_up = True
 				target_up = True
 		elif (re.match(r'(Hash|Merge|Nested Loop)( \w+)? Join', src_cur_value)
-			  and re.match(r'(Hash|Merge|Nested Loop)( \w+)? Join', target_cur[1])):
+		      and re.match(r'(Hash|Merge|Nested Loop)( \w+)? Join',
+		                   target_cur[1])):
 			src_up = True
 			target_up = True
 		else:
@@ -656,30 +656,28 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			# checks before
 
 			if (src_cur_value.startswith('Index Only Scan')
-				and target_cur[1].startswith('Custom Scan')
-				and target_cur[2]
-				and (target_cur[2][0] == 'Bitmap heap scan'
-					or (target_cur[2][0].startswith('Filter')
-						and len(target_cur[2]) > 1
-						and target_cur[2][1] == 'Bitmap heap scan')
-					or (target_cur[2][0].startswith("Forward index only scan"))
-					or (target_cur[2][0].startswith("Backward index only scan")))):
+			    and target_cur[1].startswith('Custom Scan') and target_cur[2]
+			    and
+			    (target_cur[2][0] == 'Bitmap heap scan' or
+			     (target_cur[2][0].startswith('Filter') and len(target_cur[2])
+			      > 1 and target_cur[2][1] == 'Bitmap heap scan') or
+			     (target_cur[2][0].startswith("Forward index only scan")) or
+			     (target_cur[2][0].startswith("Backward index only scan")))):
 				# sometimes we have bitmap heap scan instead index scan
 				src_up = True
 				target_up = True
 			elif (src_cur_value.startswith('Index Scan')
-				  and target_cur[1].startswith('Custom Scan')
-				  and target_cur[2]
-				  and (target_cur[2][0].startswith("Forward index scan")
-					   or target_cur[2][0].startswith("Backward index scan"))):
+			      and target_cur[1].startswith('Custom Scan') and target_cur[2]
+			      and (target_cur[2][0].startswith("Forward index scan")
+			           or target_cur[2][0].startswith("Backward index scan"))):
 				# an ordered secondary index scan is served by o_scan, which
 				# names the index and its direction in its first property
 				src_up = True
 				target_up = True
 			elif (src_cur_value.startswith('Index Only Scan')
-				and target_cur[1].startswith('Parallel Custom Scan')
-				and len(target_cur[2]) > 0
-				and target_cur[2][0].startswith('Forward index only scan')):
+			      and target_cur[1].startswith('Parallel Custom Scan')
+			      and len(target_cur[2]) > 0
+			      and target_cur[2][0].startswith('Forward index only scan')):
 				# Parallel Custom Scan replaces Parallel Index Only Scan
 				src_up = True
 				target_up = True
@@ -688,10 +686,10 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				src_up = True
 				target_up = True
 			elif (src_cur_value.startswith('Seq Scan on ')
-				  and target_cur[1].startswith('Custom Scan (o_scan) on ')
-				  and o_scan_index_name(target_cur[2]) is not None
-				  and re.sub(r'^Seq Scan on ', '', src_cur_value)
-					  == re.sub(r'^Custom Scan \(o_scan\) on ', '', target_cur[1])):
+			      and target_cur[1].startswith('Custom Scan (o_scan) on ')
+			      and o_scan_index_name(target_cur[2]) is not None
+			      and re.sub(r'^Seq Scan on ', '', src_cur_value) == re.sub(
+			          r'^Custom Scan \(o_scan\) on ', '', target_cur[1])):
 				# The mirror of the case above: the same relation, scanned
 				# sequentially by heap and through an index by OrioleDB.
 				src_up = True
@@ -706,47 +704,51 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				# instead of index scan
 				target_down = True
 			# different processing of or clauses for our tables
-			elif (test_name == 'create_index'
-				  and (src_cur_value == 'BitmapAnd'
-					   and target_cur[1] == 'Bitmap Index Scan on tenk1_hundred')):
+			elif (test_name == 'create_index' and
+			      (src_cur_value == 'BitmapAnd'
+			       and target_cur[1] == 'Bitmap Index Scan on tenk1_hundred')):
 				src_up = True
 				target_up = True
 			elif (src_cur_value.startswith('Index Scan')
-		 		 and target_cur[1].startswith('Custom Scan')
-				 and target_cur[2]
-				 and (target_cur[2][0].startswith('Forward index scan')
-					  or target_cur[2][0].startswith('Backward index scan'))):
-				if (len(src_cur[2]) == 0 and len(target_cur[2]) == 1) or  is_conds_eq(src_cur[2][0], target_cur[2][1]):
+			      and target_cur[1].startswith('Custom Scan') and target_cur[2]
+			      and (target_cur[2][0].startswith('Forward index scan')
+			           or target_cur[2][0].startswith('Backward index scan'))):
+				if (len(src_cur[2]) == 0
+				    and len(target_cur[2]) == 1) or is_conds_eq(
+				        src_cur[2][0], target_cur[2][1]):
 					src_down = True
 					target_down = True
 				else:
 					equal = False
 			elif (src_cur_value.startswith('Index Scan')
-				 and target_cur[1].startswith('Parallel Custom Scan')
-				 and len(target_cur[2]) > 0
-				 and target_cur[2][0].startswith('Forward index scan')):
+			      and target_cur[1].startswith('Parallel Custom Scan')
+			      and len(target_cur[2]) > 0
+			      and target_cur[2][0].startswith('Forward index scan')):
 				# Parallel Custom Scan replaces Parallel Index Scan
-				if (len(src_cur[2]) == 0 and len(target_cur[2]) == 1) or is_conds_eq(src_cur[2][0], target_cur[2][1]):
+				if (len(src_cur[2]) == 0
+				    and len(target_cur[2]) == 1) or is_conds_eq(
+				        src_cur[2][0], target_cur[2][1]):
 					src_down = True
 					target_down = True
 				else:
 					equal = False
 			elif (src_cur_value.startswith('Index Scan')
-				 and target_cur[1].startswith('Index Only Scan')):
+			      and target_cur[1].startswith('Index Only Scan')):
 				# allvisfrac=1 makes index-only scan cheaper
 				src_up = True
 				target_up = True
 			elif (src_cur_value.startswith('Index Only Scan')
-				 and target_cur[1].startswith('Index Only Scan')):
+			      and target_cur[1].startswith('Index Only Scan')):
 				# allvisfrac=1 may cause different index choice
 				src_up = True
 				target_up = True
 			elif (src_cur_value.startswith('Seq Scan')
-				 and target_cur[1].startswith('Index Only Scan')):
+			      and target_cur[1].startswith('Index Only Scan')):
 				# allvisfrac=1 may make IOS cheaper than seq scan
 				src_up = True
 				target_up = True
-			elif re.sub(r"_\d+$", "", src_cur_value) == re.sub(r"_\d+$", "", target_cur[1]):
+			elif re.sub(r"_\d+$", "",
+			            src_cur_value) == re.sub(r"_\d+$", "", target_cur[1]):
 				# lines differ only by auto-generated alias suffix (e.g. tinner_2 vs tinner_1)
 				src_down = True
 				target_down = True
@@ -757,22 +759,25 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				src_down = True
 				target_down = True
 			elif (src_cur_value.startswith('Index Scan')
-				  and target_cur[1].startswith('Index Only Scan')):
+			      and target_cur[1].startswith('Index Only Scan')):
 				src_up = True
 				target_up = True
-			elif (test_name in ['partition_prune', 'inherit', 'updatable_views']
-				  and (src_cur_value.startswith('Index Only Scan')
-					and target_cur[1].startswith('Custom Scan')
-					and target_cur[2]
-					and (target_cur[2][0].startswith('Forward index only scan')
-						 or target_cur[2][0].startswith('Backward index only scan')))):
+			elif (
+			    test_name in ['partition_prune', 'inherit', 'updatable_views']
+			    and
+			    (src_cur_value.startswith('Index Only Scan') and
+			     target_cur[1].startswith('Custom Scan') and target_cur[2] and
+			     (target_cur[2][0].startswith('Forward index only scan') or
+			      target_cur[2][0].startswith('Backward index only scan')))):
 				if is_conds_eq(src_cur[2][0], target_cur[2][1]):
 					src_down = True
 					target_down = True
 				else:
 					equal = False
-			elif (test_name == 'partition_prune'
-				  and re.sub(r"actual rows=[\d.]+ loops=\d+\)$", "", src_cur_value) == re.sub(r"actual rows=[\d.]+ loops=\d+\)$", "", target_cur[1])):
+			elif (test_name == 'partition_prune' and re.sub(
+			    r"actual rows=[\d.]+ loops=\d+\)$",
+			    "", src_cur_value) == re.sub(
+			        r"actual rows=[\d.]+ loops=\d+\)$", "", target_cur[1])):
 				# PG18 EXPLAIN ANALYZE prints fractional rows as "actual rows=N.NN".
 				# Heap reports the raw index hit count on Bitmap Index Scan; orioledb
 				# reports the visibility-checked count.  Equal up to that numeric
@@ -780,12 +785,13 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				src_down = True
 				target_down = True
 			elif (src_cur_value.startswith('Finalize Aggregate')
-				  and target_cur[1].startswith('Aggregate')):
+			      and target_cur[1].startswith('Aggregate')):
 				# Need to skip report about parallel heap execution, because OrioleDB
 				# currently does not support parallel scans except sequential
 				for _ in range(2):
 					if goto_down_level(src_stack, src_cur) == False:
-						raise RuntimeError("Aggregate explain structure is invalid")
+						raise RuntimeError(
+						    "Aggregate explain structure is invalid")
 					src_cur = src_stack[0][0][src_stack[0][1]]
 				src_down = True
 				target_down = True
@@ -797,14 +803,14 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				# the PG18 "Disabled: true" property on bypassed paths.
 				src_up = True
 				target_up = True
-			elif (test_name == 'with'
-				  and src_cur_value == 'Merge Semi Join'
-				  and target_cur[1] == 'Hash Semi Join'):
+			elif (test_name == 'with' and src_cur_value == 'Merge Semi Join'
+			      and target_cur[1] == 'Hash Semi Join'):
 				src_up = True
 				target_up = True
-			elif (test_name in ('generated', 'generated_stored', 'generated_virtual')
-				  and src_cur_value.startswith('Index Scan')
-				  and target_cur[1].startswith('Index Scan')):
+			elif (test_name
+			      in ('generated', 'generated_stored', 'generated_virtual')
+			      and src_cur_value.startswith('Index Scan')
+			      and target_cur[1].startswith('Index Scan')):
 				# PG18 split generated into generated_stored / generated_virtual.
 				# Both inherit the gtest22c plan divergence: heap picks
 				# gtest22c_b_idx, orioledb picks the partial gtest22c_pred_idx
@@ -812,32 +818,31 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				src_up = True
 				target_up = True
 			elif (test_name == 'updatable_views'
-				  and ((re.match(r"Hash (Right )*Join", src_cur_value)
-						and target_cur[1].startswith("Nested Loop"))
-					or (src_cur_value == 'Hash Left Join'
-						and target_cur[1] == 'Merge Left Join'))):
+			      and ((re.match(r"Hash (Right )*Join", src_cur_value)
+			            and target_cur[1].startswith("Nested Loop")) or
+			           (src_cur_value == 'Hash Left Join'
+			            and target_cur[1] == 'Merge Left Join'))):
 				src_up = True
 				target_up = True
 			elif (test_name == 'aggregates'
-				  and src_cur[1].startswith("Parallel Index Only")
-				  and target_cur[1].startswith("Parallel Seq Scan")):
+			      and src_cur[1].startswith("Parallel Index Only")
+			      and target_cur[1].startswith("Parallel Seq Scan")):
 				src_down = True
 				target_down = True
 			elif (test_name == 'incremental_sort'
-				  and ((src_cur_value.startswith('Gather')
-							or (len(src_cur[3]) > 0
-								and src_cur[3][0][1].startswith('Gather')))
-					    or (src_cur_value == 'Finalize Aggregate'
-							and target_cur[1] == 'Aggregate'))):
+			      and ((src_cur_value.startswith('Gather') or
+			            (len(src_cur[3]) > 0
+			             and src_cur[3][0][1].startswith('Gather'))) or
+			           (src_cur_value == 'Finalize Aggregate'
+			            and target_cur[1] == 'Aggregate'))):
 				src_up = True
 				target_up = True
-			elif (test_name == 'union'
-				  and src_cur_value == 'Nested Loop'
-				  and target_cur[1] == 'Merge Join'):
+			elif (test_name == 'union' and src_cur_value == 'Nested Loop'
+			      and target_cur[1] == 'Merge Join'):
 				src_up = True
 				target_up = True
 			elif (test_name == 'join_hash'
-				  and src_cur_value == 'Seq Scan on tenk1 t1'):
+			      and src_cur_value == 'Seq Scan on tenk1 t1'):
 				src_up = True
 				target_up = True
 			else:
@@ -876,6 +881,7 @@ def find_table_lines(line_no, lines):
 	# Use r".*;$" as a separator in case of non-table output (e.g. COPY TO STDOUT)
 	def is_table_start(line: str) -> bool:
 		return re.match(r"^[-+]+$", line) or re.match(r".*;$", line)
+
 	def is_table_end(line: str) -> bool:
 		return re.match(r"\(\d+ rows?\)", line) or re.match(r".*;$", line)
 
@@ -1038,8 +1044,9 @@ for patched_file in patched_files:
 		cur_hunk_first_line = list(hunks[hunk_num])[0]
 		prev_hunk_last_line = list(hunks[hunk_num - 1])[-1]
 
-		if (cur_hunk_first_line.source_line_no == prev_hunk_last_line.source_line_no + 1
-		   and not re.match(r".*;$", cur_hunk_first_line.value)):
+		if (cur_hunk_first_line.source_line_no
+		    == prev_hunk_last_line.source_line_no + 1
+		    and not re.match(r".*;$", cur_hunk_first_line.value)):
 			hunks[hunk_num - 1] += hunks[hunk_num]
 			hunks.pop(hunk_num)
 		else:
@@ -1142,8 +1149,10 @@ for patched_file in patched_files:
 						finish_table = True
 					elif src_desc_end != 0 and line.source_line_no > src_desc_end:
 						finish_desc = True
-					elif (line.source_line_no == hunk.source_start + hunk.source_length - 1
-					  and line.target_line_no == hunk.target_start + hunk.target_length - 1):
+					elif (line.source_line_no
+					      == hunk.source_start + hunk.source_length - 1
+					      and line.target_line_no
+					      == hunk.target_start + hunk.target_length - 1):
 						if len(src_stmts) > 0 and len(target_stmts) > 0:
 							finish_stmts = True
 				if src_table_end != 0 and target_table_end != 0:
@@ -1154,7 +1163,6 @@ for patched_file in patched_files:
 					elif (line_num == len(lines) - 1
 					      and hunk_num == len(hunks) - 1):
 						finish_table = True
-
 
 				if finish_stmts:
 					# print("FINISH STMTS?")
@@ -1171,8 +1179,7 @@ for patched_file in patched_files:
 						for test_stmts_diff in test_stmts_diffs:
 							# import ipdb; ipdb.set_trace()
 							if (test_stmts_diff[0] == src_stmts
-								and test_stmts_diff[1]
-								== target_stmts):
+							    and test_stmts_diff[1] == target_stmts):
 								stmts_remove = True
 
 					if stmts_remove:
@@ -1181,14 +1188,17 @@ for patched_file in patched_files:
 							for stmts_line in stmts_lines:
 								line_type = type_of_line(stmts_line.value)
 								if line_type == LineType.stmt:
-									if (stmts_line.is_removed
-										and stmts_line.value.strip() in src_stmts):
+									if (stmts_line.is_removed and
+									    stmts_line.value.strip() in src_stmts):
 										stmts_hunk.remove(stmts_line)
-										src_stmts.remove(stmts_line.value.strip())
+										src_stmts.remove(
+										    stmts_line.value.strip())
 									elif (stmts_line.is_added
-										  and stmts_line.value.strip() in target_stmts):
+									      and stmts_line.value.strip()
+									      in target_stmts):
 										stmts_hunk.remove(stmts_line)
-										target_stmts.remove(stmts_line.value.strip())
+										target_stmts.remove(
+										    stmts_line.value.strip())
 
 							if stmts_hunk.added == 0 and stmts_hunk.removed == 0 and stmts_hunk in patched_file:
 								patched_file.remove(stmts_hunk)
@@ -1208,7 +1218,8 @@ for patched_file in patched_files:
 					# partition_prune wraps EXPLAIN ANALYZE in a SQL helper that
 					# relabels the column "explain_analyze" instead of "QUERY PLAN";
 					# the body is still a plan tree, so compare it the same way.
-					if table_columns[0].strip() in ('QUERY PLAN', 'explain_analyze'):
+					if table_columns[0].strip() in ('QUERY PLAN',
+					                                'explain_analyze'):
 						# In `returning` the diff loses context: the plan only
 						# tests RETURNING-flavoured EXPLAIN; the actual returned
 						# rows are checked against expected output via the
@@ -1221,9 +1232,11 @@ for patched_file in patched_files:
 							table_remove = True
 						else:
 							src_tree = query_plan_to_tree(src_table_lines)
-							target_tree = query_plan_to_tree(target_table_lines)
+							target_tree = query_plan_to_tree(
+							    target_table_lines)
 							# compare plan trees
-							equal = compare_trees(src_tree, target_tree, testName)
+							equal = compare_trees(src_tree, target_tree,
+							                      testName)
 							# sys.exit(0)
 							if equal:
 								table_remove = True
@@ -1235,7 +1248,8 @@ for patched_file in patched_files:
 						# though the row contents agree.  Strip "(N,N)" cells to
 						# the normalized form "(0,X)" before comparing.
 						def _normalize_ctid(cell):
-							return re.sub(r"^\(\d+,\d+\)$", "(0,X)", cell.strip())
+							return re.sub(r"^\(\d+,\d+\)$", "(0,X)",
+							              cell.strip())
 
 						src_table_lines = sorted(
 						    [_normalize_ctid(cell) for cell in line]
@@ -1254,7 +1268,8 @@ for patched_file in patched_files:
 						else:
 							while (len(src_table_lines) > 0
 							       and len(target_table_lines) > 0
-							       and src_table_lines[0] == target_table_lines[0]):
+							       and src_table_lines[0]
+							       == target_table_lines[0]):
 								src_table_lines.pop(0)
 								target_table_lines.pop(0)
 
@@ -1265,10 +1280,11 @@ for patched_file in patched_files:
 							if testName in known_table_diffs:
 								test_table_diffs = known_table_diffs[testName]
 								for test_table_diff in test_table_diffs:
-									if _table_diff_matches(test_table_diff[0],
-														   src_table_lines) \
-										and _table_diff_matches(test_table_diff[1],
-																target_table_lines):
+									if (_table_diff_matches(
+									    test_table_diff[0], src_table_lines)
+									    and _table_diff_matches(
+									        test_table_diff[1],
+									        target_table_lines)):
 										table_remove = True
 										break
 

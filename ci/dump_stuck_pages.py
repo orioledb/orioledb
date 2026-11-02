@@ -84,8 +84,7 @@ def dump_page(blkno, seen):
 	hdr = safe_eval(f"*(BTreePageHeader *) {addr}")
 	print(f"    BTreePageHeader = {hdr}")
 
-	state_expr = (
-	    f"((BTreePageHeader *) {addr})->o_header.state.value")
+	state_expr = (f"((BTreePageHeader *) {addr})->o_header.state.value")
 	state = safe_eval(state_expr)
 	if isinstance(state, str):
 		print(f"    state read failed: {state}")
