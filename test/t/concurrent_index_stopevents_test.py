@@ -10,7 +10,7 @@ from .base_test import BaseTest, ThreadQueryExecutor, wait_stopevent
 class ConcurrentIndexStopEventsTest(BaseTest):
 	"""
 	Deterministic CIC concurrency tests driven by stop events placed at
-	two safe phase boundaries:
+	three phase boundaries:
 
 	  - cic_after_ambuild: fires from orioledb_ambuild right after the
 	    OIndex has been installed in BUILDING_PHASE_2.  PG holds
@@ -18,6 +18,9 @@ class ConcurrentIndexStopEventsTest(BaseTest):
 	    waiting on the lock), so the gate lets tests inspect the
 	    just-installed BUILDING state and stage a writer that will be
 	    released as soon as we resume.
+	  - cic_before_build: pauses validation after PG has committed
+	    indisready, while the tree still has a shared-root placeholder.
+	    UPDATE capture can run without racing the bulk build.
 	  - cic_before_flip: fires from o_define_index_concurrent_finish
 	    after drain + covering pass + unique walk, just before the
 	    OIndex.state flip to VALID.  AccessExclusive is held; DML is
@@ -30,13 +33,13 @@ class ConcurrentIndexStopEventsTest(BaseTest):
 
 	Note: a stop event placed between PG's phase-2 commit and the
 	concurrent-finish AccessExclusive (i.e. inside the BUILDING window
-	where writers route to the spool) currently exposes an unrelated
+	where writers route to the spool) previously exposed an unrelated
 	hang in `o_tuple_compute_data_size` for DELETEs on the BUILDING
-	secondary — that path uses `nonLeafTupdesc` whose initialization
-	for a BUILDING-state OIndex is racy.  Until that's fixed
-	separately, the DELETE/UPDATE-during-BUILDING scenarios are tested
-	by natural timing in `concurrent_index_test.py` rather than by a
-	deterministic stop event here.
+	secondary. This was attributed to racy initialization of
+	`nonLeafTupdesc` for a BUILDING-state OIndex; that diagnosis and
+	the DELETE hang have not been rechecked here. DELETE-during-BUILDING
+	scenarios remain tested by natural timing in `concurrent_index_test.py`
+	rather than by a deterministic stop event here.
 	"""
 
 	def setUp(self):
@@ -89,6 +92,38 @@ class ConcurrentIndexStopEventsTest(BaseTest):
 		return self.node.execute("SELECT count(*) FROM t;")[0][0]
 
 	# -------------------------- tests --------------------------
+
+	def test_update_during_concurrent_reindex(self):
+		node = self.node
+		node.safe_psql("CREATE INDEX t_val_idx ON t (val)")
+		ctrl = node.connect(autocommit=True)
+		self._arm(ctrl, 'cic_before_build')
+		conn, thread, pid = self._start_cic(
+		    'REINDEX INDEX CONCURRENTLY t_val_idx')
+		try:
+			wait_stopevent(node, pid)
+			ctrl.execute("UPDATE t SET val = 'updated' || id WHERE id <= 3")
+		finally:
+			self._release(ctrl, 'cic_before_build')
+			thread.join()
+			conn.close()
+			ctrl.close()
+
+		with node.connect() as con:
+			con.execute(
+			    'SET enable_seqscan = off; SET enable_bitmapscan = off')
+			query = (
+			    "SELECT id, val FROM t "
+			    "WHERE val IN ('updated1', 'updated2', 'updated3') ORDER BY id"
+			)
+			self.assertIn('t_val_idx', str(con.execute('EXPLAIN ' + query)))
+			self.assertEqual(con.execute(query), [(1, 'updated1'),
+			                                      (2, 'updated2'),
+			                                      (3, 'updated3')])
+		self.assertEqual(self._index_count("val IN ('v1', 'v2', 'v3')"), 0)
+		self.assertEqual(
+		    node.execute("SELECT orioledb_tbl_check('t'::regclass)"),
+		    [(True, )])
 
 	def test_oindex_in_building_state_at_after_ambuild(self):
 		"""
