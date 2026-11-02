@@ -1575,6 +1575,13 @@ _PG_init(void)
 	ReindexConcurrentlySkipHook = orioledb_reindex_concurrently_skip;
 	RecoveryStopsBeforeHook = orioledb_recovery_stops_before_hook;
 
+	/*
+	 * When PostgreSQL reaches a recovery target, Oriole must align its own
+	 * replay and finalization state with PG's stop position before
+	 * pause/promote/shutdown becomes externally visible.
+	 */
+	RecoveryTargetReachedHook = orioledb_recovery_target_reached_hook;
+
 	if (enable_rewind)
 		VacuumHorizonHook = orioledb_vacuum_horizon_hook;
 	orioledb_setup_ddl_hooks();
