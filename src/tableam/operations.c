@@ -2348,6 +2348,56 @@ o_update_secondary_index(OIndexDescr *id,
 	if (is_keys_eq(id, &old_key, &new_key) && (old_valid == new_valid))
 		return res;
 
+	/*
+	 * PostgreSQL makes the concurrent index ready for writes before our
+	 * validation pass builds its tree.  UPDATE must capture both halves of
+	 * the key change, just as the INSERT and DELETE paths do, rather than
+	 * reaching into a tree that still has a shared-root placeholder.
+	 */
+	if (id->state != OINDEX_STATE_VALID)
+	{
+		OIndex	   *fresh = o_indices_get(id->oids, id->desc.type);
+		OIndexState fresh_state = fresh ? fresh->state : OINDEX_STATE_VALID;
+
+		if (fresh)
+			free_o_index(fresh);
+
+		/* A cached BUILDING descriptor can outlive the flip to VALID. */
+		if (fresh_state != OINDEX_STATE_VALID)
+		{
+			OTuple		tuples[2];
+			bool		valid[2] = {old_valid, new_valid};
+			CICOpType	ops[2] = {CIC_OP_DELETE, CIC_OP_INSERT};
+			OTuple		nullKey = {NULL, 0};
+			int			i;
+
+			/* The AM supplied full leaf tuples in both index slots. */
+			tuples[0] = ((OTableSlot *) oldSlot)->tuple;
+			tuples[1] = new_ix_tup;
+			for (i = 0; i < 2; i++)
+			{
+				UndoStackLocations locs;
+				uint16		tupLen;
+
+				if (!valid[i])
+					continue;
+
+				if (i == 1)
+					o_btree_check_size_of_tuple(o_tuple_size(tuples[i], &id->leafSpec),
+												id->name.data, true);
+				tupLen = (uint16) o_tuple_size(tuples[i], &id->leafSpec);
+				get_cur_undo_locations(&locs, UndoLogRegular);
+				cic_spool_append(id->tableOids, id->builderOxid,
+								 locs.location, ops[i], nullKey, 0,
+								 tuples[i], tupLen);
+				cic_spool_track_for_abort(id->tableOids, id->builderOxid,
+										  locs.location, ops[i], nullKey, 0,
+										  tuples[i], tupLen);
+			}
+			return res;
+		}
+	}
+
 	O_TUPLE_SET_NULL(nullTup);
 
 	if (old_valid)
