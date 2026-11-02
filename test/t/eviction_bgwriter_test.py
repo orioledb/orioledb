@@ -89,7 +89,8 @@ class EvictionBGWriterTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.main_buffers = 8MB\n"
-		    "orioledb.bgwriter_num_workers = 1\n")
+		    "orioledb.bgwriter_num_workers = 1\n"
+		    "autovacuum = off\n")
 		node.start()
 		node.safe_psql('postgres',
 		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
