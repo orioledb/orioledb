@@ -44,6 +44,8 @@
 #include "btree/modify.h"
 
 #include "access/transam.h"
+#include "access/xlog.h"
+#include "access/xlogrecovery.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -297,6 +299,19 @@ undo_page_dirty(UndoLogType undoType, uint32 page)
 
 PendingTruncatesMeta *pending_truncates_meta;
 
+/*
+ * What a replication slot is to retain of the system undo log next, and the
+ * WAL position at which that was taken.  One per slot, indexed like
+ * ReplicationSlotCtl->replication_slots.  See o_slot_retain_location().
+ */
+typedef struct
+{
+	XLogRecPtr	lsn;
+	UndoLocation location;
+} OSlotRetainCandidate;
+
+static OSlotRetainCandidate *slot_retain_candidates = NULL;
+
 UndoLocation curRetainUndoLocations[(int) UndoLogsCount] =
 {
 	InvalidUndoLocation
@@ -403,6 +418,8 @@ undo_shmem_needs(void)
 
 	size = CACHELINEALIGN(sizeof(UndoMeta) * (int) UndoLogsCount);
 	size = add_size(size, CACHELINEALIGN(sizeof(PendingTruncatesMeta)));
+	size = add_size(size, CACHELINEALIGN(mul_size(max_replication_slots,
+												  sizeof(OSlotRetainCandidate))));
 	size = add_size(size, o_undo_circular_sizes[UndoLogRegular]);
 	size = add_size(size, o_undo_circular_sizes[UndoLogRegularPageLevel]);
 	size = add_size(size, o_undo_circular_sizes[UndoLogSystem]);
@@ -442,6 +459,10 @@ undo_shmem_init(Pointer buf, bool found)
 	pending_truncates_meta = (PendingTruncatesMeta *) ptr;
 	ptr += CACHELINEALIGN(sizeof(PendingTruncatesMeta));
 
+	slot_retain_candidates = (OSlotRetainCandidate *) ptr;
+	ptr += CACHELINEALIGN(mul_size(max_replication_slots,
+								   sizeof(OSlotRetainCandidate)));
+
 	o_undo_buffers[UndoLogRegular] = ptr;
 	ptr += o_undo_circular_sizes[UndoLogRegular];
 	o_undo_buffers[UndoLogRegularPageLevel] = ptr;
@@ -461,6 +482,12 @@ undo_shmem_init(Pointer buf, bool found)
 
 	if (!found)
 	{
+		for (i = 0; i < max_replication_slots; i++)
+		{
+			slot_retain_candidates[i].lsn = InvalidXLogRecPtr;
+			slot_retain_candidates[i].location = InvalidUndoLocation;
+		}
+
 		for (i = 0; i < (int) UndoLogsCount; i++)
 		{
 			Size		w;
@@ -866,23 +893,73 @@ wait_for_even_write_in_progress_changecount(UndoMeta *meta)
 }
 
 /*
- * What logical decoding may still need of the system undo log, were a slot
- * to be created (or to catch up) right now.
+ * What logical decoding may need of the system undo log for WAL written from
+ * now on.
  *
  * A decoder reads the system trees at the CommitSeqNo carried by each WAL
  * record, which means undoing everything committed after it -- the same
  * thing the reader of a snapshot with that CSN does, and answered with the
- * same location.  Records already written but not decoded yet belong to
- * transactions that are running now, and their retain is in
- * logicalWalRetainUndoLocation; a record they have stamped but not flushed
- * yet reaches back to where that retain points.
+ * same location.  Records already stamped by transactions still running are
+ * covered too: their retain is in logicalWalRetainUndoLocation.
  */
-static uint64
-o_slot_retain_location(ReplicationSlot *slot)
+static UndoLocation
+logical_wal_retain_location(void)
 {
 	UndoMeta   *meta = get_undo_meta_by_type(UndoLogSystem);
 	UndoLocation result;
 	int			i;
+
+	result = pg_atomic_read_u64(&meta->minProcTransactionRetainLocation);
+
+	for (i = 0; i < max_procs; i++)
+	{
+		UndoLocation tmp;
+
+		tmp = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[UndoLogSystem].logicalWalRetainUndoLocation);
+		result = Min(result, tmp);
+	}
+
+	return result;
+}
+
+/*
+ * Zero is how the slot code says "nothing to retain", so a location of zero
+ * -- which does happen, right after start -- has to say something else.  One
+ * is below every record and retains just as much.
+ */
+static uint64
+slot_retain_value(UndoLocation location)
+{
+	if (!UndoLocationIsValid(location))
+		return 0;
+	return location == 0 ? 1 : location;
+}
+
+/*
+ * What a replication slot has to retain of the system undo log.  Called by
+ * the slot code when the slot is created, restored at startup, or has caught
+ * up with the end of WAL; zero means "keep what the slot has".  Only the
+ * process that owns the slot calls it.
+ *
+ * Catching up does not mean the WAL behind us will not be decoded again: the
+ * next decoding session starts at the slot's restart_lsn, which lags behind,
+ * and decodes everything from there once more -- reading the system trees at
+ * each record's old CSN.  What logical_wal_retain_location() says now only
+ * covers WAL written from now on.  So keep it as a candidate, together with
+ * the WAL position at which it was taken, and hand it out only once
+ * restart_lsn has passed that position: the way PostgreSQL itself holds
+ * catalog_xmin back until restart_lsn has passed candidate_xmin_lsn.  That
+ * also covers peeking, which never moves restart_lsn.
+ */
+static uint64
+o_slot_retain_location(ReplicationSlot *slot)
+{
+#if PG_VERSION_NUM >= 170000
+	UndoMeta   *meta = get_undo_meta_by_type(UndoLogSystem);
+#endif
+	OSlotRetainCandidate *candidate;
+	XLogRecPtr	restart_lsn;
+	uint64		result = 0;
 
 	if (wal_level < WAL_LEVEL_LOGICAL || oProcData == NULL)
 		return 0;
@@ -905,25 +982,118 @@ o_slot_retain_location(ReplicationSlot *slot)
 	}
 #endif
 
-	result = pg_atomic_read_u64(&meta->minProcTransactionRetainLocation);
-
-	for (i = 0; i < max_procs; i++)
-	{
-		UndoLocation tmp;
-
-		tmp = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[UndoLogSystem].logicalWalRetainUndoLocation);
-		result = Min(result, tmp);
-	}
-
-	if (!UndoLocationIsValid(result))
-		return 0;
+	if (slot == NULL)
+		return slot_retain_value(logical_wal_retain_location());
 
 	/*
-	 * Zero is how the caller says "nothing to retain", so a location of zero
-	 * -- which does happen, right after start -- has to say something else.
-	 * One is below every record and retains just as much.
+	 * Restoring slots at startup: the WAL written before the restart lies
+	 * ahead of where recovery stands, so nothing we could take now covers it.
+	 * Keep what we have until decoding takes the first candidate.
 	 */
-	return result == 0 ? 1 : result;
+	if (AmStartupProcess())
+		return 0;
+
+	Assert(slot >= ReplicationSlotCtl->replication_slots &&
+		   slot < ReplicationSlotCtl->replication_slots + max_replication_slots);
+	candidate = &slot_retain_candidates[slot - ReplicationSlotCtl->replication_slots];
+
+	SpinLockAcquire(&slot->mutex);
+	restart_lsn = slot->data.restart_lsn;
+	SpinLockRelease(&slot->mutex);
+
+	if (XLogRecPtrIsInvalid(restart_lsn))
+	{
+		/*
+		 * A slot being created has not reserved WAL yet.  It will start
+		 * reading where WAL ends by then, so the answer holds right away.
+		 * Forget whatever a dropped slot left in this place.
+		 */
+		candidate->lsn = InvalidXLogRecPtr;
+		return slot_retain_value(logical_wal_retain_location());
+	}
+
+	/* Hand out the candidate once decoding can no longer go back before it */
+	if (!XLogRecPtrIsInvalid(candidate->lsn) && restart_lsn >= candidate->lsn)
+	{
+		result = slot_retain_value(candidate->location);
+		candidate->lsn = InvalidXLogRecPtr;
+	}
+
+	/*
+	 * Take a new candidate unless one is pending: replacing a pending one
+	 * would only push the point restart_lsn has to reach further away.
+	 */
+	if (XLogRecPtrIsInvalid(candidate->lsn))
+	{
+		UndoLocation location = logical_wal_retain_location();
+		XLogRecPtr	lsn;
+
+		/*
+		 * Only now see where WAL ends.  Anything inserted from here on comes
+		 * from a transaction that had not finished when we asked, so the
+		 * answer above covers it; a transaction that had finished has all its
+		 * WAL behind lsn.
+		 */
+		pg_memory_barrier();
+		lsn = RecoveryInProgress() ? GetXLogReplayRecPtr(NULL) : GetXLogInsertRecPtr();
+		if (UndoLocationIsValid(location) && !XLogRecPtrIsInvalid(lsn))
+		{
+			candidate->lsn = lsn;
+			candidate->location = location;
+		}
+	}
+
+	return result;
+}
+
+/*
+ * The lowest location the logical replication slots retain of the system undo
+ * log: PG_UINT64_MAX when none retains anything, zero when one has not said
+ * yet ("keep what you have").
+ *
+ * The same as ReplicationSlotsComputeMinExtRetainLocation(), except that it
+ * leaves out invalidated slots.  Nothing can be decoded from them any more, the
+ * reason PostgreSQL leaves them out of the xmin and LSN horizons too; counting
+ * them would hold the undo until someone drops the slot.
+ */
+static uint64
+slots_min_retain_location(void)
+{
+	uint64		result = PG_UINT64_MAX;
+	int			i;
+
+	Assert(ReplicationSlotCtl != NULL);
+
+	LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+	for (i = 0; i < max_replication_slots; i++)
+	{
+		ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[i];
+		uint64		location;
+		bool		invalidated;
+
+		if (!s->in_use || s->data.database == InvalidOid)
+			continue;
+
+		SpinLockAcquire(&s->mutex);
+		location = s->ext_retain_location;
+		invalidated = s->data.invalidated != RS_INVAL_NONE;
+		SpinLockRelease(&s->mutex);
+
+		if (invalidated)
+			continue;
+
+		if (location == 0)
+		{
+			result = 0;
+			break;
+		}
+
+		if (location < result)
+			result = location;
+	}
+	LWLockRelease(ReplicationSlotControlLock);
+
+	return result;
 }
 
 /*
@@ -945,7 +1115,7 @@ o_install_slot_retain_hook(void)
 Datum
 orioledb_slot_retain_undo_location(PG_FUNCTION_ARGS)
 {
-	uint64		location = ReplicationSlotsComputeMinExtRetainLocation();
+	uint64		location = slots_min_retain_location();
 
 	if (location == PG_UINT64_MAX)
 		PG_RETURN_NULL();
@@ -976,7 +1146,7 @@ get_current_replication_catalog_retain_undo_location(void)
 	if (wal_level < WAL_LEVEL_LOGICAL)
 		return InvalidUndoLocation;
 
-	location = ReplicationSlotsComputeMinExtRetainLocation();
+	location = slots_min_retain_location();
 
 	/* No logical slot is around to ask for anything */
 	if (location == PG_UINT64_MAX)
@@ -1155,7 +1325,8 @@ set_my_logical_wal_retain_location(void)
 /*
  * Release what set_my_logical_wal_retain_location() retained.  Called once
  * the local WAL buffer has been handed to WAL: from there on the records are
- * covered by the xid -> undo location mapping instead.
+ * covered by the replication slots, which keep what they need until their
+ * restart_lsn has moved past them.
  */
 void
 clear_my_logical_wal_retain_location(void)
