@@ -187,6 +187,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  rll_hidden_key_update \
 				  rll_mix \
 				  rll_mode_raise \
+				  rll_own_chain \
 				  rll_subtrans \
 				  rollback_lock_stale_copy \
 				  rr_committed_locker \
