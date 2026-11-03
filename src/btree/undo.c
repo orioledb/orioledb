@@ -2296,6 +2296,20 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				*conflictUndoLocation = curUndoLocation;
 				result = true;
 			}
+
+			/*
+			 * A version of our own, at least as strong as what we ask for,
+			 * with no lock-only record below it: nothing further down can
+			 * change the answer.  Below are only older versions of ours and
+			 * whatever we found when we wrote the oldest of them, which then
+			 * conflicted with nothing in progress, or we would have waited.
+			 * Walking on would make every modification of a row our
+			 * transaction keeps modifying as slow as the chain is long.
+			 */
+			if (XACT_INFO_GET_OXID(xactInfo) == my_oxid &&
+				xactMode >= mode && ROW_LOCKS_CONFLICT(xactMode, mode) &&
+				!curTuphdr.chainHasLocks)
+				break;
 		}
 
 		if (delete_record && undoLocation >= retainedUndoLocation)
