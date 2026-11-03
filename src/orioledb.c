@@ -1257,7 +1257,7 @@ _PG_init(void)
 							   &s3_accesskey,
 							   NULL,
 							   PGC_POSTMASTER,
-							   0,
+							   GUC_SUPERUSER_ONLY,
 							   NULL,
 							   NULL,
 							   NULL);
@@ -1268,7 +1268,7 @@ _PG_init(void)
 							   &s3_secretkey,
 							   NULL,
 							   PGC_POSTMASTER,
-							   0,
+							   GUC_SUPERUSER_ONLY,
 							   NULL,
 							   NULL,
 							   NULL);

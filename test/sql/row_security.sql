@@ -224,6 +224,14 @@ SET SESSION AUTHORIZATION DEFAULT;
 -- the owner bypasses a policy that is not forced, so nothing changes for it
 SELECT row_security_schema.orioledb_tbl_structure('o_diag'::regclass, 'nue') IS NOT NULL;
 
+-- the S3 credentials are hidden from a role that may not read all settings
+SET SESSION AUTHORIZATION regress_diag_nopriv;
+SELECT name FROM pg_settings
+	WHERE name IN ('orioledb.s3_accesskey', 'orioledb.s3_secretkey')
+	ORDER BY name;
+SHOW orioledb.s3_secretkey;
+SET SESSION AUTHORIZATION DEFAULT;
+
 DROP POLICY o_diag_pol ON o_diag;
 DROP TABLE o_diag;
 REVOKE USAGE ON SCHEMA row_security_schema FROM regress_diag_nopriv;
