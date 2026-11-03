@@ -4398,7 +4398,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 
 						elog(ERROR, "unable to perform page IO for page %d to file %s with offset " UINT64_FORMAT,
 							 blkno,
-							 btree_smgr_filename(descr, chkpNum, offset),
+							 btree_smgr_filename(descr, offset, chkpNum),
 							 offset);
 					}
 
@@ -5522,7 +5522,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 				Assert(page_desc != NULL);
 				elog(ERROR, "Unable to perform page IO for page %d to file %s with offset " UINT64_FORMAT,
 					 blkno,
-					 btree_smgr_filename(descr, chkpNum, offset),
+					 btree_smgr_filename(descr, offset, chkpNum),
 					 offset);
 			}
 
