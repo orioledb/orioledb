@@ -1,0 +1,173 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s2_begin_rr s2_snap s1_insert s2_ioc_u s2_rollback
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_snap: SELECT count(*) FROM o_ioc_rr;
+count
+-----
+    0
+(1 row)
+
+step s1_insert: INSERT INTO o_ioc_rr VALUES (1, 10, '1');
+step s2_ioc_u: INSERT INTO o_ioc_rr VALUES (2, 10, '2') ON CONFLICT (u) DO NOTHING RETURNING k;
+ERROR:  could not serialize access due to concurrent update
+step s2_rollback: ROLLBACK;
+
+starting permutation: s2_begin_rr s2_snap s1_insert s2_ioc_k s2_rollback
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_snap: SELECT count(*) FROM o_ioc_rr;
+count
+-----
+    0
+(1 row)
+
+step s1_insert: INSERT INTO o_ioc_rr VALUES (1, 10, '1');
+step s2_ioc_k: INSERT INTO o_ioc_rr VALUES (1, 20, '2') ON CONFLICT (k) DO NOTHING RETURNING k;
+ERROR:  could not serialize access due to concurrent update
+step s2_rollback: ROLLBACK;
+
+starting permutation: s2_begin_rc s2_snap s1_insert s2_ioc_u s2_commit s2_select
+step s2_begin_rc: BEGIN ISOLATION LEVEL READ COMMITTED;
+step s2_snap: SELECT count(*) FROM o_ioc_rr;
+count
+-----
+    0
+(1 row)
+
+step s1_insert: INSERT INTO o_ioc_rr VALUES (1, 10, '1');
+step s2_ioc_u: INSERT INTO o_ioc_rr VALUES (2, 10, '2') ON CONFLICT (u) DO NOTHING RETURNING k;
+k
+-
+(0 rows)
+
+step s2_commit: COMMIT;
+step s2_select: SELECT k, u, v FROM o_ioc_rr ORDER BY k;
+k| u|v
+-+--+-
+1|10|1
+(1 row)
+
+
+starting permutation: s2_begin_rr s2_snap s1_insert s2_ins_k s2_rollback
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_snap: SELECT count(*) FROM o_ioc_rr;
+count
+-----
+    0
+(1 row)
+
+step s1_insert: INSERT INTO o_ioc_rr VALUES (1, 10, '1');
+step s2_ins_k: INSERT INTO o_ioc_rr VALUES (1, 20, '2');
+ERROR:  duplicate key value violates unique constraint "o_ioc_rr_pkey"
+step s2_rollback: ROLLBACK;
+
+starting permutation: s2_begin_rr s2_snap s1_insert s2_ins_u s2_rollback
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_snap: SELECT count(*) FROM o_ioc_rr;
+count
+-----
+    0
+(1 row)
+
+step s1_insert: INSERT INTO o_ioc_rr VALUES (1, 10, '1');
+step s2_ins_u: INSERT INTO o_ioc_rr VALUES (2, 10, '2');
+ERROR:  duplicate key value violates unique constraint "o_ioc_rr_u"
+step s2_rollback: ROLLBACK;
+
+starting permutation: s1_insert s2_begin_rr s2_snap s1_delete s2_ins_k s2_rollback
+step s1_insert: INSERT INTO o_ioc_rr VALUES (1, 10, '1');
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_snap: SELECT count(*) FROM o_ioc_rr;
+count
+-----
+    1
+(1 row)
+
+step s1_delete: DELETE FROM o_ioc_rr WHERE k = 1;
+step s2_ins_k: INSERT INTO o_ioc_rr VALUES (1, 20, '2');
+ERROR:  could not serialize access due to concurrent delete
+step s2_rollback: ROLLBACK;
+
+starting permutation: s2_begin_rr s2_snap s1_begin s1_insert s2_ioc_u s1_commit s2_rollback
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_snap: SELECT count(*) FROM o_ioc_rr;
+count
+-----
+    0
+(1 row)
+
+step s1_begin: BEGIN;
+step s1_insert: INSERT INTO o_ioc_rr VALUES (1, 10, '1');
+step s2_ioc_u: INSERT INTO o_ioc_rr VALUES (2, 10, '2') ON CONFLICT (u) DO NOTHING RETURNING k; <waiting ...>
+step s1_commit: COMMIT;
+step s2_ioc_u: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s2_rollback: ROLLBACK;
+
+starting permutation: s2_begin_rr s2_snap s1_begin s1_insert s2_ioc_k s1_commit s2_rollback
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_snap: SELECT count(*) FROM o_ioc_rr;
+count
+-----
+    0
+(1 row)
+
+step s1_begin: BEGIN;
+step s1_insert: INSERT INTO o_ioc_rr VALUES (1, 10, '1');
+step s2_ioc_k: INSERT INTO o_ioc_rr VALUES (1, 20, '2') ON CONFLICT (k) DO NOTHING RETURNING k; <waiting ...>
+step s1_commit: COMMIT;
+step s2_ioc_k: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s2_rollback: ROLLBACK;
+
+starting permutation: s2_begin_rr s2_snap s1_begin s1_insert s2_ioc_u s1_rollback s2_commit s2_select
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_snap: SELECT count(*) FROM o_ioc_rr;
+count
+-----
+    0
+(1 row)
+
+step s1_begin: BEGIN;
+step s1_insert: INSERT INTO o_ioc_rr VALUES (1, 10, '1');
+step s2_ioc_u: INSERT INTO o_ioc_rr VALUES (2, 10, '2') ON CONFLICT (u) DO NOTHING RETURNING k; <waiting ...>
+step s1_rollback: ROLLBACK;
+step s2_ioc_u: <... completed>
+k
+-
+2
+(1 row)
+
+step s2_commit: COMMIT;
+step s2_select: SELECT k, u, v FROM o_ioc_rr ORDER BY k;
+k| u|v
+-+--+-
+2|10|2
+(1 row)
+
+
+starting permutation: s2_begin_rr s2_snap s1_begin s1_insert s2_ioc_k s1_rollback s2_commit s2_select
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_snap: SELECT count(*) FROM o_ioc_rr;
+count
+-----
+    0
+(1 row)
+
+step s1_begin: BEGIN;
+step s1_insert: INSERT INTO o_ioc_rr VALUES (1, 10, '1');
+step s2_ioc_k: INSERT INTO o_ioc_rr VALUES (1, 20, '2') ON CONFLICT (k) DO NOTHING RETURNING k; <waiting ...>
+step s1_rollback: ROLLBACK;
+step s2_ioc_k: <... completed>
+k
+-
+1
+(1 row)
+
+step s2_commit: COMMIT;
+step s2_select: SELECT k, u, v FROM o_ioc_rr ORDER BY k;
+k| u|v
+-+--+-
+1|20|2
+(1 row)
+

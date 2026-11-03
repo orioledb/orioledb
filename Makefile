@@ -173,6 +173,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  isol_rr_fk \
 				  isol_rr_seqscan \
 				  isol_serializable \
+				  ioc_rr_skip \
 				  load_refind_page \
 				  merge \
 				  parallel_idx_scan \
