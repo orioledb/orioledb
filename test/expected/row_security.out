@@ -349,6 +349,19 @@ SELECT row_security_schema.orioledb_tbl_structure('o_diag'::regclass, 'nue') IS 
  t
 (1 row)
 
+-- the S3 credentials are hidden from a role that may not read all settings
+SET SESSION AUTHORIZATION regress_diag_nopriv;
+SELECT name FROM pg_settings
+	WHERE name IN ('orioledb.s3_accesskey', 'orioledb.s3_secretkey')
+	ORDER BY name;
+ name 
+------
+(0 rows)
+
+SHOW orioledb.s3_secretkey;
+ERROR:  permission denied to examine "orioledb.s3_secretkey"
+DETAIL:  Only roles with privileges of the "pg_read_all_settings" role may examine this parameter.
+SET SESSION AUTHORIZATION DEFAULT;
 DROP POLICY o_diag_pol ON o_diag;
 DROP TABLE o_diag;
 REVOKE USAGE ON SCHEMA row_security_schema FROM regress_diag_nopriv;
