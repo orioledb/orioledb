@@ -186,6 +186,8 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  rll_mix \
 				  rll_mode_raise \
 				  rll_tuple_lock_collision \
+				  rll_collision_real_deadlock \
+				  rll_collision_stale_tag \
 				  rll_subtrans \
 				  rollback_lock_stale_copy \
 				  skipundo \

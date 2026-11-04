@@ -1,0 +1,27 @@
+Parsed test spec with 2 sessions
+
+starting permutation: begin_2 begin_3 u_2_plain_A u_3_plain_B u_2_plain_B u_3_plain_A rb_3 rb_2
+step begin_2: BEGIN;
+step begin_3: BEGIN;
+step u_2_plain_A: UPDATE o_plain SET v = v + 1 WHERE id = 140737490556223;
+step u_3_plain_B: UPDATE o_plain SET v = v + 1 WHERE id = 140737490556224;
+step u_2_plain_B: UPDATE o_plain SET v = v + 1 WHERE id = 140737490556224; <waiting ...>
+step u_3_plain_A: UPDATE o_plain SET v = v + 1 WHERE id = 140737490556223; <waiting ...>
+step u_3_plain_A: <... completed>
+ERROR:  deadlock detected
+step u_2_plain_B: <... completed>
+step rb_3: ROLLBACK;
+step rb_2: ROLLBACK;
+
+starting permutation: begin_2 begin_3 u_2_coll_A u_3_coll_B u_2_coll_B u_3_coll_A rb_3 rb_2
+step begin_2: BEGIN;
+step begin_3: BEGIN;
+step u_2_coll_A: UPDATE o_coll SET v = v + 1 WHERE id = 140737490556223;
+step u_3_coll_B: UPDATE o_coll SET v = v + 1 WHERE id = 140737501603420;
+step u_2_coll_B: UPDATE o_coll SET v = v + 1 WHERE id = 140737501603420; <waiting ...>
+step u_3_coll_A: UPDATE o_coll SET v = v + 1 WHERE id = 140737490556223; <waiting ...>
+step u_3_coll_A: <... completed>
+ERROR:  deadlock detected
+step u_2_coll_B: <... completed>
+step rb_3: ROLLBACK;
+step rb_2: ROLLBACK;

@@ -1,0 +1,146 @@
+Parsed test spec with 3 sessions
+
+starting permutation: dt_long_3 dt_short_2 begin_1 begin_2 begin_3 ks_1_B ks_2_A fu_3_A fu_2_B rb_1 rb_2 rb_3
+step dt_long_3: SET deadlock_timeout = '10s';
+step dt_short_2: SET deadlock_timeout = '10ms';
+step begin_1: BEGIN;
+step begin_2: BEGIN;
+step begin_3: BEGIN;
+step ks_1_B: SELECT id FROM o_coll WHERE id = 140737501603420 FOR KEY SHARE;
+             id
+---------------
+140737501603420
+(1 row)
+
+step ks_2_A: SELECT id FROM o_coll WHERE id = 140737490556223 FOR KEY SHARE;
+             id
+---------------
+140737490556223
+(1 row)
+
+step fu_3_A: SELECT id FROM o_coll WHERE id = 140737490556223 FOR UPDATE; <waiting ...>
+step fu_2_B: SELECT id FROM o_coll WHERE id = 140737501603420 FOR UPDATE; <waiting ...>
+step rb_1: ROLLBACK;
+step fu_2_B: <... completed>
+             id
+---------------
+140737501603420
+(1 row)
+
+step rb_2: ROLLBACK;
+step fu_3_A: <... completed>
+             id
+---------------
+140737490556223
+(1 row)
+
+step rb_3: ROLLBACK;
+
+starting permutation: dt_long_2 dt_short_3 lt_2 lt_3 begin_1 fu_1_AB fu_2_A fu_3_B sleep_1 rb_1 lt_off_2 lt_off_3 adv_2_1 adv_3_2 adv_2_2 adv_3_1 adv_3_held unl_3 unl_2
+step dt_long_2: SET deadlock_timeout = '10s';
+step dt_short_3: SET deadlock_timeout = '100ms';
+step lt_2: SET lock_timeout = '100ms';
+step lt_3: SET lock_timeout = '100ms';
+step begin_1: BEGIN;
+step fu_1_AB: SELECT id FROM o_coll ORDER BY id FOR UPDATE;
+             id
+---------------
+140737490556223
+140737501603420
+(2 rows)
+
+step fu_2_A: SELECT id FROM o_coll WHERE id = 140737490556223 FOR UPDATE; <waiting ...>
+step fu_3_B: SELECT id FROM o_coll WHERE id = 140737501603420 FOR UPDATE; <waiting ...>
+step sleep_1: SELECT pg_sleep(0.5);
+pg_sleep
+--------
+        
+(1 row)
+
+step fu_2_A: <... completed>
+ERROR:  canceling statement due to lock timeout
+step fu_3_B: <... completed>
+ERROR:  canceling statement due to lock timeout
+step rb_1: ROLLBACK;
+step lt_off_2: RESET lock_timeout;
+step lt_off_3: RESET lock_timeout;
+step adv_2_1: SELECT pg_advisory_lock(1);
+pg_advisory_lock
+----------------
+                
+(1 row)
+
+step adv_3_2: SELECT pg_advisory_lock(2);
+pg_advisory_lock
+----------------
+                
+(1 row)
+
+step adv_2_2: SELECT pg_advisory_lock(2); <waiting ...>
+step adv_3_1: SELECT pg_advisory_lock(1); <waiting ...>
+step adv_3_1: <... completed>
+ERROR:  deadlock detected
+step adv_3_held: SELECT objid FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted ORDER BY objid;
+objid
+-----
+    2
+(1 row)
+
+step unl_3: SELECT pg_advisory_unlock_all();
+pg_advisory_unlock_all
+----------------------
+                      
+(1 row)
+
+step adv_2_2: <... completed>
+pg_advisory_lock
+----------------
+                
+(1 row)
+
+step unl_2: SELECT pg_advisory_unlock_all();
+pg_advisory_unlock_all
+----------------------
+                      
+(1 row)
+
+
+starting permutation: dt_long_2 dt_short_3 lt_2 lt_3 begin_1 fu_1_AB fu_2_A fu_3_B sleep_1 rb_1 lt_off_2 lt_off_3 begin_2 begin_3 lk_2_t1 lk_3_t2 lk_2_t2 lk_3_t1 rb_3 rb_2
+step dt_long_2: SET deadlock_timeout = '10s';
+step dt_short_3: SET deadlock_timeout = '100ms';
+step lt_2: SET lock_timeout = '100ms';
+step lt_3: SET lock_timeout = '100ms';
+step begin_1: BEGIN;
+step fu_1_AB: SELECT id FROM o_coll ORDER BY id FOR UPDATE;
+             id
+---------------
+140737490556223
+140737501603420
+(2 rows)
+
+step fu_2_A: SELECT id FROM o_coll WHERE id = 140737490556223 FOR UPDATE; <waiting ...>
+step fu_3_B: SELECT id FROM o_coll WHERE id = 140737501603420 FOR UPDATE; <waiting ...>
+step sleep_1: SELECT pg_sleep(0.5);
+pg_sleep
+--------
+        
+(1 row)
+
+step fu_2_A: <... completed>
+ERROR:  canceling statement due to lock timeout
+step fu_3_B: <... completed>
+ERROR:  canceling statement due to lock timeout
+step rb_1: ROLLBACK;
+step lt_off_2: RESET lock_timeout;
+step lt_off_3: RESET lock_timeout;
+step begin_2: BEGIN;
+step begin_3: BEGIN;
+step lk_2_t1: LOCK TABLE t1;
+step lk_3_t2: LOCK TABLE t2;
+step lk_2_t2: LOCK TABLE t2; <waiting ...>
+step lk_3_t1: LOCK TABLE t1; <waiting ...>
+step lk_3_t1: <... completed>
+ERROR:  deadlock detected
+step lk_2_t2: <... completed>
+step rb_3: ROLLBACK;
+step rb_2: ROLLBACK;

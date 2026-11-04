@@ -2290,6 +2290,7 @@ orioledb_error_cleanup_hook(void)
 	int			i;
 
 	GET_CUR_PROCDATA()->waitingForOxid = false;
+	GET_CUR_PROCDATA()->tupleLockActive = false;
 	clear_pending_sk_marker();
 	btree_unpin_meta_page();
 	btree_release_meta_page_claim();

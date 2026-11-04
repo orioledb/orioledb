@@ -817,7 +817,8 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 * the page is still ours.  See make_tuple_lock_tag().
 				 */
 				if (context->hwLockMode == NoLock &&
-					context->lockStatus == BTreeModifyNoLock)
+					context->lockStatus == BTreeModifyNoLock &&
+					!context->hwLockCollisionSkip)
 					make_tuple_lock_tag(desc, curTuple, &context->hwLockTag);
 
 				unlock_page(blkno);
