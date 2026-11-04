@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 """
-Compare COPY throughput across three configurations of the orioledb
+Compare COPY throughput across four configurations of the orioledb
 multi-insert path, for three row shapes.
+
+Two independent boolean GUCs control the batching:
+  debug_disable_multi_insert        -- PK batching
+  debug_disable_toast_multi_insert  -- TOAST batching
 
 Only the executor's MultiInsert path (COPY FROM, INSERT ... SELECT into
 partitioned tables, etc.) routes through orioledb_multi_insert; plain
 INSERT ... SELECT into a non-partitioned table goes row-by-row and
 never exercises o_tbl_multi_insert.  This benchmark uses COPY FROM.
 
-  off          orioledb.debug_disable_multi_insert = 'all'
-               per-row o_tbl_insert; per-row TOAST inside o_tbl_insert.
-  multi        orioledb.debug_disable_multi_insert = 'toast'
-               o_tbl_multi_insert Phases 1-3; Phase 4 falls back to per-row
-               o_toast_insert_values.
-  multi+toast  orioledb.debug_disable_multi_insert = 'none' (default)
-               o_tbl_multi_insert Phases 1-3 plus Phase 4 batched TOAST insert.
+  off          both GUCs = true; per-row PK + per-row TOAST.
+  multi        PK batching on, TOAST batching off.
+  toast        PK batching off, TOAST batching on.
+  multi+toast  both GUCs = false (default); full batching.
 
 Each iteration COPYs the same in-memory TSV payload once per config, and
-iterations are interleaved across configs so all three modes see identical
+iterations are interleaved across configs so all four modes see identical
 cache warmness / steady state -- running all iterations of one mode first
 biases the next mode with a fully warm node.
 
@@ -43,9 +44,10 @@ sys.path.insert(0, os.path.join(_REPO, "test"))
 import testgres  # noqa: E402
 
 CONFIGS = [
-    ("off", "all"),
-    ("multi", "toast"),
-    ("multi+toast", "none"),
+    ("off", True, True),
+    ("multi", False, True),
+    ("toast", True, False),
+    ("multi+toast", False, False),
 ]
 
 # Non-compressible seeds; each row rotates the seed by (i % 10) chars so
@@ -113,14 +115,17 @@ def build_payload(shape, n_rows):
 	return buf.getvalue()
 
 
-def run_one(node, shape, mode, payload):
+def run_one(node, shape, disable_pk, disable_toast, payload):
 	spec = SHAPES[shape]
 	conn = node.connect()
 	try:
 		c = conn.cursor
 		c.execute("DROP TABLE IF EXISTS t")
 		c.execute("CREATE TABLE t (%s) USING orioledb" % spec["columns"])
-		c.execute("SET orioledb.debug_disable_multi_insert = '%s'" % mode)
+		c.execute("SET orioledb.debug_disable_multi_insert = %s",
+		          (disable_pk, ))
+		c.execute("SET orioledb.debug_disable_toast_multi_insert = %s",
+		          (disable_toast, ))
 		t0 = time.perf_counter()
 		c.copy_expert("COPY t FROM STDIN", io.StringIO(payload))
 		conn.connection.commit()
@@ -176,16 +181,16 @@ def main():
 			payload = build_payload(shape, args.rows)
 			# Warmup one iteration per config so the first measurement round
 			# already runs against a warm node.
-			for _, mode in CONFIGS:
-				run_one(node, shape, mode, payload)
+			for _, dpk, dt in CONFIGS:
+				run_one(node, shape, dpk, dt, payload)
 			# Interleaved measurements: rotate through configs per iteration
 			# so all modes see the same steady state.
-			runs = {name: [] for name, _ in CONFIGS}
+			runs = {name: [] for name, _, _ in CONFIGS}
 			for _ in range(args.iterations):
-				for name, mode in CONFIGS:
-					runs[name].append(run_one(node, shape, mode, payload))
+				for name, dpk, dt in CONFIGS:
+					runs[name].append(run_one(node, shape, dpk, dt, payload))
 			baseline_median = statistics.median(runs[baseline])
-			for name, _ in CONFIGS:
+			for name, _, _ in CONFIGS:
 				vs = runs[name]
 				med = statistics.median(vs)
 				std = statistics.stdev(vs) if len(vs) > 1 else 0.0
