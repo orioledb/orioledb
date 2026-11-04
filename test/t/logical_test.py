@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import json
+import os
 import subprocess
 import shutil
 import testgres
@@ -3480,13 +3481,14 @@ COMMIT\n""")
 				sub = subscriber.subscribe(pub, 'test_sub')
 				wait_ready(subscriber)
 
+				csvpath = os.path.join(publisher.base_dir, 'toast_multi.csv')
 				publisher.safe_psql("""
 					COPY (
 						SELECT i, generate_string(i, 10000)
 						FROM generate_series(1, 5) i
-					) TO '/tmp/toast_multi.csv';
-					COPY o_toast_multi FROM '/tmp/toast_multi.csv';
-				""")
+					) TO '%s';
+					COPY o_toast_multi FROM '%s';
+				""" % (csvpath, csvpath))
 
 				expected = publisher.execute(
 				    'SELECT id, length(body) FROM o_toast_multi ORDER BY id')
