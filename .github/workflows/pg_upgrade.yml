@@ -67,16 +67,16 @@ jobs:
           path: postgresql${{ matrix.version.new }}
 
       - name: Setup prerequisites
-        run: bash ./orioledb/ci/prerequisites.sh
+        run: bash ./orioledb/ci/setup/prerequisites.sh
 
       - name: Install Python prerequisites
-        run: bash ./orioledb/ci/post_build_prerequisites.sh
+        run: bash ./orioledb/ci/setup/post_build_prerequisites.sh
 
       - name: Build old PostgreSQL + orioledb
-        run: bash ./orioledb/ci/pg_upgrade_build.sh "$PG_OLD_VERSION" "$GITHUB_WORKSPACE/postgresql$PG_OLD_VERSION" "$GITHUB_WORKSPACE/pgsql$PG_OLD_VERSION"
+        run: bash ./orioledb/ci/setup/pg_upgrade_build.sh "$PG_OLD_VERSION" "$GITHUB_WORKSPACE/postgresql$PG_OLD_VERSION" "$GITHUB_WORKSPACE/pgsql$PG_OLD_VERSION"
 
       - name: Build new PostgreSQL + orioledb
-        run: bash ./orioledb/ci/pg_upgrade_build.sh "$PG_NEW_VERSION" "$GITHUB_WORKSPACE/postgresql$PG_NEW_VERSION" "$GITHUB_WORKSPACE/pgsql$PG_NEW_VERSION"
+        run: bash ./orioledb/ci/setup/pg_upgrade_build.sh "$PG_NEW_VERSION" "$GITHUB_WORKSPACE/postgresql$PG_NEW_VERSION" "$GITHUB_WORKSPACE/pgsql$PG_NEW_VERSION"
 
       - name: Run pg_upgrade test
         timeout-minutes: 30

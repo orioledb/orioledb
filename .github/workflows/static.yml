@@ -45,11 +45,11 @@ jobs:
           ref: ${{ env.PGTAG }}
           path: postgresql
       - name: Setup prerequisites
-        run: bash ./orioledb/ci/prerequisites.sh
+        run: bash ./orioledb/ci/setup/prerequisites.sh
       - name: Build
-        run: bash ./orioledb/ci/build.sh
+        run: bash ./orioledb/ci/setup/build.sh
       - name: Static analysis
-        run: bash ./orioledb/ci/static.sh
+        run: bash ./orioledb/ci/lint/static.sh
       - name: Upload clang reports
         uses: actions/upload-artifact@v7
         if: ${{ failure() && matrix.compiler == 'clang' }}

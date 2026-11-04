@@ -42,10 +42,10 @@ jobs:
           ref: ${{ env.PGTAG }}
           path: postgresql
       - name: Setup prerequisites
-        run: bash ./orioledb/ci/prerequisites.sh
+        run: bash ./orioledb/ci/setup/prerequisites.sh
       - name: Build
-        run: bash ./orioledb/ci/build.sh
+        run: bash ./orioledb/ci/setup/build.sh
       - name: Install post build prerequisites
-        run: bash ./orioledb/ci/post_build_prerequisites.sh
+        run: bash ./orioledb/ci/setup/post_build_prerequisites.sh
       - name: PGIndent
-        run: bash ./orioledb/ci/pgindent.sh
+        run: bash ./orioledb/ci/lint/pgindent.sh

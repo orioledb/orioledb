@@ -44,7 +44,7 @@ elif [ "$COMPILER" = "gcc" ]; then
 
 	cppcheck \
 		--enable=warning,portability,performance \
-		--suppressions-list=ci/cppcheck-suppress \
+		--suppressions-list=ci/lint/cppcheck-suppress \
 		--std=c99 --inline-suppr --verbose \
 		-D__GNUC__ \
 		${CPPCHK_DEFS[@]} \

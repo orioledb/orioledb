@@ -27,7 +27,7 @@ VALID_COMPILERS="clang gcc"
 # Function to display help message
 show_help() {
     cat << EOF
-Usage: ./ci/docker_matrix.sh [options]
+Usage: ./scripts/docker/docker_matrix.sh [options]
 This script should be run from the project root directory!
 
 Experimental OrioleDB Docker matrix build command
@@ -71,27 +71,21 @@ and you can check the build logs with:
   grep -i -C 1 warning: ./log_docker_build/*/*.build.log
 
 Examples:
-  ./ci/docker_matrix.sh --base all-dev --pg-major all --compiler clang
-  ./ci/docker_matrix.sh --base alpine:3.21 --pg-major 17 --compiler gcc --debug true
-  ./ci/docker_matrix.sh --base ubuntu:noble --pg-major 16 --compiler all --debug false
+  ./scripts/docker/docker_matrix.sh --base all-dev --pg-major all --compiler clang
+  ./scripts/docker/docker_matrix.sh --base alpine:3.21 --pg-major 17 --compiler gcc --debug true
+  ./scripts/docker/docker_matrix.sh --base ubuntu:noble --pg-major 16 --compiler all --debug false
 
 Default behavior:
-  ./ci/docker_matrix.sh --base $BASE_MATRIX --pg-major $PG_MAJOR --compiler $COMPILER --debug $DEBUG
+  ./scripts/docker/docker_matrix.sh --base $BASE_MATRIX --pg-major $PG_MAJOR --compiler $COMPILER --debug $DEBUG
 
 EOF
 }
 
 # Function to check if the script is run from the correct directory
 check_directory() {
-    if [[ "$(basename "$(pwd)")" == "ci" ]]; then
-        echo "Error: This script should be run from the project root directory, not the 'ci' directory."
-        echo "Please change to the project root directory and run: ./ci/docker_matrix.sh"
-        exit 1
-    fi
-
-    if [[ ! -f "./ci/docker_matrix.sh" ]]; then
+    if [[ ! -f "./scripts/docker/docker_matrix.sh" ]]; then
         echo "Error: This script should be run from the project root directory."
-        echo "Please change to the project root directory and run: ./ci/docker_matrix.sh"
+        echo "Please change to the project root directory and run: ./scripts/docker/docker_matrix.sh"
         exit 1
     fi
 }

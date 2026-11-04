@@ -37,7 +37,7 @@ jobs:
           path: postgresql
 
       - name: Setup prerequisites
-        run: bash ./orioledb/ci/prerequisites.sh
+        run: bash ./orioledb/ci/setup/prerequisites.sh
 
       - name: Install pgBackRest
         run: |
@@ -55,10 +55,10 @@ jobs:
           sudo apt-get -y install -qq pgbackrest
 
       - name: Build
-        run: bash ./orioledb/ci/build.sh
+        run: bash ./orioledb/ci/setup/build.sh
 
       - name: Install post build prerequisites
-        run: bash ./orioledb/ci/post_build_prerequisites.sh
+        run: bash ./orioledb/ci/setup/post_build_prerequisites.sh
 
       - name: Run pgbackrest test
         timeout-minutes: 100
@@ -109,7 +109,7 @@ jobs:
           path: postgresql
 
       - name: Setup prerequisites
-        run: bash ./orioledb/ci/prerequisites.sh
+        run: bash ./orioledb/ci/setup/prerequisites.sh
 
       - name: Install wal-g
         run: |
@@ -123,10 +123,10 @@ jobs:
           sudo install -m 0755 /tmp/wal-g /usr/local/bin/wal-g
 
       - name: Build
-        run: bash ./orioledb/ci/build.sh
+        run: bash ./orioledb/ci/setup/build.sh
 
       - name: Install post build prerequisites
-        run: bash ./orioledb/ci/post_build_prerequisites.sh
+        run: bash ./orioledb/ci/setup/post_build_prerequisites.sh
 
       - name: Run wal-g test
         timeout-minutes: 100
@@ -178,7 +178,7 @@ jobs:
           path: postgresql
 
       - name: Setup prerequisites
-        run: bash ./orioledb/ci/prerequisites.sh
+        run: bash ./orioledb/ci/setup/prerequisites.sh
 
       - name: Checkout wal-g code into workspace directory
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1    # v7.0.1
@@ -220,10 +220,10 @@ jobs:
           sudo install -m 0755 main/pg/wal-g /usr/local/bin/wal-g
 
       - name: Build
-        run: bash ./orioledb/ci/build.sh
+        run: bash ./orioledb/ci/setup/build.sh
 
       - name: Install post build prerequisites
-        run: bash ./orioledb/ci/post_build_prerequisites.sh
+        run: bash ./orioledb/ci/setup/post_build_prerequisites.sh
 
       - name: Run wal-g test
         timeout-minutes: 100

@@ -10,7 +10,7 @@ disable-model-invocation: true
 Invoked as `/release vX.Y.Z [additional notes]`. The first argument is the
 tag. Any text after it is additional release notes from the user (step 4).
 The release branch is `vX.Y`. The mechanical
-work is done by `ci/release.py`; this skill adds review and judgment. Never
+work is done by `scripts/release/release.py`; this skill adds review and judgment. Never
 force-push. If anything fails midway, report the exact state (what was
 committed, pushed, tagged) instead of retrying destructively. Do not push
 anything before the user explicitly confirms (step 5).
@@ -23,10 +23,10 @@ by `prepare` (default `../orioledb-release-X.Y`).
 
 ## 1. Prepare
 
-`python3 ci/release.py prepare vX.Y.Z`
+`python3 scripts/release/release.py prepare vX.Y.Z`
 
 It validates the tag and branch, creates a detached worktree of `origin/vX.Y`,
-applies the version edits and runs `ci/check_release.py`. It does not commit.
+applies the version edits and runs `scripts/release/check_release.py`. It does not commit.
 Report any failure to the user and stop. In particular:
 
 - New minor branch (`origin/vX.Y` missing): branches are created manually.
@@ -51,7 +51,7 @@ lines; this overrides tool defaults.
 
 ## 4. Release notes
 
-`python3 ci/release.py notes vX.Y.Z > <tmpfile>`
+`python3 scripts/release/release.py notes vX.Y.Z > <tmpfile>`
 
 Then review and edit the draft per "Release notes" in `CLAUDE.md`:
 user-visible changes only, grouped by theme, commit hashes kept, no PR
@@ -66,7 +66,7 @@ like the rest of the notes.
 
 ## 5. Confirm
 
-Run `python3 ci/release.py publish vX.Y.Z --notes <tmpfile>` without `--yes`.
+Run `python3 scripts/release/release.py publish vX.Y.Z --notes <tmpfile>` without `--yes`.
 It runs all the safety checks and prints the plan without changing anything.
 Show the user the commit diff, the notes and that output. Ask for
 confirmation. Do not continue without an explicit yes.

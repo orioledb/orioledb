@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release helper: ci/release.py {prepare,notes,publish} vX.Y.Z.
+"""Release helper: scripts/release/release.py {prepare,notes,publish} vX.Y.Z.
 
 Run it from the main checkout.  The release is prepared in a detached
 worktree of origin/vX.Y, so no local branch is created or changed.  Nothing
@@ -20,7 +20,7 @@ FORMAT_DEFINES = [
     'ORIOLEDB_PAGE_VERSION', 'ORIOLEDB_COMPRESS_VERSION',
     'ORIOLEDB_WAL_VERSION', 'ORIOLEDB_CHECKPOINT_CONTROL_VERSION'
 ]
-NON_USER_DIRS = ('test/', '.github/', 'ci/', 'doc/', '.claude/')
+NON_USER_DIRS = ('test/', '.github/', 'ci/', 'scripts/', 'doc/', '.claude/')
 HELPER_RE = re.compile(r'test|debug|stopevent|sys_xid', re.I)
 
 

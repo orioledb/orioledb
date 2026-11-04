@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sanity checks for a release tag: ci/check_release.py <tag> [--repo DIR].
+"""Sanity checks for a release tag: scripts/release/check_release.py <tag> [--repo DIR].
 
 Run it on the commit the tag points to.  All failures are collected and
 printed one per line; the exit status is 1 if there are any.

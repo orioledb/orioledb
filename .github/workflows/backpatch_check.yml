@@ -4,7 +4,7 @@ name: Backpatch sanity check
 # "Backpatch: no <reason>", or none does and the pull request has no "bug"
 # label.  When all commits say "Backpatch: stable", the script also adds that
 # line to the pull request description so squash-merge commits carry it.
-# See ci/backpatch_check.sh.
+# See ci/backpatch/backpatch_check.sh.
 
 on:
   pull_request:
@@ -27,4 +27,4 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           EVENT_ACTION: ${{ github.event.action }}
-        run: ci/backpatch_check.sh
+        run: ci/backpatch/backpatch_check.sh
