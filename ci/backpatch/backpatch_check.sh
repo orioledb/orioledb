@@ -18,7 +18,7 @@
 #
 set -euo pipefail
 
-# shellcheck source=ci/backpatch_common.sh
+# shellcheck source=ci/backpatch/backpatch_common.sh
 . "$(dirname "$0")/backpatch_common.sh"
 
 BUG_LABEL=${BUG_LABEL:-bug}

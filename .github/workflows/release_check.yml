@@ -1,7 +1,7 @@
 name: Release sanity check
 
 # Runs on a release tag push, from the tagged commit.  See
-# ci/check_release.py and doc/contributing/backpatching.mdx.
+# scripts/release/check_release.py and doc/contributing/backpatching.mdx.
 
 on:
   push:
@@ -20,4 +20,4 @@ jobs:
         with:
           fetch-depth: 0
       - name: Check release
-        run: python3 ci/check_release.py "$GITHUB_REF_NAME"
+        run: python3 scripts/release/check_release.py "$GITHUB_REF_NAME"

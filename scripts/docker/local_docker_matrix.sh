@@ -2,7 +2,7 @@
 set -Eeo pipefail
 
 # Testing all possible docker builds on a local machine
-# run from project root: ./ci/local_docker_matrix.sh
+# run from project root: ./scripts/docker/local_docker_matrix.sh
 # and check the logs in ./log_docker_build/*.*.log
 
 pg_major_list=( 16 17 18)

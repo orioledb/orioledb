@@ -18,7 +18,6 @@ orioledb
 |- .github
 |  |- workflows -- GitHub workflows
 |
-|- ci  -- scripts for building, testing, and CI automation
 |- doc -- documentation
 |- docker
 |  |- tests -- Docker images tests
@@ -29,7 +28,19 @@ orioledb
 |  |- orioledb-config.sh -- Docker images tests configuration
 |  |- init/postgresql.docker.conf -- configuration file used by Docker images
 |- include -- C-headers of extension
-|- perf -- performance benchmarks
+|- ci -- scripts for building, testing, and CI automation (test runners, output filters, core dump helpers)
+|  |- setup -- dependency installation and PostgreSQL/extension builds
+|  |- coverage -- lcov helpers
+|  |- lint -- static analysis and pgindent
+|  |- backpatch -- backpatching automation
+|- scripts
+|  |- dev -- development helpers and code generators
+|  |  |- check_patchset_version.py -- checks the patched PostgreSQL version
+|  |  |- stopevents_gen.py -- generates include/utils/stopevents_(defs|data).h from stopevents.txt
+|  |  |- typedefs_gen.py -- generates list of C-symbols in orioledb.so to orioledb.typedefs
+|  |- docker -- Docker build matrix helpers
+|  |- perf -- performance benchmarks
+|  |- release -- release checks and release automation
 |- sql -- installation scripts with definitions of the extension's SQL-level objects
 |- src -- C-sources of extension
 |- test
@@ -44,8 +55,6 @@ orioledb
 |- README.md -- main documentation entrypoint
 |- orioledb.control -- extension control file
 |- stopevents.txt -- list of "stop events"
-|- stopevents_gen.py -- generates include/utils/stopevents_(defs|data).h from stopevents.txt
-|- typedefs_gen.py -- generates list of C-symbols in orioledb.so to orioledb.typedefs
 |- valgrind.supp -- suppression rules for valgrind checks
 
 ```
@@ -237,6 +246,6 @@ At the C level, the following macros are provided for managing stop events.
   without stopping the execution. Used for error simulation.
 
 The list of stop events is defined in `stopevents.txt` file. The
-`stopevents_gen.py` script generates `include/utils/stopevents_defs.h` (macros)
+`scripts/dev/stopevents_gen.py` script generates `include/utils/stopevents_defs.h` (macros)
 and `include/utils/stopevents_data.h` (name strings) files with C definitions of
 the stop events list.

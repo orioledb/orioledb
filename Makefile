@@ -304,8 +304,8 @@ TESTGRESCHECKS_PART_3 = test/t/logical_streaming_test.py \
 						test/t/relnode_wraparound_test.py \
 						test/t/rewind_time_test.py
 
-# perf/*_perf.py -- see perf/README.md.
-PERFCHECKS = $(sort $(wildcard perf/*_perf.py))
+# scripts/perf/*_perf.py -- see scripts/perf/README.md.
+PERFCHECKS = $(sort $(wildcard scripts/perf/*_perf.py))
 
 PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test --temp-instance=./test/tmp_check
 PG_ISOLATION_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test/output_iso --temp-instance=./test/tmp_check_iso
@@ -434,8 +434,8 @@ endif
 
 include/utils/stopevents_data.h: include/utils/stopevents_defs.h
 
-include/utils/stopevents_defs.h: stopevents.txt stopevents_gen.py
-	python3 stopevents_gen.py
+include/utils/stopevents_defs.h: stopevents.txt scripts/dev/stopevents_gen.py
+	python3 scripts/dev/stopevents_gen.py
 
 
 ifndef ORIOLEDB_PATCHSET_VERSION
@@ -443,7 +443,7 @@ ORIOLEDB_PATCHSET_VERSION=1
 endif
 
 check_patchset_version:
-	@python3 check_patchset_version.py $(MAJORVERSION) $(ORIOLEDB_PATCHSET_VERSION)
+	@python3 scripts/dev/check_patchset_version.py $(MAJORVERSION) $(ORIOLEDB_PATCHSET_VERSION)
 
 $(OBJS): include/utils/stopevents_defs.h check_patchset_version
 
@@ -467,7 +467,7 @@ testgrescheck_part_3: $(TESTGRESCHECKS_PART_3)
 temp-install: EXTRA_INSTALL=contrib/orioledb
 
 orioledb.typedefs: $(OBJS)
-	./typedefs_gen.py
+	./scripts/dev/typedefs_gen.py
 
 pgindent: orioledb.typedefs
 	pgindent --typedefs=orioledb.typedefs \
@@ -479,8 +479,11 @@ pgindent: orioledb.typedefs
 yapf:
 	yapf -i test/t/*.py
 	yapf -i test/integration/*.py
-	yapf -i ci/*.py
 	yapf -i *.py
+	yapf -i ci/*.py
+	yapf -i scripts/dev/*.py
+	yapf -i scripts/perf/*.py
+	yapf -i scripts/release/*.py
 
 .PHONY: submake-orioledb submake-regress check \
 	regresscheck isolationcheck testgrescheck perfcheck pgindent \

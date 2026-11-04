@@ -47,6 +47,8 @@
 # Local excludes in root directory
 test/t/__pycache__/
 test/__pycache__/
+ci/__pycache__/
+scripts/**/__pycache__/
 test/log/
 log_docker_build/
 test/results/
@@ -56,7 +58,6 @@ test/output_iso/
 include/utils/stopevents_defs.h
 include/utils/stopevents_data.h
 orioledb.typedefs
-ci/antithesis
 
 # Ignore generated scripts. Keep in sync with the similar list in .gitignore
 sql/orioledb--1.0.sql
@@ -86,8 +87,12 @@ docker/Dockerfile.ubuntu
 # Exclude OrioleDB Docker test definitions and code
 # as they are not needed inside the Docker image.
 test/
-ci/local_docker_matrix.sh
-ci/docker_matrix.sh
+
+# CI and helper scripts; scripts/dev/ is still needed by make in the image build.
+ci/
+scripts/docker/
+scripts/perf/
+scripts/release/
 
 # Documentation files, which are not needed inside the Docker image.
 doc/

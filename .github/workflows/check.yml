@@ -238,13 +238,13 @@ jobs:
           path: postgresql
 
       - name: Setup prerequisites
-        run: bash ./orioledb/ci/prerequisites.sh
+        run: bash ./orioledb/ci/setup/prerequisites.sh
 
       - name: Build
-        run: bash ./orioledb/ci/build.sh
+        run: bash ./orioledb/ci/setup/build.sh
 
       - name: Install post build prerequisites
-        run: bash ./orioledb/ci/post_build_prerequisites.sh
+        run: bash ./orioledb/ci/setup/post_build_prerequisites.sh
 
       - name: Check
         timeout-minutes: ${{ matrix.timeout }}
@@ -297,7 +297,7 @@ jobs:
 
       - name: Run lcov
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
-        run: bash ./orioledb/ci/lcov.sh
+        run: bash ./orioledb/ci/coverage/lcov.sh
 
       - name: Create artifact for coverage.info
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
@@ -321,7 +321,7 @@ jobs:
         uses: actions/download-artifact@v8
 
       - name: Merge coverage files
-        run: bash ./orioledb/ci/lcov_merge.sh
+        run: bash ./orioledb/ci/coverage/lcov_merge.sh
 
       - name: coveralls
         uses: coverallsapp/github-action@v2

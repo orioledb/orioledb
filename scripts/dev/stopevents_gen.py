@@ -11,7 +11,7 @@ while line:
 f.close()
 
 f = open('include/utils/stopevents_defs.h', 'w')
-f.write('/* Generated file, see stopevents_gen.py */\n\n')
+f.write('/* Generated file, see scripts/dev/stopevents_gen.py */\n\n')
 
 for i, e in enumerate(event_names):
 	f.write(f'#define STOPEVENT_{e.upper()} ({str(i)})\n')
@@ -20,7 +20,7 @@ f.write('#define STOPEVENTS_COUNT (' + str(len(event_names)) + ')\n')
 f.close()
 
 f = open('include/utils/stopevents_data.h', 'w')
-f.write('/* Generated file, see stopevents_gen.py */\n\n')
+f.write('/* Generated file, see scripts/dev/stopevents_gen.py */\n\n')
 
 f.write('static const char *const stopeventnames[] = {')
 for i, e in enumerate(event_names):

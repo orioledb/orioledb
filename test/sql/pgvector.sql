@@ -2,7 +2,7 @@ CREATE SCHEMA pgvector;
 SET SESSION search_path = 'pgvector';
 CREATE EXTENSION orioledb;
 -- pgvector is not part of the fork, so it is not installed everywhere; CI
--- installs it in ci/post_build_prerequisites.sh.  Where it is missing the test
+-- installs it in ci/setup/post_build_prerequisites.sh.  Where it is missing the test
 -- skips its body and matches the pgvector_1 alternative output instead -- the
 -- error from CREATE EXTENSION cannot be used for that, as it names an absolute
 -- path.

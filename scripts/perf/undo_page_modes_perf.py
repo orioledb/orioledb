@@ -30,7 +30,7 @@ from threading import Thread
 
 # Make the testgres helpers importable when invoked from the repo root.
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_REPO = os.path.dirname(_HERE)
+_REPO = os.path.dirname(os.path.dirname(_HERE))
 sys.path.insert(0, os.path.join(_REPO, "test"))
 import testgres  # noqa: E402
 
@@ -74,8 +74,7 @@ def make_node(undo_buffer_blocks):
 	node = testgres.get_new_node(name="undo_page_modes_perf")
 	node.init(["--no-locale", "--encoding=UTF8"])
 	node.append_conf(
-	    "postgresql.conf",
-	    "shared_preload_libraries = 'orioledb'\n"
+	    "postgresql.conf", "shared_preload_libraries = 'orioledb'\n"
 	    "log_min_messages = warning\n"
 	    "shared_buffers = '512MB'\n"
 	    "fsync = off\n"
@@ -96,9 +95,10 @@ def make_node(undo_buffer_blocks):
 	effective_kb = int(
 	    node.execute("SELECT setting::bigint * 8 FROM pg_settings "
 	                 "WHERE name = 'orioledb.undo_buffers';")[0][0])
-	print(f"# undo_buffers requested={requested_mib:.1f} MiB, "
-	      f"effective={effective_kb/1024:.1f} MiB",
-	      flush=True)
+	print(
+	    f"# undo_buffers requested={requested_mib:.1f} MiB, "
+	    f"effective={effective_kb/1024:.1f} MiB",
+	    flush=True)
 	node.safe_psql(
 	    "postgres", "CREATE EXTENSION orioledb;\n"
 	    "CREATE TABLE t (id bigint NOT NULL, pad text NOT NULL, "
@@ -158,10 +158,9 @@ def run_one(node, mode, n_rows, padlen, order, warmup_rows):
 		# These splits produce FULL images (numSeqScans > 0), leaving
 		# the warmed pages with valid undoLocations > holder.retainLoc.
 		wu = node.connect()
-		wu.execute(
-		    f"INSERT INTO t (id, pad) "
-		    f"SELECT i, repeat('x', {padlen}) "
-		    f"FROM generate_series(1, {warmup_rows}) i;")
+		wu.execute(f"INSERT INTO t (id, pad) "
+		           f"SELECT i, repeat('x', {padlen}) "
+		           f"FROM generate_series(1, {warmup_rows}) i;")
 		wu.close()
 		if mode == "diff":
 			# End the seq scan; SKIP is disabled by the snapshot's
@@ -182,10 +181,9 @@ def run_one(node, mode, n_rows, padlen, order, warmup_rows):
 	id_lo = warmup_rows + 1
 	id_hi = warmup_rows + n_rows
 	if order == "ordered":
-		insert_sql = (
-		    f"INSERT INTO t (id, pad) "
-		    f"SELECT i, repeat('x', {padlen}) "
-		    f"FROM generate_series({id_lo}, {id_hi}) i;")
+		insert_sql = (f"INSERT INTO t (id, pad) "
+		              f"SELECT i, repeat('x', {padlen}) "
+		              f"FROM generate_series({id_lo}, {id_hi}) i;")
 	elif order == "random":
 		insert_sql = (
 		    f"INSERT INTO t (id, pad) "
@@ -244,22 +242,31 @@ def main():
 	ap = argparse.ArgumentParser(
 	    description="Measure time of SELECT count(*) mid-INSERT across "
 	    "page-undo modes.")
-	ap.add_argument("--rows", type=int, default=300_000,
+	ap.add_argument("--rows",
+	                type=int,
+	                default=300_000,
 	                help="rows the timed writer inserts (default 300000)")
-	ap.add_argument("--padlen", type=int, default=200,
+	ap.add_argument("--padlen",
+	                type=int,
+	                default=200,
 	                help="text pad length per row in bytes (default 200)")
-	ap.add_argument("--undo-buffers", default="2048,1",
+	ap.add_argument("--undo-buffers",
+	                default="2048,1",
 	                help="comma-separated list of orioledb.undo_buffers "
 	                "requests in MiB (default: 2048,1).  Each value is "
 	                "run once per mode/order; sizes below orioledb's "
 	                "16*max_procs floor are clamped up and the "
 	                "effective size is printed on start.")
-	ap.add_argument("--warmup", type=int, default=500,
+	ap.add_argument("--warmup",
+	                type=int,
+	                default=500,
 	                help="warm-up rows for DIFF/FULL (default 500)")
-	ap.add_argument("--modes", default="skip,diff,full",
+	ap.add_argument("--modes",
+	                default="skip,diff,full",
 	                help="comma-separated subset of skip,diff,full "
 	                "(default: all three)")
-	ap.add_argument("--orders", default="ordered,random",
+	ap.add_argument("--orders",
+	                default="ordered,random",
 	                help="comma-separated subset of ordered,random "
 	                "(default: both)")
 	args = ap.parse_args()
@@ -267,8 +274,9 @@ def main():
 	commit = detect_commit()
 	modes = [m.strip() for m in args.modes.split(",") if m.strip()]
 	orders = [o.strip() for o in args.orders.split(",") if o.strip()]
-	undo_mbs = [int(m.strip()) for m in args.undo_buffers.split(",")
-	            if m.strip()]
+	undo_mbs = [
+	    int(m.strip()) for m in args.undo_buffers.split(",") if m.strip()
+	]
 
 	print(f"# commit = {commit}")
 	print(f"# rows   = {args.rows}, pad = {args.padlen} bytes/row, "
@@ -300,13 +308,14 @@ def main():
 				finally:
 					node.stop()
 					node.cleanup()
-				print(f"{mode:>4} {order:>8} {mb:>9d} "
-				      f"{fmt_mib(r['table_delta']):>7} "
-				      f"{fmt_mib(r['row_delta']):>9} "
-				      f"{fmt_mib(r['page_delta']):>10} "
-				      f"{int(r['writer_s']*1000):>8} "
-				      f"{int(r['select_s']*1000):>10}",
-				      flush=True)
+				print(
+				    f"{mode:>4} {order:>8} {mb:>9d} "
+				    f"{fmt_mib(r['table_delta']):>7} "
+				    f"{fmt_mib(r['row_delta']):>9} "
+				    f"{fmt_mib(r['page_delta']):>10} "
+				    f"{int(r['writer_s']*1000):>8} "
+				    f"{int(r['select_s']*1000):>10}",
+				    flush=True)
 
 
 if __name__ == "__main__":

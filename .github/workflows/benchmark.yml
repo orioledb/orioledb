@@ -59,6 +59,7 @@ jobs:
       LLVM_VER: 18
       CHECK_TYPE: debug
       COMPILER: ${{ github.event.inputs.compiler }}
+      PG_VERSION: ${{ github.event.inputs.pg_version }}
     steps:
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v6
@@ -75,11 +76,11 @@ jobs:
           ref: ${{ env.PGTAG }}
           path: postgresql
       - name: Setup prerequisites
-        run: bash ./orioledb/ci/prerequisites.sh
+        run: bash ./orioledb/ci/setup/prerequisites.sh
       - name: Build
-        run: bash ./orioledb/ci/build.sh
+        run: bash ./orioledb/ci/setup/build.sh
       - name: Install post build prerequisites
-        run: bash ./orioledb/ci/post_build_prerequisites.sh
+        run: bash ./orioledb/ci/setup/post_build_prerequisites.sh
       - name: Benchmark
         run: |
           ulimit -n 65535
@@ -93,9 +94,9 @@ jobs:
           sudo sh -c 'echo "RemoveIPC=no" >> /etc/systemd/logind.conf'
           sudo apt-get -y remove -qq unattended-upgrades
           sudo sh -c 'echo "/mnt/%t_%p.core" > /proc/sys/kernel/core_pattern'
-          PATH="$GITHUB_WORKSPACE/pgsql/bin:$PATH" python3 ./orioledb/ci/pgbench.py ${{ github.event.inputs.args }} --results_dir=$GITHUB_WORKSPACE/results
+          PATH="$GITHUB_WORKSPACE/pgsql/bin:$PATH" python3 ./orioledb/scripts/perf/pgbench.py ${{ github.event.inputs.args }} --results_dir=$GITHUB_WORKSPACE/results
       - name: Check for core dumps
-        run: bash ./orioledb/ci/check_bench_cores.sh
+        run: bash ./orioledb/scripts/perf/check_bench_cores.sh
         if: ${{ success() || failure() }}
       - name: Upload results
         uses: actions/upload-artifact@v7

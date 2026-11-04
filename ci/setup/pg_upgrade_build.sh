@@ -18,11 +18,11 @@ else
 fi
 
 # Look up the orioledb-patches tag for this PG major so the
-# ORIOLEDB_PATCHSET_VERSION imprint matches what ci/build.sh produces.
+# ORIOLEDB_PATCHSET_VERSION imprint matches what ci/setup/build.sh produces.
 PGTAG=$(grep "^${PG_MAJOR}: " "$GITHUB_WORKSPACE/orioledb/.pgtags" | cut -d' ' -f2-)
 export PGTAG
 
-# Configure and build PostgreSQL.  Mirrors ci/build.sh for a debug build
+# Configure and build PostgreSQL.  Mirrors ci/setup/build.sh for a debug build
 # (asserts on), which is what we want for a pg_upgrade regression run.
 cd "$SRC_DIR"
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix="$PREFIX"
