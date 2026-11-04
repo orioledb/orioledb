@@ -28,6 +28,7 @@ Build via `make build` (see details under Usage)
 | [workload/jepsen](./config/workload/jepsen)  | adds a jepsen client with append workload (RR is default)  |
 | [workload/jepsen-RR](./config/workload/jepsen-RR)  | configures jepsen in repeatable-read mode  |
 | [workload/jepsen-RC](./config/workload/jepsen-RC)  | configures jepsen in read committed mode  |
+| [workload/checkpoint-recovery](./config/workload/checkpoint-recovery) | stresses checkpoint, eviction, process restart, and crash recovery transitions |
 | flake repro  | todo  |
 
 - individual configuration sets are merged with `config/docker-compose.base.yaml` to define a simulation
@@ -95,6 +96,73 @@ snouty launch \
   --param custom.container_faults_exclusion='sk-recovery-race-chaos-client' \
   --webhook supabase
 ```
+
+#### Checkpoint and recovery
+
+The `workload/checkpoint-recovery` configuration initializes fixed OrioleDB and
+heap-shadow table pairs before setup completes. It uses named `pgdata` and
+runtime-state volumes, records every database boot, removes the Compose restart
+policy, and runs strict final data, checksum, native-index, checkpoint, DDL, and
+`verify_orioledb` checks. A dedicated DDL worker concurrently cycles through
+table creation and deletion, column add/rename/drop, `TRUNCATE`, and native
+index creation and deletion. Each transition is committed with a durable schema
+journal entry so recovery can distinguish committed from interrupted DDL.
+
+Run a short local no-fault smoke test with a reduced, but still oversized,
+working set:
+
+```bash
+CHECKPOINT_RECOVERY_INITIAL_ROWS=2048 \
+CHECKPOINT_RECOVERY_WORKING_SET_MULTIPLIER=2 \
+JEPSEN_TIME_LIMIT=60 \
+make build up CFG='workload/checkpoint-recovery' PG_MAJOR=18
+```
+
+While a longer local run is active, inject a restart storm explicitly. Do not
+add a Compose restart policy, because that masks the node-termination behavior
+used by Antithesis.
+
+```bash
+docker kill orioledb
+docker start orioledb
+sleep 2
+docker kill orioledb
+docker start orioledb
+```
+
+Inspect the durable boot and result artifacts:
+
+```bash
+docker exec checkpoint-recovery-client sh -c \
+  'cat /runtime-state/boot-attempts.jsonl; cat /runtime-state/final-summary.json'
+```
+
+Render and validate the Antithesis configuration:
+
+```bash
+make build CFG='workload/checkpoint-recovery' PG_MAJOR=18
+snouty validate target/
+```
+
+Launch with node faults enabled only for the database container. The
+initializer, driver, and health checker must remain excluded fault targets.
+
+```bash
+snouty launch \
+  --config-image "$(make config-image CFG='workload/checkpoint-recovery' PG_MAJOR=18)" \
+  --test-name 'orioledb-checkpoint-recovery' \
+  --description 'checkpoint and repeated crash recovery storm' \
+  --duration 30m \
+  --ephemeral \
+  --param custom.container_faults_enable=true \
+  --param custom.container_faults_exclusion='checkpoint-recovery-client,checkpoint-recovery-initializer,health-checker' \
+  --webhook basic_test
+```
+
+Before interpreting a run, confirm that the Antithesis tenant preserves both
+named volumes across node termination. The property
+`checkpoint recovery: durable volume canary survived restart` records this as
+coverage rather than assuming the tenant storage model.
 
 ## Usage
 

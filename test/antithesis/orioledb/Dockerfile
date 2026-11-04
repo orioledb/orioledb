@@ -349,6 +349,8 @@ RUN set -eux; \
 COPY --from=builder /usr/src/postgresql/contrib/orioledb/docker/init/postgresql.docker.conf /etc/postgresql/postgresql.conf
 COPY --from=builder /usr/src/postgresql/contrib/orioledb/docker/init/docker-entrypoint.sh /usr/local/bin/
 COPY --from=builder /usr/src/postgresql/contrib/orioledb/docker/init/default-orioledb.sh /docker-default-initdb.d/
+COPY --chmod=755 pgdata-canary.sh /docker-default-initdb.d/zz-pgdata-canary.sh
+COPY --chmod=755 boot-entrypoint /usr/local/bin/boot-entrypoint
 
 RUN set -eux; \
 	sed -i -e 's/su-exec/gosu/g' /usr/local/bin/docker-entrypoint.sh; \

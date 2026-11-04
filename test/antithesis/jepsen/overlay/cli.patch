@@ -1,0 +1,23 @@
+diff --git a/postgres/src/jepsen/postgres/cli.clj b/postgres/src/jepsen/postgres/cli.clj
+index 987b641..56262ab 100644
+--- a/postgres/src/jepsen/postgres/cli.clj
++++ b/postgres/src/jepsen/postgres/cli.clj
+@@ -17,14 +17,16 @@
+              [util :as util]]
+             [jepsen.nemesis.combined :as nc]
+             [jepsen.os.debian :as debian]
++            [jepsen.orioledb.workload.checkpoint-recovery :as checkpoint-recovery]
+             [jepsen.postgres [client :as client]
+              [db :as db]]))
+
+ (def workloads
+   "A map of workload keywords (e.g. :append) to workload-constructing
+   functions."
+-  (sql/workloads {:open client/open
+-                  :error-fn client/error-fn}))
++  (assoc (sql/workloads {:open client/open
++                         :error-fn client/error-fn})
++         :orioledb-checkpoint-recovery checkpoint-recovery/workload))
+
+ (def all-workloads
+   "A collection of workloads we run by default."

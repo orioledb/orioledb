@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+exec java \
+	-ea -cp '/opt/jepsen/*' \
+	-Djava.awt.headless=true \
+	-server \
+	jepsen.postgres.cli \
+	test-all \
+	--test-count 1 \
+	--no-ssh \
+	--workload orioledb-checkpoint-recovery \
+	--concurrency "${JEPSEN_CONCURRENCY:-8}" \
+	--rate "${JEPSEN_RATE:-80}" \
+	--time-limit "${JEPSEN_TIME_LIMIT:-300}" \
+	--nemesis none \
+	--node "$JEPSEN_NODE" \
+	--existing-postgres \
+	--postgres-user "$JEPSEN_POSTGRES_USER" \
+	--postgres-password "$JEPSEN_POSTGRES_PASSWORD" \
+	--postgres-port "${JEPSEN_POSTGRES_PORT:-5432}"

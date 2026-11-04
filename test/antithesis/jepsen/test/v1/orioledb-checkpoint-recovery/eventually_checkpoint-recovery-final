@@ -1,0 +1,9 @@
+#!/bin/sh
+set -u
+
+rm -f "${RUNTIME_STATE_DIR:-/runtime-state}/final-summary.json"
+rc=0
+java -ea -cp '/opt/jepsen/*' -Djava.awt.headless=true clojure.main \
+	-m jepsen.orioledb.workload.checkpoint-recovery final || rc=$?
+/opt/antithesis/test/v1/orioledb-checkpoint-recovery/checkpoint-recovery-results evaluate || rc=$?
+exit "$rc"
