@@ -43,7 +43,7 @@ def _run_copy(node, payload, errors):
 	con = node.connect()
 	try:
 		c = con.cursor
-		c.execute("SET orioledb.debug_disable_multi_insert = 'none'")
+		c.execute("SET orioledb.debug_disable_multi_insert = false")
 		try:
 			c.copy_expert("COPY t (id, val) FROM STDIN", _tsv(payload, 2))
 			con.connection.commit()
@@ -61,7 +61,7 @@ def _run_copy_toast(node, table, payload, columns, errors):
 	con = node.connect()
 	try:
 		c = con.cursor
-		c.execute("SET orioledb.debug_disable_multi_insert = 'none'")
+		c.execute("SET orioledb.debug_disable_multi_insert = false")
 		try:
 			cols = ", ".join(columns)
 			c.copy_expert(f"COPY {table} ({cols}) FROM STDIN",
@@ -225,7 +225,7 @@ class MultiInsertTest(BaseTest):
 			con = node.connect()
 			try:
 				c = con.cursor
-				c.execute("SET orioledb.debug_disable_multi_insert = 'none'")
+				c.execute("SET orioledb.debug_disable_multi_insert = false")
 				for b in range(WIDE_KEY_BATCHES):
 					buf = io.StringIO()
 					for i, u in enumerate(ids):
