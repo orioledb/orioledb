@@ -1650,6 +1650,26 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OTableFetchCon
 	result->fill_in_progress = true;
 
 	oIndex = o_indices_get_extended(ixOids, ixType, ctx);
+
+	/*
+	 * The non-deleted snapshot exposes indexes created by in-progress
+	 * transactions so their owner and rollback machinery can still reach
+	 * them.  Other transactional processes must not build descriptors for
+	 * such indexes: their PostgreSQL catalog dependencies (for example, a
+	 * composite key type created in the same transaction) are not visible
+	 * yet.
+	 *
+	 * Auxiliary processes intentionally use this snapshot to checkpoint and
+	 * maintain trees regardless of transactional catalog visibility.
+	 */
+	if (IsTransactionState() && oIndex != NULL &&
+		OXidIsValid(oIndex->createOxid) &&
+		oIndex->createOxid != get_current_oxid_if_any() &&
+		!xid_is_finished(oIndex->createOxid))
+	{
+		free_o_index(oIndex);
+		oIndex = NULL;
+	}
 	Assert(oIndex || miss_ok);
 	if (!oIndex && miss_ok)
 	{
