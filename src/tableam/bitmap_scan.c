@@ -1091,8 +1091,12 @@ add_rbt_to_tbm(OBitmapHeapPlanState *bitmap_state, TIDBitmap *tbm, OKeyBitmap *r
 			OTupleFixedFormatSpec *spec = &primary->leafSpec;
 			ItemPointer bridge_iptr;
 
-			Assert(primary->nFields == 1);
-
+			/*
+			 * The bitmap seq scan follows the key bitmap in whatever encoding
+			 * it has, composite keys included.  The bridge pointer comes
+			 * right after the row id of a ctid primary key, and first
+			 * otherwise, however many columns the key has.
+			 */
 			attnum = primary->primaryIsCtid ? 2 : 1;
 			val = o_toast_nocachegetattr(tuple, attnum, tupdesc, spec, &is_null);
 			Assert(!is_null);

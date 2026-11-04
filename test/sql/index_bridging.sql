@@ -1327,6 +1327,37 @@ SELECT count(*), sum(a * 1000 + b) FROM o_bridge_pk2
 	WHERE tags @> ARRAY[3] OR (a, b) IN ((0, 5), (7, 10), (20, 40), (39, 49));
 DROP TABLE o_bridge_pk2;
 
+-- a bitmap qual pairing a bridged index with a native secondary one: the key
+-- bitmap of the native arm turns into bridge pointers for the bridged arm's
+-- TIDBitmap, with a composite primary key too
+CREATE TABLE o_bridge_mixed_pk2 (
+	a int,
+	b int,
+	c int NOT NULL,
+	tags int[],
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_bridge_mixed_pk2
+	SELECT g / 50, g % 50, g % 97, ARRAY[g % 7, g % 11]
+	FROM generate_series(1, 2000) g;
+CREATE INDEX o_bridge_mixed_pk2_c ON o_bridge_mixed_pk2 (c);
+CREATE INDEX o_bridge_mixed_pk2_gin ON o_bridge_mixed_pk2 USING gin (tags);
+ANALYZE o_bridge_mixed_pk2;
+
+SET enable_seqscan = off;
+SET enable_indexscan = off;
+SELECT count(*), sum(a * 1000 + b) FROM o_bridge_mixed_pk2
+	WHERE tags @> ARRAY[3] OR c < 5;
+SELECT count(*), sum(a * 1000 + b) FROM o_bridge_mixed_pk2
+	WHERE c < 5 OR tags @> ARRAY[3];
+RESET enable_indexscan;
+RESET enable_seqscan;
+SET enable_bitmapscan = off;
+SELECT count(*), sum(a * 1000 + b) FROM o_bridge_mixed_pk2
+	WHERE tags @> ARRAY[3] OR c < 5;
+RESET enable_bitmapscan;
+DROP TABLE o_bridge_mixed_pk2;
+
 -- Updates must maintain bridged expression indexes and enforce uniqueness.
 CREATE TABLE o_bridge_expr (
 	id int PRIMARY KEY,
