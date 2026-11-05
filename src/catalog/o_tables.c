@@ -1573,6 +1573,12 @@ o_tables_evict_callback(OTable *o_table, void *arg)
 		write_tree_pages(td, -1, true);
 		args->evicted = lappend_oid(args->evicted, td->oids.relnode);
 	}
+	if (descr->bridge)
+	{
+		td = &descr->bridge->desc;
+		write_tree_pages(td, -1, true);
+		args->evicted = lappend_oid(args->evicted, td->oids.relnode);
+	}
 	td = &descr->toast->desc;
 	write_tree_pages(td, -1, true);
 	args->evicted = lappend_oid(args->evicted, td->oids.relnode);
