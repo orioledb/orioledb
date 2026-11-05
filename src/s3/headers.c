@@ -117,6 +117,7 @@ static S3HeadersBuffersGroup *groups;
 #define S3_PART_DIRTY_FLAG		   UINT64CONST(0x0000000000200000)
 #define S3_PART_WRITING_FLAG	   UINT64CONST(0x0000000000400000)
 #define S3_PART_SCHEDULED_FOR_WRITE_FLAG UINT64CONST(0x0000000000800000)
+#define S3_PART_LOAD_FAILED_FLAG   UINT64CONST(0x0000000001000000)
 #define S3_PART_USAGE_COUNT_MASK   UINT64CONST(0x00000000FE000000)
 #define S3_PART_USAGE_COUNT_MAX    (0x7F)
 #define S3_PART_USAGE_COUNT_SHIFT  (25)
@@ -686,14 +687,18 @@ s3_part_is_beyond_eof(S3HeaderTag tag, int index)
 	return result;
 }
 
+#define S3_PART_LOAD_ATTEMPTS	3
+
 /*
  * Lock file part in S3 header.  This shouldn't let anybody to concurrently
- * evict the same file part.
+ * evict the same file part.  Returns false if the part cannot be loaded
+ * from S3.
  */
 bool
 s3_header_lock_part(S3HeaderTag tag, int index, uint32 *loadId)
 {
 	uint32		value;
+	int			attempts = 0;
 
 	Assert(!OidIsValid(curLockedTag.key.oids.datoid) &&
 		   !OidIsValid(curLockedTag.key.oids.relnode));
@@ -731,6 +736,17 @@ s3_header_lock_part(S3HeaderTag tag, int index, uint32 *loadId)
 				value = s3_header_read_value(tag, index);
 				continue;
 			}
+
+			/*
+			 * A part evicted right after loading also looks not loaded, so
+			 * retry the download.  The loop makes S3_PART_LOAD_ATTEMPTS
+			 * download attempts and then reports a failure.  A healthy query
+			 * fails only if the eviction race strikes S3_PART_LOAD_ATTEMPTS
+			 * times in a row.  The cap stops waiting forever on an object
+			 * that is not in S3.
+			 */
+			if (attempts++ >= S3_PART_LOAD_ATTEMPTS)
+				return false;
 			s3_load_file_part(tag.checkpointNum, tag.key, tag.segNum, index);
 			value = s3_header_read_value(tag, index);
 			continue;
@@ -760,7 +776,7 @@ s3_header_lock_part(S3HeaderTag tag, int index, uint32 *loadId)
 		{
 			curLockedTag = tag;
 			curLockedIndex = index;
-			return (value & S3_PART_DIRTY_FLAG);
+			return true;
 		}
 	}
 }
@@ -842,9 +858,42 @@ s3_header_mark_part_loaded(S3HeaderTag tag, int index)
 		Assert(status == S3PartStatusLoading);
 		newValue = S3_PART_SET_STATUS(value, S3PartStatusLoaded);
 		newValue = S3_PART_SET_USAGE_COUNT(newValue, 1);
+		/* A successfully loaded part is no longer known to be missing */
+		newValue &= ~S3_PART_LOAD_FAILED_FLAG;
 
 		if (s3_header_compare_and_swap(tag, index, &value, newValue))
 			return;
+	}
+}
+
+/*
+ * Return a loading part to not loaded after its object was not found in
+ * S3.  Mark the part with S3_PART_LOAD_FAILED_FLAG, so that only its
+ * first failure reports a warning.  Return true for the first failure.
+ */
+bool
+s3_header_mark_part_load_failed(S3HeaderTag tag, int index)
+{
+	uint32		value;
+	bool		firstFailure;
+
+	value = s3_header_read_value(tag, index);
+
+	while (true)
+	{
+		uint32		newValue;
+
+		if (S3_PART_GET_STATUS(value) != S3PartStatusLoading)
+			return false;
+		firstFailure = (value & S3_PART_LOAD_FAILED_FLAG) == 0;
+		newValue = S3_PART_SET_STATUS(value, S3PartStatusNotLoaded) |
+			S3_PART_LOAD_FAILED_FLAG;
+
+		if (s3_header_compare_and_swap(tag, index, &value, newValue))
+		{
+			pg_atomic_fetch_sub_u64(&meta->numberOfLoadedParts, 1);
+			return firstFailure;
+		}
 	}
 }
 

@@ -661,15 +661,19 @@ s3_put_file_part(char *objectname, char *filename, int partnum)
 }
 
 /*
- * Get the file part from S3 object.
+ * Get the file part from S3 object.  Returns false if the object is missing.
  */
-void
+bool
 s3_get_file_part(char *objectname, char *filename, int partnum)
 {
 	StringInfoData buf;
 
 	initStringInfo(&buf);
-	s3_get_object(objectname, &buf, false);
+	if (s3_get_object(objectname, &buf, true) == S3_RESPONSE_NOT_FOUND)
+	{
+		pfree(buf.data);
+		return false;
+	}
 
 	write_file_part(filename,
 					partnum * ORIOLEDB_S3_PART_SIZE + ORIOLEDB_BLCKSZ,
@@ -677,6 +681,7 @@ s3_get_file_part(char *objectname, char *filename, int partnum)
 					buf.len);
 
 	pfree(buf.data);
+	return true;
 }
 
 /*

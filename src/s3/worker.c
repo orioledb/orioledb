@@ -351,6 +351,7 @@ s3process_task(uint64 taskLocation)
 	{
 		char	   *filename;
 		S3HeaderTag tag;
+		bool		found;
 
 		filename = btree_filename(task->typeSpecific.filePart.key,
 								  task->typeSpecific.filePart.segNum,
@@ -365,11 +366,35 @@ s3process_task(uint64 taskLocation)
 
 		elog(DEBUG1, "S3 part get %s %s", objectname, filename);
 
-		s3_get_file_part(objectname, filename, task->typeSpecific.filePart.partNum);
+		found = s3_get_file_part(objectname, filename,
+								 task->typeSpecific.filePart.partNum);
 
 		tag.key = task->typeSpecific.filePart.key;
 		tag.checkpointNum = task->typeSpecific.filePart.chkpNum;
 		tag.segNum = task->typeSpecific.filePart.segNum;
+
+		/*
+		 * Do not error out on a missing object.  A restarted worker replays
+		 * this task forever.  Finish the task so the waiters wake up.  Warn
+		 * only on the first failure of a part.  The woken waiters make a few
+		 * download attempts before they report an error.
+		 */
+		if (!found)
+		{
+			if (s3_header_mark_part_load_failed(tag, task->typeSpecific.filePart.partNum))
+				ereport(WARNING,
+						(errmsg("could not load part %d of file %u/%u (checkpoint %u, segment %d) from S3",
+								task->typeSpecific.filePart.partNum,
+								tag.key.oids.datoid, tag.key.oids.relnode,
+								tag.checkpointNum, tag.segNum),
+						 errdetail("Object \"%s\" does not exist.", objectname)));
+			else
+				elog(DEBUG1, "part %d of file %u/%u (checkpoint %u, segment %d) "
+					 "still missing from S3: object \"%s\" does not exist",
+					 task->typeSpecific.filePart.partNum,
+					 tag.key.oids.datoid, tag.key.oids.relnode,
+					 tag.checkpointNum, tag.segNum, objectname);
+		}
 
 		/*
 		 * A worker that errors out is restarted with bgw_restart_time 0 and
@@ -386,7 +411,8 @@ s3process_task(uint64 taskLocation)
 		 * evicted in between and it just claimed it back for us, and Loaded
 		 * means the first attempt already finished this.
 		 */
-		if (s3_header_mark_part_loading(tag, task->typeSpecific.filePart.partNum) !=
+		if (found &&
+			s3_header_mark_part_loading(tag, task->typeSpecific.filePart.partNum) !=
 			S3PartStatusLoaded)
 			s3_header_mark_part_loaded(tag, task->typeSpecific.filePart.partNum);
 
