@@ -284,15 +284,13 @@ o_tuple_flatten_toast(OTableDescr *descr, TupleTableSlot *slot, bool *allocated)
 	int			nupfront = 0;
 	OTuple		result;
 	Size		len;
-	int			ctid_off = idx->primaryIsCtid ? 1 : 0;
+	int			ctid_off = o_idx_ctid_off(idx);
 	bool		found = false;
 	int			natts;
 	int			i;
 
 	*allocated = false;
 
-	if (idx->bridging)
-		ctid_off++;
 	natts = tupdesc->natts - ctid_off;
 
 	slot_getallattrs(slot);
@@ -1225,7 +1223,7 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 	BTreeDescr *tdesc = &toastd->desc;
 	OTableToastArg arg = {GET_PRIMARY(descr), toastd, descr->version};
 	ToastAPI   *api = &tableToastAPI;
-	int			ctid_off = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
+	int			ctid_off = o_idx_ctid_off(GET_PRIMARY(descr));
 	OToastMultiInsertJob *jobs = NULL;
 	int			njobs = 0;
 	int			allocated_jobs = 0;
@@ -1239,9 +1237,6 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 
 	Assert(descr->toast->desc.type == oIndexToast);
 	Assert(ORelOidsIsEqual(descr->toast->tableOids, descr->oids));
-
-	if (GET_PRIMARY(descr)->bridging)
-		ctid_off++;
 
 	/* Collect (pk, attn, data) jobs from slots' to_toast bitmaps. */
 	for (s = 0; s < nslots; s++)
@@ -1534,7 +1529,7 @@ o_toast_emit_slot_wal(OTableDescr *descr, TupleTableSlot *slot)
 	BTreeDescr *tdesc = &toastd->desc;
 	OTableToastArg arg = {GET_PRIMARY(descr), toastd, descr->version};
 	ToastAPI   *api = &tableToastAPI;
-	int			ctid_off = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
+	int			ctid_off = o_idx_ctid_off(GET_PRIMARY(descr));
 	OTuple		idx_tup;
 	int			i;
 
@@ -1542,9 +1537,6 @@ o_toast_emit_slot_wal(OTableDescr *descr, TupleTableSlot *slot)
 		return;
 	if (oslot->to_toast == NULL)
 		return;
-
-	if (GET_PRIMARY(descr)->bridging)
-		ctid_off++;
 
 	idx_tup = tts_orioledb_make_key(slot, descr);
 
