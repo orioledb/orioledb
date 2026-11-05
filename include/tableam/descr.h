@@ -269,6 +269,16 @@ OIndexKeyAttnumToTupleAttnum(BTreeKeyType keyType, OIndexDescr *idx, int attnum)
 	}
 }
 
+static inline int
+o_idx_ctid_off(OIndexDescr *idx)
+{
+	int			off = idx->primaryIsCtid ? 1 : 0;
+
+	if (idx->bridging)
+		off++;
+	return off;
+}
+
 #define OGetIndexContext(index) \
 	((index)->index_mctx ? \
 	 (index)->index_mctx : \
