@@ -20,9 +20,9 @@ The picture below illustrates the recovery scheme involving the main recovery pr
 
 Note that the main process does not distribute the transaction begin message because it does not know which workers will be involved in the transaction. Instead, it attaches the transaction id to the row modification messages. Also, note that OrioleDB transactions are not necessarily continuous chunks in WAL. They could be interleaved.
 
-Main recovery process tracks which worker participates in which transaction. Once the transaction is confirmed and aborted in the WAL stream, the main process spreads this message to the participating workers.
+Main recovery process tracks which worker participates in which transaction. Once the transaction is committed or aborted in the WAL stream, the main process spreads this message to the participating workers.
 
-Recovery workers are not synchronized on each transaction finish. So, worker #2 can process the `delete` message before worker #2 completes the `commit` message. It is possible because each worker has his own notion of finished transactions.
+Recovery workers are not synchronized on each transaction finish. So, worker #2 can process the `delete` message before worker #1 completes the `commit` message. It is possible because each worker has his own notion of finished transactions.
 
 Recovery processes store the recovery transaction statuses in `recovery_xid_state_hash`. When transaction status needs to be clarified, the recovery process first checks `recovery_xid_state_hash` and only then the shared memory. The main recovery process updates transaction status in the shared memory only when all the worker processes have already processed the transaction finish message. Consequently, once the transaction status is updated in shared memory, the worker process can remove its entry from the hash.
 

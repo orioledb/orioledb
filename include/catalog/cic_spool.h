@@ -96,7 +96,7 @@ extern void cic_spool_ensure_dir(ORelOids tableOids, OXid builderOxid);
  * per-backend file on first call; subsequent calls write to the same
  * fd.  Caller must already hold an OXid-level guarantee that the CIC
  * directory exists (cic_spool_ensure_dir is called once by the CIC
- * driver at phase-1 start).
+ * driver in ambuild, before the new OIndex is inserted).
  */
 extern void cic_spool_append(ORelOids tableOids, OXid builderOxid,
 							 UndoLocation undoPos, CICOpType opType,

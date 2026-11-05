@@ -25,7 +25,7 @@ Once we need to add a new undo record, but the corresponding space is still occu
 
 ![Undo log split](../images/undo_buffer_3.svg)
 
-The two pictures below explain how we write a chunk of undo records into the data file. At first, we set the "write in-progress" location. This means that undo records within the range [written location; write in-progress location) are about to be written to undo files. During this period, undo records from this range can still be read from the circular buffer but can't be written (in some situations, we need to update existing undo records).
+The two pictures below explain how we write a chunk of undo records into the undo file. At first, we set the "write in-progress" location. This means that undo records within the range [written location; write in-progress location) are about to be written to undo files. During this period, undo records from this range can still be read from the circular buffer but can't be written (in some situations, we need to update existing undo records).
 
 ![Undo log write in-progress](../images/undo_buffer_4.svg)
 

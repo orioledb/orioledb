@@ -76,26 +76,6 @@ snouty launch \
   --webhook basic_test
 ```
 
-#### sk-recovery-race[-chaos]
-
-```
-# ref before fix
-make build push CFG='workload/sk-recovery-race' PG_MAJOR=18 ORIOLEDB_REF=ce4681c77e3a0b8e67f900704bb598838837171e
-
-# optional
-snouty validate target/
-
-snouty launch \
-  --config-image "$(make config-image CFG='workload/sk-recovery-race' PG_MAJOR=18 ORIOLEDB_REF=ce4681c77e3a0b8e67f900704bb598838837171e)" \
-  --test-name 'sk-recovery-race' \
-  --description 'sk-recovery-race trial' \
-  --duration 20m \
-  --ephemeral \
-  --param custom.container_faults_enable=true \
-  --param custom.container_faults_exclusion='sk-recovery-race-chaos-client' \
-  --webhook supabase
-```
-
 ## Usage
 
 Before pushing to Antithesis, it's worth running your changes locally. 

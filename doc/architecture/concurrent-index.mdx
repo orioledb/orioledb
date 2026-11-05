@@ -99,11 +99,11 @@ entry to its own file:
 orioledb_data/cic_<datoid>_<reloid>_<builderOxid>/spool_<backendid>.bin
 ```
 
-The per-CIC directory is created by `cic_spool_ensure_dir` once at phase-1
-start; each backend lazily opens its own `spool_<backendid>.bin` on first
-append and holds the file descriptor until backend exit (or
-`cic_spool_close_local`).  No cross-backend coordination is required: every
-backend writes to a private file, and the builder merges them.
+The per-CIC directory is created by `cic_spool_ensure_dir` once in ambuild,
+before the new `OIndex` is inserted; each backend lazily opens its own
+`spool_<backendid>.bin` on first append and holds the file descriptor until
+backend exit (or `cic_spool_close_local`).  No cross-backend coordination is
+required: every backend writes to a private file, and the builder merges them.
 
 Each spool entry records:
 
