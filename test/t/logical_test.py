@@ -491,6 +491,80 @@ class LogicalTest(BaseTest):
 		    "table public.log: INSERT: id[integer]:9\n"
 		    "COMMIT\n")
 
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_savepoint_xid_reuse_after_release(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE data(id int primary key) USING orioledb;\n"
+		    "CREATE TABLE h_data(id int primary key) USING heap;\n")
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		# s2 starts after s1 is released.  If s2 gets s1's logical xid,
+		# ROLLBACK TO s2 also drops the row of s1.  The s2 that ROLLBACK TO
+		# starts again may reuse the xid of the rolled back one.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO data VALUES (1);\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data VALUES (2);\n"
+		    "RELEASE SAVEPOINT s1;\n"
+		    "SAVEPOINT s2;\n"
+		    "INSERT INTO data VALUES (3);\n"
+		    "ROLLBACK TO s2;\n"
+		    "INSERT INTO data VALUES (10);\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:1\n"
+		    "table public.data: INSERT: id[integer]:2\n"
+		    "table public.data: INSERT: id[integer]:10\n"
+		    "COMMIT\n")
+
+		# The same with PL/pgSQL EXCEPTION blocks: the first one succeeds,
+		# the second one fails.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO data VALUES (4);\n"
+		    "DO $$ BEGIN\n"
+		    "  INSERT INTO data VALUES (5);\n"
+		    "EXCEPTION WHEN others THEN NULL; END $$;\n"
+		    "DO $$ BEGIN\n"
+		    "  INSERT INTO data VALUES (6);\n"
+		    "  RAISE EXCEPTION 'rollback';\n"
+		    "EXCEPTION WHEN others THEN NULL; END $$;\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:4\n"
+		    "table public.data: INSERT: id[integer]:5\n"
+		    "COMMIT\n")
+
+		# The same with a heap xid: s1 ends with a joint commit.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO h_data VALUES (1);\n"
+		    "INSERT INTO data VALUES (7);\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data VALUES (8);\n"
+		    "RELEASE SAVEPOINT s1;\n"
+		    "SAVEPOINT s2;\n"
+		    "INSERT INTO data VALUES (9);\n"
+		    "ROLLBACK TO s2;\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.h_data: INSERT: id[integer]:1\n"
+		    "table public.data: INSERT: id[integer]:7\n"
+		    "table public.data: INSERT: id[integer]:8\n"
+		    "COMMIT\n")
+
 	def test_simple_replident(self):
 		node = self.node
 		node.start()  # start PostgreSQL
@@ -566,6 +640,42 @@ class LogicalTest(BaseTest):
 		        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
 		    ))
 		#print(result)
+
+	def test_logical_subscription_savepoint_reuse(self):
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubscriber()
+			with subscriber.start() as subscriber:
+				setup_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE o_data(id int primary key) USING orioledb;
+				"""
+				publisher.safe_psql(setup_sql)
+				subscriber.safe_psql(setup_sql)
+
+				pub = publisher.publish('test_pub', tables=['o_data'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
+
+				# s2 must not drop the rows of the released s1.
+				publisher.safe_psql("""
+					BEGIN;
+					INSERT INTO o_data VALUES (1);
+					SAVEPOINT s1;
+					INSERT INTO o_data VALUES (2);
+					RELEASE SAVEPOINT s1;
+					SAVEPOINT s2;
+					INSERT INTO o_data VALUES (3);
+					ROLLBACK TO s2;
+					COMMIT;
+				""")
+
+				sub.catchup()
+
+				self.assertListEqual(
+				    subscriber.execute('SELECT * FROM o_data ORDER BY id'),
+				    [(1, ), (2, )])
 
 	def test_logical_subscription_drop_table(self):
 		with self.node as publisher:
