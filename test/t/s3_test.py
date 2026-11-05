@@ -1079,3 +1079,89 @@ class S3Test(S3BaseTest):
 				)
 
 				new_node.cleanup()
+
+	def test_s3_missing_part_error(self):
+		# A data part missing from S3 must fail the query with an error, not
+		# make the S3 worker restart forever and hang the query and shutdown.
+		from threading import Thread
+
+		node = self.node
+		desired = 20 * 1024 * 1024
+
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+			orioledb.s3_desired_size = {desired // (1024 * 1024)}MB
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		# Random ~1.9KB values: incompressible and below the TOAST threshold
+		node.safe_psql("""
+			CREATE TABLE o_test (
+				id int PRIMARY KEY,
+				value text NOT NULL
+			) USING orioledb;
+			INSERT INTO o_test (id, value)
+			SELECT id, (SELECT string_agg(md5(random()::text || g::text), '')
+			            FROM generate_series(1, 60) g WHERE id > 0)
+			FROM generate_series(1, 30000) id;
+		""")
+		node.safe_psql("CHECKPOINT")
+
+		# Empty the page pool and let eviction shrink the local cache, so the
+		# scan has to fetch parts from S3
+		node.stop()
+		node.start()
+		node.safe_psql("CHECKPOINT")
+		deadline = time.time() + 120
+		while self.get_data_size() > desired:
+			if time.time() > deadline:
+				self.fail("local cache never shrank below desired size")
+			time.sleep(1)
+
+		# Remove every data part of this database from the bucket
+		datoid = node.execute(
+		    "SELECT oid FROM pg_database WHERE datname = current_database()"
+		)[0][0]
+		part_re = re.compile(rf"^orioledb_data/\d+/{datoid}/\d+\.\d+\.\d+$")
+		parts = []
+		paginator = self.client.get_paginator("list_objects_v2")
+		for page in paginator.paginate(Bucket=self.bucket_name,
+		                               Prefix="orioledb_data/"):
+			for obj in page.get("Contents", []):
+				if part_re.match(obj["Key"]):
+					parts.append(obj)
+		self.assertGreater(sum(obj["Size"] for obj in parts), desired)
+		for obj in parts:
+			self.client.delete_object(Bucket=self.bucket_name, Key=obj["Key"])
+
+		# Run the scan in a thread so a hang cannot block the test itself
+		result = {}
+
+		def run_query():
+			try:
+				result["rows"] = node.execute("SELECT COUNT(*) FROM o_test")
+			except Exception as e:
+				result["error"] = str(e)
+
+		t = Thread(target=run_query, daemon=True)
+		t.start()
+		t.join(60)
+		hung = t.is_alive()
+		if hung:
+			node.stop(['-m', 'immediate'])
+		self.assertFalse(hung, "query on a missing part hung")
+
+		with open(node.pg_log_file) as f:
+			log = f.read()
+		self.assertIn("error", result, "query on a missing part succeeded")
+		self.assertRegex(log, r"(ERROR|FATAL):\s+(could not|can not) read")
+		self.assertIn("could not load part", log)
+		self.assertNotIn("could not get object from S3", log)
+		node.stop()
