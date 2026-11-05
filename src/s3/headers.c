@@ -1233,7 +1233,8 @@ eviction_callback(S3HeaderTag tag)
 {
 	int			fd;
 	char	   *filename;
-	off_t		fileSize;
+	off_t		fileSize,
+				dataSize;
 	int			i;
 	int			numParts;
 	bool		haveLoadedParts = false;
@@ -1247,12 +1248,20 @@ eviction_callback(S3HeaderTag tag)
 
 	fileSize = lseek(fd, 0, SEEK_END);
 
-	numParts = (fileSize + ORIOLEDB_S3_PART_SIZE - 1) / ORIOLEDB_S3_PART_SIZE;
+	/*
+	 * Parts start right after the header block, so count them over the data
+	 * area only.  Counting the header in makes the part that the file has not
+	 * reached yet an eviction candidate.  Eviction marks that part as not
+	 * loaded, and a later write requests it from S3, where nobody uploaded
+	 * it.
+	 */
+	dataSize = fileSize > ORIOLEDB_BLCKSZ ? fileSize - ORIOLEDB_BLCKSZ : 0;
+	numParts = (dataSize + ORIOLEDB_S3_PART_SIZE - 1) / ORIOLEDB_S3_PART_SIZE;
 	for (i = 0; i < numParts; i++)
 	{
 		uint32		value;
 
-		if (i == numParts - 1 && fileSize < (uint64) numParts * (uint64) ORIOLEDB_S3_PART_SIZE)
+		if (i == numParts - 1 && dataSize < (uint64) numParts * (uint64) ORIOLEDB_S3_PART_SIZE)
 		{
 			static pg_prng_state random_state;
 			static bool seed_initialized = false;
@@ -1264,7 +1273,7 @@ eviction_callback(S3HeaderTag tag)
 			}
 
 			if (pg_prng_int32(&random_state) % ORIOLEDB_S3_PART_SIZE >
-				fileSize - (uint64) (numParts - 1) * (uint64) ORIOLEDB_S3_PART_SIZE)
+				dataSize - (uint64) (numParts - 1) * (uint64) ORIOLEDB_S3_PART_SIZE)
 			{
 				continue;
 			}
