@@ -20,7 +20,7 @@
 #define S3_RESPONSE_CONDITION_FAILED	412
 
 extern long s3_put_file(char *objectname, char *filename, bool ifNoneMatch);
-extern void s3_get_file(char *objectname, char *filename);
+extern bool s3_get_file(char *objectname, char *filename);
 extern void s3_put_empty_dir(char *objectname);
 extern long s3_put_file_part(char *objectname, char *filename, int partnum);
 extern bool s3_get_file_part(char *objectname, char *filename, int partnum);

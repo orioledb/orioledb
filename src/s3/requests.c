@@ -620,21 +620,26 @@ s3_put_file(char *objectname, char *filename, bool ifNoneMatch)
 }
 
 /*
- * Get the whole file from S3 object.
+ * Get the whole file from S3 object.  Returns false if the object is missing.
  */
-void
+bool
 s3_get_file(char *objectname, char *filename)
 {
 	StringInfoData buf;
 
 	initStringInfo(&buf);
-	s3_get_object(objectname, &buf, false);
+	if (s3_get_object(objectname, &buf, true) == S3_RESPONSE_NOT_FOUND)
+	{
+		pfree(buf.data);
+		return false;
+	}
 
 	write_file(filename,
 			   (Pointer) buf.data,
 			   buf.len);
 
 	pfree(buf.data);
+	return true;
 }
 
 /*

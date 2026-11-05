@@ -342,7 +342,33 @@ s3process_task(uint64 taskLocation)
 
 		elog(DEBUG1, "S3 map get %s %s", objectname, filename);
 
-		s3_get_file(objectname, filename);
+		/*
+		 * Do not error out on a missing object.  A restarted worker replays
+		 * this task forever.  The waiting backend finds no map file and
+		 * reports the error.  Return the map to not loaded, so a later
+		 * request schedules a new task instead of waiting for this one.  Warn
+		 * only on the first failure.
+		 */
+		if (!s3_get_file(objectname, filename))
+		{
+			S3HeaderTag tag = {
+				.key = task->typeSpecific.filePart.key,
+				.checkpointNum = task->typeSpecific.filePart.chkpNum,
+				.segNum = task->typeSpecific.filePart.segNum
+			};
+
+			if (s3_header_mark_part_load_failed(tag, task->typeSpecific.filePart.partNum))
+				ereport(WARNING,
+						(errmsg("could not load map file of %u/%u (checkpoint %u) from S3",
+								tag.key.oids.datoid, tag.key.oids.relnode,
+								tag.checkpointNum),
+						 errdetail("Object \"%s\" does not exist.", objectname)));
+			else
+				elog(DEBUG1, "map file of %u/%u (checkpoint %u) still missing "
+					 "from S3: object \"%s\" does not exist",
+					 tag.key.oids.datoid, tag.key.oids.relnode,
+					 tag.checkpointNum, objectname);
+		}
 
 		pfree(filename);
 		pfree(objectname);
@@ -703,7 +729,9 @@ s3_schedule_file_part_write(uint32 chkpNum, OIndexKey key,
 }
 
 /*
- * Schedule the read of given data file part from S3.
+ * Schedule the read of given data file part from S3.  Returns the location of
+ * the task to wait for, or InvalidS3TaskLocation if the part is already
+ * loaded.
  */
 static S3TaskLocation
 s3_schedule_file_part_read(uint32 chkpNum, OIndexKey key, int32 segNum,
@@ -737,7 +765,11 @@ s3_schedule_file_part_read(uint32 chkpNum, OIndexKey key, int32 segNum,
 	}
 	else if (status == S3PartStatusLoaded)
 	{
-		return 0;
+		/*
+		 * Nothing to wait for.  Location 0 can't mean that: it is a valid
+		 * location, the one of the first task after startup.
+		 */
+		return InvalidS3TaskLocation;
 	}
 	Assert(status == S3PartStatusNotLoaded);
 
@@ -848,7 +880,8 @@ s3_schedule_downlink_load(BTreeDescr *desc, uint64 downlink)
 		segNum = byte_offset / ORIOLEDB_SEGMENT_SIZE;
 		partNum = (byte_offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
 		location = s3_schedule_file_part_read(chkpNum, key, segNum, partNum);
-		result = Max(result, location);
+		if (location != InvalidS3TaskLocation)
+			result = Max(result, location);
 		if (byte_offset % ORIOLEDB_S3_PART_SIZE + read_size > ORIOLEDB_S3_PART_SIZE)
 		{
 			uint64		shift = ORIOLEDB_S3_PART_SIZE - byte_offset % ORIOLEDB_S3_PART_SIZE;
@@ -932,7 +965,7 @@ s3_load_file_part(uint32 chkpNum, OIndexKey key, int32 segNum, int32 partNum)
 
 	location = s3_schedule_file_part_read(chkpNum, key, segNum, partNum);
 
-	if (location > 0)
+	if (location != InvalidS3TaskLocation)
 		s3_queue_wait_for_location(location);
 }
 
@@ -943,7 +976,7 @@ s3_load_map_file(uint32 chkpNum, OIndexKey key)
 
 	location = s3_schedule_file_part_read(chkpNum, key, -1, 0);
 
-	if (location > 0)
+	if (location != InvalidS3TaskLocation)
 		s3_queue_wait_for_location(location);
 }
 
