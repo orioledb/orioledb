@@ -1187,6 +1187,7 @@ o_toast_insert(OTableDescr *descr, OTuple pk, uint16 attn,
 typedef struct OToastMultiInsertJob
 {
 	OTuple		pk;
+	TupleTableSlot *slot;
 	Datum		value;
 	Pointer		data;
 	Size		size;
@@ -1233,7 +1234,8 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 				j_start;
 	uint32		chunk_start = 0;
 	bool		ok = true;
-	uint16		failed_attnum = 0;
+	char	   *failed_colname = NULL;
+	char	   *failed_pk_str = NULL;
 
 	Assert(descr->toast->desc.type == oIndexToast);
 	Assert(ORelOidsIsEqual(descr->toast->tableOids, descr->oids));
@@ -1269,6 +1271,7 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 					: (OToastMultiInsertJob *) palloc(sizeof(OToastMultiInsertJob) * allocated_jobs);
 			}
 			jobs[njobs].pk = idx_tup;
+			jobs[njobs].slot = slots[s];
 			jobs[njobs].attnum = i + 1 + ctid_off;
 			jobs[njobs].value = slots[s]->tts_values[i];
 			jobs[njobs].data = NULL;
@@ -1451,7 +1454,23 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 							   oxid, csn, RowLockUpdate,
 							   NULL, &nullCallbackInfo) != OBTreeModifyResultInserted)
 			{
-				failed_attnum = ((OToastKey *) use_keyptrs[i])->attnum;
+				{
+					OToastKey  *fkey = (OToastKey *) use_keyptrs[i];
+					int			col = fkey->attnum - 1 - ctid_off;
+
+					failed_colname = pstrdup(NameStr(TupleDescAttr(
+																   RelationGetDescr(rel), col)->attname));
+					for (int fj = j_start; fj < next_job; fj++)
+					{
+						if (jobs[fj].pk.data == fkey->pk_tuple.data &&
+							jobs[fj].attnum == fkey->attnum)
+						{
+							failed_pk_str = tss_orioledb_print_idx_key(
+																	   jobs[fj].slot, GET_PRIMARY(descr));
+							break;
+						}
+					}
+				}
 				ok = false;
 				i++;
 				break;
@@ -1510,8 +1529,9 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 				(errcode(ERRCODE_INTERNAL_ERROR),
 				 errmsg("Unable to insert TOASTable value in \"%s\"",
 						RelationGetRelationName(rel)),
-				 errdetail("Failed to insert TOAST chunks for attribute %u.",
-						   failed_attnum)));
+				 errdetail("Unable to insert column \"%s\" for primary key %s into TOAST",
+						   failed_colname ? failed_colname : "unknown",
+						   failed_pk_str ? failed_pk_str : "unknown")));
 }
 
 /*
