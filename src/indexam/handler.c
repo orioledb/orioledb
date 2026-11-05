@@ -19,6 +19,7 @@
 
 #include "btree/iterator.h"
 #include "btree/modify.h"
+#include "btree/check.h"
 #include "catalog/cic_spool.h"
 #include "catalog/indices.h"
 #include "catalog/o_indices.h"
@@ -109,6 +110,8 @@ static Size orioledb_amestimateparallelscan(void);
 #endif
 static void orioledb_aminitparallelscan(void *target);
 static void orioledb_amparallelrescan(IndexScanDesc scan);
+static void orioledb_amverify(Relation indexRelation, Relation heapRelation,
+							  const IndexVerifyOptions *options);
 static BlockNumber orioledb_amnblocks(Relation indexRelation, ForkNumber forkNum);
 
 static IndexBuildResult *bridged_ambuild(Relation heap, Relation index, IndexInfo *indexInfo);
@@ -187,6 +190,7 @@ orioledb_btree_handler(void)
 	amroutine->amestimateparallelscan = orioledb_amestimateparallelscan;
 	amroutine->aminitparallelscan = orioledb_aminitparallelscan;
 	amroutine->amparallelrescan = orioledb_amparallelrescan;
+	amroutine->amverify = orioledb_amverify;
 	amroutine->amnblocks = orioledb_amnblocks;
 
 	return amroutine;
@@ -2265,6 +2269,87 @@ orioledb_aminitparallelscan(void *target)
 static void
 orioledb_amparallelrescan(IndexScanDesc scan)
 {
+}
+
+static void
+amverify_report_err(const char *msg)
+{
+	ereport(ERROR,
+			(errcode(ERRCODE_INDEX_CORRUPTED),
+			 errmsg("%s", msg)));
+}
+
+static void
+orioledb_amverify(Relation indexRelation, Relation heapRelation,
+				  const IndexVerifyOptions *options)
+{
+	OTableDescr *descr;
+	OIndexDescr *index_descr = NULL;
+	bool		heapallindexed;
+	char	   *name;
+	int			i;
+
+	if (options->checkunique)
+		ereport(WARNING,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("option checkunique is not supported for OrioleDB"
+						"indexes, ignoring it")));
+
+	descr = relation_get_descr(heapRelation);
+	if (descr == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("relation \"%s\" is not an OrioleDB object",
+						RelationGetRelationName(heapRelation))));
+
+	for (i = 0; i < descr->nIndices; ++i)
+	{
+		if (descr->indices[i]->oids.reloid == RelationGetRelid(indexRelation))
+		{
+			index_descr = descr->indices[i];
+			break;
+		}
+	}
+
+	if (index_descr == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("could not find index \"%s\"",
+						RelationGetRelationName(indexRelation))));
+
+	name = psprintf("index \"%s\"", RelationGetRelationName(indexRelation));
+
+	/*
+	 * heapallindexed only applies to secondary indexes.  For a primary index
+	 * there is no separate table to cross-reference.
+	 */
+	heapallindexed = options->heapallindexed;
+	if (heapallindexed && index_descr->desc.type == oIndexPrimary)
+	{
+		ereport(WARNING,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("option heapallindexed is not applicable to primary index \"%s\", ignoring it",
+						RelationGetRelationName(indexRelation))));
+		heapallindexed = false;
+	}
+
+	if (heapallindexed)
+	{
+		/*
+		 * The primary index is walked (and thus fully checked) as part of the
+		 * heapallindexed verification, so load its shared state too.
+		 */
+		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+	}
+
+	o_btree_load_shmem(&index_descr->desc);
+	check_btree_structure(&index_descr->desc, name, options->parentcheck,
+						  options->rootdescend, amverify_report_err,
+						  heapallindexed, index_descr,
+						  heapallindexed ? GET_PRIMARY(descr) : NULL,
+						  heapallindexed ? descr : NULL);
+
+	pfree(name);
 }
 
 static BlockNumber

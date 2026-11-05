@@ -15,6 +15,7 @@
 #define __BTREE_CHECK_H__
 
 #include "btree/btree.h"
+#include "tableam/descr.h"
 
 typedef struct
 {
@@ -34,8 +35,17 @@ typedef struct
 	BTreeCompressRange *ranges;
 } BTreeCompressStats;
 
+typedef void (*BTreeCheckReport) (const char *msg);
+
 extern bool check_btree(BTreeDescr *desc, bool force_file_check,
 						bool wait_for_checkpoint);
+extern void check_btree_structure(BTreeDescr *desc, const char *name,
+								  bool parentcheck, bool rootdescend,
+								  BTreeCheckReport report,
+								  bool heapallindexed,
+								  OIndexDescr *secondaryIndex,
+								  OIndexDescr *primaryIndex,
+								  OTableDescr *tableDescr);
 extern void check_btree_compression(BTreeDescr *desc,
 									BTreeCompressStats *stats,
 									OCompress lvl);
