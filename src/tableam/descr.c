@@ -40,12 +40,14 @@
 #include "access/nbtree.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_opfamily.h"
+#include "catalog/pg_type.h"
 #include "common/hashfn.h"
 #include "executor/functions.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "parser/parse_coerce.h"
 #include "utils/builtins.h"
+#include "utils/fmgroids.h"
 #include "utils/fmgrtab.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -74,6 +76,7 @@ static void o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode
 static bool o_tree_init_free_extents(BTreeDescr *desc);
 static OComparator *o_find_opclass_comparator(OOpclass *opclass, Oid collation,
 											  Oid exacttype);
+static void o_preload_comparator_metadata(OComparator *comparator);
 static inline OComparator *o_find_cached_comparator(OComparatorKey *key);
 static inline OComparator *o_add_comparator_to_cache(OComparator *comparator);
 static bool recreate_table_descr(OTableDescr *descr);
@@ -2027,6 +2030,76 @@ o_resolve_collation(Oid collation)
 }
 
 /*
+ * Prime metadata that PostgreSQL's generic comparators otherwise fetch on
+ * their first call.  That call can come from a page walk with a victim page
+ * locked, while the syscache hooks may need to read an OrioleDB catalog page.
+ */
+static void
+o_preload_comparator_type(Oid type, bool nested, List **visited)
+{
+	TypeCacheEntry *typentry;
+	int			flags = TYPECACHE_TUPDESC |
+		TYPECACHE_RANGE_INFO |
+		TYPECACHE_MULTIRANGE_INFO |
+		TYPECACHE_DOMAIN_BASE_INFO;
+	int			i;
+
+	if (!OidIsValid(type))
+		return;
+
+	/* Parent generic comparators look up their child comparison functions. */
+	if (nested)
+		flags |= TYPECACHE_CMP_PROC_FINFO;
+	typentry = lookup_type_cache(type, flags);
+	if (list_member_oid(*visited, type))
+		return;
+	*visited = lappend_oid(*visited, type);
+
+	if (typentry->typtype == TYPTYPE_DOMAIN)
+		o_preload_comparator_type(typentry->domainBaseType, nested, visited);
+	else if (IsTrueArrayType(typentry))
+		o_preload_comparator_type(typentry->typelem, true, visited);
+	else if (typentry->typtype == TYPTYPE_COMPOSITE && typentry->tupDesc)
+	{
+		for (i = 0; i < typentry->tupDesc->natts; i++)
+		{
+			Form_pg_attribute attr = TupleDescAttr(typentry->tupDesc, i);
+
+			if (!attr->attisdropped)
+				o_preload_comparator_type(attr->atttypid, true, visited);
+		}
+	}
+	else if (typentry->typtype == TYPTYPE_RANGE && typentry->rngelemtype)
+		o_preload_comparator_type(typentry->rngelemtype->type_id, false,
+								  visited);
+	else if (typentry->typtype == TYPTYPE_MULTIRANGE && typentry->rngtype)
+		o_preload_comparator_type(typentry->rngtype->type_id, false, visited);
+}
+
+static void
+o_preload_comparator_metadata(OComparator *comparator)
+{
+	List	   *visited = NIL;
+
+	if (comparator->haveSortSupport)
+		return;
+
+	switch (comparator->finfo.fn_oid)
+	{
+		case F_BTARRAYCMP:
+		case F_BTRECORDCMP:
+		case F_RANGE_CMP:
+		case F_MULTIRANGE_CMP:
+			o_preload_comparator_type(comparator->key.exacttype, false,
+									  &visited);
+			list_free(visited);
+			break;
+		default:
+			break;
+	}
+}
+
+/*
  * Find opfamily comparator for given datatypes and collation.  Throws error
  * if not found.
  */
@@ -2206,6 +2279,8 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation, Oid exacttype)
 
 		o_resolve_collation(collation);
 	}
+	if (!IsTransactionState())
+		o_preload_comparator_metadata(&comparator);
 	o_unset_syscache_hooks();
 
 	return o_add_comparator_to_cache(&comparator);
