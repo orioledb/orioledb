@@ -26,6 +26,115 @@ class StandbyDiverged(Exception):
 
 class ReplicationTest(BaseTest):
 
+	def test_replication_move_database_tablespace(self):
+		"""A database tablespace move must preserve rows on the standby."""
+		master = self.node
+		master.append_conf("allow_in_place_tablespaces = on\n"
+		                   "synchronous_commit = on\n")
+		master.start()
+		master.safe_psql("CREATE TABLESPACE ts1 LOCATION '';")
+		master.safe_psql("CREATE TABLESPACE ts2 LOCATION '';")
+		master.safe_psql("CREATE DATABASE moved TABLESPACE ts1;")
+		master.safe_psql('moved', "CREATE EXTENSION orioledb;")
+		master.safe_psql(
+		    'moved', """
+			CREATE TABLE t (id int, val int, data text) USING orioledb;
+			INSERT INTO t SELECT x, 2 * x, 'test' || x
+				FROM generate_series(1, 10000) x;
+		""")
+
+		replica = self.getReplica()
+		replica.start()
+		master.safe_psql("ALTER SYSTEM SET synchronous_standby_names = '*';")
+		master.reload()
+
+		master.safe_psql("CHECKPOINT;")
+		self.catchup_orioledb(replica)
+		replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
+		                         dbname='moved',
+		                         expected=True)
+		replica.safe_psql("CHECKPOINT;")
+		self.assertEqual(
+		    master.execute('moved', "SELECT * FROM t WHERE id = 500;"),
+		    [(500, 1000, 'test500')])
+		self.assertEqual(
+		    replica.execute('moved', "SELECT * FROM t WHERE id = 500;"),
+		    [(500, 1000, 'test500')])
+
+		master.safe_psql("ALTER DATABASE moved SET TABLESPACE ts2;")
+
+		master.safe_psql("CHECKPOINT;")
+		self.catchup_orioledb(replica)
+		replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
+		                         dbname='moved',
+		                         expected=True)
+		replica.safe_psql("CHECKPOINT;")
+		self.assertEqual(
+		    master.execute('moved', "SELECT * FROM t WHERE id = 500;"),
+		    [(500, 1000, 'test500')])
+		self.assertEqual(
+		    replica.execute('moved', "SELECT * FROM t WHERE id = 500;"),
+		    [(500, 1000, 'test500')])
+
+	def test_replication_move_rewritten_database_tablespace_back(self):
+		"""Evicted descriptors must be invalidated using the rewritten relnode."""
+		master = self.node
+		master.append_conf("allow_in_place_tablespaces = on\n"
+		                   "synchronous_commit = on\n")
+		master.start()
+		master.safe_psql("CREATE TABLESPACE ts1 LOCATION '';")
+		master.safe_psql("CREATE TABLESPACE ts2 LOCATION '';")
+		master.safe_psql("CREATE DATABASE moved TABLESPACE ts1;")
+		master.safe_psql('moved', "CREATE EXTENSION orioledb;")
+		master.safe_psql('moved', "CREATE TABLE t (id int) USING orioledb;")
+		# A separate transaction makes TRUNCATE assign a different relnode.
+		master.safe_psql('moved', "TRUNCATE t;")
+		self.assertTrue(
+		    master.execute(
+		        'moved', "SELECT oid <> pg_relation_filenode(oid) "
+		        "FROM pg_class WHERE oid = 't'::regclass;")[0][0])
+		master.safe_psql('moved', "INSERT INTO t VALUES (1);")
+
+		replica = self.getReplica()
+		replica.start()
+		master.safe_psql("ALTER SYSTEM SET synchronous_standby_names = '*';")
+		master.reload()
+
+		master.safe_psql("CHECKPOINT;")
+		self.catchup_orioledb(replica)
+		replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
+		                         dbname='moved',
+		                         expected=True)
+		replica.safe_psql("CHECKPOINT;")
+		self.assertEqual(replica.execute('moved', "SELECT * FROM t;"), [(1, )])
+
+		master.safe_psql("ALTER DATABASE moved SET TABLESPACE ts2;")
+		master.safe_psql('moved', "INSERT INTO t VALUES (2);")
+		master.safe_psql("CHECKPOINT;")
+		self.catchup_orioledb(replica)
+		replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
+		                         dbname='moved',
+		                         expected=True)
+		replica.safe_psql("CHECKPOINT;")
+		self.assertEqual(
+		    replica.execute('moved', "SELECT * FROM t ORDER BY id;"), [(1, ),
+		                                                               (2, )])
+
+		# Reusing the old tablespace exposes descriptors left behind by eviction.
+		master.safe_psql("ALTER DATABASE moved SET TABLESPACE ts1;")
+		master.safe_psql("CHECKPOINT;")
+		self.catchup_orioledb(replica)
+		replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
+		                         dbname='moved',
+		                         expected=True)
+		replica.safe_psql("CHECKPOINT;")
+		self.assertEqual(
+		    master.execute('moved', "SELECT * FROM t ORDER BY id;"), [(1, ),
+		                                                              (2, )])
+		self.assertEqual(
+		    replica.execute('moved', "SELECT * FROM t ORDER BY id;"), [(1, ),
+		                                                               (2, )])
+
 	def test_replication_simple(self):
 		with self.node as master:
 			master.start()
