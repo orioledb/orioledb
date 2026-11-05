@@ -3448,6 +3448,10 @@ COMMIT\n""")
 		sees sequential chunk_seq per chunk_id.  Grouped WAL (all PK
 		records then all TOAST records) causes chunk_id collisions when
 		multiple rows toast the same attribute.
+
+		Covers two TOAST columns per row and a value large enough to
+		exceed O_TOAST_MULTI_MAX_CHUNKS (128) chunks, crossing a
+		sub-batch boundary.
 		"""
 		with self.node as publisher:
 			publisher.start()
@@ -3471,7 +3475,8 @@ COMMIT\n""")
 					CREATE EXTENSION IF NOT EXISTS orioledb;
 					CREATE TABLE o_toast_multi (
 						id integer PRIMARY KEY,
-						body text
+						body text,
+						body2 text
 					) USING orioledb;
 				"""
 				publisher.safe_psql(gen_string + create_sql)
@@ -3484,20 +3489,24 @@ COMMIT\n""")
 				csvpath = os.path.join(publisher.base_dir, 'toast_multi.csv')
 				publisher.safe_psql("""
 					COPY (
-						SELECT i, generate_string(i, 10000)
+						SELECT i,
+							   generate_string(i, CASE WHEN i = 5
+								   THEN 300000 ELSE 10000 END),
+							   generate_string(i + 100, 10000)
 						FROM generate_series(1, 5) i
 					) TO '%s';
 					COPY o_toast_multi FROM '%s';
 				""" % (csvpath, csvpath))
 
-				expected = publisher.execute(
-				    'SELECT id, length(body) FROM o_toast_multi ORDER BY id')
+				check_query = """
+					SELECT id, md5(body), md5(body2)
+					FROM o_toast_multi ORDER BY id
+				"""
+				expected = publisher.execute(check_query)
 
 				sub.catchup()
 				subscriber.poll_query_until(
 				    "SELECT orioledb_recovery_synchronized();", expected=True)
 
 				self.assertListEqual(
-				    subscriber.execute(
-				        'SELECT id, length(body) FROM o_toast_multi ORDER BY id'
-				    ), expected)
+				    subscriber.execute(check_query), expected)
