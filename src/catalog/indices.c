@@ -931,6 +931,8 @@ o_define_index_concurrent_finish(Relation heap, Relation index)
 									 PrimaryIndexNumber, true, &hint);
 			slot_getallattrs(primarySlot);
 
+			MemoryContextReset(idx->econtext->ecxt_per_tuple_memory);
+
 			if (!o_is_index_predicate_satisfied(idx, primarySlot, idx->econtext))
 			{
 				ExecClearTuple(primarySlot);
@@ -1912,6 +1914,8 @@ build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx,
 	{
 		OTuple		secondaryTup;
 
+		MemoryContextReset(idx->econtext->ecxt_per_tuple_memory);
+
 		if (o_is_index_predicate_satisfied(idx, primarySlot, idx->econtext))
 		{
 			secondaryTup = tts_orioledb_make_secondary_tuple(primarySlot,
@@ -2373,6 +2377,8 @@ rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 			OTuple		newTup;
 
 			idx = descr->indices[i];
+
+			MemoryContextReset(idx->econtext->ecxt_per_tuple_memory);
 
 			if (!o_is_index_predicate_satisfied(idx, primarySlot,
 												idx->econtext))
