@@ -648,6 +648,41 @@ orioledb_debug_recovery_crash_lsn_assign_hook(const char *newval, void *extra)
 }
 #endif							/* IS_DEV */
 
+/*
+ * Make sure the device holds device_length bytes.  Seeking to the end only
+ * reads the size from the kernel, it does no I/O.
+ */
+static void
+check_device_size(int fd)
+{
+	struct stat st;
+	off_t		size;
+
+	if (fstat(fd, &st) < 0)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not stat device file \"%s\": %m",
+						device_filename)));
+
+	/* A regular file grows on write, but mmap past its end is a SIGBUS */
+	if (S_ISREG(st.st_mode) && !use_mmap)
+		return;
+	if (!S_ISREG(st.st_mode) && !S_ISBLK(st.st_mode))
+		return;
+
+	size = lseek(fd, 0, SEEK_END);
+	if (size < 0)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not seek in device file \"%s\": %m",
+						device_filename)));
+
+	if (device_length > (Size) size)
+		ereport(ERROR,
+				(errmsg("orioledb.device_length (%zu bytes) exceeds the size of device file \"%s\" (%lld bytes)",
+						device_length, device_filename, (long long) size)));
+}
+
 void
 _PG_init(void)
 {
@@ -1455,8 +1490,15 @@ _PG_init(void)
 
 	if (device_filename)
 	{
+		if (device_length_guc == 0)
+			ereport(ERROR,
+					(errmsg("orioledb.device_length must be set when orioledb.device_filename is set"),
+					 errhint("Set it to the size of the device, for example '100GB'.")));
+
 		device_fd = BasicOpenFile(device_filename, O_RDWR);
 		device_length = (Size) device_length_guc * BLCKSZ;
+		if (device_fd >= 0)
+			check_device_size(device_fd);
 		if (device_fd < 0)
 		{
 			elog(LOG, "can't open device file %s", device_filename);
@@ -1469,9 +1511,11 @@ _PG_init(void)
 							 MAP_FILE | MAP_SHARED,
 							 device_fd,
 							 0);
-			if (!mmap_data)
-				elog(LOG, "can't map device file %s", device_filename);
-
+			if (mmap_data == MAP_FAILED)
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("could not map device file \"%s\": %m",
+								device_filename)));
 		}
 		if (device_fd >= 0)
 			use_device = true;

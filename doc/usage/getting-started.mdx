@@ -250,6 +250,8 @@ OrioleDB has its own pool of background writer processes (the `orioledb.bgwriter
 
 OrioleDB implements experimental support of direct interaction with block devices mode. This mode removes the overhead of the filesystem.
 
+Instead of one file per table, OrioleDB stores table pages in a single raw device, such as `/dev/nvme0n1` or an NVRAM (DAX) device, and manages the space in it by itself. Pages are read and written at byte offsets in the device, bypassing the filesystem. This is similar to direct IO, but OrioleDB also does the space allocation that a filesystem would do. A regular file can be used instead of a device for testing.
+
 In this mode, the main part of table data is stored in the filesystem, but small metadata is still stored in the data directory.
 
 The current implementation of block devices support contains memory leaks, resulting in the error message `device file overflow` even if the actual data size is much less than block device size. In this case, only the re-initialization of the data directory could help.

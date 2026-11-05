@@ -174,11 +174,13 @@ Path to the block device for block device mode.
 
 ### `orioledb.device_length`
 
-|             |      |
-| ----------- | ---- |
-| **Default** | 1 GB |
+|             |                  |
+| ----------- | ---------------- |
+| **Default** | Not set          |
+| **Unit**    | blocks (8 kB)    |
+| **Context** | restart required |
 
-The length of the block device.
+Size of the block device. Accepts units, e.g. `100GB`; a number without a unit is a count of blocks. The maximum is 2^31 - 1 blocks, which is just under 16 TiB with the default block size. Required when `orioledb.device_filename` is set. Set it to the real device size. OrioleDB reuses freed space, and takes new space from the start of the device up to this limit. A smaller value leaves part of the device unused. At startup, OrioleDB refuses a value larger than the size of a block device (or of a regular file when `orioledb.use_mmap` is on). Other devices, such as DAX devices, are not checked. When no free space is left below the limit, OrioleDB fails with `device file overflow`.
 
 ### `orioledb.use_mmap`
 
@@ -186,7 +188,7 @@ The length of the block device.
 | ----------- | --- |
 | **Default** | off |
 
-Specify whether to use `mmap` to work with the block device. We recommend setting `on` value for NVRAM.
+Map the first `orioledb.device_length` bytes of the block device into memory at startup, instead of using `pread`/`pwrite`. Reads and writes become memory copies, and checkpoints flush the mapping with `msync`. Startup fails if the mapping cannot be created. We recommend setting `on` value for NVRAM.
 
 ### `orioledb.default_compress`
 
