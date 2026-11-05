@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import os
+
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import generate_string as gen_str
@@ -8,6 +10,64 @@ from .base_test import wait_checkpointer_stopevent
 
 
 class ToastIndexTest(BaseTest):
+
+	def test_expression_index_on_toasted(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_toast_expr (\n"
+		    "	id integer PRIMARY KEY,\n"
+		    "	data jsonb\n"
+		    ") USING orioledb;\n")
+
+		con = node.connect()
+
+		con.execute("""
+			INSERT INTO o_toast_expr
+			SELECT i,
+			       jsonb_build_object(
+			           'type', 'item_' || i,
+			           'payload', repeat('x', 4000)
+			       )
+			FROM generate_series(1, 10000) AS i;
+		""")
+
+		pid = int(con.execute("SELECT pg_backend_pid()")[0][0])
+		rss_before = self.get_rss_kb(pid)
+
+		con.execute("CREATE INDEX ON o_toast_expr ((data->>'type'));")
+
+		rss_after = self.get_rss_kb(pid)
+		rss_growth_kb = rss_after - rss_before
+
+		# Sanitizers inflate RSS with shadow memory, skip the check there.
+		if not (os.environ.get('ASAN_OPTIONS')
+		        or os.environ.get('USE_VALGRIND') == '1'):
+			# 10k rows × ~4KB detoasted ≈ 40MB if leaked.
+			# With the fix, per-tuple memory is reset each iteration,
+			# so growth should stay well under 20MB.
+			self.assertLess(
+			    rss_growth_kb, 20 * 1024,
+			    f"RSS grew by {rss_growth_kb} KB during "
+			    f"expression index build, likely a memory leak")
+
+		result = con.execute("""
+			SET enable_seqscan = off;
+			SELECT id FROM o_toast_expr
+			WHERE data->>'type' = 'item_42';
+		""")
+		self.assertEqual(result[0][0], 42)
+
+		con.close()
+		node.stop()
+
+	@staticmethod
+	def get_rss_kb(pid):
+		import subprocess
+		out = subprocess.check_output(['ps', '-o', 'rss=', '-p',
+		                               str(pid)]).decode().strip()
+		return int(out)
 
 	def init_table(self, stopEvents):
 		node = self.node
