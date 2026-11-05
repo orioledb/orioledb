@@ -664,6 +664,29 @@ InvalidOid}}, 0, 0};
 static int	curLockedIndex = 0;
 
 /*
+ * Does the part start at or beyond the end of its local data file?
+ *
+ * The answer is only meaningful for files of unfinished checkpoints.
+ * Eviction keeps their size, so every uploaded part lies within the file.
+ * A part that starts at or past the end has never held any data.  If the
+ * local file is missing, the function cannot tell.  It reports false, and
+ * the caller fetches the part.
+ */
+static bool
+s3_part_is_beyond_eof(S3HeaderTag tag, int index)
+{
+	char	   *filename;
+	struct stat st;
+	bool		result = false;
+
+	filename = btree_filename(tag.key, tag.segNum, tag.checkpointNum);
+	if (stat(filename, &st) == 0)
+		result = (off_t) index * ORIOLEDB_S3_PART_SIZE + ORIOLEDB_BLCKSZ >= st.st_size;
+	pfree(filename);
+	return result;
+}
+
+/*
  * Lock file part in S3 header.  This shouldn't let anybody to concurrently
  * evict the same file part.
  */
@@ -687,6 +710,27 @@ s3_header_lock_part(S3HeaderTag tag, int index, uint32 *loadId)
 
 		if (status == S3PartStatusNotLoaded)
 		{
+			/*
+			 * A part of an unfinished checkpoint that the file has not
+			 * reached yet holds no data.  Nobody uploaded it, so a request to
+			 * S3 can only fail.  Claim it as an empty loaded part instead.
+			 * Files of completed checkpoints can exist locally with the
+			 * header only while their contents live in S3.  The check must
+			 * not apply to them.
+			 */
+			if (tag.checkpointNum > checkpoint_state->lastCheckpointNumber &&
+				s3_part_is_beyond_eof(tag, index))
+			{
+				elog(LOG, "part %d of file %u/%u (checkpoint %u, segment %d) is "
+					 "marked not loaded but lies beyond the end of the local file, "
+					 "treating it as empty",
+					 index, tag.key.oids.datoid, tag.key.oids.relnode,
+					 tag.checkpointNum, tag.segNum);
+				if (s3_header_mark_part_loading(tag, index) == S3PartStatusNotLoaded)
+					s3_header_mark_part_loaded(tag, index);
+				value = s3_header_read_value(tag, index);
+				continue;
+			}
 			s3_load_file_part(tag.checkpointNum, tag.key, tag.segNum, index);
 			value = s3_header_read_value(tag, index);
 			continue;
