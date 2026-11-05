@@ -4749,6 +4749,9 @@ handle_movedb(Oid dbOid, Oid src_tblspcoid, Oid dst_tblspcoid)
 		EvictedTreeData *evicted_data = NULL;
 		Oid			relnode = lfirst_oid(lc);
 
+		/* Clean trees may have only a checkpoint map, not evicted data. */
+		o_move_latest_chkp_num(dbOid, relnode, src_tblspcoid, dst_tblspcoid);
+
 		evicted_data = read_evicted_data(dbOid, relnode, src_tblspcoid, true);
 
 		if (evicted_data != NULL)

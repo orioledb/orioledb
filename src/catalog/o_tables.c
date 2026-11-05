@@ -1578,7 +1578,7 @@ o_tables_evict_callback(OTable *o_table, void *arg)
 	args->evicted = lappend_oid(args->evicted, td->oids.relnode);
 
 	table_descr_dec_refcnt(descr);
-	o_invalidate_descrs(descr->oids.datoid, descr->oids.reloid, descr->oids.reloid);
+	o_invalidate_descrs(descr->oids.datoid, descr->oids.reloid, descr->oids.relnode);
 }
 
 void
