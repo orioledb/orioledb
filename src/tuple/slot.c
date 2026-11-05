@@ -691,10 +691,7 @@ detoast_key_attrs(TupleTableSlot *slot, OTableDescr *descr)
 	OIndexDescr *id = GET_PRIMARY(descr);
 	TupleDesc	tupleDesc = slot->tts_tupleDescriptor;
 	int			i;
-	int			ctid_off = id->primaryIsCtid ? 1 : 0;
-
-	if (id->bridging)
-		ctid_off++;
+	int			ctid_off = o_idx_ctid_off(id);
 
 	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
 	{
@@ -1305,14 +1302,7 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 	AttrNumber	toast_attn;
 	bool		has_toasted = false;
 	TupleDesc	tupdesc = slot->tts_tupleDescriptor;
-	bool		primaryIsCtid;
-	int			ctid_off;
-
-	primaryIsCtid = GET_PRIMARY(descr)->primaryIsCtid;
-	ctid_off = primaryIsCtid ? 1 : 0;
-
-	if (GET_PRIMARY(descr)->bridging)
-		ctid_off++;
+	int			ctid_off = o_idx_ctid_off(GET_PRIMARY(descr));
 
 	slot_getallattrs(slot);
 
@@ -1636,10 +1626,7 @@ tts_orioledb_insert_toast_values(TupleTableSlot *slot,
 	OTuple		idx_tup;
 	int			i;
 	bool		result = true;
-	int			ctid_off = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
-
-	if (GET_PRIMARY(descr)->bridging)
-		ctid_off++;
+	int			ctid_off = o_idx_ctid_off(GET_PRIMARY(descr));
 
 	if (oslot->to_toast == NULL)
 		return true;
@@ -1685,10 +1672,7 @@ tts_orioledb_toast_sort_add(TupleTableSlot *slot,
 	TupleDesc	tupleDesc = slot->tts_tupleDescriptor;
 	OTuple		idx_tup;
 	int			i;
-	int			ctid_off = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
-
-	if (GET_PRIMARY(descr)->bridging)
-		ctid_off++;
+	int			ctid_off = o_idx_ctid_off(GET_PRIMARY(descr));
 
 	if (oslot->to_toast == NULL)
 		return;
@@ -1728,10 +1712,7 @@ tts_orioledb_remove_toast_values(TupleTableSlot *slot,
 {
 	int			i;
 	bool		result = true;
-	int			ctid_off = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
-
-	if (GET_PRIMARY(descr)->bridging)
-		ctid_off++;
+	int			ctid_off = o_idx_ctid_off(GET_PRIMARY(descr));
 
 	slot_getallattrs(slot);
 
@@ -1782,10 +1763,7 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 	int			i;
 	bool		result = true;
 	OIndexDescr *primary = GET_PRIMARY(descr);
-	int			ctid_off = primary->primaryIsCtid ? 1 : 0;
-
-	if (descr->bridge)
-		ctid_off++;
+	int			ctid_off = o_idx_ctid_off(primary);
 
 	slot_getallattrs(oldSlot);
 
