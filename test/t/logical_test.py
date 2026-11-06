@@ -3508,5 +3508,4 @@ COMMIT\n""")
 				subscriber.poll_query_until(
 				    "SELECT orioledb_recovery_synchronized();", expected=True)
 
-				self.assertListEqual(
-				    subscriber.execute(check_query), expected)
+				self.assertListEqual(subscriber.execute(check_query), expected)
