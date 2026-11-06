@@ -40,6 +40,7 @@
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "tuple/slot.h"
+#include "utils/datetime.h"
 #include "utils/dsa.h"
 #include "utils/elog.h"
 #include "utils/inval.h"
@@ -230,6 +231,8 @@ typedef struct WorkerUndoTempCheckpointStack
 } WorkerUndoTempCheckpointStack;
 
 PG_FUNCTION_INFO_V1(orioledb_recovery_synchronized);
+
+static XLogRecPtr recovery_get_retain_ptr(void);
 
 /*
  * Comparator for undo retain min-heap.
@@ -846,6 +849,15 @@ RecoveryWorkerPtrs *worker_ptrs;
 pg_atomic_uint64 *recovery_ptr;
 static pg_atomic_uint64 *recovery_main_retain_ptr;
 pg_atomic_uint64 *recovery_finished_list_ptr;
+
+/* Highest commit position confirmed by all workers and published. */
+pg_atomic_uint64 *recovery_visible_ptr;
+
+/* WAL position of the last commit-producing replay event. */
+static XLogRecPtr recovery_wal_ptr = InvalidXLogRecPtr;
+
+/* Oriole commit position paired with recovery_wal_ptr. */
+static XLogRecPtr recovery_commit_ptr = InvalidXLogRecPtr;
 bool	   *recovery_single_process;
 bool	   *was_in_recovery;
 pg_atomic_uint32 *after_recovery_cleaned;
@@ -880,6 +892,9 @@ static void workers_send_savepoint(SubTransactionId parentSubId);
 static void workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 											   SubTransactionId parentSubId);
 static void workers_synchronize(XLogRecPtr ptr, bool send_synchronize);
+static void recovery_check_worker_detach(void);
+static Jsonb *recovery_target_sync_stopevent_params(const char *phase,
+													bool stop_after);
 static void workers_notify_toast_consistent(void);
 static void worker_wait_shutdown(RecoveryWorkerState *worker);
 
@@ -892,6 +907,8 @@ static inline void spread_idx_modify(BTreeDescr *desc,
 
 static inline RecoveryMsgType recovery_msg_from_wal_record(WalRecordType rec_type);
 static void recovery_send_init(int worker_num);
+static inline void recovery_record_wal_commit_pair(XLogRecPtr wal_ptr, XLogRecPtr commit_ptr);
+static void recovery_advance_visible_ptr(XLogRecPtr ptr);
 
 /*
  * Returns full size of the shared memory needed to recovery.
@@ -910,7 +927,7 @@ recovery_shmem_needs(void)
 	size = add_size(size, CACHELINEALIGN(sizeof(RecoveryUndoLocFlush)));
 	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(RecoveryWorkerPtrs),
 												  recovery_pool_size_guc + recovery_idx_pool_size_guc)));
-	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 3)));
+	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 4)));
 	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint64)));
@@ -956,8 +973,9 @@ recovery_shmem_init(Pointer ptr, bool found)
 	recovery_ptr = (pg_atomic_uint64 *) ptr;
 	recovery_main_retain_ptr = recovery_ptr + 1;
 	recovery_finished_list_ptr = recovery_ptr + 2;
+	recovery_visible_ptr = recovery_ptr + 3;
 
-	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 3));
+	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 4));
 
 	was_in_recovery = (bool *) ptr;
 	ptr += CACHELINEALIGN(sizeof(bool));
@@ -999,6 +1017,9 @@ recovery_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(recovery_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_main_retain_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_finished_list_ptr, InvalidXLogRecPtr);
+		pg_atomic_init_u64(recovery_visible_ptr, InvalidXLogRecPtr);
+		recovery_wal_ptr = InvalidXLogRecPtr;
+		recovery_commit_ptr = InvalidXLogRecPtr;
 
 		*was_in_recovery = false;
 		pg_atomic_init_u32(after_recovery_cleaned, 0);
@@ -1615,6 +1636,15 @@ recovery_get_effective_replay_ptr(void)
 	if (*recovery_single_process)
 		return InvalidXLogRecPtr;
 
+	/*
+	 * This is only an approximate snapshot.
+	 *
+	 * recovery_ptr and recovery_finished_list_ptr are read here without a
+	 * shared synchronization protocol, so the pair may transiently reflect
+	 * different instants in time. The returned value is therefore suitable
+	 * only as an advisory effective replay/apply position and must not be
+	 * used as a strict synchronization predicate.
+	 */
 	ptr = pg_atomic_read_u64(recovery_ptr);
 	finishedPtr = pg_atomic_read_u64(recovery_finished_list_ptr);
 	if (ptr == finishedPtr)
@@ -1714,6 +1744,368 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 
 	return false;
 }
+
+/*
+ * Called by PG before recovery_target_action; Oriole synchronizes its own
+ * replay, retain/undo, and visible state to PG's stop position.
+ */
+void
+orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
+{
+	XLogRecPtr	target_ptr;
+
+	Assert(info);
+
+	target_ptr = info->recordPtr;
+
+	elog(DEBUG4,
+		 "Recovery target reached: start synchronization "
+		 "(target=%d action=%d stop_after=%d record_ptr=%X/%X "
+		 "record_end_ptr=%X/%X target_ptr=%X/%X)",
+		 recoveryTarget,
+		 recoveryTargetAction,
+		 info->recoveryStopAfter,
+		 LSN_FORMAT_ARGS(info->recordPtr),
+		 LSN_FORMAT_ARGS(info->recordEndPtr),
+		 LSN_FORMAT_ARGS(target_ptr));
+
+	Assert(XLogRecPtrIsValid(target_ptr));
+
+#define SYNC_STATE_FMT \
+	"target_ptr=%X/%X recovery_ptr=%X/%X " \
+	"wal_ptr=%X/%X commit_ptr=%X/%X " \
+	"stop_before_commit_ptr=%X/%X " \
+	"stop_after_wal_ptr=%X/%X stop_after_commit_ptr=%X/%X " \
+	"main_retain_ptr=%X/%X current_ptr=%X/%X " \
+	"retain_ptr=%X/%X finished_ptr=%X/%X"
+#define SYNC_STATE_ARGS \
+	LSN_FORMAT_ARGS(target_ptr), \
+	LSN_FORMAT_ARGS(recovery_ptr_snapshot), \
+	LSN_FORMAT_ARGS(wal_ptr_snapshot), \
+	LSN_FORMAT_ARGS(commit_ptr_snapshot), \
+	LSN_FORMAT_ARGS(stop_before_commit_ptr), \
+	LSN_FORMAT_ARGS(stop_after_wal_ptr), \
+	LSN_FORMAT_ARGS(stop_after_commit_ptr), \
+	LSN_FORMAT_ARGS(main_retain_ptr), \
+	LSN_FORMAT_ARGS(current_ptr), \
+	LSN_FORMAT_ARGS(retain_ptr), \
+	LSN_FORMAT_ARGS(finished_ptr)
+
+	while (true)
+	{
+		XLogRecPtr	current_ptr = recovery_get_current_ptr();
+		XLogRecPtr	retain_ptr = recovery_get_retain_ptr();
+		XLogRecPtr	finished_ptr;
+		XLogRecPtr	main_retain_ptr;
+		XLogRecPtr	recovery_ptr_snapshot;
+		XLogRecPtr	wal_ptr_snapshot;
+		XLogRecPtr	commit_ptr_snapshot;
+		XLogRecPtr	stop_before_commit_ptr;
+		XLogRecPtr	stop_after_commit_ptr;
+		XLogRecPtr	stop_after_wal_ptr;
+
+		/* Drive startup-side finalization before reading pointers. */
+		update_proc_retain_undo_location(-1);
+		update_recovery_undo_loc_flush(*recovery_single_process, -1);
+		finished_ptr = pg_atomic_read_u64(recovery_visible_ptr);
+		main_retain_ptr = pg_atomic_read_u64(recovery_main_retain_ptr);
+		recovery_ptr_snapshot = pg_atomic_read_u64(recovery_ptr);
+		wal_ptr_snapshot = recovery_wal_ptr;
+		commit_ptr_snapshot = recovery_commit_ptr;
+		stop_before_commit_ptr = InvalidXLogRecPtr;
+		stop_after_commit_ptr = InvalidXLogRecPtr;
+		stop_after_wal_ptr = InvalidXLogRecPtr;
+
+		if (!info->recoveryStopAfter &&
+			XLogRecPtrIsValid(wal_ptr_snapshot) &&
+			wal_ptr_snapshot <= target_ptr &&
+			XLogRecPtrIsValid(commit_ptr_snapshot))
+			stop_before_commit_ptr = commit_ptr_snapshot;
+
+		if (info->recoveryStopAfter &&
+			XLogRecPtrIsValid(wal_ptr_snapshot) &&
+			XLogRecPtrIsValid(commit_ptr_snapshot))
+		{
+			stop_after_wal_ptr = wal_ptr_snapshot;
+			stop_after_commit_ptr = commit_ptr_snapshot;
+		}
+
+		if (!info->recoveryStopAfter)
+		{
+
+			elog(DEBUG4,
+				 "Recovery target reached: !inclusive snapshot after "
+				 "publication attempt "
+				 "(" SYNC_STATE_FMT ")",
+				 SYNC_STATE_ARGS);
+
+			recovery_check_worker_detach();
+			if (unexpected_worker_detach)
+			{
+				abort_recovery(workers_pool, false);
+				ereport(ERROR,
+						(errmsg("orioledb recovery worker detached unexpectedly"),
+						 errdetail("Recovery target synchronization could "
+								   "not complete. " SYNC_STATE_FMT,
+								   SYNC_STATE_ARGS)));
+			}
+
+			if (XLogRecPtrIsInvalid(finished_ptr))
+			{
+				/*
+				 * Oriole has not finished any transaction yet, i.e. the
+				 * target precedes the first Oriole transaction after backup.
+				 * The correct visible state is the backup baseline; waiting
+				 * would hang forever.
+				 */
+				if (XLogRecPtrIsInvalid(recovery_ptr_snapshot) &&
+					XLogRecPtrIsInvalid(current_ptr) &&
+					XLogRecPtrIsInvalid(retain_ptr) &&
+					XLogRecPtrIsInvalid(main_retain_ptr))
+				{
+					elog(DEBUG4,
+						 "Recovery target reached: !inclusive done, "
+						 "visible state is backup baseline "
+						 "(" SYNC_STATE_FMT ")",
+						 SYNC_STATE_ARGS);
+					STOPEVENT(STOPEVENT_RECOVERY_TARGET_SYNC,
+							  recovery_target_sync_stopevent_params("completed",
+																	false));
+					break;
+				}
+
+				/*
+				 * Replay advanced into post-backup WAL but the first Oriole
+				 * transaction has not committed yet (e.g. JOINT_COMMIT
+				 * started but the builtin commit record has not been
+				 * replayed).  The visible state is still the backup baseline.
+				 */
+				if (XLogRecPtrIsInvalid(commit_ptr_snapshot) &&
+					XLogRecPtrIsInvalid(stop_before_commit_ptr))
+				{
+					elog(DEBUG4,
+						 "Recovery target reached: !inclusive done, "
+						 "visible state is backup baseline "
+						 "(" SYNC_STATE_FMT ")",
+						 SYNC_STATE_ARGS);
+					STOPEVENT(STOPEVENT_RECOVERY_TARGET_SYNC,
+							  recovery_target_sync_stopevent_params("completed",
+																	false));
+					break;
+				}
+
+				elog(DEBUG4,
+					 "Recovery target reached: !inclusive waiting for "
+					 "published visible state "
+					 "(" SYNC_STATE_FMT ")",
+					 SYNC_STATE_ARGS);
+			}
+			else if (XLogRecPtrIsInvalid(stop_before_commit_ptr))
+			{
+				/*
+				 * The replay/visible pair is written only by the startup
+				 * process during WAL apply.  Without recoveryStopAfter the
+				 * hook runs before the target record is applied, so no replay
+				 * position can exceed target_ptr.  Waiting would not help.
+				 */
+				ereport(ERROR,
+						(errmsg("inconsistent OrioleDB recovery visibility "
+								"state before recovery target"),
+						 errdetail(SYNC_STATE_FMT,
+								   SYNC_STATE_ARGS)));
+			}
+			else if (finished_ptr < stop_before_commit_ptr)
+			{
+				elog(DEBUG4,
+					 "Recovery target reached: !inclusive waiting for "
+					 "published state to reach last visible position "
+					 "(" SYNC_STATE_FMT ")",
+					 SYNC_STATE_ARGS);
+			}
+			else
+			{
+				if (finished_ptr > target_ptr)
+					ereport(ERROR,
+							(errmsg("OrioleDB recovery visible state crossed "
+									"the recovery target"),
+							 errdetail(SYNC_STATE_FMT,
+									   SYNC_STATE_ARGS)));
+				Assert(finished_ptr <= target_ptr);
+				if (main_retain_ptr < finished_ptr)
+				{
+					elog(DEBUG4,
+						 "Recovery target reached: !inclusive waiting for "
+						 "startup retain to reach published visible position "
+						 "(" SYNC_STATE_FMT ")",
+						 SYNC_STATE_ARGS);
+				}
+				else
+				{
+					elog(DEBUG4,
+						 "Recovery target reached: !inclusive synchronization "
+						 "done "
+						 "(" SYNC_STATE_FMT ")",
+						 SYNC_STATE_ARGS);
+
+					STOPEVENT(STOPEVENT_RECOVERY_TARGET_SYNC,
+							  recovery_target_sync_stopevent_params("completed",
+																	false));
+					break;
+				}
+			}
+		}
+		else
+		{
+			elog(DEBUG4,
+				 "Recovery target reached: inclusive snapshot after "
+				 "publication attempt "
+				 "(" SYNC_STATE_FMT ")",
+				 SYNC_STATE_ARGS);
+
+			recovery_check_worker_detach();
+			if (unexpected_worker_detach)
+			{
+				abort_recovery(workers_pool, false);
+				ereport(ERROR,
+						(errmsg("orioledb recovery worker detached unexpectedly"),
+						 errdetail("Recovery target synchronization could "
+								   "not complete. " SYNC_STATE_FMT,
+								   SYNC_STATE_ARGS)));
+			}
+
+			if (XLogRecPtrIsInvalid(stop_after_commit_ptr))
+			{
+				/*
+				 * Oriole has not finished any transaction yet, i.e. the
+				 * target precedes the first Oriole transaction after backup.
+				 * The backup baseline is the correct visible state.
+				 */
+				if (XLogRecPtrIsInvalid(wal_ptr_snapshot) &&
+					XLogRecPtrIsInvalid(commit_ptr_snapshot) &&
+					XLogRecPtrIsInvalid(finished_ptr))
+				{
+					elog(DEBUG4,
+						 "Recovery target reached: inclusive done, "
+						 "visible state is backup baseline "
+						 "(" SYNC_STATE_FMT ")",
+						 SYNC_STATE_ARGS);
+					STOPEVENT(STOPEVENT_RECOVERY_TARGET_SYNC,
+							  recovery_target_sync_stopevent_params("completed",
+																	true));
+					break;
+				}
+				else
+				{
+					/*
+					 * Some pointers are valid but no visible position was
+					 * derived.  The pair is written only by the startup
+					 * process during WAL apply, and this hook runs after the
+					 * redo loop exits, so no new pair can appear. Waiting
+					 * would hang forever; this is a bug.
+					 */
+					ereport(ERROR,
+							(errmsg("inconsistent OrioleDB recovery visibility "
+									"state at recovery target"),
+							 errdetail(SYNC_STATE_FMT,
+									   SYNC_STATE_ARGS)));
+				}
+			}
+			else if (current_ptr < stop_after_wal_ptr)
+			{
+				elog(DEBUG4,
+					 "Recovery target reached: inclusive waiting for "
+					 "workers to reach Oriole replay position "
+					 "(" SYNC_STATE_FMT ")",
+					 SYNC_STATE_ARGS);
+			}
+			else if (current_ptr != retain_ptr)
+			{
+				elog(DEBUG4,
+					 "Recovery target reached: inclusive waiting for "
+					 "workers retain to reach replay position "
+					 "(" SYNC_STATE_FMT ")",
+					 SYNC_STATE_ARGS);
+			}
+			else if (finished_ptr < stop_after_commit_ptr)
+			{
+				elog(DEBUG4,
+					 "Recovery target reached: inclusive waiting for "
+					 "published state to reach visible position "
+					 "(" SYNC_STATE_FMT ")",
+					 SYNC_STATE_ARGS);
+			}
+			else if (main_retain_ptr < stop_after_commit_ptr)
+			{
+				elog(DEBUG4,
+					 "Recovery target reached: inclusive waiting for "
+					 "startup retain to reach visible position "
+					 "(" SYNC_STATE_FMT ")",
+					 SYNC_STATE_ARGS);
+			}
+			else
+			{
+				elog(DEBUG4,
+					 "Recovery target reached: inclusive synchronization "
+					 "done "
+					 "(" SYNC_STATE_FMT ")",
+					 SYNC_STATE_ARGS);
+
+				STOPEVENT(STOPEVENT_RECOVERY_TARGET_SYNC,
+						  recovery_target_sync_stopevent_params("completed",
+																true));
+				break;
+			}
+		}
+
+		pg_usleep(1000L);
+
+		/*
+		 * This loop runs inside PostgreSQL's startup process, so shutdown
+		 * requests are delivered through startup.c's shutdown_requested flag
+		 * rather than normal backend interrupt processing.
+		 */
+#if PG_VERSION_NUM >= 180000
+		ProcessStartupProcInterrupts();
+#else
+		HandleStartupProcInterrupts();
+#endif
+	}
+#undef SYNC_STATE_FMT
+#undef SYNC_STATE_ARGS
+}
+
+static Jsonb *
+recovery_target_sync_stopevent_params(const char *phase, bool stop_after)
+{
+	JsonbParseState *state = NULL;
+	Jsonb	   *res;
+	MemoryContext mctx;
+
+	mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	jsonb_push_string_key(&state, "phase", phase);
+	jsonb_push_bool_key(&state, "stopAfter", stop_after);
+	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+
+	MemoryContextSwitchTo(mctx);
+
+	return res;
+}
+
+/* wal_ptr and commit_ptr can differ, e.g. container end vs commit inside */
+static inline void
+recovery_record_wal_commit_pair(XLogRecPtr wal_ptr, XLogRecPtr commit_ptr)
+{
+	Assert(AmStartupProcess() || !IsUnderPostmaster);
+
+	if (XLogRecPtrIsInvalid(wal_ptr) || XLogRecPtrIsInvalid(commit_ptr))
+		return;
+
+	recovery_wal_ptr = wal_ptr;
+	recovery_commit_ptr = commit_ptr;
+}
+
 
 static XLogRecPtr
 recovery_get_retain_ptr(void)
@@ -2656,6 +3048,12 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 	cur_recovery_xid_state = NULL;
 
 	update_proc_retain_undo_location(worker_id);
+
+	if (sync)
+	{
+		Assert(worker_id < 0);
+		recovery_advance_visible_ptr(ptr);
+	}
 }
 
 static void
@@ -3219,6 +3617,26 @@ free_run_xmin(void)
 	Assert(xmin >= pg_atomic_read_u64(&xid_meta->globalXmin));
 }
 
+
+static void
+recovery_advance_visible_ptr(XLogRecPtr ptr)
+{
+	XLogRecPtr	old_ptr;
+
+	Assert(AmStartupProcess() || !IsUnderPostmaster);
+
+	old_ptr = pg_atomic_read_u64(recovery_visible_ptr);
+	if (XLogRecPtrIsValid(old_ptr) &&
+		(XLogRecPtrIsInvalid(ptr) || ptr < old_ptr))
+		ereport(ERROR,
+				(errmsg("OrioleDB recovery visible state moved backwards"),
+				 errdetail("old_ptr=%X/%X new_ptr=%X/%X",
+						   LSN_FORMAT_ARGS(old_ptr),
+						   LSN_FORMAT_ARGS(ptr))));
+
+	pg_atomic_write_u64(recovery_visible_ptr, ptr);
+}
+
 /*
  * Update process transactionUndoRetainLocation according to the state of
  * retain_undo_queues[undoType].  Removes finished transactions from the top
@@ -3261,7 +3679,8 @@ void
 update_proc_retain_undo_location(int worker_id)
 {
 	XLogRecPtr	recoveryPtr = InvalidXLogRecPtr,
-				listPtr;
+				listPtr,
+				visiblePtr;
 	RecoveryXidState *state;
 	dlist_mutable_iter miter;
 	int			i;
@@ -3292,11 +3711,40 @@ update_proc_retain_undo_location(int worker_id)
 		listPtr = recoveryPtr = recovery_get_current_ptr();
 	else
 		listPtr = pg_atomic_read_u64(recovery_finished_list_ptr);
+	visiblePtr = pg_atomic_read_u64(recovery_visible_ptr);
 
 	dlist_foreach_modify(miter, &finished_list)
 	{
 		state = dlist_container(RecoveryXidState, finished_list_node, miter.cur);
-		if (state->ptr > listPtr)
+		if (worker_id < 0 && !*recovery_single_process)
+		{
+			bool		reached = true;
+			int			wc = recovery_pool_size_guc;
+			int			j;
+
+			if (state->checkpoint_xid)
+			{
+				for (j = 0; j < wc; j++)
+					if (pg_atomic_read_u64(&worker_ptrs[j].commitPtr) < state->ptr)
+					{
+						reached = false;
+						break;
+					}
+			}
+			else if (state->used_by != NULL)
+			{
+				for (j = 0; j < wc; j++)
+					if (state->used_by[j] &&
+						pg_atomic_read_u64(&worker_ptrs[j].commitPtr) < state->ptr)
+					{
+						reached = false;
+						break;
+					}
+			}
+			if (!reached)
+				break;
+		}
+		else if (state->ptr > listPtr)
 			break;
 
 		if (worker_id < 0)
@@ -3315,6 +3763,7 @@ update_proc_retain_undo_location(int worker_id)
 			}
 			if (state->needs_feedback)
 				needsFeedback = true;
+			visiblePtr = state->ptr;
 		}
 		dlist_delete(miter.cur);
 		state->in_finished_list = false;
@@ -3323,6 +3772,7 @@ update_proc_retain_undo_location(int worker_id)
 	if (worker_id < 0)
 	{
 		pg_atomic_write_u64(recovery_finished_list_ptr, recoveryPtr);
+		recovery_advance_visible_ptr(visiblePtr);
 
 		/*
 		 * If at least one transaction required feedback to the primary, wake
@@ -5018,10 +5468,14 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 				recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
 											 xlogPtr, -1, sync);
+
+				recovery_record_wal_commit_pair(ctx->xlogRecEndPtr, xlogPtr);
+
 				elog(DEBUG1, "OrioleDB recovery %s transaction with oxid=" UINT64_FORMAT ". "
 					 "Next WAL record starts at LSN %X/%X",
 					 commit ? "committed" : "aborted", rec->oxid,
 					 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
+
 				rec->oxid = InvalidOXid;
 
 				if (needsFeedback)
@@ -5590,6 +6044,7 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn, bool commit)
 		/* unlinks the entry from joint_commit_list */
 		recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
 									 lsn, -1, sync);
+		recovery_record_wal_commit_pair(lsn, lsn);
 
 		/*
 		 * Keep going: several oxids can ride on one heap xid, and all of them
@@ -5999,6 +6454,35 @@ workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback, bool commit)
 		}
 	}
 	pg_atomic_write_u64(recovery_ptr, ptr);
+}
+
+/*
+ * Check whether regular recovery workers are still alive while the startup
+ * process waits inside the recovery-target synchronization loop.
+ */
+static void
+recovery_check_worker_detach(void)
+{
+	int			i;
+
+	if (*recovery_single_process || unexpected_worker_detach)
+		return;
+
+	for (i = 0; i < recovery_pool_size_guc; i++)
+	{
+		BgwHandleStatus status;
+		pid_t		pid;
+
+		if (workers_pool[i].queue == NULL || workers_pool[i].handle == NULL)
+			continue;
+
+		status = GetBackgroundWorkerPid(workers_pool[i].handle, &pid);
+		if (status != BGWH_STARTED && status != BGWH_NOT_YET_STARTED)
+		{
+			unexpected_worker_detach = true;
+			break;
+		}
+	}
 }
 
 /*

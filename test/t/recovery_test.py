@@ -5,6 +5,7 @@ import io
 import os
 import random
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -4964,6 +4965,154 @@ class RecoveryWithArchivingTest(BaseTest):
 		                          has_archiving=True,
 		                          allows_streaming=True)
 
+	def _assert_visible_series(self, replica, expected_count, expected_max):
+		count, distinct_count, min_value, max_value, total_sum = replica.execute(
+		    "SELECT count(*), count(DISTINCT a), min(a), max(a), sum(a) "
+		    "FROM tab_int")[0]
+		self.assertEqual(count, expected_count)
+		self.assertEqual(distinct_count, expected_count)
+		self.assertEqual(min_value, 1)
+		self.assertEqual(max_value, expected_max)
+		self.assertEqual(total_sum, expected_max * (expected_max + 1) // 2)
+		self.assertEqual(
+		    replica.execute(
+		        f"SELECT count(*) FROM tab_int WHERE a > {expected_max}")[0]
+		    [0], 0)
+
+	def _wait_for_node_shutdown(self, node, timeout_s=60):
+		pidfile_path = os.path.join(node.data_dir, "postmaster.pid")
+		deadline = time.time() + timeout_s
+		started = False
+		while time.time() < deadline:
+			pidfile_exists = os.path.exists(pidfile_path)
+			if pidfile_exists:
+				started = True
+			elif started:
+				return
+			elif os.path.exists(node.pg_log_file):
+				with open(node.pg_log_file, encoding='utf-8') as f:
+					replica_log = f.read()
+					if ("Recovery target reached: start synchronization"
+					    in replica_log
+					    and "database system is shut down" in replica_log):
+						return
+			time.sleep(0.1)
+		self.fail(
+		    "node did not complete startup and shutdown within %s "
+		    "seconds; startup observed=%s, status=%s, "
+		    "postmaster.pid exists=%s" %
+		    (timeout_s, started, node.status(), os.path.exists(pidfile_path)))
+
+	def _wait_stopevent_waiter_pid(self, node, stopevent, timeout_s=30):
+		deadline = time.time() + timeout_s
+		while time.time() < deadline:
+			rows = node.execute("""
+				SELECT waiter_pids[1]
+				FROM pg_stopevents()
+				WHERE stopevent = %s
+				  AND coalesce(array_length(waiter_pids, 1), 0) > 0
+			""" % ("'" + stopevent + "'", ))
+			if rows:
+				return rows[0][0]
+			time.sleep(0.1)
+		self.fail("no waiter pid observed for stopevent %s" % stopevent)
+
+	def _arm_recovery_target_sync_stopevent(self, replica, stop_after):
+		replica.safe_psql("""
+			SELECT pg_stopevent_set(
+				'recovery_target_sync',
+				'$.phase == "completed" && $.stopAfter == %s');
+		""" % ("true" if stop_after else "false"))
+
+	def _wait_recovery_target_sync_stopevent(self,
+	                                         replica,
+	                                         stop_after,
+	                                         timeout_s=30):
+		self._wait_stopevent_waiter_pid(replica,
+		                                'recovery_target_sync',
+		                                timeout_s=timeout_s)
+		replica.safe_psql("SELECT pg_stopevent_reset('recovery_target_sync');")
+
+	def _replace_recovery_target_action(self,
+	                                    node,
+	                                    old_action='shutdown',
+	                                    new_action='promote'):
+		conf_path = os.path.join(node.data_dir, "postgresql.conf")
+		auto_conf_path = os.path.join(node.data_dir, "postgresql.auto.conf")
+		with open(conf_path, encoding='utf-8') as f:
+			conf = f.read()
+
+		old_line = f"recovery_target_action = '{old_action}'"
+		new_line = f"recovery_target_action = '{new_action}'"
+		pos = conf.rfind(old_line)
+		self.assertNotEqual(pos,
+		                    -1,
+		                    msg=f"{old_line} was not found in {conf_path}")
+		conf = conf[:pos] + new_line + conf[pos + len(old_line):]
+
+		with open(conf_path, 'w', encoding='utf-8') as f:
+			f.write(conf)
+
+		with open(conf_path, encoding='utf-8') as f:
+			updated_conf = f.read()
+		self.assertIn(new_line, updated_conf)
+
+		with open(auto_conf_path, encoding='utf-8') as f:
+			auto_conf = f.read()
+
+		auto_lines = [
+		    line for line in auto_conf.splitlines()
+		    if not line.startswith("recovery_target_action = ")
+		]
+		auto_lines.append(new_line)
+
+		with open(auto_conf_path, 'w', encoding='utf-8') as f:
+			f.write("\n".join(auto_lines) + "\n")
+
+		with open(auto_conf_path, encoding='utf-8') as f:
+			updated_auto_conf = f.read()
+		self.assertIn(new_line, updated_auto_conf)
+
+	def _run_recovery_target_time_commit_timestamp_case(
+	        self, inclusive, expected_count, expected_max):
+		node = self.node
+		node.append_conf("track_commit_timestamp = on")
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			recovery_txid = ret.decode().strip().splitlines()[-1]
+			recovery_time = node.execute(
+			    f"SELECT pg_xact_commit_timestamp('{recovery_txid}'::xid)"
+			)[0][0]
+
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_inclusive = {'true' if inclusive else 'false'}
+recovery_target_action = 'pause'
+""")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			replica.start()
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, expected_count, expected_max)
+
 	def test_recovery_target_time(self):
 		node = self.node
 		node.start()
@@ -4974,16 +5123,1402 @@ class RecoveryWithArchivingTest(BaseTest):
 		""")
 
 		with self.getReplica(has_restoring=True) as replica:
-			node.safe_psql(
-			    "INSERT INTO tab_int VALUES (generate_series(1,1000))")
-			recovery_time = node.execute("SELECT now()")[0][0]
+			con = node.connect()
+			try:
+				con.execute(
+				    "INSERT INTO tab_int VALUES (generate_series(1,1000))")
+				con.commit()
+				con.execute("SELECT pg_sleep(0.1)")
+				recovery_time = con.execute("SELECT clock_timestamp()")[0][0]
+				con.execute("SELECT pg_sleep(0.1)")
+			finally:
+				con.close()
 
-			replica.append_conf(f"recovery_target_time = '{recovery_time}'")
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_action = 'pause'
+""")
 
 			node.safe_psql(
 			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
 
 			replica.start()
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
 
-			self.assertTrue(replica.execute("SELECT count(*) from tab_int"),
-			                1000)
+			self._assert_visible_series(replica, 1000, 1000)
+
+	def test_recovery_target_time_sync_exclusive(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("SELECT pg_sleep(1)")
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+			node.safe_psql("SELECT pg_sleep(1)")
+			recovery_time = node.execute("SELECT clock_timestamp()")[0][0]
+			node.safe_psql("SELECT pg_sleep(1)")
+
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_inclusive = true
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(3001,4000))")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 3000, 3000)
+
+	def test_recovery_target_time_sync_exclusive_base_backup(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql("SELECT pg_sleep(1)")
+			recovery_time = node.execute("SELECT clock_timestamp()")[0][0]
+			node.safe_psql("SELECT pg_sleep(1)")
+
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_inclusive = false
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
+
+	def test_recovery_target_time_sync_exclusive_base_backup_promote(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql("SELECT pg_sleep(1)")
+			recovery_time = node.execute("SELECT clock_timestamp()")[0][0]
+			node.safe_psql("SELECT pg_sleep(1)")
+
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_inclusive = false
+recovery_target_action = 'promote'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
+
+	def test_recovery_target_time_sync_exclusive_base_backup_shutdown(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql("SELECT pg_sleep(1)")
+			recovery_time = node.execute("SELECT clock_timestamp()")[0][0]
+			node.safe_psql("SELECT pg_sleep(1)")
+
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_inclusive = false
+recovery_target_action = 'shutdown'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+			self._wait_for_node_shutdown(replica)
+
+			self.assertTrue(
+			    os.path.exists(
+			        os.path.join(replica.data_dir, "recovery.signal")))
+
+			self._replace_recovery_target_action(replica)
+			replica.is_started = False
+			replica.start()
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
+
+	def test_recovery_target_time_sync_earlier_target_time(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("SELECT pg_sleep(1)")
+			recovery_time = node.execute("SELECT clock_timestamp()")[0][0]
+			node.safe_psql("SELECT pg_sleep(1)")
+
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_inclusive = true
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	# Validate that Oriole catches up when recovery_target_inclusive = off
+	# and the target time is later than the last Oriole commit, then promote.
+	def test_recovery_target_time_sync_late_target_promote(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("SELECT pg_sleep(1)")
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+			node.safe_psql("SELECT pg_sleep(1)")
+			recovery_time = node.execute("SELECT clock_timestamp()")[0][0]
+			node.safe_psql("SELECT pg_sleep(1)")
+
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_inclusive = true
+recovery_target_action = 'promote'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(3001,4000))")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 3000, 3000)
+
+	def test_recovery_target_time_sync_exclusive_promote(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("SELECT pg_sleep(1)")
+			recovery_time = node.execute("SELECT clock_timestamp()")[0][0]
+			node.safe_psql("SELECT pg_sleep(1)")
+
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_inclusive = true
+recovery_target_action = 'promote'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	def test_recovery_target_time_sync_exclusive_shutdown(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("SELECT pg_sleep(1)")
+			recovery_time = node.execute("SELECT clock_timestamp()")[0][0]
+			node.safe_psql("SELECT pg_sleep(1)")
+
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_inclusive = true
+recovery_target_action = 'shutdown'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+			self._wait_for_node_shutdown(replica)
+
+			self.assertTrue(
+			    os.path.exists(
+			        os.path.join(replica.data_dir, "recovery.signal")))
+
+			self._replace_recovery_target_action(replica)
+			replica.is_started = False
+			replica.start()
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	def test_recovery_target_time_sync_commit_timestamp_inclusive(self):
+		self._run_recovery_target_time_commit_timestamp_case(True, 2000, 2000)
+
+	# Known bug reproducer: recovery_target_inclusive = off at exact commit
+	# timestamp may leak rows from the target transaction for multi-container
+	# Oriole replay.
+	def test_recovery_target_time_sync_commit_timestamp_exclusive(self):
+		self._run_recovery_target_time_commit_timestamp_case(False, 1000, 1000)
+
+	def test_recovery_target_time_exclusive_oriole_not_crossed(self):
+		node = self.node
+		node.append_conf("track_commit_timestamp = on")
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+			INSERT INTO tab_int VALUES (generate_series(1,1000));
+		""")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql("CREATE INDEX tab_int_a_idx ON tab_int (a)")
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			recovery_txid = ret.decode().strip().splitlines()[-1]
+			recovery_time = node.execute(
+			    f"SELECT pg_xact_commit_timestamp('{recovery_txid}'::xid)"
+			)[0][0]
+
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_inclusive = false
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
+
+	def test_recovery_target_xid_sync_inclusive(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			recovery_txid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_wal_lsn(), pg_current_xact_id();
+			    COMMIT;
+			    """)
+			(_, actual_xid) = ret.decode().strip().splitlines()[-1].split('|')
+			self.assertEqual(int(actual_xid), recovery_txid)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			self._wait_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	def test_recovery_target_xid_sync_worker_detach_errors(self):
+		node = self.node
+		node.append_conf("orioledb.recovery_pool_size = 1")
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_detach (
+				id int NOT NULL,
+				token int NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			CREATE UNIQUE INDEX tab_detach_token_idx ON tab_detach (token);
+			INSERT INTO tab_detach VALUES (1, 1);
+		""")
+
+		with self.getReplica(has_restoring=True) as replica:
+			target_xid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+
+			replica.append_conf(f"""
+orioledb.enable_stopevents = true
+orioledb.recovery_pool_size = 1
+recovery_target_xid = '{target_xid}'
+recovery_target_action = 'pause'
+""")
+			replica.start()
+			replica.safe_psql("SELECT pg_stopevent_set('sk_modify_pending', "
+			                  "'$backendType == \"orioledb recovery worker\" "
+			                  "&& $.treeName == \"tab_detach_pkey\"');")
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_detach VALUES (2, 2);
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			actual_xid = int(ret.decode().strip().splitlines()[-1])
+			self.assertEqual(actual_xid, target_xid)
+
+			worker_pid = self._wait_stopevent_waiter_pid(
+			    replica, 'sk_modify_pending')
+
+			os.kill(worker_pid, signal.SIGTERM)
+			replica.safe_psql(
+			    "SELECT pg_stopevent_reset('sk_modify_pending');")
+
+			expected = [
+			    "Recovery target synchronization could not complete",
+			    "orioledb recovery worker detached unexpectedly"
+			]
+			deadline = time.time() + 30
+			replica_log = ""
+			while time.time() < deadline:
+				if os.path.exists(replica.pg_log_file):
+					with open(replica.pg_log_file, encoding='utf-8') as f:
+						replica_log = f.read()
+					if all(line in replica_log for line in expected):
+						break
+				time.sleep(0.1)
+			for line in expected:
+				self.assertIn(line, replica_log)
+
+	def test_recovery_target_xid_sync_inclusive_first_post_backup(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			recovery_txid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_wal_lsn(), pg_current_xact_id();
+			    COMMIT;
+			    """)
+			(_, actual_xid) = ret.decode().strip().splitlines()[-1].split('|')
+			self.assertEqual(int(actual_xid), recovery_txid)
+
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			self._wait_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	def test_recovery_target_xid_sync_inclusive_promote(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			recovery_txid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_action = 'promote'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_wal_lsn(), pg_current_xact_id();
+			    COMMIT;
+			    """)
+			(_, actual_xid) = ret.decode().strip().splitlines()[-1].split('|')
+			self.assertEqual(int(actual_xid), recovery_txid)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			self._wait_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	def test_recovery_target_xid_sync_inclusive_shutdown(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			recovery_txid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_action = 'shutdown'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_wal_lsn(), pg_current_xact_id();
+			    COMMIT;
+			    """)
+			(_, actual_xid) = ret.decode().strip().splitlines()[-1].split('|')
+			self.assertEqual(int(actual_xid), recovery_txid)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			self._wait_recovery_target_sync_stopevent(replica, stop_after=True)
+			self._wait_for_node_shutdown(replica)
+
+			self.assertTrue(
+			    os.path.exists(
+			        os.path.join(replica.data_dir, "recovery.signal")))
+
+			self._replace_recovery_target_action(replica)
+			replica.is_started = False
+			replica.start()
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	def test_recovery_target_xid_sync_exclusive_base_backup(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			recovery_txid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_inclusive = false
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			actual_xid = int(ret.decode().strip().splitlines()[-1])
+			self.assertEqual(actual_xid, recovery_txid)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
+
+	def test_recovery_target_xid_sync_exclusive_base_backup_promote(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			recovery_txid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_inclusive = false
+recovery_target_action = 'promote'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			actual_xid = int(ret.decode().strip().splitlines()[-1])
+			self.assertEqual(actual_xid, recovery_txid)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
+
+	def test_recovery_target_xid_sync_exclusive_base_backup_shutdown(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			recovery_txid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_inclusive = false
+recovery_target_action = 'shutdown'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			actual_xid = int(ret.decode().strip().splitlines()[-1])
+			self.assertEqual(actual_xid, recovery_txid)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+			self._wait_for_node_shutdown(replica)
+
+			self.assertTrue(
+			    os.path.exists(
+			        os.path.join(replica.data_dir, "recovery.signal")))
+
+			self._replace_recovery_target_action(replica)
+			replica.is_started = False
+			replica.start()
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
+
+	def test_recovery_target_xid_sync_exclusive(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			recovery_txid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_inclusive = false
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(2001,3000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			actual_xid = int(ret.decode().strip().splitlines()[-1])
+			self.assertEqual(actual_xid, recovery_txid)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(3001,4000))")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	def test_recovery_target_xid_sync_exclusive_sync_finalization(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+			INSERT INTO tab_int VALUES (generate_series(1,1000));
+		""")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			# CREATE INDEX modifies Oriole system trees, forcing synchronous
+			# recovery finalization.  The target xid (recovery_target_inclusive
+			# = off) stops before the next transaction and requires that the
+			# synchronously finalized visible state has been published.
+			node.safe_psql("CREATE INDEX tab_int_a_idx ON tab_int (a)")
+			recovery_txid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_inclusive = false
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			actual_xid = int(ret.decode().strip().splitlines()[-1])
+			self.assertEqual(actual_xid, recovery_txid)
+
+			# Without the synchronous visible-state publish the target hook
+			# would wait forever.  Valgrind runners can take noticeably
+			# longer before the hook loop finishes.
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False,
+			                                          timeout_s=60)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+			self._assert_visible_series(replica, 1000, 1000)
+			self.assertEqual(
+			    replica.execute("SELECT count(*) FROM pg_class "
+			                    "WHERE relname = 'tab_int_a_idx'")[0][0], 1)
+
+	def test_recovery_target_xid_sync_exclusive_deferred_then_sync(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+			INSERT INTO tab_int VALUES (generate_series(1,1000));
+		""")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			# Leave an ordinary xid on finished_list, then force synchronous
+			# finalization.  Publishing the synchronous visible state must
+			# first drain the earlier deferred xid.
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,1500))")
+			node.safe_psql("CREATE INDEX tab_int_a_idx ON tab_int (a)")
+			recovery_txid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_inclusive = false
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1501,2000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			actual_xid = int(ret.decode().strip().splitlines()[-1])
+			self.assertEqual(actual_xid, recovery_txid)
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1500, 1500)
+			self.assertEqual(
+			    replica.execute("SELECT count(*) FROM pg_class "
+			                    "WHERE relname = 'tab_int_a_idx'")[0][0], 1)
+
+	def test_recovery_target_xid_sync_inclusive_sync_finalization(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+			INSERT INTO tab_int VALUES (generate_series(1,1000));
+		""")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			# Make the synchronously finalized transaction itself the
+			# recovery_target_inclusive = on target.  The hook must see the
+			# directly published visible state for this xid.
+			recovery_txid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_inclusive = true
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    CREATE INDEX tab_int_a_idx ON tab_int (a);
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			actual_xid = int(ret.decode().strip().splitlines()[-1])
+			self.assertEqual(actual_xid, recovery_txid)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+
+			self._wait_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
+			self.assertEqual(
+			    replica.execute("SELECT count(*) FROM pg_class "
+			                    "WHERE relname = 'tab_int_a_idx'")[0][0], 1)
+
+	def test_recovery_target_lsn_sync_inclusive(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			self._wait_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	def test_recovery_target_lsn_sync_inclusive_heap(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+			CREATE TABLE heap_marker (a int);
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("INSERT INTO heap_marker VALUES (1)")
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			self._wait_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	def test_recovery_target_lsn_sync_inclusive_base_backup_heap(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+			CREATE TABLE heap_marker (a int);
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql("INSERT INTO heap_marker VALUES (1)")
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			self._wait_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
+
+	def test_recovery_target_lsn_sync_inclusive_late(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(3001,4000))")
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			self._wait_recovery_target_sync_stopevent(replica, stop_after=True)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 3000, 3000)
+
+	def test_recovery_target_lsn_sync_exclusive(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_inclusive = false
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	def test_recovery_target_lsn_sync_exclusive_promote(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_inclusive = false
+recovery_target_action = 'promote'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	def test_recovery_target_lsn_sync_exclusive_shutdown(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_inclusive = false
+recovery_target_action = 'shutdown'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+			self._wait_for_node_shutdown(replica)
+
+			self.assertTrue(
+			    os.path.exists(
+			        os.path.join(replica.data_dir, "recovery.signal")))
+
+			self._replace_recovery_target_action(replica)
+			replica.is_started = False
+			replica.start()
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+	def test_recovery_target_lsn_sync_exclusive_base_backup(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_inclusive = false
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
+
+	def test_recovery_target_lsn_sync_exclusive_base_backup_promote(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_inclusive = false
+recovery_target_action = 'promote'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
+
+	def test_recovery_target_lsn_sync_exclusive_base_backup_shutdown(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("orioledb.enable_stopevents = true")
+
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_inclusive = false
+recovery_target_action = 'shutdown'
+""")
+
+			replica.start()
+			self._arm_recovery_target_sync_stopevent(replica, stop_after=False)
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			self._wait_recovery_target_sync_stopevent(replica,
+			                                          stop_after=False)
+			self._wait_for_node_shutdown(replica)
+
+			self.assertTrue(
+			    os.path.exists(
+			        os.path.join(replica.data_dir, "recovery.signal")))
+
+			self._replace_recovery_target_action(replica)
+			replica.is_started = False
+			replica.start()
+			replica.poll_query_until("SELECT NOT pg_is_in_recovery()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
