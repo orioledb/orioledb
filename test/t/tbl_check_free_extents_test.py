@@ -80,3 +80,56 @@ class TblCheckFreeExtentsTest(BaseTest):
 				    (i, said[:3]))
 		finally:
 			con.close()
+
+	def test_check_after_allocations_behind_the_map_file(self):
+		"""
+		The other half: extents taken after the map file was written.  Once
+		a checkpoint has free extents to list -- old copies of pages
+		rewritten before it -- every page written afterwards takes one of
+		them, and the map file still says it is free.  Read whole, it made
+		each of those extents both busy and free:
+
+		    NOTICE:  Excess busy extent 1375 1
+
+		which is how evict_stale_descr_test kept failing under valgrind,
+		with the tree perfectly sound.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_churn (id int NOT NULL, v text NOT NULL,\n"
+		    "  PRIMARY KEY (id)) USING orioledb;\n"
+		    "INSERT INTO o_churn SELECT g, repeat('c', 400)"
+		    "  FROM generate_series(1, 20000) g;\n")
+		node.safe_psql("CHECKPOINT;")
+		# Rewrite every page, so that the next map file has free extents
+		node.safe_psql("UPDATE o_churn SET v = repeat('d', 400);")
+		node.safe_psql("CHECKPOINT;")
+
+		con = node.connect()
+		try:
+			ok, said = self.tbl_check(con, 'o_churn')
+			self.assertTrue(
+			    ok, "the check disagrees straight after a"
+			    " checkpoint: %s" % said[:3])
+
+			# Write pages without checkpointing again: each write takes an
+			# extent the map file lists as free
+			for i in range(3):
+				node.safe_psql("UPDATE o_churn SET v = v || 'x' "
+				               "WHERE id %% 3 = %d;" % i)
+				node.safe_psql(
+				    "SELECT orioledb_evict_pages('o_churn'::regclass, 0);")
+				ok, said = self.tbl_check(con, 'o_churn')
+				self.assertTrue(
+				    ok, "round %d: the check disagrees with a sound tree"
+				    " after extents were taken behind the map file: %s" %
+				    (i, said[:3]))
+
+			# And the next checkpoint agrees too
+			node.safe_psql("CHECKPOINT;")
+			ok, said = self.tbl_check(con, 'o_churn')
+			self.assertTrue(ok, "after the next checkpoint: %s" % said[:3])
+		finally:
+			con.close()
