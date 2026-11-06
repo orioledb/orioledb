@@ -1288,6 +1288,17 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 					? (OToastMultiInsertJob *) repalloc(jobs, sizeof(OToastMultiInsertJob) * allocated_jobs)
 					: (OToastMultiInsertJob *) palloc(sizeof(OToastMultiInsertJob) * allocated_jobs);
 			}
+
+			/*
+			 * table_multi_insert is only called from COPY, so values are
+			 * always inline, never external toast pointers.  This matters
+			 * because o_toast_emit_slot_wal re-reads the value for WAL
+			 * emission after sub-batch processing frees the detoasted data;
+			 * for inline values o_get_src_value is just a pointer return.
+			 * This condition should never appear in practice.
+			 */
+			if (unlikely(VARATT_IS_EXTERNAL(DatumGetPointer(slots[s]->tts_values[i]))))
+				elog(ERROR, "unexpected external toast value in multi-insert");
 			jobs[njobs].pk = idx_tup;
 			jobs[njobs].slot = slots[s];
 			jobs[njobs].attnum = i + 1 + ctid_off;
@@ -1353,7 +1364,7 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 			uint32		offset;
 			uint32		max_length = jobs[next_job].max_length;
 
-			/* Detoast on first access */
+			/* Pointer return, no allocation: inline guard above. */
 			if (jobs[next_job].data == NULL)
 			{
 				Datum		val;
@@ -1514,7 +1525,7 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 		pfree(chunkkeys);
 		pfree(keyptrs);
 
-		/* Free detoasted values for fully consumed jobs. */
+		/* No-op while the inline guard holds; kept as safety net. */
 		for (i = j_start; i < next_job; i++)
 		{
 			if (jobs[i].free)
@@ -1529,6 +1540,7 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 		chunk_start = next_chunk;
 	}
 
+	/* No-op while the inline guard holds; kept as safety net. */
 	for (i = 0; i < njobs; i++)
 	{
 		if (jobs[i].data && jobs[i].free)
@@ -1589,6 +1601,7 @@ o_toast_emit_slot_wal(OTableDescr *descr, TupleTableSlot *slot)
 		if (oslot->to_toast[i] != ORIOLEDB_TO_TOAST_ON)
 			continue;
 
+		/* Pointer return, no allocation: inline guard in multi-insert. */
 		value = o_get_src_value(slot->tts_values[i], &free);
 		p = DatumGetPointer(value);
 		sz = toast_datum_size(value);
