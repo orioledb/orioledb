@@ -785,6 +785,10 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	tuple.formatFlags = item->tuphdr.formatFlags;
 	tuple.data = (Pointer) item + sizeof(BTreeModifyUndoStackItem);
 
+	/* A promotion rolls this row back: keep old primary for pg_rewind.  */
+	if (rewind_keys_capturing)
+		rewind_keys_capture(desc, item->action, tuple);
+
 	if (STOPEVENTS_ENABLED())
 	{
 		Jsonb	   *params = undo_record_key_stopevent_params(item->action,

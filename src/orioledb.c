@@ -481,35 +481,42 @@ orioledb_test_wal_parse_relation(PG_FUNCTION_ARGS)
 static void
 orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 {
+	if ((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_KEYS)
+		rewind_keys_desc(buf, record);
 #ifdef IS_DEV
-	Pointer		startPtr = (Pointer) XLogRecGetData(record);
-	Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
+	else
+	{
+		Pointer		startPtr = (Pointer) XLogRecGetData(record);
+		Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
 
-	WalDescCtx	dctx = {
-		.buf = buf
-	};
+		WalDescCtx	dctx = {
+			.buf = buf
+		};
 
-	WalReaderState r = {
-		.start = startPtr,
-		.end = endPtr,
-		.ptr = startPtr,
-		/* Consumer */
-		.ctx = &dctx,
-		.check_version = wal_desc_check_version,
-		.on_container = NULL,
-		.on_record = wal_desc_on_record
-	};
+		WalReaderState r = {
+			.start = startPtr,
+			.end = endPtr,
+			.ptr = startPtr,
+			/* Consumer */
+			.ctx = &dctx,
+			.check_version = wal_desc_check_version,
+			.on_container = NULL,
+			.on_record = wal_desc_on_record
+		};
 
-	WalParseResult st = wal_parse_container(&r, false);
+		WalParseResult st = wal_parse_container(&r, false);
 
-	if (st != WALPARSE_OK)
-		appendStringInfo(buf, " [PARSE ERROR %d]", (int) st);
+		if (st != WALPARSE_OK)
+			appendStringInfo(buf, " [PARSE ERROR %d]", (int) st);
+	}
 #endif
 }
 
 static const char *
 orioledb_rm_identify(uint8 info)
 {
+	if ((info & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_KEYS)
+		return "OrioleDB rewind keys";
 	return "OrioleDB WAL container";
 }
 

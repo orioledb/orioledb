@@ -32,8 +32,9 @@
 #include "btree/undo.h"
 #include "catalog/o_tables.h"
 #include "catalog/sys_trees.h"
-#include "miscadmin.h"
 #include "recovery/recovery.h"
+
+#include "miscadmin.h"
 #include "utils/catcache.h"
 #include "utils/pg_locale.h"
 #if PG_VERSION_NUM >= 170000

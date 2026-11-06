@@ -68,7 +68,6 @@ O_SYS_CACHE_INIT_FUNC(opclass_cache)
 									   &opclass_cache_funcs);
 }
 
-
 /*
  * o_opclass_get
  *

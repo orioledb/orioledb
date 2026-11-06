@@ -78,7 +78,7 @@ def extract_typedefs_dwarfdump():
 def extract_typedefs_objdump():
 	"""Extract typedefs using objdump (Linux/Ubuntu)"""
 	result = subprocess.run([find_objdump(), '-W'] + glob.glob('src/*/*.o') +
-	                        glob.glob('src/*.o'),
+	                        glob.glob('src/*.o') + ['pg_rewind_orioledb.so'],
 	                        stdout=subprocess.PIPE,
 	                        stderr=subprocess.PIPE)
 	if result.returncode != 0:

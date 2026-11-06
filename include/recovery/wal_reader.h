@@ -14,7 +14,12 @@
 #ifndef __WAL_READER_H__
 #define __WAL_READER_H__
 
+#include "btree/btree.h"
+#include "btree/page_contents.h"
+#include "transam/oxid.h"
 #include "recovery/wal_record.h"
+
+#include "storage/itemptr.h"
 
 /*
  * WalRecord instances are transient and reused across iterations.
