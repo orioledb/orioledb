@@ -169,7 +169,7 @@ COPY --from=orioledb-source /usr/src/orioledb/ /usr/src/postgresql/contrib/oriol
 RUN set -eux; \
 	PGTAG="$(cat /opt/postgresql-inputs/pgtag)"; \
 	PG_MAJOR="$(cat /opt/postgresql-inputs/pg-major)"; \
-	ORIOLEDB_VERSION="$(grep "^#define ORIOLEDB_VERSION" /usr/src/postgresql/contrib/orioledb/include/orioledb.h | cut -d'"' -f2)"; \
+	ORIOLEDB_VERSION="$(grep "^#define ORIOLEDB_VERSION " /usr/src/postgresql/contrib/orioledb/include/orioledb.h | cut -d'"' -f2)"; \
 	ORIOLEDB_BUILDTIME="$(date -Iseconds)"; \
 	echo "PG_MAJOR=${PG_MAJOR}"; \
 	echo "PGTAG=${PGTAG}"; \
