@@ -561,6 +561,7 @@ merge_waited_tuples(BTreeDescr *desc, Page p, BTreeSplitItems *outputItems,
 	outputItems->leaf = inputItems->leaf;
 	outputItems->hikeySize = inputItems->hikeySize;
 	outputItems->hikeysEnd = inputItems->hikeysEnd;
+	outputItems->droppedTuple = inputItems->droppedTuple;
 	outputItems->itemsCount = 0;
 
 	/*
@@ -1402,7 +1403,9 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 	if (!split)
 	{
 		START_CRIT_SECTION();
-		perform_page_compaction(desc, blkno, &newItems, needsUndo, csn);
+		perform_page_compaction(desc, blkno, &newItems,
+								needsUndo && newItems.droppedTuple, csn);
+		((BTreePageHeader *) p)->prevInsertOffset = MaxOffsetNumber;
 		MARK_DIRTY(desc, blkno);
 
 		if (waitersWakeupCount > 0)
@@ -1618,7 +1621,8 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 		{
 			START_CRIT_SECTION();
 
-			perform_page_compaction(desc, blkno, &items, needsUndo, csn);
+			perform_page_compaction(desc, blkno, &items,
+									needsUndo && items.droppedTuple, csn);
 			header->prevInsertOffset = offset;
 
 			MARK_DIRTY(desc, blkno);
