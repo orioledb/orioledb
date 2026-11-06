@@ -2174,6 +2174,18 @@ SELECT count(*), sum(c) FROM o_test_skip_probe WHERE a IS NULL AND b = 3;
 -- range on the leading column with equality below it
 SELECT count(*), sum(c) FROM o_test_skip_probe
 	WHERE a BETWEEN 1 AND 2 AND b = 5;
+-- two columns skipped, qual on the third: the NULL of the second skipped
+-- column sorts after its last value, beyond the bound that steps past it
+SELECT count(*), sum(c) FROM o_test_skip_probe WHERE c > 5;
+-- a strict qual on the second column still keeps its NULL out
+SELECT count(*), sum(c) FROM o_test_skip_probe WHERE b > 2 AND c > 5;
+-- the same NULL reached by a backward scan, with NULLs sorting first
+CREATE INDEX o_test_skip_probe_nf_idx
+	ON o_test_skip_probe (a NULLS FIRST, b NULLS FIRST, c);
+SELECT count(*), sum(c) FROM
+	(SELECT c FROM o_test_skip_probe WHERE c > 5
+	 ORDER BY a DESC NULLS LAST, b DESC NULLS LAST, c DESC) s;
+DROP INDEX o_test_skip_probe_nf_idx;
 
 RESET enable_seqscan;
 RESET enable_bitmapscan;
