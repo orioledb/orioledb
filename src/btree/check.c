@@ -708,7 +708,12 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 			}
 			else if (DOWNLINK_IS_IN_IO(tuphdr->downlink))
 			{
-				wait_for_io_completion(DOWNLINK_GET_IO_LOCKNUM(tuphdr->downlink));
+				int			ionum = DOWNLINK_GET_IO_LOCKNUM(tuphdr->downlink);
+
+				/* The I/O owner needs this page to publish its new downlink. */
+				unlock_page(blkno);
+				wait_for_io_completion(ionum);
+				lock_page(blkno);
 				continue;
 			}
 			else if (DOWNLINK_IS_ON_DISK(tuphdr->downlink))
