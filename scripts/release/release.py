@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Release helper: scripts/release/release.py {prepare,notes,publish} vX.Y.Z.
+"""Release helper: scripts/release/release.py {prepare,notes,pr,publish} vX.Y.Z.
 
 Run it from the main checkout.  The release is prepared in a detached
-worktree of origin/vX.Y, so no local branch is created or changed.  Nothing
-is ever force-pushed.
+worktree of origin/vX.Y, so no local branch is created or changed.  The
+stable branch is protected: `pr` opens a PR with the stamp commit and, once it
+is merged, `publish` tags the merged commit.  Nothing is ever force-pushed.
 """
 import argparse
 import os
@@ -306,23 +307,53 @@ def cmd_notes(args):
 	      f'{prev}...{release.tag}')
 
 
-def cmd_publish(args):
-	"""publish subcommand"""
-	release = Release(args)
+def run_steps(steps, dry_run_msg, yes):
+	"""Run (label, cmd, cwd) steps; report the exact state on failure."""
+	if not yes:
+		print('checks passed, would run:')
+		for _, cmd, cwd in steps:
+			print(f'  (in {cwd}) {" ".join(cmd)}')
+		print(dry_run_msg)
+		return None
 
+	done = []
+	res = None
+	for label, cmd, cwd in steps:
+		try:
+			res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+			failed = res.returncode != 0
+			reason = res.stderr.strip() or res.stdout.strip()
+		except OSError as e:
+			failed, reason = True, str(e)
+
+		if failed:
+			print(f'error: step "{label}" failed: {reason}', file=sys.stderr)
+			completed = ', '.join(done) or 'none'
+			print(f'completed steps: {completed}', file=sys.stderr)
+			pending = ', '.join(l for l, _, _ in steps if l not in done)
+			print(f'not done: {pending}', file=sys.stderr)
+			sys.exit(1)
+		done.append(label)
+		if label in ('PR created', 'release created'):
+			print(f'{label}: ' + res.stdout.strip().splitlines()[-1])
+	return done
+
+
+def check_worktree(release):
 	if not os.path.isdir(release.worktree):
 		die(f'worktree {release.worktree} does not exist: run prepare first')
-
-	# gh runs in the worktree, so a relative path must not depend on the cwd
-	args.notes = os.path.abspath(args.notes)
-	if not os.path.isfile(args.notes) or os.path.getsize(args.notes) == 0:
-		die(f'notes file {args.notes} is missing or empty')
 
 	if shutil.which('gh') is None:
 		die('gh is not found in PATH')
 
 	if git('status', '--porcelain', cwd=release.worktree):
 		die(f'worktree {release.worktree} is not clean')
+
+
+def cmd_pr(args):
+	"""pr subcommand: push the stamp commit to a branch and open a PR"""
+	release = Release(args)
+	check_worktree(release)
 
 	subj = git('log', '-1', '--format=%s', cwd=release.worktree)
 	if subj != 'Stamp ' + release.version:
@@ -341,10 +372,82 @@ def cmd_publish(args):
 	if where:
 		die(f'tag {release.tag} already exists {where}')
 
+	git('fetch', 'origin', cwd=release.worktree)
+	res = subprocess.run([
+	    'git', 'merge-base', '--is-ancestor', 'origin/' + release.branch,
+	    'HEAD'
+	],
+	                     cwd=release.worktree)
+	if res.returncode != 0:
+		die(f'origin/{release.branch} is not an ancestor of HEAD '
+		    '(rebase the stamp commit onto it)')
+
+	body = (f'Version stamp for release {release.tag}.\n\n'
+	        f'After merging, run: scripts/release/release.py publish '
+	        f'{release.tag} --notes FILE --yes')
+
+	pr_branch = 'release-' + release.version
 	steps = [
-	    ('branch pushed', ['git', 'push', 'origin',
-	                       'HEAD:' + release.branch], release.worktree),
-	    ('tag created', ['git', 'tag', release.tag], release.worktree),
+	    ('branch pushed',
+	     ['git', 'push', 'origin',
+	      f'HEAD:refs/heads/{pr_branch}'], release.worktree),
+	    ('PR created', [
+	        'gh', 'pr', 'create', '--repo', REPO, '--base', release.branch,
+	        '--head', pr_branch, '--title', f'Stamp {release.version}',
+	        '--body', body
+	    ], release.worktree),
+	]
+	run_steps(steps, 'dry run: nothing was pushed, rerun with --yes', args.yes)
+	if args.yes:
+		print(f'After the PR is merged, run: release.py publish {release.tag} '
+		      '--notes FILE')
+
+
+def find_stamp(release):
+	"""Return the commit on origin/vX.Y that stamped the version."""
+	ref = 'origin/' + release.branch
+	pat = re.compile(rf'^Stamp {re.escape(release.version)}( \(#\d+\))?$')
+	for line in git('log',
+	                ref,
+	                '--first-parent',
+	                '--format=%H%x09%s',
+	                cwd=release.root).splitlines():
+		h, subj = line.split('\t', 1)
+		if pat.match(subj):
+			return h
+	return None
+
+
+def cmd_publish(args):
+	"""publish subcommand: tag the merged stamp commit, draft the release"""
+	release = Release(args)
+	check_worktree(release)
+
+	# gh runs in the worktree, so a relative path must not depend on the cwd
+	args.notes = os.path.abspath(args.notes)
+	if not os.path.isfile(args.notes) or os.path.getsize(args.notes) == 0:
+		die(f'notes file {args.notes} is missing or empty')
+
+	git('fetch', 'origin', '--tags', cwd=release.worktree)
+
+	where = release.tag_exists()
+	if where:
+		die(f'tag {release.tag} already exists {where}')
+
+	stamp = find_stamp(release)
+	if not stamp:
+		die(f'no "Stamp {release.version}" commit on origin/{release.branch}: '
+		    'is the PR merged?')
+
+	git('checkout', '--detach', stamp, cwd=release.worktree)
+	errors = check_release.run_checks(release.worktree, release.tag)
+	for e in errors:
+		print(f'FAIL: {e}')
+	if errors:
+		die('release checks failed on the merged stamp commit')
+
+	steps = [
+	    ('tag created', ['git', 'tag', release.tag, stamp], release.worktree),
 	    ('tag pushed', ['git', 'push', 'origin',
 	                    release.tag], release.worktree),
 	    ('release created', [
@@ -354,43 +457,9 @@ def cmd_publish(args):
 	    ('worktree removed', ['git', 'worktree', 'remove',
 	                          release.worktree], release.root),
 	]
-
-	git('fetch', 'origin', cwd=release.worktree)
-	res = subprocess.run([
-	    'git', 'merge-base', '--is-ancestor', 'origin/' + release.branch,
-	    'HEAD'
-	],
-	                     cwd=release.worktree)
-	if res.returncode != 0:
-		die(f'origin/{release.branch} is not an ancestor of HEAD '
-		    '(not a fast-forward)')
-
-	if not args.yes:
-		print('checks passed, would run:')
-		for _, cmd, cwd in steps:
-			print(f'  (in {cwd}) {" ".join(cmd)}')
-		print('dry run: nothing was pushed, rerun with --yes to publish')
+	if run_steps(steps, 'dry run: nothing was tagged, rerun with --yes',
+	             args.yes) is None:
 		return
-
-	done = []
-	for label, cmd, cwd in steps:
-		try:
-			res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-			failed = res.returncode != 0
-			reason = res.stderr.strip() or res.stdout.strip()
-		except OSError as e:
-			failed, reason = True, str(e)
-
-		if failed:
-			print(f'error: step "{label}" failed: {reason}', file=sys.stderr)
-			completed = ', '.join(done) or 'none'
-			print(f'completed steps: {completed}', file=sys.stderr)
-			pending = ', '.join(l for l, _, _ in steps if l not in done)
-			print(f'not done: {pending}', file=sys.stderr)
-			sys.exit(1)
-		done.append(label)
-		if label == 'release created':
-			print('draft release: ' + res.stdout.strip().splitlines()[-1])
 
 	print('The "Release sanity check" workflow runs on the tag push: '
 	      'gh run list --workflow release_check.yml')
@@ -414,10 +483,18 @@ def main():
 	                       help='print draft release notes')
 	notes.set_defaults(fn=cmd_notes)
 
+	pr = sub.add_parser('pr',
+	                    parents=[common],
+	                    help='push the stamp commit and open a PR')
+	pr.add_argument('--yes',
+	                action='store_true',
+	                help='really push; without it only print the plan')
+	pr.set_defaults(fn=cmd_pr)
+
 	publish = sub.add_parser(
 	    'publish',
 	    parents=[common],
-	    help='push the branch and the tag, draft the release')
+	    help='after the PR is merged: tag, push the tag, draft the release')
 	publish.add_argument('--notes', required=True)
 	publish.add_argument('--yes',
 	                     action='store_true',

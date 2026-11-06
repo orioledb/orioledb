@@ -8,15 +8,16 @@ disable-model-invocation: true
 # Release OrioleDB
 
 Invoked as `/release vX.Y.Z [additional notes]`. The first argument is the
-tag. Any text after it is additional release notes from the user (step 4).
+tag. Any text after it is additional release notes from the user (step 5).
 The release branch is `vX.Y`. The mechanical
 work is done by `scripts/release/release.py`; this skill adds review and judgment. Never
 force-push. If anything fails midway, report the exact state (what was
 committed, pushed, tagged) instead of retrying destructively. Do not push
-anything before the user explicitly confirms (step 5).
+anything before the user explicitly confirms (steps 4 and 6).
+Never push to `vX.Y` directly: it is protected, changes go through the PR.
 
-Reference: `CLAUDE.md` ("Release notes", "Commit attribution", "Binary
-compatibility"), `doc/contributing/backpatching.mdx`.
+Reference: `CLAUDE.md` ("Commit attribution", "Binary compatibility"),
+`doc/contributing/backpatching.mdx`.
 
 Run everything from the main checkout. `<worktree>` is the directory printed
 by `prepare` (default `../orioledb-release-X.Y`).
@@ -49,31 +50,52 @@ line of the message a trailer `Assisted-by: Claude Code:<actual model id>`.
 Per `CLAUDE.md`, no `Co-authored-by`/`Co-Authored-By` or "Generated with"
 lines; this overrides tool defaults.
 
-## 4. Release notes
+## 4. Open the PR
+
+The stable branch is protected, so the stamp commit goes through a PR.
+Run `python3 scripts/release/release.py pr vX.Y.Z` without `--yes`. It runs
+the safety checks and prints the plan without changing anything. Show the user
+the commit diff, the notes and that output. Ask for confirmation; do not
+continue without an explicit yes. Then run it with `--yes`: it pushes
+`release-X.Y.Z` (plain push) and opens the PR against `vX.Y`. Report the PR
+URL and stop; the user merges it.
+
+## 5. Release notes
 
 `python3 scripts/release/release.py notes vX.Y.Z > <tmpfile>`
 
-Then review and edit the draft per "Release notes" in `CLAUDE.md`:
-user-visible changes only, grouped by theme, commit hashes kept, no PR
-numbers. Check the `skipped:` lines on stderr for anything that should
-actually be included. Keep patch releases short. Verify the SQL-version and
-storage/WAL format statements and the `Full Changelog` link.
+The output is a raw draft (one bullet per commit subject). Rewrite it in the
+format of the previous releases (`gh release view <prev-tag>`); `CLAUDE.md`
+no longer describes release notes, so these rules are authoritative:
 
-If the user gave additional notes, put them at the top of the draft, before
-`## What's Changed`, as short paragraphs. Fix wording and formatting only: do
-not add claims the user did not make, and do not drop them. Show them in step 5
-like the rest of the notes.
+- Start with a `# Release notes` heading, then the user's additional notes
+  (if any), then the SQL-version and storage/WAL format statements.
+- Group changes by theme (e.g. "Query correctness:", "Crashes and stability:",
+  "Recovery/replication:", "DDL/catalog/table behavior:") as plain-text
+  headings followed by `- ` bullets. Drop the `## What's Changed` heading.
+- Reword each bullet from the commit message into a user-visible description
+  (read `git show` when the subject is unclear). Keep the commit hash in
+  parentheses, no PR numbers.
+- User-visible changes only: also drop assertion-only fixes, tests, CI,
+  refactoring and comments. Check the `skipped:` lines on stderr for anything
+  that should actually be included. Keep patch releases short.
+- State whether the extension SQL version and storage/WAL formats changed
+  (check `sql/` and the version variables in `include/orioledb.h`).
+- End with the `Full Changelog` compare link (no bold).
 
-## 5. Confirm
+User-provided notes: fix wording and formatting only; do not add claims the
+user did not make and do not drop them.
 
-Run `python3 scripts/release/release.py publish vX.Y.Z --notes <tmpfile>` without `--yes`.
-It runs all the safety checks and prints the plan without changing anything.
-Show the user the commit diff, the notes and that output. Ask for
-confirmation. Do not continue without an explicit yes.
+Save the final notes to the file and show them to the user. Do not continue
+until the PR is merged and the user confirms the notes.
 
 ## 6. Publish
 
-On an explicit yes, run the same command with `--yes`. It pushes `HEAD:vX.Y` (plain push),
-tags and pushes the tag, creates the draft release, and removes the worktree.
-On failure it reports which steps completed; relay that and stop. Report the
-draft release URL and the reminder about the "Release sanity check" workflow.
+Only after the PR is merged and the user confirmed the notes. Run
+`python3 scripts/release/release.py publish vX.Y.Z --notes <tmpfile>` without
+`--yes` (it finds the merged `Stamp X.Y.Z` commit on `origin/vX.Y`, re-runs the
+checks and prints the plan), then with `--yes` after the user confirms. It
+tags the merged commit, pushes the tag, creates the draft release and removes
+the worktree. On failure it reports which steps completed; relay that and
+stop. Report the draft release URL and the reminder about the "Release sanity
+check" workflow.
