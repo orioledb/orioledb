@@ -407,6 +407,7 @@ o_tables_table_meta_unlock(OTable *o_table, Oid oldRelnode)
 }
 
 extern Oid	o_saved_relrewrite;
+extern Oid	o_am_conversion_newrel;
 extern List *o_reuse_indices;
 
 extern void redefine_pkey_for_rel(Relation rel);
