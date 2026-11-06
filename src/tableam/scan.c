@@ -228,52 +228,6 @@ o_index_path_pages(IndexPath *ipath)
 }
 
 /*
- * Whether every leaf of a bitmap qual path is a native OrioleDB index (so the
- * bitmap scan builds a key bitmap rather than a bridge TIDBitmap).  The
- * parallel bitmap heap scan only supports the native key-bitmap path.
- */
-static bool
-bitmap_qual_all_native(Path *bitmapqual, OTableDescr *descr)
-{
-	ListCell   *lc;
-
-	if (IsA(bitmapqual, IndexPath))
-		return o_find_ix_num((IndexPath *) bitmapqual, descr) >= 0;
-	else if (IsA(bitmapqual, BitmapAndPath))
-	{
-		foreach(lc, ((BitmapAndPath *) bitmapqual)->bitmapquals)
-		{
-			if (!bitmap_qual_all_native((Path *) lfirst(lc), descr))
-				return false;
-		}
-		return true;
-	}
-	else if (IsA(bitmapqual, BitmapOrPath))
-	{
-		foreach(lc, ((BitmapOrPath *) bitmapqual)->bitmapquals)
-		{
-			if (!bitmap_qual_all_native((Path *) lfirst(lc), descr))
-				return false;
-		}
-		return true;
-	}
-	return false;
-}
-
-/*
- * Whether a bitmap qual is a single bridged-index scan -- one IndexPath whose
- * index is not a native OrioleDB index (so the scan builds a bridge TIDBitmap).
- * The parallel bitmap scan supports this via a shared DSA TIDBitmap; And/Or
- * combinations of bridged indexes are not parallelized (they stay serial).
- */
-static bool
-bitmap_qual_single_bridged(Path *bitmapqual, OTableDescr *descr)
-{
-	return IsA(bitmapqual, IndexPath) &&
-		o_find_ix_num((IndexPath *) bitmapqual, descr) < 0;
-}
-
-/*
  * Estimate the number of parallel workers for a parallel index scan.
  */
 static int
@@ -682,22 +636,17 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 				}
 				else if (IsA(path, BitmapHeapPath))
 				{
-					BitmapHeapPath *bh_path = (BitmapHeapPath *) path;
-
 					/*
 					 * Transform a partial BitmapHeapPath into a
 					 * parallel-aware custom bitmap scan: the first worker
 					 * builds the bitmap and the primary tree is fetched
 					 * cooperatively.  Supported when the primary key is
-					 * bitmap-eligible and the qual is either all native
-					 * OrioleDB indexes (key bitmap) or a single bridged index
-					 * (shared DSA TIDBitmap).  Not supported during recovery.
+					 * bitmap-eligible, for any mix of native and bridged
+					 * indexes in the qual.  Not supported during recovery.
 					 */
 					if (!RecoveryInProgress() &&
 						o_keybitmap_pk_mode(GET_PRIMARY(descr), NULL) !=
-						O_KEYBITMAP_NONE &&
-						(bitmap_qual_all_native(bh_path->bitmapqual, descr) ||
-						 bitmap_qual_single_bridged(bh_path->bitmapqual, descr)))
+						O_KEYBITMAP_NONE)
 					{
 						Path	   *custom_path = transform_path(path, descr,
 																 false);
