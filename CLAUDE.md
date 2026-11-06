@@ -80,19 +80,6 @@ types with identical representation across architectures.
 - In Python code prefer f-strings for formatting.
 
 
-## Release notes
-
-Draft release notes in the format of the previous releases at
-https://github.com/orioledb/orioledb/releases, covering commits since the
-previous release tag (`git log <prev>..<tag> --no-merges`).
-
-- Include user-visible changes only. Skip CI, workflows, tests, refactoring,
-  comments, and assertion-only fixes.
-- Group changes by theme and reference commit hashes.
-- State whether the extension SQL version and storage/WAL formats changed
-  (check `sql/` and the version variables in `include/orioledb.h`).
-- End with the `Full Changelog` compare link.
-
 ## Commit attribution
 
 For AI-assisted commits and pull requests, use an `Assisted-by:` trailer in the
