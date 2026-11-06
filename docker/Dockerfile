@@ -53,7 +53,7 @@ RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgres
 RUN set -eux; \
 	\
 	PGTAG=$(grep "^$PG_MAJOR: " /usr/src/postgresql/contrib/orioledb/.pgtags | cut -d' ' -f2-) ; \
-	ORIOLEDB_VERSION=$(grep "^#define ORIOLEDB_VERSION" /usr/src/postgresql/contrib/orioledb/include/orioledb.h | cut -d'"' -f2) ; \
+	ORIOLEDB_VERSION=$(grep "^#define ORIOLEDB_VERSION " /usr/src/postgresql/contrib/orioledb/include/orioledb.h | cut -d'"' -f2) ; \
 	ORIOLEDB_BUILDTIME=$(date -Iseconds) ; \
 	ALPINE_VERSION=$(cat /etc/os-release | grep VERSION_ID | cut -d = -f 2 | cut -d . -f 1,2 | cut -d _ -f 1) ; \
 	\
