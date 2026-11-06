@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import json
+import os
 import subprocess
 import shutil
 import testgres
@@ -3438,3 +3439,73 @@ COMMIT\n""")
 				        'SELECT id, n, md5(data) FROM o_data ORDER BY id'),
 				    publisher.execute(
 				        'SELECT id, n, md5(data) FROM o_data ORDER BY id'))
+
+	def test_logical_subscription_toast_multi_insert(self):
+		"""COPY of multiple rows with TOAST values via multi-insert.
+
+		Exercises per-slot TOAST WAL ordering: each row's TOAST chunks
+		must precede its PK record so that ReorderBufferToastAppendChunk
+		sees sequential chunk_seq per chunk_id.  Grouped WAL (all PK
+		records then all TOAST records) causes chunk_id collisions when
+		multiple rows toast the same attribute.
+
+		Covers two TOAST columns per row and a value large enough to
+		exceed O_TOAST_MULTI_MAX_CHUNKS (128) chunks, crossing a
+		sub-batch boundary.
+		"""
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubscriber()
+
+			with subscriber.start() as subscriber:
+				gen_string = """
+					CREATE OR REPLACE FUNCTION generate_string(
+						seed integer, length integer
+					) RETURNS text AS $$
+						SELECT substr(string_agg(
+							substr(encode(sha256(
+								seed::text::bytea || '_' || i::text::bytea
+							), 'hex'), 1, 21),
+						''), 1, length)
+						FROM generate_series(1, (length + 20) / 21) i;
+					$$ LANGUAGE SQL IMMUTABLE;
+				"""
+				create_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE o_toast_multi (
+						id integer PRIMARY KEY,
+						body text,
+						body2 text
+					) USING orioledb;
+				"""
+				publisher.safe_psql(gen_string + create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub', tables=['o_toast_multi'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
+
+				csvpath = os.path.join(publisher.base_dir, 'toast_multi.csv')
+				publisher.safe_psql("""
+					COPY (
+						SELECT i,
+							   generate_string(i, CASE WHEN i = 5
+								   THEN 300000 ELSE 10000 END),
+							   generate_string(i + 100, 10000)
+						FROM generate_series(1, 5) i
+					) TO '%s';
+					COPY o_toast_multi FROM '%s';
+				""" % (csvpath, csvpath))
+
+				check_query = """
+					SELECT id, md5(body), md5(body2)
+					FROM o_toast_multi ORDER BY id
+				"""
+				expected = publisher.execute(check_query)
+
+				sub.catchup()
+				subscriber.poll_query_until(
+				    "SELECT orioledb_recovery_synchronized();", expected=True)
+
+				self.assertListEqual(subscriber.execute(check_query), expected)
