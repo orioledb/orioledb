@@ -4,6 +4,7 @@ import time
 import re
 import shutil
 import signal
+import threading
 from tempfile import mkstemp
 
 from unittest.mock import patch
@@ -1079,3 +1080,177 @@ class S3Test(S3BaseTest):
 				)
 
 				new_node.cleanup()
+
+	def test_s3_missing_part_error(self):
+		# A data part missing from S3 must fail the query with an error, not
+		# make the S3 worker restart forever and hang the query and shutdown.
+		from threading import Thread
+
+		node = self.node
+		desired = 20 * 1024 * 1024
+
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+			orioledb.s3_desired_size = {desired // (1024 * 1024)}MB
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		# Random ~1.9KB values: incompressible and below the TOAST threshold
+		node.safe_psql("""
+			CREATE TABLE o_test (
+				id int PRIMARY KEY,
+				value text NOT NULL
+			) USING orioledb;
+			INSERT INTO o_test (id, value)
+			SELECT id, (SELECT string_agg(md5(random()::text || g::text), '')
+			            FROM generate_series(1, 60) g WHERE id > 0)
+			FROM generate_series(1, 30000) id;
+		""")
+		node.safe_psql("CHECKPOINT")
+
+		# Empty the page pool and let eviction shrink the local cache, so the
+		# scan has to fetch parts from S3
+		node.stop()
+		node.start()
+		node.safe_psql("CHECKPOINT")
+		deadline = time.time() + 120
+		while self.get_data_size() > desired:
+			if time.time() > deadline:
+				self.fail("local cache never shrank below desired size")
+			time.sleep(1)
+
+		# Remove every data part of this database from the bucket
+		datoid = node.execute(
+		    "SELECT oid FROM pg_database WHERE datname = current_database()"
+		)[0][0]
+		part_re = re.compile(rf"^orioledb_data/\d+/{datoid}/\d+\.\d+\.\d+$")
+		parts = []
+		paginator = self.client.get_paginator("list_objects_v2")
+		for page in paginator.paginate(Bucket=self.bucket_name,
+		                               Prefix="orioledb_data/"):
+			for obj in page.get("Contents", []):
+				if part_re.match(obj["Key"]):
+					parts.append(obj)
+		self.assertGreater(sum(obj["Size"] for obj in parts), desired)
+		for obj in parts:
+			self.client.delete_object(Bucket=self.bucket_name, Key=obj["Key"])
+
+		# Run the scan in a thread so a hang cannot block the test itself
+		result = {}
+
+		def run_query():
+			try:
+				result["rows"] = node.execute("SELECT COUNT(*) FROM o_test")
+			except Exception as e:
+				result["error"] = str(e)
+
+		t = Thread(target=run_query, daemon=True)
+		t.start()
+		t.join(60)
+		hung = t.is_alive()
+		if hung:
+			node.stop(['-m', 'immediate'])
+		self.assertFalse(hung, "query on a missing part hung")
+
+		with open(node.pg_log_file) as f:
+			log = f.read()
+		self.assertIn("error", result, "query on a missing part succeeded")
+		self.assertRegex(log, r"(ERROR|FATAL):\s+(could not|can not) read")
+		self.assertIn("could not load part", log)
+		self.assertNotIn("could not get object from S3", log)
+		node.stop()
+
+	def test_s3_missing_map_error(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+		node.start()
+		# The index is built in an earlier checkpoint than the last one, so
+		# loading it fetches its map file from S3 when the local copy is gone
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test (id int PRIMARY KEY, val text) USING orioledb;
+			INSERT INTO o_test SELECT i, 'row ' || i FROM generate_series(1, 1000) i;
+			CHECKPOINT;
+			CREATE INDEX o_test_val_idx ON o_test (val);
+			CHECKPOINT;
+			CREATE TABLE o_other (id int PRIMARY KEY) USING orioledb;
+			INSERT INTO o_other SELECT generate_series(1, 10);
+			CHECKPOINT;
+			INSERT INTO o_other SELECT generate_series(11, 20);
+			CHECKPOINT;
+		""")
+		datoid = node.execute(
+		    "SELECT oid FROM pg_database WHERE datname = current_database()"
+		)[0][0]
+		db_dir = os.path.join(node.data_dir, "orioledb_data", str(datoid))
+		node.stop()
+
+		keys = []
+		paginator = self.client.get_paginator('list_objects_v2')
+		for page in paginator.paginate(Bucket=self.bucket_name):
+			keys.extend(obj["Key"] for obj in page.get("Contents", []))
+		self.assertTrue(any(key.endswith(".map") for key in keys))
+		for key in keys:
+			self.client.delete_object(Bucket=self.bucket_name, Key=key)
+
+		maps = [name for name in os.listdir(db_dir) if name.endswith(".map")]
+		self.assertGreater(len(maps), 0)
+		for name in maps:
+			os.unlink(os.path.join(db_dir, name))
+
+		node.start()
+
+		def run_query():
+			result = {}
+
+			def target():
+				try:
+					result["rows"] = node.execute(
+					    "SET enable_seqscan = off; "
+					    "SELECT count(*) FROM o_test WHERE val >= 'row'")
+				except Exception as e:
+					result["error"] = str(e)
+
+			thread = threading.Thread(target=target, daemon=True)
+			thread.start()
+			thread.join(30)
+			return thread.is_alive(), result
+
+		# The second query must not wait for the task of the first one
+		hung, result = run_query()
+		if not hung:
+			hung, result2 = run_query()
+
+		with open(node.pg_log_file, errors='replace') as f:
+			log = f.read()
+
+		if hung:
+			node.stop(['-m', 'immediate'])
+		self.assertFalse(hung, "query hung on a map file missing from S3")
+		self.assertIn("error", result)
+		self.assertIn("error", result2)
+		# The S3 worker reports the missing object and the backend fails
+		self.assertEqual(log.count("WARNING:  could not load map file of"), 1)
+		self.assertIn("FATAL:  could not load map file", log)
+		self.assertNotIn("could not get object from S3", log)
+		# Only the backend that loaded the tree fails. The server keeps running
+		self.assertNotIn("terminated by signal", log)
+		self.assertNotIn("all server processes terminated", log)
+		self.assertEqual([(1, )], node.execute("SELECT 1"))
+		node.stop()
