@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import os
+import subprocess
 import time
 import unittest
 
 from testgres.enums import NodeStatus
+from testgres.utils import get_bin_path
 
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
@@ -259,6 +262,148 @@ class LogicalUndoRetainTest(BaseTest):
 
 		self.check_survived_restart(node)
 
+	def refresh_retain_floor(self, node):
+		"""
+		Let the system undo retain floor catch up with what is retained right
+		now.  orioledb_get_undo_meta() runs update_min_undo_locations(), the
+		same thing the background writer does on its own every now and then.
+		"""
+		node.execute("SELECT count(*) FROM orioledb_get_undo_meta();")
+
+	def write_record_then_change_its_catalog(self, node):
+		"""
+		Stamp a WAL_REC_RELATION with the CSN of this moment, then change the
+		o_tables row of the same table.  Reading that row back at the stamped
+		CSN now means walking the system undo log.  Returns an LSN no later
+		than the record.
+		"""
+		lsn = node.execute("SELECT pg_current_wal_insert_lsn();")[0][0]
+		node.safe_psql('postgres',
+		               "INSERT INTO o_decoded VALUES (1, 'before-ddl');")
+		node.safe_psql('postgres',
+		               "ALTER TABLE o_decoded ADD COLUMN extra int;")
+		# The slot asks what is retained when it catches up; make that answer
+		# current rather than whatever was published before the DDL.
+		self.refresh_retain_floor(node)
+		return lsn
+
+	def assert_decoded_again_from(self, node, lsn):
+		"""
+		The next decoding session starts at restart_lsn, so it reads the
+		record at lsn once more -- with its old CSN.
+		"""
+		restart_lsn = node.execute(
+		    f"SELECT restart_lsn FROM pg_replication_slots "
+		    f"WHERE slot_name = '{SLOT}';")[0][0]
+		self.assertTrue(
+		    node.execute(f"SELECT '{restart_lsn}'::pg_lsn <= '{lsn}';")[0][0],
+		    f"restart_lsn {restart_lsn} is already past the record at {lsn}: "
+		    f"nothing would be decoded again")
+
+	def decode_or_fail(self, node, fn):
+		try:
+			return [
+			    row[0] for row in node.execute(
+			        f"SELECT data FROM pg_logical_slot_{fn}_changes("
+			        f"'{SLOT}', NULL, NULL);")
+			]
+		except Exception as e:
+			# restart_after_crash is off: a PANIC takes the node down.
+			self.wait_stopped(node)
+			self.fail(f"decoding a record a second time failed: {e}")
+
+	def test_redecode_after_get_changes(self):
+		"""
+		Catching up moves the slot's retain to what is needed for WAL written
+		from now on.  But the slot does not restart from here: the next
+		session starts at restart_lsn, which lags behind confirmed_flush, and
+		decodes the records in between once more, at their own old CSNs.
+		"""
+		node = self.start_node()
+		self.create_slot(node)
+		lsn = self.write_record_then_change_its_catalog(node)
+
+		self.assertIn(
+		    "table public.o_decoded: INSERT: id[integer]:1 v[text]:'before-ddl'",
+		    self.decode_or_fail(node, 'get'))
+		self.assert_decoded_again_from(node, lsn)
+
+		self.refresh_retain_floor(node)
+
+		# A fresh backend, so no descriptor is cached: the record above is
+		# decoded again and its table is read from o_tables at its CSN.
+		self.decode_or_fail(node, 'get')
+		self.assertEqual(node.status(), NodeStatus.Running)
+
+	def test_redecode_after_peek_changes(self):
+		"""
+		Peeking confirms nothing, so the next call decodes the very same
+		records again.  The retain must not move on a peek.
+		"""
+		node = self.start_node()
+		self.create_slot(node)
+		lsn = self.write_record_then_change_its_catalog(node)
+
+		row = "table public.o_decoded: INSERT: id[integer]:1 v[text]:'before-ddl'"
+		self.assertIn(row, self.decode_or_fail(node, 'peek'))
+		self.assert_decoded_again_from(node, lsn)
+
+		self.refresh_retain_floor(node)
+
+		self.assertIn(row, self.decode_or_fail(node, 'get'))
+		self.assertEqual(node.status(), NodeStatus.Running)
+
+	def recvlogical_until_now(self, node, out):
+		"""
+		Stream through a walsender up to the current end of WAL and
+		disconnect, the way a subscriber does when its connection drops.
+		"""
+		endpos = node.execute("SELECT pg_current_wal_flush_lsn();")[0][0]
+		try:
+			return subprocess.run([
+			    get_bin_path("pg_recvlogical"), "-d", "postgres", "-h",
+			    "127.0.0.1", "-p",
+			    str(node.port), "-S", SLOT, "--start", "--no-loop", "-E",
+			    endpos, "-f", out
+			],
+			                      capture_output=True,
+			                      text=True,
+			                      timeout=60)
+		except subprocess.TimeoutExpired as e:
+			self.fail(f"pg_recvlogical did not reach {endpos}: {e}")
+
+	def test_redecode_after_walsender_reconnect(self):
+		"""
+		The same through a walsender: it catches up and moves the retain,
+		the client disconnects, and the walsender of the next connection
+		starts at restart_lsn.
+		"""
+		node = self.start_node()
+		self.create_slot(node)
+		lsn = self.write_record_then_change_its_catalog(node)
+		out = os.path.join(node.base_dir, 'recvlogical.out')
+
+		first = self.recvlogical_until_now(node, out)
+		self.assertEqual(first.returncode, 0, first.stderr)
+		with open(out) as f:
+			self.assertIn(
+			    "table public.o_decoded: INSERT: id[integer]:1 "
+			    "v[text]:'before-ddl'", f.read())
+		self.assert_decoded_again_from(node, lsn)
+
+		self.refresh_retain_floor(node)
+
+		# Something new to stream, so that the second session has an end
+		# point to reach.
+		node.safe_psql('postgres',
+		               "INSERT INTO o_decoded VALUES (2, 'after-reconnect');")
+		second = self.recvlogical_until_now(node, out)
+		if second.returncode != 0:
+			# restart_after_crash is off: a PANIC takes the node down.
+			self.wait_stopped(node)
+			self.fail(f"walsender failed on reconnect: {second.stderr}")
+		self.assertEqual(node.status(), NodeStatus.Running)
+
 	def slot_retain(self, node):
 		return node.execute(
 		    "SELECT orioledb_slot_retain_undo_location();")[0][0]
@@ -268,7 +413,8 @@ class LogicalUndoRetainTest(BaseTest):
 		The slot is the one holding the undo now, so its value has to behave:
 		nothing without a slot, something once one exists, standing still
 		while a transaction has a record stamped but not flushed, and moving
-		on once that transaction is done and decoded.
+		on once that transaction is done, decoded, and restart_lsn has moved
+		past it.
 		"""
 		node = self.start_node()
 		self.assertIsNone(self.slot_retain(node),
@@ -302,15 +448,62 @@ class LogicalUndoRetainTest(BaseTest):
 		    "the slot moved past a record that is still waiting in its "
 		    "transaction's WAL buffer")
 
-		# Once that transaction is done and decoded, it may move.
+		# Once that transaction is done and decoded, it may move -- but only
+		# after restart_lsn has moved past the point where the slot asked, as
+		# the next session reads everything from restart_lsn again.  It only
+		# moves on a running_xacts record, so log some.  Decoding reads
+		# flushed WAL only, and nothing flushes that record but the next
+		# commit, so commit something with an xid after it.
 		old_con.commit()
 		old_con.close()
 		with node.connect(autocommit=True) as churn:
 			self.churn(churn, 'freed', 20)
-		self.decoded(node)
+		node.safe_psql('postgres', "CREATE TABLE flush_wal (i int);")
+		for _ in range(10):
+			node.execute("SELECT pg_log_standby_snapshot();")
+			node.execute("SELECT pg_current_xact_id();")
+			node.execute("INSERT INTO flush_wal VALUES (1);")
+			self.decoded(node)
+			if self.slot_retain(node) > held:
+				break
 
 		self.assertGreater(self.slot_retain(node), held,
 		                   "the slot never moved on after catching up")
+
+	def test_invalidated_slot_lets_go(self):
+		"""
+		An invalidated slot can never be decoded from again, so it must not
+		keep holding the system undo -- PostgreSQL leaves such a slot out of
+		its own xmin and LSN horizons for the same reason.
+		"""
+		# wal_keep_size keeps WAL on its own (testgres sets it), so the slot
+		# would never fall out of what may be kept.
+		self.node.append_conf(
+		    'postgresql.conf', "wal_keep_size = 0\n"
+		    "max_slot_wal_keep_size = 1MB\n")
+		node = self.start_node()
+		self.create_slot(node)
+		self.assertIsNotNone(self.slot_retain(node),
+		                     "a slot has to say what it retains")
+
+		# Push the slot's restart_lsn out of the WAL it may keep, so that the
+		# next checkpoint invalidates it.
+		for i in range(4):
+			node.safe_psql(
+			    'postgres',
+			    f"INSERT INTO o_decoded SELECT g, repeat('x', 100) "
+			    f"FROM generate_series({i * 10000 + 10}, {i * 10000 + 9999}) g;"
+			)
+			node.safe_psql('postgres', "SELECT pg_switch_wal();")
+		node.safe_psql('postgres', "CHECKPOINT;")
+		node.poll_query_until(
+		    f"SELECT wal_status = 'lost' FROM pg_replication_slots "
+		    f"WHERE slot_name = '{SLOT}';",
+		    sleep_time=0.5,
+		    max_attempts=60)
+
+		self.assertIsNone(self.slot_retain(node),
+		                  "an invalidated slot still holds the system undo")
 
 	def test_standby_decodes_with_its_own_slot(self):
 		"""
