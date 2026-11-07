@@ -133,7 +133,7 @@ In OrioleDB, old versions of tuples do not cause bloat in the main storage syste
 
 ### Copy-on-write checkpoints and row-level WAL
 
-OrioleDB utilizes copy-on-write checkpoints, which provides a structurally consistent snapshot of data every moment of time. This is friendly for modern SSDs and allows row-level WAL logging. In turn, row-level WAL logging is easy to parallelize (done), compact and suitable for active-active multimaster (planned).
+OrioleDB utilizes copy-on-write checkpoints, which provide a structurally consistent snapshot of data every moment of time. This is friendly for modern SSDs and allows row-level WAL logging. In turn, row-level WAL logging is easy to parallelize (done), compact and suitable for active-active multimaster (planned).
 
 ## Resources
 
