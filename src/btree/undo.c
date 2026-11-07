@@ -2152,6 +2152,39 @@ nonconflicting_record_is_final(OTupleXactInfo xactInfo, CommitSeqNo csn,
 }
 
 /*
+ * Places the answer of a row_lock_conflicts() walk that ended where the undo
+ * does: gone, or below our snapshot's retain location, under which no
+ * transaction running when the snapshot was taken had written any undo.  If
+ * the walk passed no version of the row, every record it saw was a row lock,
+ * and the version under them was written by a transaction that had finished
+ * by then -- and committed, as an aborted one takes its version back.  The
+ * answer then says so, a version committed for everybody, rather than naming
+ * one of the locks.  The caller would judge the row by that lock: by the
+ * locker's csn, or, for a lock of our own, as a version our transaction
+ * wrote, which made an upsert skip the row it had just locked.
+ */
+static inline void
+chain_end_answer(BTreeLeafTuphdr *conflictTuphdr,
+				 UndoLocation *conflictUndoLocation,
+				 BTreeLeafTuphdr *finalTuphdr, UndoLocation finalUndoLocation,
+				 bool haveVersion)
+{
+	if (haveVersion)
+	{
+		*conflictTuphdr = *finalTuphdr;
+		*conflictUndoLocation = finalUndoLocation;
+		return;
+	}
+
+	*conflictTuphdr = *finalTuphdr;
+	conflictTuphdr->xactInfo = OXID_GET_XACT_INFO(BootstrapTransactionId,
+												  RowLockUpdate, false);
+	conflictTuphdr->undoLocation = InvalidUndoLocation;
+	conflictTuphdr->chainHasLocks = false;
+	*conflictUndoLocation = InvalidUndoLocation;
+}
+
+/*
  * Check for row-level lock conflict
  *
  * Returns true if lock conflict.  On lock conflict places the conflicting undo
@@ -2162,8 +2195,8 @@ nonconflicting_record_is_final(OTupleXactInfo xactInfo, CommitSeqNo csn,
  * mode conflicts with ours, or else the newest version committed before
  * my_csn or written by us (see nonconflicting_record_is_final()).  Row locks
  * are never versions.  If the walk ends before it finds that version, the
- * newest version it passed is placed instead, or the record it started from
- * if it passed none.
+ * newest version it passed is placed instead, or, if it passed none, a version
+ * committed for everybody (see chain_end_answer()).
  *
  * Lock-only undo records from committed and aborted transactions are removed.
  * Own lock-only undo records of the same or weaker level are removed.
@@ -2342,10 +2375,9 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 					lastLockOnlyUndoLocation = InvalidUndoLocation;
 				}
 				if (!result)
-				{
-					*conflictTuphdr = finalTuphdr;
-					*conflictUndoLocation = finalUndoLocation;
-				}
+					chain_end_answer(conflictTuphdr, conflictUndoLocation,
+									 &finalTuphdr, finalUndoLocation,
+									 haveVersion);
 				return result;
 			}
 			newTuphdr = curTuphdr;
@@ -2421,10 +2453,9 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			}
 
 			if (!result)
-			{
-				*conflictTuphdr = finalTuphdr;
-				*conflictUndoLocation = finalUndoLocation;
-			}
+				chain_end_answer(conflictTuphdr, conflictUndoLocation,
+								 &finalTuphdr, finalUndoLocation,
+								 haveVersion);
 			return result;
 		}
 
@@ -2446,10 +2477,9 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 								 &curUndoLocation, NULL))
 			{
 				if (!result)
-				{
-					*conflictTuphdr = finalTuphdr;
-					*conflictUndoLocation = finalUndoLocation;
-				}
+					chain_end_answer(conflictTuphdr, conflictUndoLocation,
+									 &finalTuphdr, finalUndoLocation,
+									 haveVersion);
 				return result;
 			}
 		}
@@ -2500,10 +2530,8 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 	}
 
 	if (!result)
-	{
-		*conflictTuphdr = finalTuphdr;
-		*conflictUndoLocation = finalUndoLocation;
-	}
+		chain_end_answer(conflictTuphdr, conflictUndoLocation,
+						 &finalTuphdr, finalUndoLocation, haveVersion);
 	return result;
 }
 
