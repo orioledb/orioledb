@@ -61,7 +61,7 @@ OrioleDB implements page-level compression. Pages have fixed size in-memory but 
 
 At first, `*.tmp` and `*.map` files contain not free block numbers but free extents. Extent comprises offset and length.
 
-Since we are dealing with extents, we can't just read `*.tmp` and `*.map` files sequentially because we may meet extents that don't match the required length. In order to deal with free extents, we also have system trees `SYS_TREES_EXTENTS_OFF_LEN` and `SYS_TREES_EXTENTS_LEN_OFF`. The `SYS_TREES_EXTENTS_LEN_OFF` is ordered by the extent length, and we use it to find the extent which is the best fit for our needs. The `SYS_TREES_EXTENTS_OFF_LEN` is ordered by the extent offset, and we use it to join the conjuncted extents.
+Since we are dealing with extents, we can't just read `*.tmp` and `*.map` files sequentially because we may meet extents that don't match the required length. In order to deal with free extents, we also have system trees `SYS_TREES_EXTENTS_OFF_LEN` and `SYS_TREES_EXTENTS_LEN_OFF`. The `SYS_TREES_EXTENTS_LEN_OFF` is ordered by the extent length, and we use it to find the extent which is the best fit for our needs. The `SYS_TREES_EXTENTS_OFF_LEN` is ordered by the extent offset, and we use it to join the adjacent extents.
 
 `SYS_TREES_EXTENTS_OFF_LEN` and `SYS_TREES_EXTENTS_LEN_OFF` trees are temporary. Their content does not survive server restart: we always start with these trees empty. Once we load some tree, we also load the content of its `*.map` file to `SYS_TREES_EXTENTS_OFF_LEN` and `SYS_TREES_EXTENTS_LEN_OFF`. When the checkpoint of a tree is completed, we read the content of `*.tmp` file of the previous checkpoint to these trees. When the checkpoint is completed, we add extents from those trees to the `*.map` file.
 
