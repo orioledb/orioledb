@@ -1,0 +1,65 @@
+Parsed test spec with 4 sessions
+
+starting permutation: l_fk c_checkpoint t_upsert t_select
+step l_fk: INSERT INTO rlpr_child VALUES (1, 1);
+step c_checkpoint: CHECKPOINT;
+step t_upsert: 
+	INSERT INTO rlpr VALUES (2, 'r1', 0)
+		ON CONFLICT (name) DO UPDATE SET v = rlpr.v + 100
+		RETURNING id, v;
+
+id|  v
+--+---
+ 1|100
+(1 row)
+
+step t_select: SELECT * FROM rlpr ORDER BY id;
+id|name|  v
+--+----+---
+ 1|r1  |100
+(1 row)
+
+
+starting permutation: w_begin w_update l_fk c_checkpoint t_update w_commit t_select
+step w_begin: BEGIN;
+step w_update: UPDATE rlpr SET v = v + 1 WHERE id = 1;
+step l_fk: INSERT INTO rlpr_child VALUES (1, 1);
+step c_checkpoint: CHECKPOINT;
+step t_update: UPDATE rlpr SET v = v + 100 WHERE id = 1 RETURNING v; <waiting ...>
+step w_commit: COMMIT;
+step t_update: <... completed>
+  v
+---
+101
+(1 row)
+
+step t_select: SELECT * FROM rlpr ORDER BY id;
+id|name|  v
+--+----+---
+ 1|r1  |101
+(1 row)
+
+
+starting permutation: w_begin w_update l_fk c_checkpoint t_upsert w_commit t_select
+step w_begin: BEGIN;
+step w_update: UPDATE rlpr SET v = v + 1 WHERE id = 1;
+step l_fk: INSERT INTO rlpr_child VALUES (1, 1);
+step c_checkpoint: CHECKPOINT;
+step t_upsert: 
+	INSERT INTO rlpr VALUES (2, 'r1', 0)
+		ON CONFLICT (name) DO UPDATE SET v = rlpr.v + 100
+		RETURNING id, v;
+ <waiting ...>
+step w_commit: COMMIT;
+step t_upsert: <... completed>
+id|  v
+--+---
+ 1|101
+(1 row)
+
+step t_select: SELECT * FROM rlpr ORDER BY id;
+id|name|  v
+--+----+---
+ 1|r1  |101
+(1 row)
+
