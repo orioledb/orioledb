@@ -37,6 +37,13 @@
  *   outcomes in troubles for logical decoder with visibility of heap
  *   modifications in Oriole's sub-part due to incorrect state of the
  *   MVCC-historical snapshot.
+ *
+ * WAL_REC_SUBXACT_ABORT:
+ *   Aborts a released subtransaction whose enclosing savepoint is rolled
+ *   back.  The reorder buffer keeps every savepoint as a child of the
+ *   top-level transaction, so the rollback of the enclosing savepoint does
+ *   not reach a savepoint released inside it.  Recovery ignores the record:
+ *   undo already rolls back the changes.
  */
 
 #define ORIOLE_WAL_RECORDS(X) \
@@ -64,7 +71,8 @@
 	X(WAL_REC_CIC_WRITERS_DIRECT,   22, "CIC_WRITERS_DIRECT", wal_parse_rec_cic_phase) \
 	X(WAL_REC_CIC_DRAIN_BARRIER,    23, "CIC_DRAIN_BARRIER",  wal_parse_rec_cic_phase) \
 	X(WAL_REC_CIC_INDEX_VALID,      24, "CIC_INDEX_VALID",    wal_parse_rec_cic_phase) \
-	X(WAL_REC_UPDATE_PARTIAL,       25, "UPDATE_PARTIAL",     wal_parse_rec_modify)
+	X(WAL_REC_UPDATE_PARTIAL,       25, "UPDATE_PARTIAL",     wal_parse_rec_modify) \
+	X(WAL_REC_SUBXACT_ABORT,        26, "SUBXACT_ABORT",      wal_parse_rec_subxact_abort)
 
 /*
  * Of the CIC records above only CIC_INDEX_VALID is emitted; the other two

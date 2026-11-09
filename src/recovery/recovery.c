@@ -5107,6 +5107,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			break;
 
 		case WAL_REC_SWITCH_LOGICAL_XID:
+		case WAL_REC_SUBXACT_ABORT:
 			/* Ignore */
 			break;
 

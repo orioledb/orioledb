@@ -565,6 +565,140 @@ class LogicalTest(BaseTest):
 		    "table public.data: INSERT: id[integer]:8\n"
 		    "COMMIT\n")
 
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_savepoint_rollback_released_child(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE data(id int primary key) USING orioledb;\n"
+		    "CREATE TABLE h_data(id int primary key) USING heap;\n")
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		# ROLLBACK TO s1 drops s2 released inside it.  s3 after the
+		# rollback may reuse the xid of s2.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO data VALUES (1);\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data VALUES (2);\n"
+		    "SAVEPOINT s2;\n"
+		    "INSERT INTO data VALUES (3);\n"
+		    "RELEASE SAVEPOINT s2;\n"
+		    "ROLLBACK TO s1;\n"
+		    "INSERT INTO data VALUES (4);\n"
+		    "SAVEPOINT s3;\n"
+		    "INSERT INTO data VALUES (5);\n"
+		    "RELEASE SAVEPOINT s3;\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:1\n"
+		    "table public.data: INSERT: id[integer]:4\n"
+		    "table public.data: INSERT: id[integer]:5\n"
+		    "COMMIT\n")
+
+		# s2 still open at ROLLBACK TO s1
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO data VALUES (11);\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data VALUES (12);\n"
+		    "SAVEPOINT s2;\n"
+		    "INSERT INTO data VALUES (13);\n"
+		    "ROLLBACK TO s1;\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:11\n"
+		    "COMMIT\n")
+
+		# Two released levels: s3 inside s2 inside s1
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO data VALUES (21);\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data VALUES (22);\n"
+		    "SAVEPOINT s2;\n"
+		    "INSERT INTO data VALUES (23);\n"
+		    "SAVEPOINT s3;\n"
+		    "INSERT INTO data VALUES (24);\n"
+		    "RELEASE SAVEPOINT s3;\n"
+		    "RELEASE SAVEPOINT s2;\n"
+		    "ROLLBACK TO s1;\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:21\n"
+		    "COMMIT\n")
+
+		# s0 released before s1 starts survives ROLLBACK TO s1
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO data VALUES (31);\n"
+		    "SAVEPOINT s0;\n"
+		    "INSERT INTO data VALUES (32);\n"
+		    "RELEASE SAVEPOINT s0;\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data VALUES (33);\n"
+		    "SAVEPOINT s2;\n"
+		    "INSERT INTO data VALUES (34);\n"
+		    "RELEASE SAVEPOINT s2;\n"
+		    "ROLLBACK TO s1;\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:31\n"
+		    "table public.data: INSERT: id[integer]:32\n"
+		    "COMMIT\n")
+
+		# ROLLBACK TO s1 twice: the second one drops s2 released into the
+		# restarted s1
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO data VALUES (51);\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data VALUES (52);\n"
+		    "SAVEPOINT s2;\n"
+		    "INSERT INTO data VALUES (53);\n"
+		    "RELEASE SAVEPOINT s2;\n"
+		    "ROLLBACK TO s1;\n"
+		    "INSERT INTO data VALUES (54);\n"
+		    "SAVEPOINT s2;\n"
+		    "INSERT INTO data VALUES (55);\n"
+		    "RELEASE SAVEPOINT s2;\n"
+		    "ROLLBACK TO s1;\n"
+		    "INSERT INTO data VALUES (56);\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:51\n"
+		    "table public.data: INSERT: id[integer]:56\n"
+		    "COMMIT\n")
+
+		# The same with a heap xid as the parent of the savepoints
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO h_data VALUES (1);\n"
+		    "INSERT INTO data VALUES (41);\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data VALUES (42);\n"
+		    "SAVEPOINT s2;\n"
+		    "INSERT INTO data VALUES (43);\n"
+		    "RELEASE SAVEPOINT s2;\n"
+		    "ROLLBACK TO s1;\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.h_data: INSERT: id[integer]:1\n"
+		    "table public.data: INSERT: id[integer]:41\n"
+		    "COMMIT\n")
+
 	def test_simple_replident(self):
 		node = self.node
 		node.start()  # start PostgreSQL
@@ -676,6 +810,46 @@ class LogicalTest(BaseTest):
 				self.assertListEqual(
 				    subscriber.execute('SELECT * FROM o_data ORDER BY id'),
 				    [(1, ), (2, )])
+
+	def test_logical_subscription_rollback_released(self):
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubscriber()
+			with subscriber.start() as subscriber:
+				setup_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE o_data(id int primary key) USING orioledb;
+				"""
+				publisher.safe_psql(setup_sql)
+				subscriber.safe_psql(setup_sql)
+
+				pub = publisher.publish('test_pub', tables=['o_data'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
+
+				# ROLLBACK TO s1 must drop the rows of s2 released inside it.
+				publisher.safe_psql("""
+					BEGIN;
+					INSERT INTO o_data VALUES (1);
+					SAVEPOINT s1;
+					INSERT INTO o_data VALUES (2);
+					SAVEPOINT s2;
+					INSERT INTO o_data VALUES (3);
+					RELEASE SAVEPOINT s2;
+					ROLLBACK TO s1;
+					INSERT INTO o_data VALUES (4);
+					COMMIT;
+				""")
+
+				sub.catchup()
+
+				self.assertListEqual(
+				    subscriber.execute('SELECT * FROM o_data ORDER BY id'),
+				    publisher.execute('SELECT * FROM o_data ORDER BY id'))
+				self.assertListEqual(
+				    subscriber.execute('SELECT * FROM o_data ORDER BY id'),
+				    [(1, ), (4, )])
 
 	def test_logical_subscription_drop_table(self):
 		with self.node as publisher:

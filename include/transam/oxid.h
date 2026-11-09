@@ -217,6 +217,7 @@ extern void oxid_notify_all(void);
 extern void advance_oxids(OXid new_xid);
 extern OXid get_current_oxid(void);
 extern void assign_subtransaction_logical_xid(SubTransactionId mySubid);
+extern void log_released_xids_abort(SubTransactionId subid);
 extern void set_oxid_csn(OXid oxid, CommitSeqNo csn);
 extern void set_oxid_xlog_ptr(OXid oxid, XLogRecPtr ptr);
 extern void set_current_oxid(OXid oxid);

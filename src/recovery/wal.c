@@ -830,6 +830,26 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 	local_wal.contains_xid = false;
 }
 
+void
+add_subxact_abort_wal_record(TransactionId logicalXid)
+{
+	WALRecSubxactAbort *rec;
+
+	Assert(!is_recovery_process());
+	Assert(TransactionIdIsValid(logicalXid));
+	flush_local_wal_if_needed(sizeof(*rec));
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	add_xid_wal_record_if_needed();
+
+	rec = (WALRecSubxactAbort *) (&local_wal.buffer[local_wal.buffer_offset]);
+
+	rec->recType = WAL_REC_SUBXACT_ABORT;
+	memcpy(rec->logicalXid, &logicalXid, sizeof(TransactionId));
+
+	local_wal.buffer_offset += sizeof(*rec);
+}
+
 /*
  * Make the next change carry a fresh xid record.
  *
