@@ -1149,6 +1149,35 @@ class LogicalTest(BaseTest):
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_o2h_total_bytes(self):
+		"""
+		The slot statistics count the adopted OrioleDB changes.
+
+		The changes of the logical xid are accounted to it while it is a
+		top-level transaction.  At commit the heap xid adopts it, and the
+		reorder buffer reports the top-level total as
+		pg_stat_replication_slots.total_bytes: without the adopted changes
+		it is the size of the heap row alone.
+		"""
+		result = self.decode_o2h_xact("""
+			INSERT INTO o_data
+				SELECT a, repeat(md5(a::text), 20)
+					FROM generate_series(1, 2000) f(a);
+			INSERT INTO h_data VALUES (1, 'h1');
+		""")
+		self.assertEqual(result.count("INSERT"), 2001)
+		total_bytes = self.node.execute("""
+			SELECT total_bytes
+				FROM pg_stat_replication_slots
+				WHERE slot_name = 'regression_slot';
+		""")[0][0]
+		# 2000 rows of about 700 bytes: counted once, not twice
+		self.assertGreater(total_bytes, 1024 * 1024)
+		self.assertLess(total_bytes, 2 * 1024 * 1024,
+		                "the adopted changes were counted twice")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
 	def test_switch_logical_xid_o2h_spilled_savepoint(self):
 		"""
 		A spilled savepoint is replayed after the heap xid took it over.
