@@ -42,6 +42,7 @@ static WalParseResult wal_parse_rec_joint_commit(WalReaderState *r, WalRecord *r
 static WalParseResult wal_parse_rec_truncate(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_bridge_erase(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_switch_logical_xid(WalReaderState *r, WalRecord *rec);
+static WalParseResult wal_parse_rec_subxact_abort(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_relreplident(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_modify(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_dbcopy(WalReaderState *r, WalRecord *rec);
@@ -266,6 +267,18 @@ wal_parse_rec_rollback_to_savepoint(WalReaderState *r, WalRecord *rec)
 		rec->u.rb_to_sp.xmin = InvalidOXid;
 		rec->u.rb_to_sp.csn = 0;
 	}
+	return WALPARSE_OK;
+}
+
+/* Parser for WAL_REC_SUBXACT_ABORT */
+static WalParseResult
+wal_parse_rec_subxact_abort(WalReaderState *r, WalRecord *rec)
+{
+	Assert(r);
+	Assert(rec);
+
+	WR_PARSE(r, &rec->u.subxact_abort.logicalXid);
+
 	return WALPARSE_OK;
 }
 

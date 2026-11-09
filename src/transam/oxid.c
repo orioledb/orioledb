@@ -145,11 +145,23 @@ static List *prevLogicalXids = NIL; /* stack of PrevLogicalXidEntry for all
 									 * restore and release */
 
 /*
- * Logical xids of released subtransactions, freed at the top-level end.  The
- * decoder keeps a released subtransaction's changes under its xid up to the
- * top-level commit, so no other subtransaction may get that xid before.
- * Rolled back subtransactions don't need this: the decoder drops them at
- * ROLLBACK TO.
+ * Logical xid of a released subtransaction, the subtransaction it was
+ * released into, and whether log_released_xids_abort() logged its abort.
+ */
+typedef struct
+{
+	TransactionId xid;
+	SubTransactionId parentSubid;
+	bool		abortLogged;
+} ReleasedLogicalXid;
+
+/*
+ * ReleasedLogicalXid entries, freed at the top-level end.  The decoder keeps
+ * a released subtransaction's changes under its xid up to the top-level
+ * commit, so no other subtransaction may get that xid before.  Rolled back
+ * subtransactions don't need this: the decoder drops them at ROLLBACK TO.
+ * Neither do released ones whose enclosing savepoint is rolled back: see
+ * log_released_xids_abort().
  */
 static List *releasedLogicalXids = NIL;
 
@@ -694,6 +706,60 @@ setup_prev_logical_xid_ctx(SubTransactionId mySubid)
 	prevLogicalXids = list_delete_last(prevLogicalXids);
 }
 
+/*
+ * Log an abort for every subtransaction released inside the rolled back
+ * subtransaction subid.  The decoder keeps them as children of the top-level
+ * transaction, so the rollback record of subid alone leaves their changes in
+ * place.  PostgreSQL lists such children in the abort record of subid.
+ *
+ * Subids grow within a transaction.  A subtransaction released while subid
+ * was open started after it, so its parent subid is subid or later.  One
+ * released before subid started has an earlier parent.
+ *
+ * Call it before the rollback record of subid, which flushes these records.
+ */
+void
+log_released_xids_abort(SubTransactionId subid)
+{
+	ListCell   *lc;
+
+	foreach(lc, releasedLogicalXids)
+	{
+		ReleasedLogicalXid *entry = (ReleasedLogicalXid *) lfirst(lc);
+
+		if (entry->parentSubid < subid)
+			continue;
+
+		add_subxact_abort_wal_record(entry->xid);
+		entry->abortLogged = true;
+	}
+}
+
+/*
+ * Free the xids whose abort records log_released_xids_abort() wrote.  A
+ * freed xid can go to another backend only after those records are in
+ * XLOG: the decoder must see our abort before that backend's changes under
+ * the same xid.  The rollback record written in between flushes them.
+ */
+static void
+free_abort_logged_xids(void)
+{
+	ListCell   *lc;
+
+	foreach(lc, releasedLogicalXids)
+	{
+		ReleasedLogicalXid *entry = (ReleasedLogicalXid *) lfirst(lc);
+		LogicalXidCtx ctx = {entry->xid, false};
+
+		if (!entry->abortLogged)
+			continue;
+
+		release_logical_xid(&ctx);
+		pfree(entry);
+		releasedLogicalXids = foreach_delete_current(releasedLogicalXids, lc);
+	}
+}
+
 void
 oxid_subxact_callback(
 					  SubXactEvent event, SubTransactionId mySubid,
@@ -701,6 +767,11 @@ oxid_subxact_callback(
 {
 	TransactionId heapXid;
 
+	/*
+	 * The released xid bookkeeping below belongs to the outer transaction: no
+	 * subtransaction starts inside an autonomous one, see
+	 * undo_subxact_callback().
+	 */
 	switch (event)
 	{
 		case SUBXACT_EVENT_COMMIT_SUB:
@@ -718,12 +789,16 @@ oxid_subxact_callback(
 					if (TransactionIdIsValid(logicalXidContext.xid) &&
 						prev_logical_xid_pushed_by(mySubid))
 					{
+						ReleasedLogicalXid *entry;
 						MemoryContext mcxt;
 
 						/* Keep the xid up to the top-level end */
 						mcxt = MemoryContextSwitchTo(TopMemoryContext);
-						releasedLogicalXids = lappend_xid(releasedLogicalXids,
-														  logicalXidContext.xid);
+						entry = (ReleasedLogicalXid *) palloc(sizeof(ReleasedLogicalXid));
+						entry->xid = logicalXidContext.xid;
+						entry->parentSubid = parentSubid;
+						entry->abortLogged = false;
+						releasedLogicalXids = lappend(releasedLogicalXids, entry);
 						MemoryContextSwitchTo(mcxt);
 
 						heapXid = GetTopTransactionIdIfAny();
@@ -772,6 +847,9 @@ oxid_subxact_callback(
 
 		case SUBXACT_EVENT_ABORT_SUB:
 			{
+				/* undo_subxact_callback() has flushed the abort records */
+				free_abort_logged_xids();
+
 				if (have_retained_undo_location())
 				{
 					if (TransactionIdIsValid(logicalXidContext.xid))
@@ -2021,11 +2099,12 @@ release_assigned_logical_xids(void)
 
 		foreach(lc, releasedLogicalXids)
 		{
-			LogicalXidCtx ctx = {lfirst_xid(lc), false};
+			ReleasedLogicalXid *released = (ReleasedLogicalXid *) lfirst(lc);
+			LogicalXidCtx ctx = {released->xid, false};
 
 			release_logical_xid(&ctx);
 		}
-		list_free(releasedLogicalXids);
+		list_free_deep(releasedLogicalXids);
 		releasedLogicalXids = NIL;
 	}
 }
