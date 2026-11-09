@@ -347,6 +347,10 @@ wal_desc_on_record(WalReaderState *r, WalRecord *rec)
 			appendStringInfo(ctx->buf, " (lxid %u parent subid %u xmin %lu csn %lu);",
 							 rec->logicalXid, rec->u.rb_to_sp.parentSubid, rec->u.rb_to_sp.xmin, rec->u.rb_to_sp.csn);
 			break;
+		case WAL_REC_SUBXACT_ABORT:
+			appendStringInfo(ctx->buf, " (lxid %u);",
+							 rec->u.subxact_abort.logicalXid);
+			break;
 		case WAL_REC_JOINT_COMMIT:
 			appendStringInfo(ctx->buf, " (xmin %lu xid %u csn %lu%s);",
 							 rec->u.joint_commit.xmin, rec->u.joint_commit.xid,

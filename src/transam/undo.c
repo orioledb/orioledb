@@ -3119,6 +3119,14 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 	LogicalXidCtx logicalXidContext;
 
 	/*
+	 * No subtransaction starts inside an autonomous transaction.  The
+	 * released xid bookkeeping in oxid_subxact_callback() relies on it: it
+	 * belongs to the outer transaction and would mix two subid spaces
+	 * otherwise.
+	 */
+	Assert(GET_CUR_PROCDATA()->autonomousNestingLevel == 0);
+
+	/*
 	 * Cleanup EXPLAIN ANALYZE counters pointer to handle case when execution
 	 * of node was interrupted by exception.
 	 */
@@ -3167,6 +3175,7 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 				{
 					if (!RecoveryInProgress())
 					{
+						log_released_xids_abort(mySubid);
 						add_rollback_to_savepoint_wal_record(parentSubid);
 					}
 				}

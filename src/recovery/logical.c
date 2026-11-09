@@ -1163,7 +1163,6 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 
 		case WAL_REC_ROLLBACK_TO_SAVEPOINT:
 			{
-				dlist_mutable_iter cur_txn_m;
 				ReorderBufferTXN *txn = NULL;
 				CSNSnapshotData *csnSnapshot = NULL;
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
@@ -1233,13 +1232,6 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				{
 					Assert(TransactionIdIsValid(rec->logicalXid));
 
-					dlist_foreach_modify(cur_txn_m, &txn->subtxns)
-					{
-						ReorderBufferTXN *cur_txn;
-
-						cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_m.cur);
-						ReorderBufferAbort(ctx->decodeCtx->reorder, cur_txn->xid, ctx->xlogRecPtr, 0);
-					}
 					elog(DEBUG4,
 						 "ABORT record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
 						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
@@ -1251,6 +1243,20 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 
 				rec->oxid = InvalidOXid;
 				rec->logicalXid = InvalidTransactionId;
+
+				break;
+			}
+
+		case WAL_REC_SUBXACT_ABORT:
+			{
+				TransactionId logicalXid = rec->u.subxact_abort.logicalXid;
+
+				elog(DEBUG4, "ABORT record type %d (%s) logicalXid %u",
+					 rec->type, recname, logicalXid);
+
+				ReorderBufferAbort(ctx->decodeCtx->reorder, logicalXid,
+								   ctx->xlogRecPtr, 0);
+				UpdateDecodingStats(ctx->decodeCtx);
 
 				break;
 			}
