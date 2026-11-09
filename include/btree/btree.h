@@ -20,6 +20,7 @@
 
 #include "access/sdir.h"
 #include "lib/stringinfo.h"
+#include "pgstat.h"
 #include "storage/bufpage.h"
 #include "storage/fd.h"
 #include "storage/off.h"
@@ -289,6 +290,23 @@ struct BTreeDescr
 	BTreeStorageType storageType;
 
 	/*
+	 * Buffer-level statistics of this tree.
+	 *
+	 * Orioledb works with its own page pool, so it never goes through
+	 * bufmgr.c and pgstat_count_buffer_{read, hit}.  Page statistics
+	 * will be counter here instead.
+	 *
+	 * - pgstatRelOid may be InvalidOid if this tree has none to report to;
+	 * - pgstatInfo is the pending stats (until end of transaction)
+	 * - pgstatGen records the pgstat_pending_generation the pointer was
+	 *   fetched at and o_btree_pgstat_info() re-fetches once the two
+	 *   differ.
+	 */
+	Oid			pgstatRelOid;
+	PgStat_TableStatus *pgstatInfo;
+	uint64		pgstatGen;
+
+	/*
 	 * Per-backend private seq buf descriptors.  The corresponding shared
 	 * state lives in the BTreeMetaPage (freeBuf, nextChkp[], tmpBuf[]).
 	 *
@@ -320,6 +338,35 @@ struct BTreeDescr
 	 */
 	BTreeLocalFreeExtents *localFreeExtents;
 };
+
+static inline PgStat_TableStatus *
+o_btree_pgstat_info(BTreeDescr *desc)
+{
+	if (unlikely(desc->pgstatGen != pgstat_pending_generation))
+	{
+		desc->pgstatInfo = pgstat_prep_relation_pending(desc->pgstatRelOid, false);
+		desc->pgstatGen = pgstat_pending_generation;
+	}
+	return desc->pgstatInfo;
+}
+
+static inline void
+o_btree_count_page_read(BTreeDescr *desc)
+{
+	if (OidIsValid(desc->pgstatRelOid) && pgstat_track_counts)
+		o_btree_pgstat_info(desc)->counts.blocks_fetched++;
+}
+
+static inline void
+o_btree_count_page_hit(BTreeDescr *desc)
+{
+	if (OidIsValid(desc->pgstatRelOid) && pgstat_track_counts)
+	{
+		PgStat_TableStatus *pgstat_info = o_btree_pgstat_info(desc);
+		pgstat_info->counts.blocks_fetched++;
+		pgstat_info->counts.blocks_hit++;
+	}
+}
 
 static inline int
 o_btree_len(BTreeDescr *desc, OTuple tuple, OLengthType type)
