@@ -68,6 +68,42 @@ class VacuumTest(BaseTest):
 		con.close()
 		node.stop()
 
+	def test_vacuum_parallel_primary_key(self):
+		node = self.node
+		node.append_conf("max_parallel_maintenance_workers = 2\n"
+		                 "min_parallel_index_scan_size = 0\n")
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_vacuum_primary (
+				id bigint PRIMARY KEY,
+				body text
+			) USING orioledb;
+			INSERT INTO o_vacuum_primary
+				SELECT i, 'hello world number ' || i
+				FROM generate_series(1, 100000) i;
+			CREATE INDEX ON o_vacuum_primary
+				USING gin (to_tsvector('english', body));
+			DELETE FROM o_vacuum_primary WHERE id <= 1000;
+		""")
+		with node.connect(autocommit=True) as con:
+			con.execute("VACUUM (PARALLEL 2) o_vacuum_primary")
+			con.execute("VACUUM (ANALYZE) o_vacuum_primary")
+			con.execute("VACUUM (PARALLEL 0) o_vacuum_primary")
+			self.assertEqual(
+			    con.execute("SELECT count(*) FROM o_vacuum_primary"),
+			    [(99000, )])
+			self.assertEqual(
+			    con.execute("SELECT reltuples::bigint FROM pg_class "
+			                "WHERE oid = 'o_vacuum_primary'::regclass"),
+			    [(99000, )])
+			con.execute("SET enable_seqscan = off")
+			self.assertEqual(
+			    con.execute("SELECT id FROM o_vacuum_primary WHERE "
+			                "to_tsvector('english', body) @@ "
+			                "to_tsquery('english', '99999')"), [(99999, )])
+		node.stop()
+
 	def test_vacuum_disable_page_skipping(self):
 		node = self.node
 		node.start()
