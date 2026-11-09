@@ -28,7 +28,6 @@
 #include "tuple/slot.h"
 #include "tuple/toast.h"
 #include "tuple/format.h"
-#include "tuple/slot.h"
 #include "tuple/sort.h"
 #include "utils/page_pool.h"
 
@@ -1196,9 +1195,7 @@ o_toast_insert(OTableDescr *descr, OTuple pk, uint16 attn,
  * pre-allocates every chunk tuple in Phase 1 and holds them all until
  * Phase 4 WAL. Without a limit, a large-TOAST COPY can reserve much
  * transient memory. Processing in sub-batches keeps that peak
- * bounded by ~max_chunks * chunk_size (~256 KB at 128 chunks, chunk ~ 2 KB)
- * without losing the same-leaf lwlock as one sub-batch covers tens of
- * leaves at typical fill.
+ * bounded by ~max_chunks * chunk_size (~256 KB at 128 chunks, chunk ~ 2 KB).
  */
 #define O_TOAST_MULTI_MAX_CHUNKS 128
 
@@ -1489,7 +1486,7 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 
 					failed_colname = pstrdup(NameStr(TupleDescAttr(
 																   RelationGetDescr(rel), col)->attname));
-					for (int fj = j_start; fj < next_job; fj++)
+					for (int fj = j_start; fj <= Min(next_job, njobs - 1); fj++)
 					{
 						if (jobs[fj].pk.data == fkey->pk_tuple.data &&
 							jobs[fj].attnum == fkey->attnum)
