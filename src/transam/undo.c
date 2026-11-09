@@ -984,11 +984,15 @@ o_slot_retain_location(ReplicationSlot *slot)
 	active_pid = slot->active_pid;
 	SpinLockRelease(&slot->mutex);
 
-	/* A slot being created decodes only what is written from now on */
+	/*
+	 * A slot being created.  A copy gets the source's restart_lsn later, and
+	 * decodes from there, so "from now on" is too late for it.  Keep what we
+	 * have until the slot catches up.
+	 */
 	if (XLogRecPtrIsInvalid(restart_lsn))
 	{
 		cand->lsn = InvalidXLogRecPtr;
-		return logical_retain_now();
+		return 0;
 	}
 
 	/* Restored at startup: we know nothing yet, keep what we have */
