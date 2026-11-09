@@ -180,6 +180,14 @@ struct OIndexDescr
 	OTupleFixedFormatSpec leafSpec;
 
 	/*
+	 * Length of a key without version made from a leaf tuple whose key
+	 * attributes are all non-null, when every key attribute is fixed-length:
+	 * it is the same for every such tuple.  0 until known, -1 when some key
+	 * attribute is variable-length.
+	 */
+	int			fixedKeyLen;
+
+	/*
 	 * Flag to indicate unique index and number of unique fields for unique
 	 * index.
 	 */

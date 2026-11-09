@@ -35,6 +35,8 @@ static WalParseResult wal_parse_empty(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_xid(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_finish(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_relation(WalReaderState *r, WalRecord *rec);
+static WalParseResult wal_parse_rec_relation_short(WalReaderState *r, WalRecord *rec);
+static WalParseResult wal_parse_rec_xid_short(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_o_tables_meta_unlock(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_savepoint(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_rollback_to_savepoint(WalReaderState *r, WalRecord *rec);
@@ -91,6 +93,17 @@ wal_parse_rec_xid(WalReaderState *r, WalRecord *rec)
 	{
 		rec->heapXid = InvalidTransactionId;
 	}
+	return WALPARSE_OK;
+}
+
+/* Parser for WAL_REC_XID_SHORT: a WAL_REC_XID with no logical or heap xid */
+static WalParseResult
+wal_parse_rec_xid_short(WalReaderState *r, WalRecord *rec)
+{
+	WR_PARSE(r, &rec->oxid);
+	rec->logicalXid = InvalidTransactionId;
+	rec->heapXid = InvalidTransactionId;
+	rec->type = WAL_REC_XID;
 	return WALPARSE_OK;
 }
 
@@ -194,6 +207,32 @@ wal_parse_rec_relation(WalReaderState *r, WalRecord *rec)
 	else
 		rec->oids.spcoid = DEFAULTTABLESPACE_OID;
 
+	return WALPARSE_OK;
+}
+
+/*
+ * Parser for WAL_REC_RELATION_SHORT.  The omitted fields get the values
+ * wal_parse_rec_relation() uses for pre-v17 WAL, and the record is handed to
+ * consumers as WAL_REC_RELATION, so replay does not tell the two apart.
+ */
+static WalParseResult
+wal_parse_rec_relation_short(WalReaderState *r, WalRecord *rec)
+{
+	WR_PARSE(r, &rec->u.relation.treeType);
+	WR_PARSE(r, &rec->oids.datoid);
+	WR_PARSE(r, &rec->oids.reloid);
+	WR_PARSE(r, &rec->oids.relnode);
+
+	if (rec->oids.datoid == SYS_TREES_DATOID &&
+		(rec->oids.relnode < 1 || rec->oids.relnode > SYS_TREES_NUM))
+		return WALPARSE_BAD_TYPE;
+
+	rec->u.relation.snapshot = o_non_deleted_snapshot;
+	rec->u.relation.version = O_TABLE_INVALID_VERSION;
+	rec->u.relation.base_version = O_TABLE_INVALID_VERSION;
+	WR_PARSE(r, &rec->oids.spcoid);
+
+	rec->type = WAL_REC_RELATION;
 	return WALPARSE_OK;
 }
 
