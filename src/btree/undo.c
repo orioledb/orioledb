@@ -1640,14 +1640,27 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 	{
 		ORelOids	oids = {datoid, reloid, dropRelnode};
 		bool		recovery = is_recovery_in_progress();
+
+		/*
+		 * Skip the non-checkpoint relation lock during abort.  It uses
+		 * LOCKTAG_RELATION, the same lock space as PG's standard relation
+		 * locks.  During abort the virtualxid is still held (released later
+		 * by ResourceOwnerRelease), so a backend waiting for our virtualxid
+		 * while holding a conflicting relation lock creates a deadlock that
+		 * PG's detector resolves by raising ERROR inside our abort handler,
+		 * crashing the backend.  Safe to skip: the dropped relnode was never
+		 * committed, so no concurrent reader can depend on it.
+		 */
+		bool		need_rel_lock = !recovery &&
+			stage != OUndoCallbackStageAbort;
 		int			i;
 
-		if (!recovery)
+		if (need_rel_lock)
 			o_tables_rel_lock_exclusive_no_inval_no_log(&oids);
 		o_tables_rel_lock_extended_no_inval(&oids, AccessExclusiveLock, true);
 		CacheInvalidateRelcacheByDbidRelid(oids.datoid, oids.reloid);
 		o_invalidate_oids(oids);
-		if (!recovery)
+		if (need_rel_lock)
 			o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, false);
 		o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, true);
 
@@ -1655,7 +1668,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 		{
 			bool		dropBridgeMarker = false;
 
-			if (!recovery)
+			if (need_rel_lock)
 				o_tables_rel_lock_exclusive_no_inval_no_log(&dropTrees[i].oids);
 			o_tables_rel_lock_extended_no_inval(&dropTrees[i].oids,
 												AccessExclusiveLock, true);
@@ -1698,7 +1711,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 									dropTrees[i].oids.reloid == dropTrees[i].oids.relnode);
 			}
 			o_invalidate_oids(dropTrees[i].oids);
-			if (!recovery)
+			if (need_rel_lock)
 				o_tables_rel_unlock_extended(&dropTrees[i].oids, AccessExclusiveLock, false);
 			o_tables_rel_unlock_extended(&dropTrees[i].oids, AccessExclusiveLock, true);
 

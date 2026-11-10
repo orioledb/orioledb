@@ -23,6 +23,7 @@
 #include "btree/page_chunks.h"
 #include "btree/undo.h"
 #include "catalog/o_tables.h"
+#include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
 #include "transam/undo.h"
@@ -742,6 +743,35 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 
 				unlock_page(blkno);
 
+				/*
+				 * Blocking on wait_for_oxid while holding oSysTreesLock
+				 * creates an undetectable LWLock deadlock: the conflicting
+				 * backend's abort undo needs the same lock SHARED. Release
+				 * the lock for the wait, then re-acquire so the btree modify
+				 * can retry normally.
+				 */
+				if (cbAction == OBTreeCallbackActionXidWait &&
+					LWLockHeldByMe(&checkpoint_state->oSysTreesLock))
+				{
+					OFindPageResult refindResult PG_USED_FOR_ASSERTS_ONLY;
+
+					LWLockRelease(&checkpoint_state->oSysTreesLock);
+					wait_for_tuple(oxid,
+								   context->lockMode,
+								   context->lockStatus,
+								   &context->hwLockTag,
+								   &context->hwLockMode);
+					LWLockAcquire(&checkpoint_state->oSysTreesLock,
+								  LW_EXCLUSIVE);
+					refindResult = refind_page(pageFindContext,
+											   context->key,
+											   context->keyType,
+											   0,
+											   pageFindContext->items[pageFindContext->index].blkno,
+											   pageFindContext->items[pageFindContext->index].pageChangeCount);
+					Assert(refindResult == OFindPageResultSuccess);
+					return ConflictResolutionRetry;
+				}
 
 				Assert(cbAction <= OBTreeCallbackActionXidExit);
 
@@ -752,7 +782,10 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 								   &context->hwLockTag,
 								   &context->hwLockMode);
 				else if (cbAction == OBTreeCallbackActionXidExit)
+				{
+					unlock_release(context, false);
 					return ConflictResolutionFound;
+				}
 				else
 				{
 					Assert(cbAction == OBTreeCallbackActionXidNoWait);
