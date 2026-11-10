@@ -347,7 +347,7 @@ typedef struct
 extern OTableFetchContext default_table_fetch_context;
 
 /*
- * Please, read commit before o_bree_load_shmemd() definition.
+ * Please, read the comment before the o_btree_load_shmem_internal() definition.
  */
 
 extern OTableDescr *o_fetch_table_descr_extended(ORelOids oids, OTableFetchContext ctx);

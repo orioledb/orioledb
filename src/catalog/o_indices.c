@@ -932,7 +932,7 @@ orioledb_test_deserialize_node(PG_FUNCTION_ARGS)
  * format is not stable across majors, so we can't (and must not, e.g. in a
  * catalog-free recovery worker) stringToNode such a blob.  We skip it and
  * record that the expressions need to be re-derived from the catalog and
- * rewritten -- see o_table_refresh_expressions().
+ * rewritten -- see o_refresh_table_expressions().
  */
 bool		o_node_deserialize_format_changed = false;
 
@@ -1169,7 +1169,7 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	/*
 	 * If any of the node trees above was written by a different PG major it
 	 * was skipped (its nodeToString format is unreadable here), leaving the
-	 * list NULL.  Flag the index so o_define_index_descr() refuses to use it
+	 * list NULL.  Flag the index so o_index_fill_descr() refuses to use it
 	 * until orioledb_upgrade_refresh() rewrites the trees.
 	 */
 	oIndex->refresh_exprs = o_node_deserialize_format_changed;

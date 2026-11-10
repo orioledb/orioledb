@@ -2137,8 +2137,8 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 									  waitForUndoLocation))
 	{
 		/*
-		 * we add size to reserver_undo_size and meta->advanceReservedLocation
-		 * and must revert this action
+		 * we add size to reserved_undo_sizes and
+		 * meta->advanceReservedLocation and must revert this action
 		 */
 		pg_atomic_fetch_sub_u64(&meta->advanceReservedLocation, size);
 		reserved_undo_sizes[(int) undoType] -= size;

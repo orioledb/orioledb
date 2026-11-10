@@ -418,7 +418,7 @@ o_tuple_get_data(OTuple tuple, int *size, OTupleFixedFormatSpec *spec)
 }
 
 /*
- * toast_compute_data_size
+ * o_tuple_compute_data_size
  *		Determine size of the data area of a tuple to be constructed
  */
 static Size

@@ -1285,7 +1285,7 @@ o_btree_iterator_advance(BTreeIterator *it, void *key, BTreeKeyType kind)
 		 * there, re-emitting already-returned rows (the array recheck still
 		 * accepts them, as they match some other array element).  Fall
 		 * through to the re-find below. Backward stepping lands past-the-end
-		 * legitimately: advance_page_ location_if_needed() steps it back to
+		 * legitimately: advance_page_location_if_needed() steps it back to
 		 * the last item <= key.
 		 */
 		page_locator_find_real_item(it->context.img, &it->context.partial, loc);
@@ -2587,7 +2587,7 @@ undo_it_find_internal(UndoIterator *undoIt, void *key, BTreeKeyType kind)
 		}
 	}
 
-	/* if O_PAGE_IS(undoIt->image, RIGHTMOST) then undoIt->righmost == true */
+	/* if O_PAGE_IS(undoIt->image, RIGHTMOST) then undoIt->rightmost == true */
 	Assert(!O_PAGE_IS(undoIt->image, RIGHTMOST) || undoIt->rightmost);
 	/* if O_PAGE_IS(undoIt->image, LEFTMOST) then undoIt->leftmost == true */
 	Assert(!O_PAGE_IS(undoIt->image, LEFTMOST) || undoIt->leftmost);

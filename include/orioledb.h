@@ -624,7 +624,7 @@ extern void o_page_desc_init(OrioleDBPageDesc *desc);
 
 extern CheckPoint_hook_type next_CheckPoint_hook;
 
-/* tableam_handler.c */
+/* tableam/handler.c */
 extern bool is_orioledb_rel(Relation rel);
 
 typedef struct OTableDescr OTableDescr;

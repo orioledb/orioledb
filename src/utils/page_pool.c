@@ -130,7 +130,7 @@ o_ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno si
 }
 
 /*
- * Initializes data in shared memory for the page pool. ppool_estimate_space()
+ * Initializes data in shared memory for the page pool. o_ppool_estimate_space()
  * must be already called for the pool.
  */
 void
@@ -593,7 +593,7 @@ local_ppool_alloc_page(PagePool *pool, int kind)
 	Assert(pool->numPagesReserved[kind] > 0);
 	pool->numPagesReserved[kind]--;
 
-	/* Iterate through local_pool_pages to find a free slot */
+	/* Iterate through local_ppool_pages to find a free slot */
 	do
 	{
 		i++;
