@@ -159,6 +159,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_iterate_split \
 				  btree_print_backend_id \
 				  btree_scan \
+				  concurrent_create_index \
 				  concurrent_update_delete \
 				  descr_torn_pair \
 				  fkeys \
