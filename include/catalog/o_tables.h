@@ -251,6 +251,7 @@ extern int	o_tables_num(Oid datoid);
 
 /* Updates OTable description in o_tables list */
 extern bool o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn);
+extern bool o_tables_update_locked(OTable *table, OXid oxid, CommitSeqNo csn);
 
 /* Invalidates descriptors after o_tables_update */
 void		o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn);
