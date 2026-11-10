@@ -604,7 +604,7 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_v
 	 * the system undo that takes.  Before reading the CSN: the other order
 	 * retains from a location that is already newer than what the CSN needs.
 	 */
-	if (wal_level >= WAL_LEVEL_LOGICAL)
+	if (XLogLogicalInfoActive())
 	{
 		set_my_logical_wal_retain_location();
 		pg_read_barrier();
