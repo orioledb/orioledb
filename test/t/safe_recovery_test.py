@@ -14,6 +14,9 @@
 # and per-record LOG output appears for the rejected OXID(s).
 
 import os
+import time
+
+from testgres import NodeStatus
 
 from .base_test import BaseTest
 
@@ -242,16 +245,24 @@ class SafeRecoveryTest(BaseTest):
 		# Attempt legacy recovery (safe_recovery still off).  The
 		# is_recovery_in_progress() gate fires on the first replay of
 		# an o_bomb modify, PANICs.  With restart_after_crash=off the
-		# postmaster shuts down and node.start() fails.
+		# postmaster shuts down.  In multi-process recovery the PANIC
+		# fires in a worker, so the postmaster may briefly appear
+		# running before it reacts to the worker's death.
 		legacy_start_failed = False
 		try:
 			node.start()
 		except Exception:
 			legacy_start_failed = True
 		else:
-			if node.status() != 1:  # 1 == RUNNING in testgres
-				legacy_start_failed = True
-				node.is_started = False
+			# Wait for the recovery worker PANIC to propagate.
+			for _ in range(30):
+				if node.status() != NodeStatus.Running:
+					legacy_start_failed = True
+					node.is_started = False
+					break
+				time.sleep(1)
+			else:
+				legacy_start_failed = False
 		self.assertTrue(legacy_start_failed,
 		                "legacy recovery should have PANICked on bomb reloid")
 		log = _read_log(node)
