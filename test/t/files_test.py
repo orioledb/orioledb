@@ -377,7 +377,7 @@ class FilesTest(BaseTest):
 		all_files = ""
 		for f in os.listdir(orioledb_dir):
 			if not re.match(self.IGNORED_FILES_PATTERN, f):
-				# do not check files of trees duplicating syscach
+				# do not check files of trees duplicating syscache
 				all_files = all_files + " " + f
 
 		self.assertFalse(bool(re.match(r".*\.map", all_files)))

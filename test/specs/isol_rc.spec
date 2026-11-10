@@ -114,7 +114,7 @@ permutation "s1_begin" "s1_update_toast" "s2_begin" "s2_update_toast" "s1_commit
 permutation "s2_setup" "s3_setup" "s1_se_set" "s1_begin" "s1_update_toast" "s2_update_toast" "s3_update_toast" "s1_commit" "s1_se_set2"(s2_update_toast) "s1_reset"
 permutation "s2_setup" "s3_setup" "s1_se_set" "s1_begin" "s1_update_toast2" "s2_update_toast2" "s3_update_toast2" "s1_commit" "s1_se_set2"(s2_update_toast2) "s1_reset"
 
-# delete behavion tests
+# delete behavior tests
 permutation "s1_begin" "s1_update1_byid" "s1_select1" "s2_begin" "s2_delete1" "s1_commit" "s2_select1" "s2_commit" "s1_select1" "s2_select1"
 permutation "s1_begin" "s1_update1_byid" "s1_select1" "s2_begin" "s2_delete2" "s1_commit" "s2_select1" "s2_commit" "s1_select1" "s2_select1"
 permutation "s1_begin" "s1_update1_byid" "s1_select1" "s2_begin" "s2_delete12" "s1_commit" "s2_select1" "s2_commit" "s1_select1" "s2_select1"

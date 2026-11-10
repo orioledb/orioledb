@@ -804,7 +804,7 @@ def tbl_structure_to_json(structure: str) -> dict[str, dict[int, Any]]:
 	cur_index = None
 	cur_page = None
 
-	# TODO Currently limited information is parsed from the ouput of the
+	# TODO Currently limited information is parsed from the output of the
 	# orioledb_tbl_structure() function. Add more information to the output
 	# JSON object.
 

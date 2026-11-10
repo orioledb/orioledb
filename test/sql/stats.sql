@@ -139,7 +139,7 @@ COMMIT;
 SELECT pg_stat_force_next_flush();
 SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid);
 
--- savepoint rolback (1 level)
+-- savepoint rollback (1 level)
 SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid);
 BEGIN;
 SAVEPOINT sp1;

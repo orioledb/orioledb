@@ -1,4 +1,4 @@
--- Random bugs that was catched during sanitizer checks
+-- Random bugs that were caught during sanitizer checks
 CREATE SCHEMA sanitizers;
 SET SESSION search_path = 'sanitizers';
 CREATE EXTENSION orioledb;

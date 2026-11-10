@@ -113,7 +113,7 @@ CREATE INDEX o_test_partial_ix7 ON o_test_partial (key)
 	WHERE plpgsql_func_test(-key) * 2 = 0;
 CREATE INDEX o_test_partial_ix7 ON o_test_partial (key)
 	WHERE plpgsql_func_test(-key) * 2 = 0;
--- predicate evalutes to null
+-- predicate evaluates to null
 CREATE INDEX o_test_partial_ix7 ON o_test_partial (key)
 	WHERE GREATEST(NULL, NULL, (ABS(plpgsql_func_test(-key)) > 0)) != NULL;
 CREATE INDEX o_test_partial_ix8 ON o_test_partial (value)
@@ -330,7 +330,7 @@ EXPLAIN (COSTS off) SELECT id FROM o_tableam5
 SELECT id FROM o_tableam5 ORDER BY val;
 SELECT val2 FROM o_tableam5 ORDER BY val;
 
--- converts result of SQL query to text becase we can not
+-- converts result of SQL query to text because we can not
 -- get result of EXPLAIN ANALYZE as TEXT in SQL statements
 CREATE OR REPLACE FUNCTION query_to_text(sql TEXT) RETURNS SETOF TEXT AS $$
 	BEGIN

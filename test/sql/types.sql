@@ -78,7 +78,7 @@ SELECT * FROM o_test_int_array;
 
 ---
 -- PostgreSQL has no full support for arrays comparison with CID and XIP elements.
--- We forbit create indices with such arrays.
+-- We forbid creating indices with such arrays.
 -- Behavior differs from postgres tables, which illustrated by tests below
 ---
 CREATE TABLE pg_test_cid_array

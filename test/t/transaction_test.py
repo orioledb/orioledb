@@ -86,7 +86,7 @@ class TransactionTest(BaseTest):
 		OLockPageWithTupleResultInserted, the later SELECT calls
 		undo_location_get_command() with a location below
 		commandInfos[0].undoLocation, the binary search lands at lo=-1
-		and tripsthe Assert(lo >= 0 && lo <= commandIndex) in
+		and trips the Assert(lo >= 0 && lo <= commandIndex) in
 		undo_location_get_command().  In non-assert builds a bogus cid
 		is returned and the row may be invisible.
 		"""

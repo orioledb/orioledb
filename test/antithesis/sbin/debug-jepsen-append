@@ -27,7 +27,7 @@
 2. Choose a jepsen anomaly and detection moment
 3. Wizard prints results.edn report
 4. Wizard prints operation log events related to the anomaly
-5. Launch an MVD debug sesson at chosen log event
+5. Launch an MVD debug session at chosen log event
 
 Usage: select_jepsen_moment [options]\n\n"
        (cli/format-opts {:spec cli-spec})))

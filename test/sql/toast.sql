@@ -262,7 +262,7 @@ INSERT INTO o_toast_free (SELECT id, generate_string(1, 3000) FROM generate_seri
 INSERT INTO o_toast_free (SELECT id, generate_string(1, 3000) FROM generate_series(901, 1000, 1) id);
 DROP TABLE o_toast_free;
 
--- unique violetes messages test
+-- unique violation messages test
 DROP TABLE o_test1;
 CREATE TABLE IF NOT EXISTS o_test1
 (

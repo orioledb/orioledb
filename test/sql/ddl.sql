@@ -41,7 +41,7 @@ SELECT orioledb_parallel_debug_stop();
 SELECT * FROM o_ddl_check;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
 
--- Fails because can't drop NOT NULL contraint on PK
+-- Fails because can't drop NOT NULL constraint on PK
 ALTER TABLE o_ddl_check ALTER f1 DROP NOT NULL;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
 SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
@@ -85,7 +85,7 @@ CREATE UNIQUE INDEX o_ddl_check_f2_idx ON o_ddl_check(f2);
 ALTER TABLE o_ddl_check ALTER f2 DROP NOT NULL;
 ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
 
--- Check partition consraint.
+-- Check partition constraint.
 CREATE TABLE o_ddl_parted
 (
 	f1 varchar COLLATE "C",

@@ -469,7 +469,7 @@ class PageFitItemsTest(BaseTest):
 		TupleReplace > TupleOld
 		TupleReplace > FreeSpace
 		TupleReplace > Vacated
-		TupleReplace < FreeeSpace + Vacated(another live tuple)
+		TupleReplace < FreeSpace + Vacated(another live tuple)
 	'''
 
 	def test_replace_use_vacated_from_live_tuple_for_another_fit_compact(self):
@@ -504,7 +504,7 @@ class PageFitItemsTest(BaseTest):
 		TupleReplace > TupleOld
 		TupleReplace > FreeSpace
 		TupleReplace > Vacated
-		TupleReplace < FreeeSpace + Vacated(another dead tuple)
+		TupleReplace < FreeSpace + Vacated(another dead tuple)
 	'''
 
 	def test_replace_use_vacated_from_deleted_tuple_fit_compact(self):
@@ -538,7 +538,7 @@ class PageFitItemsTest(BaseTest):
 		TupleReplace > TupleOld
 		TupleReplace > FreeSpace
 		TupleReplace > Vacated
-		TupleReplace < FreeeSpace + Vacated(self tuple)
+		TupleReplace < FreeSpace + Vacated(self tuple)
 	'''
 
 	def test_replace_increase_self_vacated_enough_fit_compact(self):
@@ -571,7 +571,7 @@ class PageFitItemsTest(BaseTest):
 		TupleReplace > TupleOld
 		TupleReplace > FreeSpace
 		TupleReplace > Vacated
-		TupleReplace > FreeeSpace + Vacated(self tuple)
+		TupleReplace > FreeSpace + Vacated(self tuple)
 	'''
 
 	def test_replace_increase_self_vacated_fit_split(self):
