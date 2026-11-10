@@ -145,7 +145,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         make installcheck-tests EXTRA_REGRESS_OPTS="--load-extension=orioledb --schedule=$GITHUB_WORKSPACE/parallel_schedule_no_segfaults" TESTS="" -j $(nproc) || true
         cd ../../..
 
-        # Run Postgress regression tests
+        # Run PostgreSQL regression tests
         make -C src/test/regress EXTRA_REGRESS_OPTS="--load-extension=orioledb" installcheck-oriole -j $(nproc) || true
         if [ -f src/test/regress/regression.diffs ]; then
           python3 ../orioledb/ci/filter_regression_diff.py --diff src/test/regress/regression.diffs > src/test/regress_filtered.diffs

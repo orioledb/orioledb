@@ -59,7 +59,7 @@ FROM query_to_text($$ EXPLAIN ANALYZE
 -- just explain buffers without analyze, fails
 EXPLAIN (BUFFERS TRUE) SELECT count(*) FROM o_explain;
 
--- test lowecase letters
+-- test lowercase letters
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (analyze TRUE, buffers TRUE)
 					SELECT count(*)
@@ -280,7 +280,7 @@ CREATE TABLE o_explain_formats (
 
 INSERT INTO o_explain_formats (SELECT v, v FROM generate_series(1, 10) v);
 
--- Bitmap Heap Scan all formats with all posible fields BEGIN
+-- Bitmap Heap Scan all formats with all possible fields BEGIN
 SET enable_indexscan = OFF;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
@@ -299,9 +299,9 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 							SELECT * FROM o_explain_formats
 								WHERE val > 5 ORDER BY val; $$) as t;
 RESET enable_indexscan;
--- Bitmap Heap Scan all formats with all posible fields END
+-- Bitmap Heap Scan all formats with all possible fields END
 
--- Index Scan all formats with all posible fields BEGIN
+-- Index Scan all formats with all possible fields BEGIN
 SET enable_indexonlyscan = OFF;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
@@ -320,9 +320,9 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 							SELECT * FROM o_explain_formats
 								WHERE val > 5 ORDER BY val; $$) as t;
 RESET enable_indexonlyscan;
--- Index Scan  all formats with all posible fields END
+-- Index Scan  all formats with all possible fields END
 
--- Index Only Scan all formats with all posible fields BEGIN
+-- Index Only Scan all formats with all possible fields BEGIN
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
 							SELECT val FROM o_explain_formats
@@ -339,7 +339,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
 							SELECT val FROM o_explain_formats
 								WHERE val > 5 ORDER BY val; $$) as t;
--- Index Only Scan all formats with all posible fields END
+-- Index Only Scan all formats with all possible fields END
 
 CREATE OR REPLACE FUNCTION explain_as_json(val text) RETURNS json
 LANGUAGE plpgsql AS $$

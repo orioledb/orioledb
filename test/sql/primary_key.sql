@@ -139,7 +139,7 @@ SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,10]);
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,5, NULL]);
 SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,5, NULL]);
 
--- Check for non-coersible case
+-- Check for non-coercible case
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1.0;
 SELECT * FROM o_pk1 WHERE key = 1.0;
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10.0;
