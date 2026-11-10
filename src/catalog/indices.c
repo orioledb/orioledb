@@ -679,7 +679,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			cur->indices[cur->nindices].index_mctx = NULL;
 			ix_num = cur->nindices;
 			cur->nindices++;
-			o_tables_update_locked(cur, oxid, oSnapshot.csn);
+			o_tables_update_locked(cur, oxid, oSnapshot.csn, false);
 			add_undo_create_relnode(o_table->oids, &key, 1, !is_temp);
 			systrees_modify_end(!is_temp);
 			o_table_free(cur);
@@ -693,6 +693,73 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	}
 
 	descr = o_fetch_table_descr(o_table->oids);
+
+	/*
+	 * A concurrent backend may have appended its uncommitted index to the
+	 * OTable and then aborted, leaving a stale entry in the sys tree.
+	 * recreate_table_descr may filter the stale index in-memory, so the
+	 * descriptor can be valid but ix_num wrong.  Detect either case and
+	 * repair the sys tree.
+	 */
+	{
+		bool		need_repair = (descr == NULL);
+
+		if (!need_repair)
+		{
+			int			desc_ix = o_table->has_primary ? ix_num : ix_num + 1;
+
+			need_repair = (desc_ix >= descr->nIndices ||
+						   !ORelOidsIsEqual(descr->indices[desc_ix]->oids,
+											table_index->oids));
+		}
+		if (need_repair)
+		{
+			OTable	   *clean;
+			OSnapshot	fixSnap;
+			OXid		fixOxid;
+			int			si,
+						di;
+			int			ctid_off = o_table->has_primary ? 0 : 1;
+
+			fill_current_oxid_osnapshot(&fixOxid, &fixSnap);
+			systrees_modify_start();
+			clean = o_tables_get(oids);
+			di = 0;
+			for (si = 0; si < clean->nindices; si++)
+			{
+				OIndex	   *idx = o_indices_get(clean->indices[si].oids,
+												clean->indices[si].type);
+
+				if (idx != NULL)
+				{
+					free_o_index(idx);
+					if (di != si)
+						clean->indices[di] = clean->indices[si];
+					di++;
+				}
+			}
+			clean->nindices = di;
+			o_tables_update_locked(clean, fixOxid, fixSnap.csn, true);
+			systrees_modify_end(clean->persistence != RELPERSISTENCE_TEMP);
+			o_table_free(clean);
+
+			recreate_table_descr_by_oids(oids);
+			descr = o_fetch_table_descr(o_table->oids);
+
+			if (descr == NULL)
+				elog(ERROR, "unable to rebuild table descriptor after "
+					 "stale index repair");
+
+			for (ix_num = ctid_off; ix_num < descr->nIndices; ix_num++)
+			{
+				if (ORelOidsIsEqual(descr->indices[ix_num]->oids,
+									table_index->oids))
+					break;
+			}
+			ix_num -= ctid_off;
+		}
+	}
+
 	ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
 
 	if (!reuse_relnode && is_build && !skip_build)
