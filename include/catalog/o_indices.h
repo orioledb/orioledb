@@ -67,7 +67,7 @@ typedef struct
 	OCompress	compress;
 	bool		nulls_not_distinct;
 	/* number of fields added using INCLUDE command explicitly */
-	/* pkey fields added implicitly in o_o_define_index_validate not counted */
+	/* pkey fields added implicitly in o_define_index_validate not counted */
 	uint16		nIncludedFields;
 	uint16		nLeafFields;
 	uint16		nNonLeafFields;
@@ -117,8 +117,8 @@ typedef struct
 	 * Set (not serialized) when deserialization skipped a node tree
 	 * (expression/predicate) written by a different PG major after a
 	 * cross-major pg_upgrade.  The index cannot be used until
-	 * orioledb_upgrade_refresh() rewrites it; o_define_index_descr() raises
-	 * an error rather than letting access crash on the missing trees.
+	 * orioledb_upgrade_refresh() rewrites it; o_index_fill_descr() raises an
+	 * error rather than letting access crash on the missing trees.
 	 */
 	bool		refresh_exprs;
 

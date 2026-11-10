@@ -3,7 +3,7 @@
  *  o_collation_cache.c
  *		Routines for orioledb collate cache.
  *
- * collate_cache is tree that contains cached metadata from pg_collate.
+ * collation_cache is tree that contains cached metadata from pg_collation.
  *
  * Copyright (c) 2021-2026, Oriole DB Inc.
  * Copyright (c) 2025-2026, Supabase Inc.

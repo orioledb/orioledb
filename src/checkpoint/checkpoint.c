@@ -2788,7 +2788,7 @@ checkpoint_ix_init_state(CheckpointState *state, BTreeDescr *descr)
 }
 
 /*
- * Marks a offset as free for given checkpoint number, throws an error on failure.
+ * Marks an offset as free for given checkpoint number, throws an error on failure.
  *
  * It adds the offset to *.map and *.tmp files.
  */

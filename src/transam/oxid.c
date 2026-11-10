@@ -1799,7 +1799,7 @@ get_current_oxid(void)
 			Assert(pg_atomic_read_u64(&xidBuffer[newOxid % xid_circular_buffer_size].csn) == COMMITSEQNO_FROZEN);
 
 			/*
-			 * Write commitPtr first because write_xidmap() takes csn into
+			 * Write commitPtr first because write_xidsmap() takes csn into
 			 * account
 			 */
 			pg_atomic_write_u64(&xidBuffer[newOxid % xid_circular_buffer_size].commitPtr,
@@ -2122,7 +2122,7 @@ current_oxid_clear_committing(void)
 }
 
 /*
- * Gets csn for given oxid.  Wrapper over map_oxid_csn(), which loops
+ * Gets csn for given oxid.  Wrapper over map_oxid(), which loops
  * till "committing bit" is not set.
  * If getRawCsn is true outputs raw csn, otherwise clears COMMITSEQNO_RETAINED_FOR_REWIND flag.
  */
@@ -2161,7 +2161,7 @@ oxid_get_csn(OXid oxid, bool getRawCsn)
 }
 
 /*
- * Gets commit ptr for given oxid.  Wrapper over map_oxid_xlog_ptr(), which
+ * Gets commit ptr for given oxid.  Wrapper over map_oxid(), which
  * loops till "committing bit" is not set.
  */
 XLogRecPtr
@@ -2197,7 +2197,7 @@ oxid_get_xlog_ptr(OXid oxid)
 }
 
 /*
- * Gets csn for given oxid.  Wrapper over map_oxid_csn(), which loops
+ * Gets csn for given oxid.  Wrapper over map_oxid(), which loops
  * till "committing bit" is not set.
  */
 void

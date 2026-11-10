@@ -501,7 +501,7 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 }
 
 /*
- * Removes all index and base relation scan paths for a orioledb TableAm table.
+ * Removes all index and base relation scan paths for an orioledb TableAm table.
  */
 void
 orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,

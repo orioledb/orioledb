@@ -684,7 +684,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				 *
 				 * We consider it's OK to return page of lower targetLevel
 				 * than required, if tree doesn't have enough height.  That's
-				 * suitable for sequential scan (see btree_scan.c).
+				 * suitable for sequential scan (see scan.c).
 				 */
 				if (level <= targetLevel)
 				{

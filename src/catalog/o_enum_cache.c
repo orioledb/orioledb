@@ -45,14 +45,14 @@ static void o_enumoid_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 									   Pointer arg);
 static void o_enumoid_cache_free_entry(Pointer entry);
 
-/* Copied from typecache.c */
+/* Copied from typcache.c */
 typedef struct
 {
 	Oid			enum_oid;		/* OID of one enum value */
 	float4		sort_order;		/* its sort position */
 } EnumItem;
 
-/* Copied from typecache.c */
+/* Copied from typcache.c */
 typedef struct TypeCacheEnumData
 {
 	Oid			bitmap_base;	/* OID corresponding to bit 0 of bitmapset */
