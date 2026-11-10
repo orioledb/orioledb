@@ -22,6 +22,7 @@
 
 #include "catalog/pg_tablespace_d.h"
 #include "common/relpath.h"
+#include "nodes/miscnodes.h"
 #include "recovery/recovery.h"
 #include "utils/syscache.h"
 
@@ -69,7 +70,8 @@ o_get_prefixes_for_tablespace(Oid datoid, Oid tablespace,
 }
 
 void
-o_tablespaces_foreach_prefix(OTablespacesPrefixCallback callback, void *arg)
+o_tablespaces_foreach_prefix(OTablespacesPrefixCallback callback, void *arg,
+							 int elevel)
 {
 	DIR		   *dir;
 	char		path[MAXPGPATH];
@@ -85,18 +87,32 @@ o_tablespaces_foreach_prefix(OTablespacesPrefixCallback callback, void *arg)
 
 	dir = opendir(PG_TBLSPC_DIR);
 	if (dir == NULL)
-		ereport(ERROR,
+	{
+		ereport(elevel,
 				(errcode_for_file_access(),
 				 errmsg("could not open directory \"%s\": %m",
 						PG_TBLSPC_DIR)));
+		return;
+	}
 
 	while (errno = 0, (file = readdir(dir)) != NULL)
 	{
+		ErrorSaveContext escontext = {T_ErrorSaveContext};
+		int64		val;
+
 		if (strcmp(file->d_name, ".") == 0 ||
 			strcmp(file->d_name, "..") == 0)
 			continue;
 
-		tablespace = pg_strtoint64(file->d_name);
+		/*
+		 * pg_tblspc entries are expected to be named after tablespace OIDs.
+		 * Skip anything that isn't a valid OID rather than erroring out.
+		 */
+		val = pg_strtoint64_safe(file->d_name, (Node *) &escontext);
+		if (SOFT_ERROR_OCCURRED(&escontext) ||
+			val <= 0 || val > PG_UINT32_MAX)
+			continue;
+		tablespace = (Oid) val;
 		Assert(OidIsValid(tablespace));
 
 		path[0] = '\0';
@@ -112,10 +128,10 @@ o_tablespaces_foreach_prefix(OTablespacesPrefixCallback callback, void *arg)
 			if (errno == ENOENT)
 				continue;
 
-			ereport(ERROR,
+			ereport(elevel,
 					(errcode_for_file_access(),
-					 errmsg("could not stat file \"%s\": %m",
-							file->d_name)));
+					 errmsg("could not stat file \"%s\": %m", path)));
+			continue;
 		}
 
 		if (!S_ISLNK(st.st_mode))
@@ -126,15 +142,21 @@ o_tablespaces_foreach_prefix(OTablespacesPrefixCallback callback, void *arg)
 		{
 			rllen = readlink(path, targetpath, sizeof(targetpath));
 			if (rllen < 0)
-				ereport(ERROR,
+			{
+				ereport(elevel,
 						(errcode_for_file_access(),
 						 errmsg("could not read symbolic link \"%s\": %m",
 								path)));
+				continue;
+			}
 			if (rllen >= (int) sizeof(targetpath))
-				ereport(ERROR,
+			{
+				ereport(elevel,
 						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 						 errmsg("symbolic link \"%s\" target is too long",
 								path)));
+				continue;
+			}
 			targetpath[rllen] = '\0';
 
 			path[0] = '\0';

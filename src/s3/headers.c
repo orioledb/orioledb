@@ -1077,7 +1077,7 @@ iterate_files(IterateFilesCallback callback)
 	IterateFilesArg arg;
 
 	arg.callback = callback;
-	o_tablespaces_foreach_prefix(iterate_files_cb, &arg);
+	o_tablespaces_foreach_prefix(iterate_files_cb, &arg, ERROR);
 }
 
 static off_t totalFilesSize;
