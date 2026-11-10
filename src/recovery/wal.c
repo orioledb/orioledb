@@ -24,6 +24,7 @@
 #include "recovery/wal_record.h"
 #include "tableam/descr.h"
 #include "transam/oxid.h"
+#include "utils/stopevent.h"
 
 #include "replication/message.h"
 #include "replication/origin.h"
@@ -340,8 +341,15 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	if (!local_wal.contains_xid)
 		add_xid_wal_record(oxid, logicalXid);
 
+	if (STOPEVENT_CONDITION(STOPEVENT_BEFORE_PRE_COMMIT_WAL_FINISH, NULL))
+		elog(PANIC, "stop event \"before_pre_commit_wal_finish\" fired");
+
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
 	walPos = flush_local_wal(true, !isAutonomous);
+
+	if (STOPEVENT_CONDITION(STOPEVENT_AFTER_FLUSH_LOCAL_WAL, NULL))
+		elog(ERROR, "stop event \"after_flush_local_wal\" fired");
+
 	local_wal.has_material_changes = false;
 
 	return walPos;
@@ -468,6 +476,9 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK);
+
+	if (STOPEVENT_CONDITION(STOPEVENT_ADD_FINISH_WAL, NULL))
+		elog(ERROR, "stop event \"add_finish_wal\" fired");
 
 	recLength = sizeof(WALRecFinish);
 	if (rec_type == WAL_REC_COMMIT &&
@@ -908,6 +919,9 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	Assert(!is_recovery_process());
 	Assert(length > 0);
 
+	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH, NULL))
+		elog(ERROR, "stop event \"wal_flush\" fired");
+
 	/*
 	 * Put the xlog location of our commit record to the shared memory.  This
 	 * will help concurrent checkpointer to wait till we do
@@ -948,6 +962,9 @@ flush_local_wal_buffer(void)
 
 	if (local_wal.buffer_offset == 0)
 		return;
+
+	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH, NULL))
+		elog(ERROR, "stop event \"wal_flush\" fired");
 
 	START_CRIT_SECTION();
 	log_logical_wal_container(local_wal.buffer, local_wal.buffer_offset, false);
@@ -1021,6 +1038,9 @@ log_logical_wal_container_with_payload(Pointer ptr, int length,
 		XLogRegisterData(payload1, payload1_length);
 	if (payload2 != NULL && payload2_length > 0)
 		XLogRegisterData(payload2, payload2_length);
+
+	if (STOPEVENT_CONDITION(STOPEVENT_BEFORE_XLOG_INSERT, NULL))
+		elog(PANIC, "stop event \"before_xlog_insert\" fired");
 
 	return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
 }

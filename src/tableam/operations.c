@@ -2097,6 +2097,9 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 				OTableSlot *oldOSlot = (OTableSlot *) oldSlot;
 				OTuple		oldTup;
 
+				if (STOPEVENT_CONDITION(STOPEVENT_PK_MUTATED_PRE_WAL, NULL))
+					elog(ERROR, "stop event \"pk_mutated_pre_wal\" fired");
+
 				/* The old row as the primary index stored it, if we have it */
 				if (oldOSlot->descr == descr &&
 					oldOSlot->ixnum == PrimaryIndexNumber &&
@@ -2409,6 +2412,9 @@ o_update_secondary_index(OIndexDescr *id,
 	}
 	else if (new_valid)
 	{
+		if (STOPEVENT_CONDITION(STOPEVENT_SK_MID_UPDATE, NULL))
+			elog(ERROR, "stop event \"sk_mid_update\" fired");
+
 		o_btree_check_size_of_tuple(o_tuple_size(new_ix_tup, &id->leafSpec),
 									id->name.data,
 									true);

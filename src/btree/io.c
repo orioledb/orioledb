@@ -2595,6 +2595,9 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 			new_downlink = perform_page_io(desc, blkno, p,
 										   checkpoint_number, copy_blkno, &dirty_parent);
 
+			if (STOPEVENT_CONDITION(STOPEVENT_AFTER_PAGE_IO, NULL))
+				elog(PANIC, "stop event \"after_page_io\" fired");
+
 			if (DiskDownlinkIsValid(new_downlink))
 				writeback_put_extent(&io_writeback, desc, new_downlink);
 
@@ -2619,6 +2622,9 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 			}
 			new_downlink = perform_page_io(desc, blkno, img,
 										   checkpoint_number, copy_blkno, &dirty_parent);
+
+			if (STOPEVENT_CONDITION(STOPEVENT_AFTER_PAGE_IO, NULL))
+				elog(PANIC, "stop event \"after_page_io\" fired");
 
 			if (DiskDownlinkIsValid(new_downlink))
 				writeback_put_extent(&io_writeback, desc, new_downlink);
