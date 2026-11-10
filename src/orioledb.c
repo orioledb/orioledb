@@ -172,6 +172,9 @@ bool		enable_rewind = false;
 int			rewind_max_time = 0;
 int			rewind_max_transactions = 0;
 int			logical_xid_buffers_guc = 64;
+bool		safe_recovery_guc = false;
+int			safe_recovery_buf_size_guc = 262144;	/* 256 MB in KB */
+int			safe_recovery_log_per_xact_guc = 100;
 bool		orioledb_strict_mode = false;
 XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
 static char *replay_until_lsn_string;
@@ -962,6 +965,49 @@ _PG_init(void)
 							1024,
 							PGC_POSTMASTER,
 							GUC_UNIT_BLOCKS,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomBoolVariable("orioledb.safe_recovery",
+							 "Defer applying OrioleDB WAL records until COMMIT is observed.",
+							 "When on, recovery buffers per-OXID records and applies them "
+							 "only after a COMMIT (or joint commit) is seen. Operations "
+							 "from transactions that never commit are skipped and LOGged. "
+							 "Use this to recover from a crash loop where the legacy "
+							 "redo path re-applies abandoned modifies.",
+							 &safe_recovery_guc,
+							 false,
+							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomIntVariable("orioledb.safe_recovery_buf_size",
+							"In-memory cap for safe_recovery per-OXID buffers.",
+							"When the total bytes buffered exceed this limit, the "
+							"largest buffer is spilled to a file under "
+							"orioledb_data/safe_recovery/ until the limit is satisfied.",
+							&safe_recovery_buf_size_guc,
+							262144, /* 256 MB */
+							1024,	/* 1 MB lower bound */
+							MAX_KILOBYTES,
+							PGC_POSTMASTER,
+							GUC_UNIT_KB,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.safe_recovery_log_per_xact",
+							"Max per-record LOG lines emitted for one rejected transaction.",
+							"Set to 0 to log only a summary line per rejected oxid.",
+							&safe_recovery_log_per_xact_guc,
+							100,
+							0,
+							INT_MAX,
+							PGC_POSTMASTER,
+							0,
 							NULL,
 							NULL,
 							NULL);
