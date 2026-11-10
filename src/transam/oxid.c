@@ -772,7 +772,7 @@ retain_released_logical_xid(TransactionId xid, SubTransactionId parentSubid)
 {
 	LogicalXidCtx ctx = {xid, false};
 
-	if (wal_level < WAL_LEVEL_LOGICAL)
+	if (!XLogLogicalInfoActive())
 	{
 		release_logical_xid(&ctx);
 		return;
