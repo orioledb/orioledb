@@ -2112,6 +2112,9 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			{
 				OTuple		final_tup = tts_orioledb_form_tuple(slot, descr);
 
+				if (STOPEVENT_CONDITION(STOPEVENT_PK_MUTATED_PRE_WAL, NULL))
+					elog(ERROR, "stop event \"pk_mutated_pre_wal\" fired");
+
 				elog(DEBUG3, "CALL o_wal_update");
 				o_wal_update(&primary->desc, final_tup, oldWalTuple, wal_relreplident(rel), descr->version);
 			}
@@ -2415,6 +2418,9 @@ o_update_secondary_index(OIndexDescr *id,
 	}
 	else if (new_valid)
 	{
+		if (STOPEVENT_CONDITION(STOPEVENT_SK_MID_UPDATE, NULL))
+			elog(ERROR, "stop event \"sk_mid_update\" fired");
+
 		o_btree_check_size_of_tuple(o_tuple_size(new_ix_tup, &id->leafSpec),
 									id->name.data,
 									true);
