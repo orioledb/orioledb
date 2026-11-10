@@ -889,7 +889,7 @@ o_slot_retain_location(ReplicationSlot *slot)
 	UndoLocation result;
 	int			i;
 
-	if (wal_level < WAL_LEVEL_LOGICAL || oProcData == NULL)
+	if (!XLogLogicalInfoActive() || oProcData == NULL)
 		return 0;
 
 #if PG_VERSION_NUM >= 170000
@@ -978,7 +978,7 @@ get_current_replication_catalog_retain_undo_location(void)
 	UndoMeta   *meta = get_undo_meta_by_type(UndoLogSystem);
 	uint64		location;
 
-	if (wal_level < WAL_LEVEL_LOGICAL)
+	if (!XLogLogicalInfoActive())
 		return InvalidUndoLocation;
 
 	location = ReplicationSlotsComputeMinExtRetainLocation();
