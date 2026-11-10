@@ -901,7 +901,9 @@ retry:
 		Assert(get_reserved_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType)) == 0);
 	}
 	else
+	{
 		unlock_page(blkno);
+	}
 }
 
 /*
