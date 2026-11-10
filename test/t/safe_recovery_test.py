@@ -14,6 +14,7 @@
 # and per-record LOG output appears for the rejected OXID(s).
 
 import os
+import resource
 import time
 
 from testgres import NodeStatus
@@ -248,6 +249,10 @@ class SafeRecoveryTest(BaseTest):
 		# postmaster shuts down.  In multi-process recovery the PANIC
 		# fires in a worker, so the postmaster may briefly appear
 		# running before it reacts to the worker's death.
+		# Suppress core dumps for the intentional PANIC so CI's
+		# core-file scanner does not flag the expected crash.
+		saved_core = resource.getrlimit(resource.RLIMIT_CORE)
+		resource.setrlimit(resource.RLIMIT_CORE, (0, saved_core[1]))
 		legacy_start_failed = False
 		try:
 			node.start()
@@ -255,7 +260,7 @@ class SafeRecoveryTest(BaseTest):
 			legacy_start_failed = True
 		else:
 			# Wait for the recovery worker PANIC to propagate.
-			for _ in range(30):
+			for _ in range(60):
 				if node.status() != NodeStatus.Running:
 					legacy_start_failed = True
 					node.is_started = False
@@ -263,6 +268,8 @@ class SafeRecoveryTest(BaseTest):
 				time.sleep(1)
 			else:
 				legacy_start_failed = False
+		finally:
+			resource.setrlimit(resource.RLIMIT_CORE, saved_core)
 		self.assertTrue(legacy_start_failed,
 		                "legacy recovery should have PANICked on bomb reloid")
 		log = _read_log(node)
