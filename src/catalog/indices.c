@@ -660,13 +660,35 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		bool		is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
 
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-		o_tables_update(o_table, oxid, oSnapshot.csn);
-		if (!reuse_relnode)
+
+		if (!reuse_relnode && ix_type != oIndexPrimary)
 		{
+			OTable	   *cur;
 			OIndexKey	key = {.oids = table_index->oids};
 
+			STOPEVENT(STOPEVENT_DEFINE_INDEX_BEFORE_UPDATE, NULL);
+
+			systrees_modify_start();
+			cur = o_tables_get(oids);
+			cur->indices = (OTableIndex *)
+				repalloc(cur->indices, sizeof(OTableIndex) *
+						 (cur->nindices + 1));
+			memcpy(&cur->indices[cur->nindices],
+				   &o_table->indices[ix_num],
+				   sizeof(OTableIndex));
+			cur->indices[cur->nindices].index_mctx = NULL;
+			ix_num = cur->nindices;
+			cur->nindices++;
+			o_tables_update_locked(cur, oxid, oSnapshot.csn);
 			add_undo_create_relnode(o_table->oids, &key, 1, !is_temp);
+			systrees_modify_end(!is_temp);
+			o_table_free(cur);
 		}
+		else
+		{
+			o_tables_update(o_table, oxid, oSnapshot.csn);
+		}
+
 		recreate_table_descr_by_oids(oids);
 	}
 

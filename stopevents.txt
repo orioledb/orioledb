@@ -60,3 +60,4 @@ split_fix_before_downlink
 oxid_notify_woke
 seq_scan_parallel_join
 seq_scan_dsm_create_fail
+define_index_before_update

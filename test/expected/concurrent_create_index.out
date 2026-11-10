@@ -1,0 +1,46 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_setup s2_arm s1_create_idx_a s2_create_idx_b s2_release s1_check
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+
+step s2_arm: 
+	SELECT pg_stopevent_set('define_index_before_update',
+		'$applicationName == "s1"');
+
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_create_idx_a: 
+	CREATE INDEX o_conc_idx_a ON o_conc_idx (a);
+ <waiting ...>
+step s2_create_idx_b: 
+	CREATE INDEX o_conc_idx_b ON o_conc_idx (b);
+
+step s2_release: 
+	SELECT pg_stopevent_reset('define_index_before_update');
+
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_create_idx_a: <... completed>
+step s1_check: 
+	SET enable_seqscan = off;
+	SELECT * FROM o_conc_idx WHERE a = 'x';
+	SELECT * FROM o_conc_idx WHERE b = 'y';
+
+id|a|b
+--+-+-
+ 1|x|y
+(1 row)
+
+id|a|b
+--+-+-
+ 1|x|y
+(1 row)
+

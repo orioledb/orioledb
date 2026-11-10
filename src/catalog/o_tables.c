@@ -1766,7 +1766,7 @@ o_table_free(OTable *table)
 }
 
 bool
-o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
+o_tables_update_locked(OTable *table, OXid oxid, CommitSeqNo csn)
 {
 	OTableChunkKey key;
 	OTable	   *old_table;
@@ -1779,7 +1779,6 @@ o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 	key.chunknum = 0;
 	key.version = table->version + 1;
 
-	systrees_modify_start();
 	old_table = o_tables_get(table->oids);
 	o_tables_oids_indexes(old_table, table, oxid, csn);
 	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
@@ -1787,10 +1786,21 @@ o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 	result = generic_toast_update_optional_wal(&oTablesToastAPI,
 											   (Pointer) &key, data, len, oxid,
 											   csn, sys_tree, table->persistence != RELPERSISTENCE_TEMP);
-	systrees_modify_end(table->persistence != RELPERSISTENCE_TEMP);
 
 	pfree(data);
 	o_table_free(old_table);
+
+	return result;
+}
+
+bool
+o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
+{
+	bool		result;
+
+	systrees_modify_start();
+	result = o_tables_update_locked(table, oxid, csn);
+	systrees_modify_end(table->persistence != RELPERSISTENCE_TEMP);
 
 	return result;
 }
