@@ -1311,7 +1311,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	 * transaction uncommitted, legacy recovery re-applies those records and
 	 * re-hits this gate -> crash loop.
 	 *
-	 * Used by safe_recovery_test.py to demonstrate that safe_recovery breaks
+	 * Used by safe_recovery_test.py to demonstrate that safe recovery breaks
 	 * the loop by rejecting the uncommitted OXID before its records are
 	 * re-applied.
 	 */

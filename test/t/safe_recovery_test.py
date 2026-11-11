@@ -9,7 +9,7 @@
 #   - concurrent backends: two backends interleave containers in WAL,
 #     one commits and one is killed before commit.
 #
-# After crash_with_os_buffer_loss(), we restart with safe_recovery=on
+# After crash_with_os_buffer_loss(), we restart with orioledb.safe_recovery=on
 # and check that committed data is present, uncommitted data is absent,
 # and per-record LOG output appears for the rejected OXID(s).
 
@@ -42,7 +42,7 @@ class SafeRecoveryTest(BaseTest):
 	# A single uncommitted INSERT that overflows the 8 KB local WAL
 	# buffer guarantees at least one ORIOLEDB_XLOG_CONTAINER is in WAL
 	# without a COMMIT.  We then SIGKILL the postmaster.  Recovery with
-	# safe_recovery=on must reject the OXID and log it.
+	# orioledb.safe_recovery=on must reject the OXID and log it.
 	def test_single_backend(self):
 		node = self.node
 		node.append_conf(
@@ -109,14 +109,14 @@ class SafeRecoveryTest(BaseTest):
 		    [0])
 
 		log = _read_log(node)
-		self.assertIn("orioledb recovery started in safe_recovery mode", log)
-		self.assertIn("safe_recovery: rejecting transaction oxid=", log)
-		self.assertIn("safe_recovery: rejecting oxid=", log)
+		self.assertIn("orioledb recovery started in safe recovery mode", log)
+		self.assertIn("safe recovery: rejecting transaction oxid=", log)
+		self.assertIn("safe recovery: rejecting oxid=", log)
 		node.stop()
 
 	# Two connections write into separate tables.  Their containers
 	# interleave in WAL.  Conn A commits, Conn B is left in-flight when
-	# the postmaster is killed.  Recovery with safe_recovery=on must
+	# the postmaster is killed.  Recovery with orioledb.safe_recovery=on must
 	# apply A's rows and reject B's.
 	def test_concurrent_backends(self):
 		node = self.node
@@ -176,10 +176,10 @@ class SafeRecoveryTest(BaseTest):
 		log = _read_log(node)
 		# Exactly one OXID must be rejected.
 		self.assertEqual(
-		    log.count("safe_recovery: rejecting transaction oxid="), 1)
+		    log.count("safe recovery: rejecting transaction oxid="), 1)
 		node.stop()
 
-	# Reproduce the crash loop the safe_recovery feature targets:
+	# Reproduce the crash loop the safe recovery feature targets:
 	#
 	#   1. A backend writes Oriole container(s) into durable WAL then
 	#      the postmaster is SIGKILLed with the OXID uncommitted (same
@@ -191,7 +191,8 @@ class SafeRecoveryTest(BaseTest):
 	#      shuts down.
 	#   3. With orioledb.safe_recovery=on the buffered OXID is rejected
 	#      (no COMMIT seen), o_btree_normal_modify is never re-invoked
-	#      for it, the gate stays silent, and recovery completes.
+	#      for it, the gate stays silent, and single-process recovery
+	#      completes.
 	def test_crash_loop_safe_recovery_breaks_it(self):
 		node = self.node
 		node.append_conf(
@@ -243,7 +244,7 @@ class SafeRecoveryTest(BaseTest):
 		# open -- the crash signature the feature targets.
 		self.crash_with_os_buffer_loss()
 
-		# Attempt legacy recovery (safe_recovery still off).  The
+		# Attempt legacy recovery (orioledb.safe_recovery still off).  The
 		# is_recovery_in_progress() gate fires on the first replay of
 		# an o_bomb modify, PANICs.  With restart_after_crash=off the
 		# postmaster shuts down.  In multi-process recovery the PANIC
@@ -275,7 +276,7 @@ class SafeRecoveryTest(BaseTest):
 		log = _read_log(node)
 		self.assertIn("recovery PANIC on modify of reloid", log)
 
-		# Now switch on safe_recovery and try again.
+		# Now switch on orioledb.safe_recovery and try again.
 		node.append_conf('postgresql.conf', "orioledb.safe_recovery = on\n")
 		node.start()
 
@@ -291,13 +292,13 @@ class SafeRecoveryTest(BaseTest):
 		    [0])
 
 		log = _read_log(node)
-		self.assertIn("orioledb recovery started in safe_recovery mode", log)
-		self.assertIn("safe_recovery: rejecting transaction oxid=", log)
+		self.assertIn("orioledb recovery started in safe recovery mode", log)
+		self.assertIn("safe recovery: rejecting transaction oxid=", log)
 		# After the safe-recovery start, the panic message must NOT
 		# appear -- the rejected OXID's records were never re-applied
 		# so o_btree_normal_modify's gate was never tripped.
 		safe_section = log.rsplit(
-		    "orioledb recovery started in safe_recovery mode", 1)[1]
+		    "orioledb recovery started in safe recovery mode", 1)[1]
 		self.assertNotIn("recovery PANIC on modify of reloid", safe_section)
 
 		# Disarm the bomb so tearDown stays clean.
@@ -307,7 +308,7 @@ class SafeRecoveryTest(BaseTest):
 		node.safe_psql('postgres', "SELECT pg_reload_conf();")
 		node.stop()
 
-	# Sanity: with safe_recovery=on but no crash, normal traffic
+	# Sanity: with orioledb.safe_recovery=on but no crash, normal traffic
 	# continues to work (every COMMIT flushes its buffer, nothing
 	# accumulates).
 	def test_clean_shutdown(self):

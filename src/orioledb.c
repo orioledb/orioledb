@@ -986,7 +986,7 @@ _PG_init(void)
 							 NULL);
 
 	DefineCustomIntVariable("orioledb.safe_recovery_buf_size",
-							"In-memory cap for safe_recovery per-OXID buffers.",
+							"In-memory cap for safe recovery per-OXID buffers.",
 							"When the total bytes buffered exceed this limit, the "
 							"largest buffer is spilled to a file under "
 							"orioledb_data/safe_recovery/ until the limit is satisfied.",
@@ -1016,8 +1016,8 @@ _PG_init(void)
 	/*
 	 * Test hook: when set to a non-zero reloid, any o_btree modify (backend
 	 * DML or recovery apply) targeting that reloid panics. Used by
-	 * test/t/safe_recovery_test.py to reproduce the crash loop the
-	 * safe_recovery feature targets.  Never enable in production.
+	 * test/t/safe_recovery_test.py to reproduce the crash loop the safe
+	 * recovery feature targets.  Never enable in production.
 	 */
 	DefineCustomIntVariable("orioledb.debug_modify_panic_reloid",
 							"PANIC on every o_btree modify of this pg_class oid (testing only).",

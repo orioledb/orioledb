@@ -1288,7 +1288,7 @@ o_recovery_start_hook(void)
 	recovery_single = *recovery_single_process = IsFatalError() || safe_recovery_guc;
 	if (*recovery_safe_process)
 	{
-		elog(LOG, "orioledb recovery started in safe_recovery mode.");
+		elog(LOG, "orioledb recovery started in safe recovery mode (single-process).");
 		safe_recovery_startup();
 	}
 	else if (recovery_single)

@@ -8,7 +8,7 @@
  * commit) is known.  A crash that flushed Oriole containers but never
  * reached the COMMIT leaves a crash loop on subsequent recoveries.
  *
- * In safe_recovery mode we instead:
+ * In safe recovery mode we instead:
  *   - hash buffer raw container payloads per OXID,
  *   - on COMMIT, replay the buffered containers via the unchanged
  *     replay_container() path,
@@ -149,6 +149,10 @@ typedef struct
  */
 #define safe_scan_check_version replay_check_version
 
+/*
+ * Lightweight counterpart of replay_on_record() in recovery.c.
+ * Only extracts OXID and transaction fate; does not apply records.
+ */
 static WalParseResult
 safe_scan_on_record(WalReaderState *r, WalRecord *rec)
 {
@@ -194,6 +198,7 @@ typedef struct
 	int			max_emit;		/* rate limit (from GUC) */
 } SafeLogCtx;
 
+/* WalReaderState on_record callback: log each data-modifying record from a rejected container. */
 static WalParseResult
 safe_log_on_record(WalReaderState *r, WalRecord *rec)
 {
@@ -217,7 +222,7 @@ safe_log_on_record(WalReaderState *r, WalRecord *rec)
 			if (ctx->emitted < ctx->max_emit)
 			{
 				ereport(LOG,
-						(errmsg("safe_recovery: rejecting oxid=" UINT64_FORMAT
+						(errmsg("safe recovery: rejecting oxid=" UINT64_FORMAT
 								" lsn=%X/%X op=%s oids=[%u %u %u]",
 								ctx->oxid,
 								LSN_FORMAT_ARGS(ctx->containerLsn),
@@ -250,7 +255,7 @@ safe_spill_write_container(File f, off_t *offset, Pointer payload, Size len,
 				   WAIT_EVENT_DATA_FILE_WRITE) != sizeof(header))
 		ereport(FATAL,
 				(errcode_for_file_access(),
-				 errmsg("safe_recovery: could not write header to \"%s\": %m",
+				 errmsg("safe recovery: could not write header to \"%s\": %m",
 						path)));
 	*offset += sizeof(header);
 
@@ -258,7 +263,7 @@ safe_spill_write_container(File f, off_t *offset, Pointer payload, Size len,
 				   WAIT_EVENT_DATA_FILE_WRITE) != (int) len)
 		ereport(FATAL,
 				(errcode_for_file_access(),
-				 errmsg("safe_recovery: could not write payload to \"%s\": %m",
+				 errmsg("safe recovery: could not write payload to \"%s\": %m",
 						path)));
 	*offset += len;
 }
@@ -274,16 +279,12 @@ safe_spill_open(SafeXactBuf *buf, int mode)
 	if (f < 0)
 		ereport(FATAL,
 				(errcode_for_file_access(),
-				 errmsg("safe_recovery: could not open \"%s\": %m",
+				 errmsg("safe recovery: could not open \"%s\": %m",
 						buf->spill_path)));
 	return f;
 }
 
-/*
- * Spill an in-memory buffer to disk: write each container to the spill file
- * then free the in-memory chain.  safe_recovery_total_bytes is decremented
- * so the in-memory budget reflects only data still in palloc'd memory.
- */
+/* Evict a buffer from memory to its spill file. */
 static void
 safe_buf_spill(SafeXactBuf *buf)
 {
@@ -316,7 +317,7 @@ safe_buf_spill(SafeXactBuf *buf)
 	if (FileSync(f, WAIT_EVENT_DATA_FILE_WRITE) < 0)
 		ereport(FATAL,
 				(errcode_for_file_access(),
-				 errmsg("safe_recovery: could not fsync \"%s\": %m",
+				 errmsg("safe recovery: could not fsync \"%s\": %m",
 						buf->spill_path)));
 	FileClose(f);
 
@@ -336,7 +337,7 @@ safe_buf_spill(SafeXactBuf *buf)
 	/* container_count and total_bytes intentionally retained. */
 
 	elog(DEBUG1,
-		 "safe_recovery: spilled oxid=" UINT64_FORMAT " (%d containers, "
+		 "safe recovery: spilled oxid=" UINT64_FORMAT " (%d containers, "
 		 UINT64_FORMAT " bytes) to %s",
 		 buf->oxid, buf->container_count, (uint64) buf->total_bytes,
 		 buf->spill_path);
@@ -377,17 +378,16 @@ safe_spill_unlink(SafeXactBuf *buf)
 	if (unlink(buf->spill_path) != 0 && errno != ENOENT)
 		ereport(WARNING,
 				(errcode_for_file_access(),
-				 errmsg("safe_recovery: could not unlink \"%s\": %m",
+				 errmsg("safe recovery: could not unlink \"%s\": %m",
 						buf->spill_path)));
 }
 
-/* ---- iteration over containers (works for in-memory or spilled) ---- */
+typedef void (*ContainerCallback) (void *arg, Pointer payload, Size len,
+								   XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr);
 
-typedef void (*ContainerVisitor) (void *arg, Pointer payload, Size len,
-								  XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr);
-
+/* Iterate every container in a buffer (in-memory or spilled), calling cb for each. */
 static void
-safe_buf_foreach_container(SafeXactBuf *buf, ContainerVisitor cb, void *arg)
+safe_buf_foreach_container(SafeXactBuf *buf, ContainerCallback cb, void *arg)
 {
 	if (!buf->spilled)
 	{
@@ -416,7 +416,7 @@ safe_buf_foreach_container(SafeXactBuf *buf, ContainerVisitor cb, void *arg)
 						  WAIT_EVENT_DATA_FILE_READ) != sizeof(header))
 				ereport(FATAL,
 						(errcode_for_file_access(),
-						 errmsg("safe_recovery: could not read header from \"%s\": %m",
+						 errmsg("safe recovery: could not read header from \"%s\": %m",
 								buf->spill_path)));
 			offset += sizeof(header);
 
@@ -425,7 +425,7 @@ safe_buf_foreach_container(SafeXactBuf *buf, ContainerVisitor cb, void *arg)
 						  WAIT_EVENT_DATA_FILE_READ) != (int) header.len)
 				ereport(FATAL,
 						(errcode_for_file_access(),
-						 errmsg("safe_recovery: could not read payload from \"%s\": %m",
+						 errmsg("safe recovery: could not read payload from \"%s\": %m",
 								buf->spill_path)));
 			offset += header.len;
 
@@ -436,8 +436,7 @@ safe_buf_foreach_container(SafeXactBuf *buf, ContainerVisitor cb, void *arg)
 	}
 }
 
-/* ---- buffer lifecycle ---- */
-
+/* Find or create the per-OXID buffer entry. */
 static SafeXactBuf *
 safe_buf_lookup(OXid oxid, bool create)
 {
@@ -474,6 +473,7 @@ safe_buf_lookup(OXid oxid, bool create)
 	return buf;
 }
 
+/* Release all resources for a per-OXID buffer and remove it from the hash. */
 static void
 safe_buf_free(SafeXactBuf *buf)
 {
@@ -492,11 +492,7 @@ safe_buf_free(SafeXactBuf *buf)
 	hash_search(safe_xact_hash, &buf->oxid, HASH_REMOVE, NULL);
 }
 
-/*
- * Make room for `needed` bytes by spilling the largest in-memory buffers
- * other than `keep` until the limit is satisfied.  Errors out if no more
- * candidates remain and we still exceed the limit.
- */
+/* Ensure enough in-memory budget for `needed` bytes, spilling if necessary. */
 static void
 safe_recovery_ensure_room(SafeXactBuf *keep, Size needed)
 {
@@ -508,7 +504,7 @@ safe_recovery_ensure_room(SafeXactBuf *keep, Size needed)
 
 		if (freed == 0)
 			elog(ERROR,
-				 "safe_recovery: buffer limit %d KB reached (used " UINT64_FORMAT
+				 "safe recovery: buffer limit %d KB reached (used " UINT64_FORMAT
 				 " bytes, need " UINT64_FORMAT
 				 ") and no in-memory buffers left to spill.  Raise "
 				 "orioledb.safe_recovery_buf_size.",
@@ -517,6 +513,7 @@ safe_recovery_ensure_room(SafeXactBuf *keep, Size needed)
 	}
 }
 
+/* Append a container to the per-OXID buffer. */
 static void
 safe_buf_append(SafeXactBuf *buf, Pointer startPtr, Pointer endPtr,
 				XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr)
@@ -559,39 +556,42 @@ safe_buf_append(SafeXactBuf *buf, Pointer startPtr, Pointer endPtr,
 
 /* ---- apply / discard ---- */
 
+/* Replay one buffered container via replay_container() in recovery.c. */
 static void
-safe_apply_visitor(void *arg, Pointer payload, Size len,
-				   XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr)
+safe_replay_buffered_container(void *arg, Pointer payload, Size len,
+							   XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr)
 {
 	OXid		oxid = *(OXid *) arg;
 
 	if (!replay_container(payload, payload + len, true,
 						  xlogRecPtr, xlogRecEndPtr))
 		elog(ERROR,
-			 "safe_recovery: replay_container failed for oxid="
+			 "safe recovery: replay_container failed for oxid="
 			 UINT64_FORMAT " at %X/%X",
 			 oxid, LSN_FORMAT_ARGS(xlogRecPtr));
 }
 
+/* Replay all containers buffered for a committed OXID. */
 static void
 safe_buf_apply(SafeXactBuf *buf)
 {
 	OXid		oxid = buf->oxid;
 
 	elog(DEBUG1,
-		 "safe_recovery: applying oxid=" UINT64_FORMAT
+		 "safe recovery: applying oxid=" UINT64_FORMAT
 		 " containers=%d bytes=" UINT64_FORMAT " lsn=%X/%X..%X/%X spilled=%d",
 		 buf->oxid, buf->container_count, (uint64) buf->total_bytes,
 		 LSN_FORMAT_ARGS(buf->first_lsn), LSN_FORMAT_ARGS(buf->last_lsn),
 		 buf->spilled);
 
-	safe_buf_foreach_container(buf, safe_apply_visitor, &oxid);
+	safe_buf_foreach_container(buf, safe_replay_buffered_container, &oxid);
 	safe_buf_free(buf);
 }
 
+/* Log records from one rejected container for diagnostics. */
 static void
-safe_discard_visitor(void *arg, Pointer payload, Size len,
-					 XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr)
+safe_log_rejected_container(void *arg, Pointer payload, Size len,
+							XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr)
 {
 	SafeLogCtx *logctx = (SafeLogCtx *) arg;
 	WalReaderState r = {
@@ -609,6 +609,7 @@ safe_discard_visitor(void *arg, Pointer payload, Size len,
 	(void) wal_parse_container(&r, false);
 }
 
+/* Reject all containers for an uncommitted OXID, logging the discarded records. */
 static void
 safe_buf_discard(SafeXactBuf *buf, const char *reason)
 {
@@ -621,24 +622,24 @@ safe_buf_discard(SafeXactBuf *buf, const char *reason)
 	};
 
 	ereport(LOG,
-			(errmsg("safe_recovery: rejecting transaction oxid=" UINT64_FORMAT
+			(errmsg("safe recovery: rejecting transaction oxid=" UINT64_FORMAT
 					" (%d containers, lsn %X/%X..%X/%X, spilled=%d): %s",
 					buf->oxid, buf->container_count,
 					LSN_FORMAT_ARGS(buf->first_lsn),
 					LSN_FORMAT_ARGS(buf->last_lsn),
 					buf->spilled, reason)));
 
-	safe_buf_foreach_container(buf, safe_discard_visitor, &logctx);
+	safe_buf_foreach_container(buf, safe_log_rejected_container, &logctx);
 
 	if (logctx.counted > logctx.emitted)
 		elog(LOG,
-			 "safe_recovery: rejected oxid=" UINT64_FORMAT
+			 "safe recovery: rejected oxid=" UINT64_FORMAT
 			 " total_data_records=%d (first %d logged, %d elided)",
 			 buf->oxid, logctx.counted, logctx.emitted,
 			 logctx.counted - logctx.emitted);
 	else
 		elog(LOG,
-			 "safe_recovery: rejected oxid=" UINT64_FORMAT
+			 "safe recovery: rejected oxid=" UINT64_FORMAT
 			 " total_data_records=%d",
 			 buf->oxid, logctx.counted);
 
@@ -661,7 +662,7 @@ safe_recovery_clean_dir(void)
 			return;
 		ereport(WARNING,
 				(errcode_for_file_access(),
-				 errmsg("safe_recovery: could not open \"%s\": %m",
+				 errmsg("safe recovery: could not open \"%s\": %m",
 						SAFE_RECOVERY_DIR)));
 		return;
 	}
@@ -677,13 +678,14 @@ safe_recovery_clean_dir(void)
 		if (unlink(path) != 0 && errno != ENOENT)
 			ereport(WARNING,
 					(errcode_for_file_access(),
-					 errmsg("safe_recovery: could not unlink \"%s\": %m",
+					 errmsg("safe recovery: could not unlink \"%s\": %m",
 							path)));
 	}
 
 	FreeDir(dir);
 }
 
+/* Initialize the per-OXID hash and spill directory for safe recovery. */
 void
 safe_recovery_startup(void)
 {
@@ -711,6 +713,11 @@ safe_recovery_startup(void)
 	safe_recovery_total_bytes = 0;
 }
 
+/*
+ * Safe-recovery counterpart of replay_container() in recovery.c.
+ * Instead of applying records immediately, buffers them per-OXID and
+ * defers replay until the transaction's fate is known.
+ */
 bool
 safe_recovery_replay_container(Pointer startPtr, Pointer endPtr,
 							   XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr)
@@ -748,7 +755,7 @@ safe_recovery_replay_container(Pointer startPtr, Pointer endPtr,
 		 * non-empty container starts with XID; see wal.c
 		 * add_xid_wal_record_if_needed) but guard defensively.
 		 */
-		elog(DEBUG2, "safe_recovery: container at %X/%X has no XID record, skipping",
+		elog(DEBUG2, "safe recovery: container at %X/%X has no XID record, skipping",
 			 LSN_FORMAT_ARGS(xlogRecPtr));
 		return true;
 	}
@@ -784,6 +791,10 @@ safe_recovery_replay_container(Pointer startPtr, Pointer endPtr,
 	return true;
 }
 
+/*
+ * Safe-recovery counterpart of the joint-commit logic in
+ * o_xact_redo_hook() in recovery.c.
+ */
 void
 safe_recovery_xact_redo(TransactionId xid, XLogRecPtr lsn, bool commit)
 {
@@ -809,6 +820,7 @@ safe_recovery_xact_redo(TransactionId xid, XLogRecPtr lsn, bool commit)
 	}
 }
 
+/* Reject any OXIDs still buffered at end-of-WAL (implicit abort). */
 void
 safe_recovery_finish(void)
 {

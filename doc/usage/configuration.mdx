@@ -61,6 +61,30 @@ this sum amount, otherwise OrioleDB will fall back to single-process index build
 
 The size of shared memory for the message queue of each recovery worker.
 
+### `orioledb.safe_recovery`
+
+|             |     |
+| ----------- | --- |
+| **Default** | off |
+
+Defer applying OrioleDB WAL records until COMMIT is observed. When on, recovery buffers per-OXID records and applies them only after a COMMIT (or joint commit) is seen. Operations from transactions that never committed are skipped and LOGged. Recovery runs in single-process mode. Use this to recover from a crash loop where the legacy redo path re-applies abandoned modifies.
+
+### `orioledb.safe_recovery_buf_size`
+
+|             |        |
+| ----------- | ------ |
+| **Default** | 256 MB |
+
+In-memory cap for safe recovery per-OXID buffers. When the total bytes buffered exceed this limit, the largest buffer is spilled to a file under `orioledb_data/safe_recovery/` until the limit is satisfied.
+
+### `orioledb.safe_recovery_log_per_xact`
+
+|             |     |
+| ----------- | --- |
+| **Default** | 100 |
+
+Maximum number of per-record LOG lines emitted for one rejected transaction. Set to 0 to log only a summary line per rejected OXID.
+
 ### `orioledb.checkpoint_completion_ratio`
 
 |             |     |
