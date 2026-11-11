@@ -167,7 +167,7 @@ typedef struct
  *
  * Restore to completeBuffer also has two ways:
  * - ordinary: if some items are evicted to disk but not restored yet. So they are read from disk to free
- *  space in conpleteBuffer (by full blocks);
+ *  space in completeBuffer (by full blocks);
  * - fast: - if items are only in in-memory buffers. So they are directly transferred from addBuffer to
  *  completeBuffer.
  *

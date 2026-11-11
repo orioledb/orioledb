@@ -284,7 +284,7 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 *    Thus, undo location we read is probably more recent than csn.  That could
 	 *    lead to traverse of extra step of undo chain, which is not a problem.
 	 *    Also that could lead to miss the need of reading undo, but that would
-	 *    be catched by subsequent check.
+	 *    be caught by subsequent check.
 	 * 2. We check page change count after reading csn and undo location.  That
 	 *    ensures page wasn't reused for something while reading csn and undo
 	 *    location.  Note, that there is at least one memory barrier between
