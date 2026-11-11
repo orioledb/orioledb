@@ -35,6 +35,7 @@
 
 #include "access/transam.h"
 #include "miscadmin.h"
+#include "port/pg_bitutils.h"
 #include "utils/inval.h"
 #include "utils/wait_event.h"
 
@@ -723,6 +724,21 @@ typedef struct
  */
 #define UPDATE_DIFF_MIN_RUN			(O_UPDATE_DIFF_FRAGMENT_HEADER_SIZE + 1)
 
+/* The high bit of every nonzero byte of x */
+#define U64_NONZERO_BYTES(x) \
+	(((((x) & UINT64CONST(0x7F7F7F7F7F7F7F7F)) + \
+	   UINT64CONST(0x7F7F7F7F7F7F7F7F)) | (x)) & \
+	 UINT64CONST(0x8080808080808080))
+
+static inline uint64
+load_u64(const char *ptr)
+{
+	uint64		result;
+
+	memcpy(&result, ptr, sizeof(result));
+	return result;
+}
+
 /*
  * Split the difference between the older version of a row and the newer one
  * into fragments that rebuild the older version from the newer.
@@ -732,21 +748,30 @@ typedef struct
  * which finds what an update of fixed-length fields changes, the tuple
  * version included.  Once a field changes its length, the offsets drift
  * apart and the rest up to the common ending goes to the last fragment.
- * Returns the number of fragments and the number of bytes they carry.
+ *
+ * Returns the number of fragments and the number of bytes they carry, or -1
+ * once the fragments with their headers would take more than budget bytes.
  */
 static int
 make_update_diff(Pointer oldData, LocationIndex oldLen,
 				 Pointer newData, LocationIndex newLen,
+				 int budget,
 				 UpdateDiffFragment *fragments, LocationIndex *bytesLen)
 {
 	LocationIndex suffix = 0,
+				minLen = Min(oldLen, newLen),
 				oldEnd,
 				newEnd,
 				common,
 				pos = 0;
-	int			n = 0;
+	int			n = 0,
+				cost = 0;
 
-	while (suffix < Min(oldLen, newLen) &&
+	while (suffix + sizeof(uint64) <= minLen &&
+		   load_u64(oldData + oldLen - suffix - sizeof(uint64)) ==
+		   load_u64(newData + newLen - suffix - sizeof(uint64)))
+		suffix += sizeof(uint64);
+	while (suffix < minLen &&
 		   oldData[oldLen - suffix - 1] == newData[newLen - suffix - 1])
 		suffix++;
 	oldEnd = oldLen - suffix;
@@ -760,25 +785,79 @@ make_update_diff(Pointer oldData, LocationIndex oldLen,
 					diffStart,
 					next = common;
 
+		while (pos + sizeof(uint64) <= common &&
+			   load_u64(oldData + pos) == load_u64(newData + pos))
+			pos += sizeof(uint64);
 		while (pos < common && oldData[pos] == newData[pos])
 			pos++;
 		if (pos == common && oldEnd == newEnd)
 			break;
 
 		diffStart = pos;
+		cost += O_UPDATE_DIFF_FRAGMENT_HEADER_SIZE;
+		if (cost > budget)
+			return -1;
+
 		if (n < UPDATE_DIFF_MAX_FRAGMENTS - 1)
 		{
 			LocationIndex run = 0;
 
-			for (; pos < common; pos++)
+			/*
+			 * A word at a time.  A run of UPDATE_DIFF_MIN_RUN equal bytes
+			 * that doesn't cover a whole word touches one of its ends, so the
+			 * equal bytes at both ends say all about the runs.  The bytes
+			 * before the current run go to this fragment whatever comes next,
+			 * which is what bounds its cost.
+			 */
+			while (pos + sizeof(uint64) <= common)
+			{
+				uint64		x = load_u64(oldData + pos) ^ load_u64(newData + pos);
+				uint64		differ;
+				int			low,
+							high;
+
+				if (x == 0)
+				{
+					run += sizeof(uint64);
+					pos += sizeof(uint64);
+					if (run >= UPDATE_DIFF_MIN_RUN)
+					{
+						next = pos - run;
+						break;
+					}
+					continue;
+				}
+
+				differ = U64_NONZERO_BYTES(x);
+#ifdef WORDS_BIGENDIAN
+				low = (63 - pg_leftmost_one_pos64(differ)) >> 3;
+				high = pg_rightmost_one_pos64(differ) >> 3;
+#else
+				low = pg_rightmost_one_pos64(differ) >> 3;
+				high = (63 - pg_leftmost_one_pos64(differ)) >> 3;
+#endif
+				if (run + low >= UPDATE_DIFF_MIN_RUN)
+				{
+					next = pos - run;
+					break;
+				}
+				if (high >= UPDATE_DIFF_MIN_RUN)
+				{
+					next = pos + sizeof(uint64) - high;
+					break;
+				}
+				run = high;
+				pos += sizeof(uint64);
+				if (cost + (pos - run - diffStart) > budget)
+					return -1;
+			}
+
+			for (; next == common && pos < common; pos++)
 			{
 				if (oldData[pos] != newData[pos])
 					run = 0;
 				else if (++run >= UPDATE_DIFF_MIN_RUN)
-				{
 					next = pos + 1 - run;
-					break;
-				}
 			}
 		}
 
@@ -790,13 +869,19 @@ make_update_diff(Pointer oldData, LocationIndex oldLen,
 			fragments[n].skip = newEnd - diffStart;
 			fragments[n].len = oldEnd - diffStart;
 			*bytesLen += fragments[n].len;
+			cost += fragments[n].len;
 			n++;
+			if (cost > budget)
+				return -1;
 			break;
 		}
 		fragments[n].skip = next - diffStart;
 		fragments[n].len = next - diffStart;
 		*bytesLen += fragments[n].len;
+		cost += fragments[n].len;
 		n++;
+		if (cost > budget)
+			return -1;
 		pos = next;
 	}
 
@@ -825,6 +910,7 @@ make_update_undo_record(BTreeDescr *desc, OTuple oldTuple, OTuple newTuple,
 	bool		key_palloc = false;
 	Pointer		ptr;
 	int			nfragments,
+				budget,
 				i;
 
 	if (desc->undoType != UndoLogRegular)
@@ -834,15 +920,21 @@ make_update_undo_record(BTreeDescr *desc, OTuple oldTuple, OTuple newTuple,
 	oldLen = o_btree_len(desc, oldTuple, OTupleLength);
 	newLen = o_btree_len(desc, newTuple, OTupleLength);
 	keyLen = o_btree_len(desc, oldTuple, OTupleKeyLength);
-	nfragments = make_update_diff(oldTuple.data, oldLen,
-								  newTuple.data, newLen,
-								  fragments, &bytesLen);
-	size = sizeof(BTreeUpdateDiffUndoStackItem) + keyLen +
-		nfragments * O_UPDATE_DIFF_FRAGMENT_HEADER_SIZE + bytesLen;
 
-	if (MAXALIGN(size) >= MAXALIGN(sizeof(BTreeModifyUndoStackItem) + oldLen))
+	/* What the fragments may take for the record to be shorter */
+	budget = (int) MAXALIGN(sizeof(BTreeModifyUndoStackItem) + oldLen) -
+		MAXIMUM_ALIGNOF - (int) sizeof(BTreeUpdateDiffUndoStackItem) -
+		(int) keyLen;
+	nfragments = budget < 0 ? -1 :
+		make_update_diff(oldTuple.data, oldLen, newTuple.data, newLen,
+						 budget, fragments, &bytesLen);
+	if (nfragments < 0)
 		return make_undo_record(desc, oldTuple, true, BTreeOperationUpdate,
 								blkno, pageChangeCount, curTupHdr);
+
+	size = sizeof(BTreeUpdateDiffUndoStackItem) + keyLen +
+		nfragments * O_UPDATE_DIFF_FRAGMENT_HEADER_SIZE + bytesLen;
+	Assert(MAXALIGN(size) < MAXALIGN(sizeof(BTreeModifyUndoStackItem) + oldLen));
 
 	item = (BTreeUpdateDiffUndoStackItem *) get_undo_record(desc->undoType,
 															&undoLocation,
@@ -2943,12 +3035,10 @@ get_prev_leaf_header_from_undo_if_exists(UndoLogType undoType,
  * version that replaced it.  See BTreeUpdateDiffUndoStackItem.
  */
 static void
-apply_update_diff(UndoLogType undoType, UndoLocation itemLocation,
-				  BTreeUpdateDiffUndoStackItem *item,
+apply_update_diff(BTreeUpdateDiffUndoStackItem *item,
 				  OTuple newTuple, LocationIndex newTupleLen,
 				  Pointer dest)
 {
-	char		diff[O_BTREE_MAX_TUPLE_SIZE];
 	LocationIndex diffLen,
 				newPos = 0,
 				pos = 0;
@@ -2956,9 +3046,7 @@ apply_update_diff(UndoLogType undoType, UndoLocation itemLocation,
 				end;
 
 	if (unlikely(item->base.header.itemSize <
-				 sizeof(BTreeUpdateDiffUndoStackItem) + item->keyLen ||
-				 item->base.header.itemSize - sizeof(BTreeUpdateDiffUndoStackItem) >
-				 O_BTREE_MAX_TUPLE_SIZE))
+				 sizeof(BTreeUpdateDiffUndoStackItem) + item->keyLen))
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_CORRUPTED),
 				 errmsg("corrupted undo record: item size %u does not fit a key of %u bytes and a difference",
@@ -2973,13 +3061,8 @@ apply_update_diff(UndoLogType undoType, UndoLocation itemLocation,
 
 	diffLen = item->base.header.itemSize -
 		sizeof(BTreeUpdateDiffUndoStackItem) - item->keyLen;
-	if (diffLen > 0)
-		undo_read(undoType,
-				  itemLocation + sizeof(BTreeUpdateDiffUndoStackItem) + item->keyLen,
-				  diffLen, diff);
-
-	ptr = diff;
-	end = diff + diffLen;
+	ptr = (Pointer) item + sizeof(BTreeUpdateDiffUndoStackItem) + item->keyLen;
+	end = ptr + diffLen;
 	while (ptr < end)
 	{
 		LocationIndex header[3];
@@ -3075,13 +3158,30 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 
 	if (item.header.type == UpdateDiffUndoItemType)
 	{
-		BTreeUpdateDiffUndoStackItem diffItem;
+		/* The whole record: header, key and difference */
+		union
+		{
+			BTreeUpdateDiffUndoStackItem item;
+			char		data[sizeof(BTreeUpdateDiffUndoStackItem) +
+							 O_BTREE_MAX_TUPLE_SIZE];
+		}			record;
+		BTreeUpdateDiffUndoStackItem *diffItem = &record.item;
 		UndoLocation itemLocation;
 
+		if (unlikely(item.header.itemSize < sizeof(BTreeUpdateDiffUndoStackItem) ||
+					 item.header.itemSize > sizeof(record)))
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_CORRUPTED),
+					 errmsg("corrupted undo record: update difference record of %u bytes",
+							(unsigned) item.header.itemSize)));
+
+		/* Read only what follows the part already read */
 		itemLocation = undoLocation - offsetof(BTreeModifyUndoStackItem, tuphdr);
-		undo_read(undoType, itemLocation, sizeof(diffItem),
-				  (Pointer) &diffItem);
-		tupleSize = diffItem.tupleLen;
+		memcpy(record.data, &item, sizeof(BTreeModifyUndoStackItem));
+		undo_read(undoType, itemLocation + sizeof(BTreeModifyUndoStackItem),
+				  item.header.itemSize - sizeof(BTreeModifyUndoStackItem),
+				  record.data + sizeof(BTreeModifyUndoStackItem));
+		tupleSize = diffItem->tupleLen;
 		if (unlikely(tupleSize > O_BTREE_MAX_TUPLE_SIZE))
 			ereport(ERROR,
 					(errcode(ERRCODE_DATA_CORRUPTED),
@@ -3098,8 +3198,7 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 		{
 			Pointer		dest = palloc(tupleSize);
 
-			apply_update_diff(undoType, itemLocation, &diffItem,
-							  *tuple, tupleLen, dest);
+			apply_update_diff(diffItem, *tuple, tupleLen, dest);
 			tuple->data = dest;
 		}
 		else
@@ -3110,8 +3209,7 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 			 * The previous version is written over the one it is rebuilt
 			 * from, in the page, where there is no memory to allocate.
 			 */
-			apply_update_diff(undoType, itemLocation, &diffItem,
-							  *tuple, tupleLen, buf);
+			apply_update_diff(diffItem, *tuple, tupleLen, buf);
 			memcpy(tuple->data, buf, tupleSize);
 		}
 		tuple->formatFlags = tuphdr->formatFlags;
