@@ -203,17 +203,16 @@ typedef struct
 	 * update_min_undo_locations() method. minUndoLocationsChangeCount is used
 	 * together with wait_for_even_min_undo_locations_changecount() method to
 	 * fix concurrency between update_min_undo_locations() method and
-	 * set_my_reserved_location() & set_my_retain_location() methods.
+	 * set_my_reserved_location() & set_my_snapshot_retain_location() methods.
 	 */
 	uint32		minUndoLocationsChangeCount;
 
 	/*
 	 * sysXidUndoLocationChangeCount is a counter used for caching in
-	 * read_replication_catalog_retain_undo_location(). When trying to use
-	 * cached value read_replication_catalog_retain_undo_location() checks if
-	 * this counter is not modified since last call by a concurrent
-	 * insert_replication_catalog_retain_undo_location(), so that it will use
-	 * cached last value without reading actual system tree.
+	 * get_current_replication_catalog_retain_undo_location(). When trying to
+	 * use cached value it checks if this counter is not modified since last
+	 * call by a concurrent update, so that it will use cached last value
+	 * without reading actual system tree.
 	 */
 	uint32		sysXidUndoLocationChangeCount;
 

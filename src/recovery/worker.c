@@ -694,12 +694,12 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				 * up.  PG core then raises ERROR ("could not attach to a
 				 * SharedFileSet that is already destroyed") out of
 				 * SharedFileSetAttach.  Letting that propagate exits the
-				 * bgworker with code 1; the leader's idx_workers_alive_range
-				 * probe then permanently flags the pool as incomplete and
-				 * every subsequent CIC replay falls back to serial until the
-				 * replica is restarted.  Treat the same way as the dsm_attach
-				 * / shm_toc_attach misses above: swallow, log, drop the
-				 * message, stay alive.
+				 * bgworker with code 1; the leader's
+				 * recovery_workers_alive_range() probe then permanently flags
+				 * the pool as incomplete and every subsequent CIC replay
+				 * falls back to serial until the replica is restarted.  Treat
+				 * the same way as the dsm_attach / shm_toc_attach misses
+				 * above: swallow, log, drop the message, stay alive.
 				 */
 				PG_TRY();
 				{

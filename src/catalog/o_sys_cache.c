@@ -1036,9 +1036,9 @@ o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg,
 	bool		inserted PG_USED_FOR_ASSERTS_ONLY;
 
 	/*
-	 * Promote to transactional if refresh_transactional() touched this key
-	 * earlier in the transaction.  A hash collision only adds unnecessary
-	 * transactional overhead.
+	 * Promote to transactional if o_sys_cache_refresh_transactional() touched
+	 * this key earlier in the transaction.  A hash collision only adds
+	 * unnecessary transactional overhead.
 	 */
 	if (!transactional && refreshed_keys != NIL &&
 		TransactionIdEquals(refreshed_keys_xid, GetTopTransactionIdIfAny()))

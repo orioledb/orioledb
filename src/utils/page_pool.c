@@ -197,7 +197,7 @@ o_ppool_reserve_pages(PagePool *pool, int kind, int count)
 		 * walk_page_prelock_check() → index_oids_get_btree_descr(), which
 		 * may need to fetch a table descriptor from a TOAST system tree:
 		 * o_btree_load_shmem() → ppool_reserve_pages() →
-		 * ppool_run_clock()).
+		 * ppool_run_maintenance()).
 		 */
 		if (!ppool_run_maintenance(pool, true, NULL))
 		{

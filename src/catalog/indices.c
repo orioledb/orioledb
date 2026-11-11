@@ -123,7 +123,7 @@ typedef struct oIdxLeader
 /*
  * Working state for parallel build used only for leader. It is used
  * to fill oIdxShared for workers in shmem or recovery_shmem and
- * a oIdxLeader for leader participation in parallel scan.
+ * an oIdxLeader for leader participation in parallel scan.
  */
 typedef struct oIdxBuildState
 {
