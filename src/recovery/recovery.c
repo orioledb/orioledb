@@ -1532,9 +1532,8 @@ o_recovery_finish_hook(bool cleanup)
 	LockReleaseCurrentOwner(NULL, 0);
 
 	/*
-	 * No sense to check recovery_internal_error state, because shm_mq_sendv()
-	 * can return SHM_MQ_DETACHED even if finish message was successfully
-	 * sent.
+	 * No sense to check worker error state, because shm_mq_sendv() can return
+	 * SHM_MQ_DETACHED even if finish message was successfully sent.
 	 */
 	if (!recovery_single && pg_atomic_read_u32(worker_finish_count) != num_workers)
 	{
@@ -3123,7 +3122,7 @@ update_run_xmin(void)
 		/*
 		 * walk_checkpoint_stacks() clobbers recovery_oxid /
 		 * curUndoLocations[] / oxid_needs_wal_flush, but update_run_xmin()
-		 * can be re-entered from inside apply_wal_record() (via the
+		 * can be re-entered from inside orioledb_redo() (via the
 		 * o_handle_startup_proc_interrupts_hook ->
 		 * update_proc_retain_undo_location -> check_delete_xid_state path)
 		 * while another oxid is being applied -- so save those globals around
@@ -4235,13 +4234,13 @@ recovery_workers_alive_range(int first, int lastInclusive)
  *
  * Call from inside _o_index_begin_parallel (which runs in the
  * index_build_leader worker process): the leader sends the DSM segment
- * handle to each idx_build_first..idx_build_last worker via
+ * handle to each index_build_first_worker..index_build_last_worker via
  * recovery_send_worker_oids and then waits for each to increment
  * nrecoveryworkersjoined.  If any of those workers has exited
  * (BGW_NEVER_RESTART means the postmaster won't bring them back), that
  * increment is never going to arrive and the leader hangs forever.
  *
- * Returns true if every idx_build_first..idx_build_last worker has a
+ * Returns true if every index_build_first_worker..index_build_last_worker has a
  * live pid; false if any of them is missing or has stopped.
  */
 bool
@@ -5222,9 +5221,9 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				 * sysTreesStartPtr that is past some window's META_LOCK (a
 				 * window whose sys-tree changes are already fully in the
 				 * checkpoint image).  We then see its UNLOCK with no matching
-				 * META_LOCK; handle_o_tables_ meta_unlock() returns early in
+				 * META_LOCK; handle_o_tables_meta_unlock() returns early in
 				 * that case (nothing to reconcile).  The old exact-cut
-				 * invariant that a UNLOCK always had its META_LOCK no longer
+				 * invariant that an UNLOCK always had its META_LOCK no longer
 				 * holds.
 				 */
 				handle_o_tables_meta_unlock(rec->u.unlock.oids, rec->u.unlock.oldRelnode);

@@ -103,7 +103,7 @@ typedef OScanDescData *OScanDesc;
 
 /*
  * Operation with indices. It does not update TOAST BTree. Implementations
- * are in tableam_handler.c.
+ * are in handler.c.
  */
 static void get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBound *key,
 								BTreeLocationHint *hint, CommitSeqNo *csn,

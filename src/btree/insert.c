@@ -32,7 +32,7 @@
 #include "miscadmin.h"
 #include "utils/memutils.h"
 
-/* In order to avoid use of the recursion in insert_leaf() we use context. */
+/* In order to avoid use of the recursion in o_btree_insert_item() we use context. */
 typedef struct BTreeInsertStackItem
 {
 	/* next item in the find context. next == NULL if it's last item. */

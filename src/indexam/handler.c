@@ -1815,12 +1815,13 @@ fill_hitup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	 * ExecCopySlotHeapTuple above produced an independent HeapTuple, and
 	 * o_new_rowid() (called via slot_getsysattr) already palloc'd its own
 	 * bytea, so neither xs_hitup nor xs_rowid retains a reference to the
-	 * source tuple buffer.  Clear the slot immediately: store_tuple() above
-	 * was called with shouldfree=true, so tts_orioledb_clear() now pfrees
-	 * tuple.data.  Doing the clear at the end of fill_hitup() (rather than
-	 * deferring to the next store_tuple()) is what makes shouldfree=true safe
-	 * here — descr->oldTuple outlives es_query_cxt, so a stale owning
-	 * pointer in the slot would dangle into a freed context across queries.
+	 * source tuple buffer.  Clear the slot immediately:
+	 * tts_orioledb_store_tuple() above was called with shouldfree=true, so
+	 * tts_orioledb_clear() now pfrees tuple.data.  Doing the clear at the end
+	 * of fill_hitup() (rather than deferring to the next
+	 * tts_orioledb_store_tuple()) is what makes shouldfree=true safe here —
+	 * descr->oldTuple outlives es_query_cxt, so a stale owning pointer in the
+	 * slot would dangle into a freed context across queries.
 	 */
 	ExecClearTuple(slot);
 }
@@ -2135,12 +2136,13 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	 * each Datum from slot->tts_values (varlenas are deep-copied by
 	 * heap_compute_data_size/heap_fill_tuple), and o_new_rowid() palloc'd its
 	 * own bytea for xs_rowid.  Neither holds a reference to the source tuple
-	 * buffer.  Clear the slot immediately: store_tuple() above was called
-	 * with shouldfree=true, so tts_orioledb_clear() now pfrees tuple.data.
-	 * Doing the clear at the end of fill_itup() (rather than deferring to the
-	 * next store_tuple()) is what makes shouldfree=true safe here —
-	 * index_descr->index_slot outlives es_query_cxt, so a stale owning
-	 * pointer in the slot would dangle into a freed context across queries.
+	 * buffer.  Clear the slot immediately: tts_orioledb_store_tuple() above
+	 * was called with shouldfree=true, so tts_orioledb_clear() now pfrees
+	 * tuple.data.  Doing the clear at the end of fill_itup() (rather than
+	 * deferring to the next tts_orioledb_store_tuple()) is what makes
+	 * shouldfree=true safe here — index_descr->index_slot outlives
+	 * es_query_cxt, so a stale owning pointer in the slot would dangle into a
+	 * freed context across queries.
 	 */
 	ExecClearTuple(slot);
 }

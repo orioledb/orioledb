@@ -51,7 +51,7 @@ typedef struct
 
 	/*
 	 * sysXidUndoLocationChangeCount with locks are used for caching in
-	 * read_replication_catalog_retain_undo_location()
+	 * get_current_replication_catalog_retain_undo_location()
 	 */
 	int			sysXidUndoLocationTrancheId;
 	LWLock		sysXidUndoLocationLock;

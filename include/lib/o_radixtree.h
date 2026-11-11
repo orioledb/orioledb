@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * radixtree.h
+ * o_radixtree.h
  *		Template for adaptive radix tree.
  *
  * A template to generate an "adaptive radix tree", specialized for value

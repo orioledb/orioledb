@@ -59,7 +59,7 @@ typedef struct
 
 /*
  * EXPLAIN ANALYZE function call counters.
- * will be init and free in tableam_scan.c
+ * will be init and free in scan.c
  */
 extern OEACallsCounters *ea_counters;
 
@@ -86,7 +86,7 @@ get_ea_counters(OrioleDBPageDesc *desc)
 			ix_counter->read++; \
 	}
 
-/* increases EXPLAIN_ANALYZE counter for write_read() call */
+/* increases EXPLAIN_ANALYZE counter for write_page() call */
 #define EA_WRITE_INC(blkno)  \
 	if (ea_counters != NULL)	\
 	{	\

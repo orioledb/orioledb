@@ -49,10 +49,10 @@
 /*
  * Returns free file extent with length = len.
  *
- * get_extend()/free_extend() operations optimized for more fast get_extend()
+ * get_extent()/free_extent() operations optimized for faster get_extent()
  * execution because as more critical for performance part.
  *
- * The main idea of get_extend()/free_extend() B-tree modification:
+ * The main idea of get_extent()/free_extent() B-tree modification:
  * We guarantee successful atomic modification after we fetch a free extent from
  * the (len, off) B-tree.
  *

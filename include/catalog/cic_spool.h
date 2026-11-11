@@ -68,7 +68,7 @@ typedef struct
 /*
  * In-memory representation of a fully-read entry.  `keyData` and
  * `tupleData` are owned by the reader and live until cic_spool_read_next
- * is called again or cic_spool_close is invoked.
+ * is called again or cic_spool_close_reader() is invoked.
  */
 typedef struct
 {
@@ -104,7 +104,7 @@ extern void cic_spool_append(ORelOids tableOids, OXid builderOxid,
 							 OTuple tuple, uint16 tupleLen);
 
 /*
- * Push a UndoLogRegular item that, when applied (transaction or
+ * Push an UndoLogRegular item that, when applied (transaction or
  * subxact abort), will emit a compensating REVERSE_* entry to the
  * spool.  Forward-op bytes are duplicated into the undo item so the
  * abort callback can re-emit them verbatim with the op flipped.
