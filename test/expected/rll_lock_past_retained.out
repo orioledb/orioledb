@@ -63,3 +63,106 @@ id|name|  v
  1|r1  |101
 (1 row)
 
+
+starting permutation: l_lock_trg c_checkpoint t_trg_update t_trg_select
+step l_lock_trg: SELECT id FROM rlpr_trg WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step c_checkpoint: CHECKPOINT;
+step t_trg_update: UPDATE rlpr_trg SET v = v + 100 WHERE id = 1;
+step t_trg_select: SELECT * FROM rlpr_trg ORDER BY id;
+id|  v
+--+---
+ 1|100
+ 2|  0
+(2 rows)
+
+
+starting permutation: l_lock_trg c_checkpoint t_trg_delete t_trg_select
+step l_lock_trg: SELECT id FROM rlpr_trg WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step c_checkpoint: CHECKPOINT;
+step t_trg_delete: DELETE FROM rlpr_trg WHERE id = 1;
+step t_trg_select: SELECT * FROM rlpr_trg ORDER BY id;
+id|v
+--+-
+ 2|0
+(1 row)
+
+
+starting permutation: l_lock_trg c_checkpoint t_merge_update t_trg_select
+step l_lock_trg: SELECT id FROM rlpr_trg WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step c_checkpoint: CHECKPOINT;
+step t_merge_update: 
+	MERGE INTO rlpr_trg t USING (VALUES (1)) s (id) ON t.id = s.id
+		WHEN MATCHED THEN UPDATE SET v = t.v + 100;
+
+step t_trg_select: SELECT * FROM rlpr_trg ORDER BY id;
+id|  v
+--+---
+ 1|100
+ 2|  0
+(2 rows)
+
+
+starting permutation: l_lock_trg c_checkpoint t_merge_delete t_trg_select
+step l_lock_trg: SELECT id FROM rlpr_trg WHERE id = 1 FOR KEY SHARE;
+id
+--
+ 1
+(1 row)
+
+step c_checkpoint: CHECKPOINT;
+step t_merge_delete: 
+	MERGE INTO rlpr_trg t USING (VALUES (1)) s (id) ON t.id = s.id
+		WHEN MATCHED THEN DELETE;
+
+step t_trg_select: SELECT * FROM rlpr_trg ORDER BY id;
+id|v
+--+-
+ 2|0
+(1 row)
+
+
+starting permutation: l_lock_child c_checkpoint t_cascade_delete t_child_select
+step l_lock_child: SELECT id FROM rlpr_trg_child WHERE id = 10 FOR KEY SHARE;
+id
+--
+10
+(1 row)
+
+step c_checkpoint: CHECKPOINT;
+step t_cascade_delete: DELETE FROM rlpr_trg WHERE id = 2;
+step t_child_select: SELECT * FROM rlpr_trg_child ORDER BY id;
+id|rid
+--+---
+(0 rows)
+
+
+starting permutation: l_lock_child c_checkpoint t_cascade_update t_child_select
+step l_lock_child: SELECT id FROM rlpr_trg_child WHERE id = 10 FOR KEY SHARE;
+id
+--
+10
+(1 row)
+
+step c_checkpoint: CHECKPOINT;
+step t_cascade_update: UPDATE rlpr_trg SET id = 3 WHERE id = 2;
+step t_child_select: SELECT * FROM rlpr_trg_child ORDER BY id;
+id|rid
+--+---
+10|  3
+(1 row)
+
