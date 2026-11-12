@@ -60,6 +60,7 @@
 #include "access/heapam.h"
 #include "access/table.h"
 #include "access/xlog_internal.h"
+#include "access/xlogrecovery.h"
 #include "catalog/pg_enum.h"
 #include "executor/execExpr.h"
 #include "funcapi.h"
@@ -1552,6 +1553,7 @@ _PG_init(void)
 
 	RegisterCustomRmgr(ORIOLEDB_RMGR_ID, &rmgr);
 	RedoShutdownHook = o_recovery_shutdown_hook;
+	RecoveryPauseSyncHook = o_recovery_pause_sync;
 	snapshot_hook = orioledb_snapshot_hook;
 	CustomErrorCleanupHook = orioledb_error_cleanup_hook;
 	snapshot_register_hook = undo_snapshot_register_hook;

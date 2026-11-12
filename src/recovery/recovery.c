@@ -103,6 +103,7 @@ static void recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num,
 									  bool isrebuild);
 static void workers_send_finish(bool send_to_idx_pool);
 static XLogRecPtr recovery_get_current_ptr(void);
+static XLogRecPtr recovery_get_retain_ptr(void);
 
 /*
  * Recovery worker state in pool.
@@ -1493,6 +1494,66 @@ orioledb_redo(XLogReaderState *record)
 	}
 }
 
+/*
+ * Synchronize recovery workers without finalizing transactions.
+ *
+ * Called at a recovery-target pause so the replica can serve queries.
+ * Workers drain their queues and stay alive, so if recovery resumes
+ * via pg_wal_replay_resume() they continue processing new WAL.
+ * In-flight transactions are left INPROGRESS: if the replica
+ * restarts, the shutdown checkpoint preserves them and the next
+ * recovery resolves them when the commit/abort WAL arrives.
+ */
+void
+o_recovery_pause_sync(void)
+{
+	int			i;
+	XLogRecPtr	ptr;
+	XLogRecPtr	current_ptr;
+	XLogRecPtr	retain_ptr;
+
+	if (!*recovery_single_process)
+	{
+		workers_synchronize(GetXLogReplayRecPtr(NULL), true);
+
+		if (unexpected_worker_detach)
+			elog(ERROR, "orioledb recovery worker died.");
+
+		for (i = 0; i < recovery_pool_size_guc; i++)
+		{
+			BgwHandleStatus status;
+			pid_t		pid;
+
+			status = GetBackgroundWorkerPid(workers_pool[i].handle, &pid);
+			if (status != BGWH_STARTED && status != BGWH_NOT_YET_STARTED)
+				elog(ERROR, "orioledb recovery worker died.");
+		}
+
+		for (i = 0; i < recovery_pool_size_guc; i++)
+			pg_atomic_write_u64(&worker_ptrs[i].retainPtr,
+								pg_atomic_read_u64(&worker_ptrs[i].commitPtr));
+	}
+
+	update_proc_retain_undo_location(-1);
+
+	ptr = pg_atomic_read_u64(recovery_ptr);
+	if (XLogRecPtrIsValid(ptr))
+	{
+		current_ptr = recovery_get_current_ptr();
+		retain_ptr = recovery_get_retain_ptr();
+
+		if (current_ptr != ptr)
+			elog(WARNING, "orioledb recovery pause sync: "
+				 "current_ptr %X/%X != recovery_ptr %X/%X",
+				 LSN_FORMAT_ARGS(current_ptr), LSN_FORMAT_ARGS(ptr));
+		if (retain_ptr != ptr)
+			elog(WARNING, "orioledb recovery pause sync: "
+				 "retain_ptr %X/%X != recovery_ptr %X/%X",
+				 LSN_FORMAT_ARGS(retain_ptr), LSN_FORMAT_ARGS(ptr));
+	}
+
+}
+
 void
 o_recovery_finish_hook(bool cleanup)
 {
@@ -1507,9 +1568,7 @@ o_recovery_finish_hook(bool cleanup)
 	{
 		workers_send_finish(false);
 		for (i = 0; i < num_workers; i++)
-		{
 			worker_wait_shutdown(&workers_pool[i]);
-		}
 	}
 
 	update_proc_retain_undo_location(-1);

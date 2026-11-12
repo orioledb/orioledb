@@ -21,6 +21,7 @@
 extern void o_recovery_start_hook(void);
 extern void orioledb_redo(XLogReaderState *record);
 extern void o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn, bool commit);
+extern void o_recovery_pause_sync(void);
 extern void o_recovery_finish_hook(bool cleanup);
 extern void o_emit_recovery_finish_rollbacks(void);
 
