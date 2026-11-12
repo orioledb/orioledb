@@ -1491,7 +1491,7 @@ btree_iterator_free_extended(BTreeIterator *it, bool fromResowner)
 							 NULL);
 
 		/*
-		 * It is unsafe to forget when called from a ResrouceOwner release
+		 * It is unsafe to forget when called from a ResourceOwner release
 		 * callback for the pinning owner.  We can only safely forget when we
 		 * are either: - not invoked from a release callback - not already in
 		 * "releasing" state NB There is no public interface for ResourceOwner

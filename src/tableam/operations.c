@@ -2451,7 +2451,7 @@ o_update_secondary_index(OIndexDescr *id,
 	return res;
 }
 
-/* returns TupleTableSlot of old tuple as OTableModifyResul.result */
+/* returns TupleTableSlot of old tuple as OTableModifyResult.result */
 static OTableModifyResult
 o_tbl_indices_overwrite(OTableDescr *descr,
 						OBTreeKeyBound *oldPkey,
