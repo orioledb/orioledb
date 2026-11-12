@@ -536,7 +536,7 @@ apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
 	primary = GET_PRIMARY(descr);
 
 	/* The undo entry stores the pre-image tuple right after the header. */
-	oldTupleSize = validate_undo_item_size(item.header.itemSize);
+	oldTupleSize = validate_undo_item_size(item.itemSize);
 	if (oldTupleSize == 0)
 		return true;
 	oldTuple.formatFlags = item.tuphdr.formatFlags;

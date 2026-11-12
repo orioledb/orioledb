@@ -525,7 +525,6 @@ cic_spool_track_for_abort(ORelOids tableOids, OXid builderOxid,
 																  &location,
 																  size);
 	item->header.type = CICCaptureUndoItemType;
-	item->header.indexType = 0;
 	item->header.itemSize = size;
 
 	item->tableOids = tableOids;

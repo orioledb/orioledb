@@ -2325,7 +2325,6 @@ o_add_invalidate_comparator_undo_item(Oid datoid, Oid opfamily, Oid lefttype,
 	item->lefttype = lefttype;
 	item->righttype = righttype;
 	item->header.base.type = InvalidateComparatorUndoItemType;
-	item->header.base.indexType = oIndexPrimary;
 	item->header.base.itemSize = size;
 
 	add_new_undo_stack_item(UndoLogSystem, location);
@@ -2693,7 +2692,6 @@ o_add_invalidate_undo_item(ORelOids oids, uint32 flags)
 	item->oids = oids;
 	item->flags = flags;
 	item->header.base.type = InvalidateUndoItemType;
-	item->header.base.indexType = oIndexPrimary;
 	item->header.base.itemSize = size;
 
 	add_new_undo_stack_item(UndoLogSystem, location);

@@ -127,10 +127,21 @@ typedef enum
 	BTreeModifySameOrStrongerLock = 3
 } BTreeModifyLockStatus;
 
-/* Undo records */
+/*
+ * BTree modify/lock undo record, layout-compatible with UndoStackItem.
+ *
+ * The first three fields match UndoStackItem so the generic undo walker
+ * can cast to UndoStackItem* and read prev, itemSize, type.  The remaining
+ * fields start at offset 11, overlapping UndoStackItem's tail padding.
+ * This shrinks the record from 64 to 56 bytes by eliminating two
+ * alignment gaps that the embedded sub-struct created.
+ */
 typedef struct
 {
-	UndoStackItem header;
+	UndoLocation prev;
+	LocationIndex itemSize;
+	uint8		type;
+	uint8		indexType;
 	BTreeOperationType action;
 	ORelOids	oids;
 	OInMemoryBlkno blkno;
@@ -163,6 +174,11 @@ typedef struct
 } BTreeLockDispatchUndoStackItem;
 
 #define O_LOCK_DISPATCH_UNDO_SIZE MAXALIGN(sizeof(BTreeLockDispatchUndoStackItem))
+
+StaticAssertDecl(sizeof(BTreeModifyUndoStackItem) == 56,
+				 "BTreeModifyUndoStackItem must be 56 bytes");
+StaticAssertDecl(sizeof(BTreeLockDispatchUndoStackItem) == 64,
+				 "BTreeLockDispatchUndoStackItem must be 64 bytes");
 
 typedef struct
 {

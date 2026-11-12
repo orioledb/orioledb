@@ -1318,7 +1318,6 @@ o_add_branch_undo_item(UndoLogType undoType, UndoLocation newLocation)
 	item->longPathLocation = pg_atomic_read_u64(&sharedLocations->location);
 	item->prevBranchLocation = pg_atomic_read_u64(&sharedLocations->branchLocation);
 	item->header.type = BranchUndoItemType;
-	item->header.indexType = oIndexPrimary;
 	item->header.itemSize = size;
 	item->header.prev = newLocation;
 
@@ -2944,7 +2943,6 @@ add_subxact_undo_item(SubTransactionId parentSubid)
 		item->prevSubLocation = pg_atomic_read_u64(&sharedLocations->subxactLocation);
 		item->parentSubid = parentSubid;
 		item->header.type = SubXactUndoItemType;
-		item->header.indexType = oIndexPrimary;
 		item->header.itemSize = size;
 		add_new_undo_stack_item(undoType, location);
 		release_undo_size(undoType);
@@ -3876,7 +3874,6 @@ o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 
 		item->header.base.type = RewindRelFileNodeUndoItemType;
 		item->header.base.itemSize = size;
-		item->header.base.indexType = oIndexPrimary;
 
 		item->nCommitRels = stepOnCommit;
 		item->nAbortRels = stepOnAbort;

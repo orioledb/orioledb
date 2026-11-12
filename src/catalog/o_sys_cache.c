@@ -1355,7 +1355,6 @@ o_add_undo_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key)
 																	  MAXALIGN(size));
 	item->header.itemSize = size;
 	item->header.type = SysCacheDeleteUndoItemType;
-	item->header.indexType = oIndexPrimary;
 	item->sys_tree_num = sys_cache->sys_tree_num;
 	item->key.common = key->common;
 
