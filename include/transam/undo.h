@@ -267,7 +267,6 @@ struct UndoStackItem
 	UndoLocation prev;
 	LocationIndex itemSize;
 	uint8		type;
-	uint8		indexType;
 };
 
 typedef struct

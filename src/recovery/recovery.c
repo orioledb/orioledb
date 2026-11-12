@@ -607,7 +607,7 @@ apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
 		undo_read(UndoLogRegular, itemLoc, sizeof(diffItem),
 				  (Pointer) &diffItem);
 		if (diffItem.keyLen == 0 ||
-			diffItem.keyLen > item.header.itemSize - sizeof(diffItem))
+			diffItem.keyLen > item.itemSize - sizeof(diffItem))
 			return true;
 		oldTuple.formatFlags = diffItem.keyFormatFlags;
 		oldTuple.data = palloc(diffItem.keyLen);
@@ -617,7 +617,7 @@ apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
 	else
 	{
 		/* The undo entry stores the pre-image tuple right after the header. */
-		oldTupleSize = validate_undo_item_size(item.header.itemSize);
+		oldTupleSize = validate_undo_item_size(item.itemSize);
 		if (oldTupleSize == 0)
 			return true;
 		oldTuple.formatFlags = item.tuphdr.formatFlags;
