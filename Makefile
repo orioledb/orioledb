@@ -58,6 +58,7 @@ OBJS = src/btree/btree.o \
 	   src/orioledb.o \
 	   src/recovery/logical.o \
 	   src/recovery/recovery.o \
+	   src/recovery/safe_recovery.o \
 	   src/recovery/wal.o \
 	   src/recovery/wal_partial.o \
 	   src/recovery/wal_reader.o \
@@ -227,6 +228,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/recovery_partial_drop_test.py \
 						test/t/concurrent_index_test.py \
 						test/t/concurrent_index_stopevents_test.py \
+						test/t/safe_recovery_test.py \
 						test/t/replication_test.py \
 						test/t/replident_full_physical_test.py \
 						test/t/fuzzy_checkpoint_test.py \
