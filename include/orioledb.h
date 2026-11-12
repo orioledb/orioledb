@@ -44,6 +44,11 @@
   ((void)(addr), (void)(size))
 #endif
 
+/* PostgreSQL 18 and later define this in c.h */
+#ifndef pg_attribute_target
+#define pg_attribute_target(...) __attribute__((target(__VA_ARGS__)))
+#endif
+
 /*
  * Currently OrioleDB has the following version-related values:
  *
