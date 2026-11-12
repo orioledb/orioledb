@@ -264,7 +264,7 @@ read_evicted_data(Oid datoid, Oid relnode, Oid tablespace, bool delete)
 	 * sequence.  This is correct because we don't evict root pages of system
 	 * trees.
 	 */
-	if (datoid == SYS_TREES_DATOID)
+	if (IS_SYS_TREE(datoid, relnode))
 		return NULL;
 
 	key.datoid = datoid;

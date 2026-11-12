@@ -396,15 +396,13 @@ PG_FUNCTION_INFO_V1(orioledb_test_wal_parse_relation);
 /*
  * Test-only (IS_DEV): feed a hand-built WAL container holding a single
  * WAL_REC_RELATION record to wal_parse_container() and return the parse
- * result as text.  This exercises the relnode bounds check in
+ * result as text.  This exercises relnode validation in
  * wal_parse_rec_relation() without needing a running recovery stream.
  *
  * A forged container is assembled with version = ORIOLEDB_WAL_VERSION,
  * no flags, and one RELATION record whose (datoid, relnode) come from
- * the caller.  When datoid == SYS_TREES_DATOID and relnode is outside
- * 1..SYS_TREES_NUM, the parser must reject it with WALPARSE_BAD_TYPE
- * instead of accepting an out-of-range system-tree number that would
- * index fixed arrays out of bounds.
+ * the caller.  Zero is rejected with WALPARSE_BAD_TYPE.  Other relnodes
+ * outside 1..SYS_TREES_NUM are user relations, even in template1.
  */
 Datum
 orioledb_test_wal_parse_relation(PG_FUNCTION_ARGS)

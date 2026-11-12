@@ -21,6 +21,7 @@
 
 #define SYS_TREES_DATOID				(1)
 
+#define SYS_TREES_BEGIN					(1)
 #define SYS_TREES_SHARED_ROOT_INFO		(1)
 #define SYS_TREES_O_TABLES				(2)
 #define SYS_TREES_O_INDICES				(3)
@@ -46,8 +47,21 @@
 #define SYS_TREES_CATALOG_XID_UNDO_LOCATION		(23)
 #define SYS_TREES_NUM					(23)
 
+/*
+ * template1 also has database OID 1.  Only relnodes in the range
+ * SYS_TREES_BEGIN..SYS_TREES_NUM identify system trees; other relnodes belong
+ * to PostgreSQL relations, including any low relfilenumbers assigned during
+ * binary upgrade.
+ */
+#define IS_SYS_TREE(datoid, relnode) \
+	((datoid) == SYS_TREES_DATOID && \
+	 (relnode) >= SYS_TREES_BEGIN && (relnode) <= SYS_TREES_NUM)
+
 #define IS_SYS_TREE_OIDS(oids) \
-	((oids).datoid == SYS_TREES_DATOID)
+	IS_SYS_TREE((oids).datoid, (oids).relnode)
+
+StaticAssertDecl(SYS_TREES_NUM < FirstNormalObjectId,
+				 "system-tree numbers must not overlap user relfilenumbers");
 
 #define OIDS_EQ_SYS_TREE(oids, systree) \
 	((oids).datoid == SYS_TREES_DATOID && \

@@ -5,47 +5,75 @@ from test.t.base_test import BaseTest
 
 SYS_TREES_DATOID = 1
 SYS_TREES_NUM = 23
+FIRST_NORMAL_OBJECT_ID = 16384
 
 
 class SysTreeGuardTest(BaseTest):
-	"""
-	Regression coverage for unchecked system-tree index values.
+	"""System-tree numbers must not be confused with template1 relations."""
 
-	Recovery and page-walking code accepts a serialized relation-node
-	value as a system-tree number after checking only the identifier
-	type (datoid == SYS_TREES_DATOID).  An out-of-range relnode indexes
-	fixed arrays (sysTreesMeta, sysTreesDescrs) without runtime bounds
-	validation, potentially crashing recovery or maintenance and
-	preventing cluster startup.
-
-	The IS_DEV helper orioledb_test_wal_parse_relation() feeds a
-	hand-built WAL container holding a single WAL_REC_RELATION record
-	to wal_parse_container() and returns the parse result.  When
-	datoid == SYS_TREES_DATOID and relnode is outside 1..SYS_TREES_NUM,
-	the parser must reject it with WALPARSE_BAD_TYPE instead of
-	accepting an out-of-range system-tree number.
-	"""
-
-	def test_out_of_range_sys_tree_relnode_rejected(self):
-		"""A WAL_REC_RELATION with datoid=SYS_TREES_DATOID and an
-		out-of-range relnode must be rejected as WALPARSE_BAD_TYPE."""
+	def test_zero_relnode_rejected(self):
+		"""Zero is invalid for both system trees and user relations."""
 		node = self.node
 		node.start()
 		node.safe_psql("CREATE EXTENSION orioledb;")
 
 		con = node.connect()
 		try:
-			for relnode in (0, SYS_TREES_NUM + 1, 999999):
+			for datoid in (SYS_TREES_DATOID, SYS_TREES_DATOID + 1):
 				result = con.execute(
 				    "SELECT orioledb_test_wal_parse_relation(%s::oid, "
-				    "%s::oid);", SYS_TREES_DATOID, relnode)[0][0]
-				self.assertEqual(
-				    result, "bad_type",
-				    "out-of-range system-tree relnode %d was not "
-				    "rejected by the WAL parser (got %r, expected "
-				    "'bad_type')" % (relnode, result))
+				    "%s::oid);", datoid, 0)[0][0]
+				self.assertEqual(result, "bad_type")
 		finally:
 			con.close()
+		node.stop()
+
+	def test_template1_user_relnode_accepted(self):
+		"""template1 WAL records with user relfilenumbers are not system trees."""
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION orioledb;")
+		with node.connect() as con:
+			for relnode in (SYS_TREES_NUM + 1, FIRST_NORMAL_OBJECT_ID - 1,
+			                FIRST_NORMAL_OBJECT_ID, 999999, 4294967295):
+				self.assertEqual(
+				    con.execute(
+				        "SELECT orioledb_test_wal_parse_relation(%s::oid, %s::oid)",
+				        SYS_TREES_DATOID, relnode), [('ok', )])
+		node.stop()
+
+	def test_template1_low_relnode_insert(self):
+		"""A relnode just above the system-tree range supports insertion and WAL."""
+		node = self.node
+		node.start()
+		node.safe_psql('template1', "CREATE EXTENSION orioledb;")
+		node.stop()
+		node.start(params=['-o', '-b'])
+		# Binary upgrade can assign relfilenumbers below FirstNormalObjectId.
+		node.safe_psql(
+		    'template1', """
+			SELECT binary_upgrade_set_next_pg_type_oid(930001);
+			SELECT binary_upgrade_set_next_array_pg_type_oid(930002);
+			SELECT binary_upgrade_set_next_heap_pg_class_oid(930003);
+			SELECT binary_upgrade_set_next_heap_relfilenode(%d);
+			CREATE TABLE low_relnode(i int) USING orioledb;
+		""" % (SYS_TREES_NUM + 1))
+		self.assertEqual(
+		    node.execute('template1',
+		                 "SELECT pg_relation_filenode('low_relnode')"),
+		    [(SYS_TREES_NUM + 1, )])
+		node.safe_psql('template1', "INSERT INTO low_relnode VALUES (1);")
+		node.safe_psql('template1', "CHECKPOINT;")
+		node.safe_psql('template1', "INSERT INTO low_relnode VALUES (2);")
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(
+		    node.execute('template1', "SELECT i FROM low_relnode ORDER BY i"),
+		    [(1, ), (2, )])
+		self.assertEqual(
+		    node.execute('template1',
+		                 "SELECT orioledb_tbl_check('low_relnode'::regclass)"),
+		    [(True, )])
 		node.stop()
 
 	def test_valid_sys_tree_relnode_accepted(self):
