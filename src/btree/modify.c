@@ -1337,6 +1337,15 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	else
 		findResult = find_page(&pageFindContext, key, keyType, 0);
 
+	/* The leaf we reached is where the caller's next insert should start */
+	if (hint && action == BTreeOperationInsert &&
+		(findResult == OFindPageResultSuccess ||
+		 findResult == OFindPageResultInserted))
+	{
+		hint->blkno = pageFindContext.items[pageFindContext.index].blkno;
+		hint->pageChangeCount = pageFindContext.items[pageFindContext.index].pageChangeCount;
+	}
+
 	if (findResult == OFindPageResultInserted)
 	{
 		Assert(action == BTreeOperationInsert);

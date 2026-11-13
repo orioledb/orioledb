@@ -1661,6 +1661,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 	}
 	descr->primaryIsCtid = oIndex->primaryIsCtid;
 	descr->bridging = oIndex->bridging;
+	descr->insertHint.blkno = OInvalidInMemoryBlkno;
+	descr->insertHint.pageChangeCount = InvalidOPageChangeCount;
 	descr->unique = (oIndex->indexType == oIndexUnique ||
 					 oIndex->indexType == oIndexPrimary);
 	descr->immediate = oIndex->immediate;

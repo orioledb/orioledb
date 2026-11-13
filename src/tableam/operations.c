@@ -2850,7 +2850,8 @@ o_tbl_index_insert(OTableDescr *descr,
 								tup, BTreeKeyLeafTuple,
 								(Pointer) &knew, BTreeKeyBound,
 								oxid, csn, RowLockUpdate,
-								NULL, callbackInfo);
+								(primary && id->primaryIsCtid) ? &id->insertHint : NULL,
+								callbackInfo);
 	else
 		result = o_btree_insert_unique(bd, tup, BTreeKeyLeafTuple,
 									   (Pointer) &knew, BTreeKeyBound,

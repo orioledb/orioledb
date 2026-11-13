@@ -200,6 +200,13 @@ struct OIndexDescr
 	 */
 	bool		bridging;
 
+	/*
+	 * The leaf this backend last inserted into, for a ctid primary key.  Our
+	 * ctids only grow, so the next one belongs on that leaf or to the right
+	 * of it, and the insert can start there instead of at the root.
+	 */
+	BTreeLocationHint insertHint;
+
 	uint8		fillfactor;
 
 	/* Description of the index fields */

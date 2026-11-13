@@ -500,6 +500,20 @@ convert_fastpath_target_to_img(OBTreeFindPageContext *context,
  * memcpy() a leaf page to the context.image. It holds lokey
  * if BTREE_PAGE_FIND_KEEP_LOKEY is set.
  */
+/*
+ * Record the page where the lock holder inserted our tuple: the caller may
+ * keep it as the starting point for its next insert (see o_btree_modify()).
+ */
+static inline OFindPageResult
+inserted_by_waiter(OBTreeFindPageInternalContext *intCxt)
+{
+	OBTreeFindPageContext *context = intCxt->context;
+
+	context->items[context->index].blkno = intCxt->blkno;
+	context->items[context->index].pageChangeCount = intCxt->pageChangeCount;
+	return OFindPageResultInserted;
+}
+
 OFindPageResult
 find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		  uint16 targetLevel)
@@ -648,7 +662,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				}
 				else if (result == OLockPageWithTupleResultInserted)
 				{
-					return OFindPageResultInserted;
+					return inserted_by_waiter(&intCxt);
 				}
 				else
 				{
@@ -873,7 +887,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			else if (result == OBTreeFastPathFindRetry)
 			{
 				if (intCxt.inserted)
-					return OFindPageResultInserted;
+					return inserted_by_waiter(&intCxt);
 				continue;
 			}
 			p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
@@ -1401,7 +1415,7 @@ retry:
 										  context->insertTuple);
 
 			if (result == OLockPageWithTupleResultInserted)
-				return OFindPageResultInserted;
+				return inserted_by_waiter(&intCxt);
 			else if (result == OLockPageWithTupleResultRefindNeeded)
 				return find_page(context, key, keyType, level);
 			Assert(result == OLockPageWithTupleResultLocked);
@@ -1502,7 +1516,7 @@ retry:
 			if (intCxt.tryLockFailed)
 				return OFindPageResultFailure;
 			if (intCxt.inserted)
-				return OFindPageResultInserted;
+				return inserted_by_waiter(&intCxt);
 			Assert(!intCxt.haveLock);
 			return find_page(context, key, keyType, level);
 		}
