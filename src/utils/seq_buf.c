@@ -27,7 +27,7 @@
 #include "orioledb.h"
 
 #include "btree/io.h"
-#include "catalog/o_sys_cache.h"
+#include "catalog/o_tablespaces.h"
 #include "utils/seq_buf.h"
 
 #include "pgstat.h"
