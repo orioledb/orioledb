@@ -790,10 +790,13 @@ table_descr_free(OTableDescr *descr)
 
 	if (descr->oldTuple)
 		ExecDropSingleTupleTableSlot(descr->oldTuple);
+	descr->oldTuple = NULL;
 	if (descr->newTuple)
 		ExecDropSingleTupleTableSlot(descr->newTuple);
+	descr->newTuple = NULL;
 	if (descr->tupdesc)
 		FreeTupleDesc(descr->tupdesc);
+	descr->tupdesc = NULL;
 }
 
 
@@ -2511,6 +2514,8 @@ recreate_table_descr(OTableDescr *descr)
 	OTable	   *o_table;
 	bool		old_enable_stopevents;
 	OEACallsCounters *saved_ea_counters;
+	int			si,
+				di;
 
 	old_enable_stopevents = enable_stopevents;
 	enable_stopevents = false;
@@ -2528,6 +2533,26 @@ recreate_table_descr(OTableDescr *descr)
 
 	saved_ea_counters = ea_counters;
 	ea_counters = NULL;
+
+	/*
+	 * Filter stale indices before refilling.  A concurrent abort may have
+	 * removed an o_indices entry while the OTable sys tree still lists it.
+	 */
+	for (si = di = 0; si < o_table->nindices; si++)
+	{
+		OIndex	   *idx = o_indices_get(o_table->indices[si].oids,
+										o_table->indices[si].type);
+
+		if (idx != NULL)
+		{
+			free_o_index(idx);
+			if (di != si)
+				o_table->indices[di] = o_table->indices[si];
+			di++;
+		}
+	}
+	o_table->nindices = di;
+
 	table_descr_free(descr);
 	if (!fill_table_descr(descr, o_table, &o_non_deleted_snapshot))
 	{
@@ -2551,12 +2576,11 @@ recreate_table_descr_by_oids(ORelOids oids)
 
 	if (found)
 	{
-		OIndexDescr *indexDescr;
-
-		indexDescr = hash_search(oIndexDescrHash, &oids, HASH_FIND, &found);
-		if (found)
-			index_descr_delete_from_hash(indexDescr);
-		recreate_table_descr(descr);
+		if (!recreate_table_descr(descr))
+		{
+			(void) hash_search(oTableDescrHash, &oids,
+							   HASH_REMOVE, &found);
+		}
 	}
 	else
 		(void) create_table_descr(oids, default_table_fetch_context);

@@ -1280,11 +1280,16 @@ o_table_make_index_keys(OTable *table, int *num)
 }
 
 /*
- * Updates SYS_TREES_O_INDICES.
+ * Synchronizes SYS_TREES_O_INDICES with the old and new OTable index lists:
+ * deletes entries absent in new_table, inserts entries absent in old_table.
+ * When allow_missing_indices is true, silently skips o_indices_del failures
+ * instead of raising ERROR; the OTable may reference indices whose o_indices
+ * entries no longer exist.
  */
 static void
 o_tables_oids_indexes(OTable *old_table, OTable *new_table,
-					  OXid oxid, CommitSeqNo csn)
+					  OXid oxid, CommitSeqNo csn,
+					  bool allow_missing_indices)
 {
 	OTableIndexOidsKey *old_keys = NULL;
 	OTableIndexOidsKey *new_keys = NULL;
@@ -1346,7 +1351,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 
 				result = o_indices_del(old_table, old_keys[i].ixNum,
 									   oxid, csn);
-				if (!result)
+				if (!result && !allow_missing_indices)
 					elog(ERROR, "missing entries in o_indices");
 			}
 			i++;
@@ -1395,7 +1400,7 @@ o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn)
 	Assert(table);
 	if (table)
 	{
-		o_tables_oids_indexes(table, NULL, oxid, csn);
+		o_tables_oids_indexes(table, NULL, oxid, csn, true);
 		sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
 		any_wal = table->persistence != RELPERSISTENCE_TEMP;
 		result = generic_toast_delete_optional_wal(&oTablesToastAPI,
@@ -1631,7 +1636,7 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
 	key.version = 0;
 
 	systrees_modify_start();
-	o_tables_oids_indexes(NULL, table, oxid, csn);
+	o_tables_oids_indexes(NULL, table, oxid, csn, false);
 	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
 	data = serialize_o_table(table, &len);
 	result = generic_toast_insert_optional_wal(&oTablesToastAPI,
@@ -1766,7 +1771,8 @@ o_table_free(OTable *table)
 }
 
 bool
-o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
+o_tables_update_locked(OTable *table, OXid oxid, CommitSeqNo csn,
+					   bool allow_missing_indices)
 {
 	OTableChunkKey key;
 	OTable	   *old_table;
@@ -1779,18 +1785,28 @@ o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 	key.chunknum = 0;
 	key.version = table->version + 1;
 
-	systrees_modify_start();
 	old_table = o_tables_get(table->oids);
-	o_tables_oids_indexes(old_table, table, oxid, csn);
+	o_tables_oids_indexes(old_table, table, oxid, csn, allow_missing_indices);
 	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
 	data = serialize_o_table(table, &len);
 	result = generic_toast_update_optional_wal(&oTablesToastAPI,
 											   (Pointer) &key, data, len, oxid,
 											   csn, sys_tree, table->persistence != RELPERSISTENCE_TEMP);
-	systrees_modify_end(table->persistence != RELPERSISTENCE_TEMP);
 
 	pfree(data);
 	o_table_free(old_table);
+
+	return result;
+}
+
+bool
+o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
+{
+	bool		result;
+
+	systrees_modify_start();
+	result = o_tables_update_locked(table, oxid, csn, false);
+	systrees_modify_end(table->persistence != RELPERSISTENCE_TEMP);
 
 	return result;
 }

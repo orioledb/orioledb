@@ -1,0 +1,96 @@
+Parsed test spec with 3 sessions
+
+starting permutation: s1_setup s3_arm_define s1_create_idx_a s2_create_idx_b s3_release_define s1_check
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+
+step s3_arm_define: 
+	SELECT pg_stopevent_set('define_index_before_update',
+		'$applicationName == "s1"');
+
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_create_idx_a: 
+	CREATE INDEX o_conc_idx_a ON o_conc_idx (a);
+ <waiting ...>
+step s2_create_idx_b: 
+	CREATE INDEX o_conc_idx_b ON o_conc_idx (b);
+
+step s3_release_define: 
+	SELECT pg_stopevent_reset('define_index_before_update');
+
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_create_idx_a: <... completed>
+step s1_check: 
+	SET enable_seqscan = off;
+	SELECT * FROM o_conc_idx WHERE a = 'x';
+	SELECT * FROM o_conc_idx WHERE b = 'y';
+
+id|a|b
+--+-+-
+ 1|x|y
+(1 row)
+
+id|a|b
+--+-+-
+ 1|x|y
+(1 row)
+
+
+starting permutation: s1_setup s3_arm_build s1_begin s1_create_idx_a s2_create_idx_b s3_release_build s1_rollback s1_check_table s2_check_idx_b
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+
+step s3_arm_build: 
+	SELECT pg_stopevent_set('build_index_placeholder_inserted',
+		'$applicationName == "s1"');
+
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_begin: BEGIN;
+step s1_create_idx_a: 
+	CREATE INDEX o_conc_idx_a ON o_conc_idx (a);
+ <waiting ...>
+step s2_create_idx_b: 
+	CREATE INDEX o_conc_idx_b ON o_conc_idx (b);
+ <waiting ...>
+step s3_release_build: 
+	SELECT pg_stopevent_reset('build_index_placeholder_inserted');
+
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_create_idx_a: <... completed>
+step s1_rollback: ROLLBACK;
+step s2_create_idx_b: <... completed>
+step s1_check_table: 
+	SELECT * FROM o_conc_idx;
+
+id|a|b
+--+-+-
+ 1|x|y
+(1 row)
+
+step s2_check_idx_b: 
+	SET enable_seqscan = off;
+	SELECT * FROM o_conc_idx WHERE b = 'y';
+
+id|a|b
+--+-+-
+ 1|x|y
+(1 row)
+
