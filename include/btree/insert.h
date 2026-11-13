@@ -67,4 +67,9 @@ extern int	o_btree_multi_insert_item(OBTreeFindPageContext *ctx,
 									  void **cb_args,
 									  BTreeLeafProbeResult *result);
 
+extern int	multi_insert_prepare_batch(UndoLogType undoType,
+									   LocationIndex *tuplens, int remaining);
+extern bool multi_insert_prepare_sort_if_needed(BTreeDescr *desc, Pointer *keyptrs,
+												int n, int **out_idx);
+
 #endif							/* __BTREE_INSERT_H__ */
