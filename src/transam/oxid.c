@@ -1534,7 +1534,8 @@ advance_global_xmin(OXid newXid)
 	SpinLockAcquire(&xid_meta->xminMutex);
 
 	if (OXidIsValid(newXid))
-		pg_atomic_write_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, newXid);
+		pg_atomic_monotonic_advance_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin,
+										newXid);
 
 	globalXmin = pg_atomic_read_u64(&xid_meta->runXmin);
 
@@ -1756,32 +1757,39 @@ get_current_oxid(void)
 	if (!OXidIsValid(curOxid))
 	{
 		OXid		newOxid = pg_atomic_fetch_add_u64(&xid_meta->nextXid, 1);
+		uint64		lastXid;
 		XidVXidMapElement *vxidElem;
 		int			nestingLevel;
 
 		/*
 		 * Advance xmin every 10th part of circular buffer.  That should
-		 * prevent unnecessary circular buffer overrun.
+		 * prevent unnecessary circular buffer overrun.  Only the backend that
+		 * moves the mark does it: everybody else that crossed the same
+		 * threshold would queue on xminMutex to repeat the same scan.
 		 */
-		if (newOxid > pg_atomic_read_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin) + xid_circular_buffer_size / 10)
-			advance_global_xmin(newOxid);
+		lastXid = pg_atomic_read_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin);
+		if (newOxid > lastXid + xid_circular_buffer_size / 10 &&
+			pg_atomic_compare_exchange_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin,
+										   &lastXid, newOxid))
+			advance_global_xmin(InvalidOXid);
 
 		/*
 		 * Write some xids out of circular buffer if needed.  We always keep
 		 * one COMMITSEQNO_FROZEN in circular buffers as a delimiter between
 		 * the future and the past.  This helps protect runXmin from growing
 		 * bigger than nextXid.
+		 *
+		 * Don't try advance_global_xmin() here: the ring stays full while a
+		 * checkpoint holds globalXmin back, and every waiter would rescan all
+		 * the procs under xminMutex for nothing.  write_xidsmap() frees the
+		 * space and advances globalXmin itself.
 		 */
 		while (newOxid >= pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size - 1)
 		{
-			advance_global_xmin(newOxid);
-			if (newOxid >= pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size - 1)
+			if (LWLockAcquireOrWait(&xid_meta->xidMapWriteLock, LW_EXCLUSIVE))
 			{
-				if (LWLockAcquireOrWait(&xid_meta->xidMapWriteLock, LW_EXCLUSIVE))
-				{
-					write_xidsmap(newOxid - xid_circular_buffer_size);
-					LWLockRelease(&xid_meta->xidMapWriteLock);
-				}
+				write_xidsmap(newOxid - xid_circular_buffer_size);
+				LWLockRelease(&xid_meta->xidMapWriteLock);
 			}
 		}
 
