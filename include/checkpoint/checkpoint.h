@@ -130,7 +130,11 @@ typedef enum
 
 #define SHARED_ROOT_INFO_INSERT_NUM_LOCKS 128
 
-#define XID_RECS_QUEUE_SIZE			(max_procs * 4)
+/*
+ * Every commit writes here while a checkpoint runs: a few records per backend
+ * would fill up within a millisecond.
+ */
+#define XID_RECS_QUEUE_SIZE			(max_procs * 64)
 
 /*
  * Tag stored in an XidFileRec to distinguish the kinds of records the file

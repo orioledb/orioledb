@@ -953,6 +953,18 @@ write_to_xids_queue(XidFileRec *rec)
 	target = &checkpoint_state->xidRecQueue[location % XID_RECS_QUEUE_SIZE];
 
 	/*
+	 * Every commit writes here while a checkpoint runs.  Drain the queue once
+	 * it is half full, unless somebody already does: when it fills up, every
+	 * producer waits on oXidQueueFlushLock, and each release wakes them all.
+	 */
+	if (location >= pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos) + XID_RECS_QUEUE_SIZE / 2 &&
+		LWLockConditionalAcquire(&checkpoint_state->oXidQueueFlushLock, LW_EXCLUSIVE))
+	{
+		flush_xids_queue();
+		LWLockRelease(&checkpoint_state->oXidQueueFlushLock);
+	}
+
+	/*
 	 * Flush queue to the file till our position is available for write.
 	 */
 	while (location >= pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos) + XID_RECS_QUEUE_SIZE)
