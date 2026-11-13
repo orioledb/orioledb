@@ -14,6 +14,7 @@
 #ifndef __ORIOLEDB_H__
 #define __ORIOLEDB_H__
 
+#include "access/htup_details.h"
 #include "access/nbtree.h"
 #include "access/reloptions.h"
 #include "access/xact.h"
@@ -344,6 +345,26 @@ typedef RelFileLocator RelFileNode;
 #define ORelOidsIsEqual(l, r) ((l).datoid == (r).datoid && (l).reloid == (r).reloid && (l).relnode == (r).relnode)
 #define ORelOidsSetInvalid(oids) \
 	((oids).datoid = (oids).reloid = (oids).relnode = (oids).spcoid = InvalidOid)
+
+/*
+ * Newer minor releases (PostgreSQL 17.12 and the matching releases of other
+ * branches) mark every tuple built by heap_form_tuple() as a composite datum
+ * (HEAP_IS_DATUM) and stamp it with the attribute version of the tuple
+ * descriptor.  Deforming such a tuple against a descriptor with a different
+ * version raises an error.
+ *
+ * OrioleDB hands tuples built with heap_form_tuple() to the core as plain
+ * HeapTuples rather than composite Datums, and the descriptors it forms them
+ * with are not the versioned relcache ones.  Such tuples must not carry the
+ * datum marking, so clear it.  On releases without the feature, there is no
+ * marking and nothing to clear.
+ */
+#ifdef HEAP_IS_DATUM
+#define o_heap_tuple_clear_datum(tup) \
+	HeapTupleHeaderClearDatum((tup)->t_data)
+#else
+#define o_heap_tuple_clear_datum(tup) ((void) 0)
+#endif
 
 #if PG_VERSION_NUM >= 170000
 

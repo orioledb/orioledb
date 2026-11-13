@@ -636,17 +636,24 @@ CREATE TABLE o_test_column_options (
 ALTER TABLE o_test_column_options ALTER COLUMN t SET (n_distinct = 100, n_distinct_inherited = 50);
 
 -- Verify options are set
+-- pg_attver is an internal attribute option added by newer minor releases;
+-- hide it so the output does not depend on it.
 SELECT attname, attoptions
-FROM pg_attribute
-WHERE attrelid = 'o_test_column_options'::regclass
-  AND attnum > 0
-  AND attoptions IS NOT NULL;
+FROM (SELECT attname,
+			 NULLIF(ARRAY(SELECT o FROM unnest(attoptions) o
+						  WHERE o NOT LIKE 'pg_attver=%'), '{}') AS attoptions
+	  FROM pg_attribute
+	  WHERE attrelid = 'o_test_column_options'::regclass
+		AND attnum > 0) s
+WHERE attoptions IS NOT NULL;
 
 -- Reset specific option
 ALTER TABLE o_test_column_options ALTER COLUMN t RESET (n_distinct);
 
 -- Verify reset
-SELECT attname, attoptions
+SELECT attname,
+	   NULLIF(ARRAY(SELECT o FROM unnest(attoptions) o
+					WHERE o NOT LIKE 'pg_attver=%'), '{}') AS attoptions
 FROM pg_attribute
 WHERE attrelid = 'o_test_column_options'::regclass
   AND attname = 't';
@@ -654,7 +661,9 @@ WHERE attrelid = 'o_test_column_options'::regclass
 -- Reset all options
 ALTER TABLE o_test_column_options ALTER COLUMN t RESET (n_distinct_inherited);
 
-SELECT attname, attoptions
+SELECT attname,
+	   NULLIF(ARRAY(SELECT o FROM unnest(attoptions) o
+					WHERE o NOT LIKE 'pg_attver=%'), '{}') AS attoptions
 FROM pg_attribute
 WHERE attrelid = 'o_test_column_options'::regclass
   AND attname = 't';
