@@ -227,8 +227,22 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 		}
 		else
 		{
-			if (!img->load ||
-				(state & PAGE_STATE_CHANGE_COUNT_MASK) != (pg_atomic_read_u64(&imgHeader->state) & PAGE_STATE_CHANGE_COUNT_MASK))
+			/*
+			 * A rightmost page has no hikey to check our key against, so
+			 * queue on it without reading it.  Reading would wait for the
+			 * holder to let readers in, and on a page that takes appends that
+			 * is most of the time.  If the page splits meanwhile, the
+			 * splitter wakes us to search again, as for the queued ones.
+			 */
+			bool		rightmost = O_PAGE_IS(p, RIGHTMOST);
+
+			pg_read_barrier();
+			if (rightmost && O_PAGE_GET_CHANGE_COUNT(p) == *pageChangeCount)
+			{
+				/* nothing to check */
+			}
+			else if (!img->load ||
+					 (state & PAGE_STATE_CHANGE_COUNT_MASK) != (pg_atomic_read_u64(&imgHeader->state) & PAGE_STATE_CHANGE_COUNT_MASK))
 			{
 				if (!o_btree_read_page(desc, *blkno, *pageChangeCount, img->img,
 									   COMMITSEQNO_INPROGRESS, NULL, BTreeKeyNone, NULL,
