@@ -72,7 +72,7 @@ def mock_put_object(self) -> TYPE_RESPONSE:
 	return orig_put_object(self)
 
 
-# Patch moto[s3]'s put_object() to alwasy return 409 code
+# Patch moto[s3]'s put_object() to always return 409 code
 def mock_put_object_conflict(self) -> TYPE_RESPONSE:
 	raise ConditionalRequestConflict("If-None-Match")
 

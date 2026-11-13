@@ -137,7 +137,7 @@ knownErrors = {
     ["generated_virtual"],
 }
 
-# Regexps that allow us to completely skip comparasion of hunks containing these regexprs
+# Regexps that allow us to completely skip comparison of hunks containing these regexps
 skip_hunk_errors = {
     r"ERROR:  orioledb tuples do not have system attribute: xm(in|ax)":
     ["update"],

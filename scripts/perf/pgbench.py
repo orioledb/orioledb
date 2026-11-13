@@ -797,7 +797,7 @@ class PgBenchTest:
 
 		node.safe_psql('postgres', 'CHECKPOINT;')
 
-		self.report_progress('initilization completed')
+		self.report_progress('initialization completed')
 
 	def run_pgbench(self, args, run_name):
 		output_filename = '%s/%s.log' % (self.results_dir, run_name)

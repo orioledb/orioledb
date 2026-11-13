@@ -995,7 +995,7 @@ SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,5, NULL]);
 -----+---------
 (0 rows)
 
--- Check for non-coersible case
+-- Check for non-coercible case
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1.0;
             QUERY PLAN            
 ----------------------------------
