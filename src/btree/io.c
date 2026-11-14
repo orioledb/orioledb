@@ -640,7 +640,9 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 		{
 			tag.segNum = segno;
 			partno = (curOffset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
-			s3_header_lock_part(tag, partno, &loadId);
+			/* Short write: the caller reports the I/O failure */
+			if (!s3_header_lock_part(tag, partno, &loadId))
+				return result;
 		}
 
 		file = btree_open_smgr_file(desc, segno, chkpNum, loadId);
@@ -740,7 +742,9 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 		{
 			tag.segNum = segno;
 			partno = (offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
-			s3_header_lock_part(tag, partno, &loadId);
+			/* Short read: the caller reports the I/O failure */
+			if (!s3_header_lock_part(tag, partno, &loadId))
+				return result;
 		}
 
 		file = btree_open_smgr_file(desc, segno, chkpNum, loadId);

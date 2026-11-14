@@ -6103,6 +6103,16 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 
 			prev_chkp_file = PathNameOpenFile(prev_chkp_fname, O_RDONLY | PG_BINARY);
 			prev_chkp_file_exist = prev_chkp_file >= 0;
+
+			/*
+			 * The tree has a map of an earlier checkpoint, so a missing file
+			 * means the S3 object is lost, not that the tree is empty.
+			 */
+			if (!prev_chkp_file_exist)
+				ereport(FATAL,
+						(errcode_for_file_access(),
+						 errmsg("could not load map file \"%s\" from S3",
+								prev_chkp_fname)));
 		}
 
 		if (!IS_SYS_TREE_OIDS(desc->oids) && !found && prev_chkp_file_exist)
