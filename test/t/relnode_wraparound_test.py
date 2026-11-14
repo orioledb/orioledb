@@ -46,6 +46,14 @@ class RelnodeWraparoundTest(BaseTest):
 		node = self.node
 		node.start()
 		node.safe_psql('postgres', "CREATE EXTENSION orioledb;")
+		# Cores with attribute versioning want pg_dump's per-column versions
+		# before every CREATE TABLE in binary upgrade mode.
+		attver_sql = ""
+		if node.execute(
+		    "SELECT count(*) FROM pg_proc WHERE proname = "
+		    "'binary_upgrade_set_next_attribute_versions'")[0][0] > 0:
+			attver_sql = ("SELECT binary_upgrade_set_next_attribute_versions("
+			              "'{0/0,0/0}'::pg_lsn[]);")
 		self._start_binary_upgrade()
 
 		# The wraparound bites the CREATE below as well, through the bound
@@ -60,9 +68,10 @@ class RelnodeWraparoundTest(BaseTest):
 			SELECT binary_upgrade_set_next_array_pg_type_oid(930002);
 			SELECT binary_upgrade_set_next_heap_pg_class_oid(930003);
 			SELECT binary_upgrade_set_next_heap_relfilenode(%d);
+			%s
 			CREATE TABLE o_maxrelnode (id int NOT NULL, v int) USING orioledb;
 			INSERT INTO o_maxrelnode VALUES (1, 1), (2, 2);
-		""" % MAX_RELNODE), "creating a table at the largest relnode")
+		""" % (MAX_RELNODE, attver_sql)), "creating a table at the largest relnode")
 
 		con = node.connect()
 		counted = {}
