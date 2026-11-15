@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import glob
+import os
 import random
+import struct
 
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_stopevent
 from .base_test import wait_checkpointer_stopevent
 from .base_test import wait_bgwriter_stopevent, tbl_structure_to_json
+
+INVALID_UNDO_LOCATION = 0x2000000000000000
+UNDO_LOG_REGULAR = 0
+UNDO_LOG_SYSTEM = 2
+# XidFileRec: oxid, kind, four undo stack locations, retainLocation.
+XID_REC = struct.Struct('<QI4xQQQQQ')
 
 
 class CheckpointConcurrentTest(BaseTest):
@@ -809,3 +818,68 @@ class CheckpointConcurrentTest(BaseTest):
 		con1.close()
 		con2.close()
 		con3.close()
+
+	def test_commit_during_checkpoint_retain_per_undo_log(self):
+		"""A transaction that commits while a checkpoint writes the xid file
+		leaves a record per undo log there, and recovery retains each log's
+		undo from the location in its record.  An UPDATE has no system undo,
+		so its system record must not ask to retain any: carrying the row
+		undo location instead makes recovery publish a system retain that
+		protects nothing, and a TRUNCATE committed in the same window then
+		loses the system undo its commit replay reads."""
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "orioledb.enable_stopevents = true\n")
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		               "CREATE TABLE o_other (id int PRIMARY KEY, v text) "
+		               "USING orioledb;\n"
+		               "INSERT INTO o_other SELECT g, 'x' "
+		               "FROM generate_series(1, 1000) g;\n")
+		node.safe_psql("CHECKPOINT;")
+
+		con = node.connect()
+		con.begin()
+		con.execute("UPDATE o_other SET v = 'y' WHERE id <= 10;")
+		oxid = con.execute("SELECT orioledb_get_current_oxid();")[0][0]
+		node.safe_psql("INSERT INTO o_other VALUES (0, 'z');")
+
+		ctl = node.connect()
+		ctl.execute("SELECT pg_stopevent_set('checkpoint_table_start',\n"
+		            "format(E'$.table.reloid == \\045s',\n"
+		            "'o_other'::regclass::oid)::jsonpath);")
+		ctl.commit()
+
+		con_ck = node.connect()
+		t_ck = ThreadQueryExecutor(con_ck, "CHECKPOINT;")
+		t_ck.start()
+		wait_checkpointer_stopevent(node)
+
+		# The xid file is open, and the checkpointer has not reached our
+		# process yet, so the commit writes our records itself.
+		con.commit()
+		con.close()
+
+		ctl.execute("SELECT pg_stopevent_reset('checkpoint_table_start');")
+		t_ck.join()
+		con_ck.close()
+		ctl.close()
+
+		xid_files = sorted(
+		    glob.glob(os.path.join(node.data_dir, 'orioledb_data', '*.xid')),
+		    key=lambda p: int(os.path.basename(p).split('.')[0]))
+		self.assertTrue(xid_files)
+		with open(xid_files[-1], 'rb') as f:
+			data = f.read()
+		count = struct.unpack_from('<I', data, 0)[0]
+		retain = {}
+		for i in range(count):
+			rec = XID_REC.unpack_from(data, 4 + i * XID_REC.size)
+			if rec[0] == oxid:
+				retain[rec[1]] = rec[6]
+
+		self.assertNotEqual(
+		    retain.get(UNDO_LOG_REGULAR, INVALID_UNDO_LOCATION),
+		    INVALID_UNDO_LOCATION)
+		self.assertEqual(retain.get(UNDO_LOG_SYSTEM), INVALID_UNDO_LOCATION)
+		node.stop()
