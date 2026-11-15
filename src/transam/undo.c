@@ -1523,7 +1523,7 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 
 		rec.oxid = oxid;
 		rec.kind = (XidRecKind) undoType;
-		rec.retainLocation = pg_atomic_read_u64(&curProcData->undoRetainLocations->transactionUndoRetainLocation);
+		rec.retainLocation = pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].transactionUndoRetainLocation);
 		read_shared_undo_locations(&rec.undoLocation, sharedLocations);
 		write_to_xids_queue(&rec);
 	}
