@@ -1582,6 +1582,14 @@ retry:
 		context->index > 0 && !context->parentImgDeferred)
 		ASSERT_PARENT_LOCATOR_LOCAL(context,
 									context->items[context->index - 1].locator);
+
+	/*
+	 * As in find_page(): the tuple is for the leaf just found.  Left set, the
+	 * next search with this context -- for the parent, to insert a downlink
+	 * after a split -- would queue on the parent with it and compare it, not
+	 * the downlink, with the parent's hikey.
+	 */
+	O_TUPLE_SET_NULL(context->insertTuple);
 	return OFindPageResultSuccess;
 }
 
