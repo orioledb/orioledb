@@ -91,6 +91,18 @@ static pairingheap retainUndoLocHeaps[(int) UndoLogsCount] =
 static SubTransactionId minParentSubId = InvalidSubTransactionId;
 static XLogRecPtr xidless_commit_lsn = InvalidXLogRecPtr;
 
+/*
+ * System undo location a logical slot may retain from once its restart_lsn
+ * reaches lsn.  One per slot, indexed like ReplicationSlotCtl.
+ */
+typedef struct
+{
+	XLogRecPtr	lsn;
+	UndoLocation location;
+} SlotRetainCandidate;
+
+static SlotRetainCandidate *slot_retain_candidates = NULL;
+
 typedef void (*UndoCallback) (UndoLogType undoType, UndoLocation location,
 							  UndoStackItem *item, OXid oxid,
 							  OUndoCallbackStage stage,
@@ -430,6 +442,10 @@ undo_shmem_needs(void)
 		}
 	}
 
+	size = add_size(size,
+					CACHELINEALIGN(mul_size(max_replication_slots,
+											sizeof(SlotRetainCandidate))));
+
 	size = add_size(size, o_buffers_shmem_needs(&undoBuffersDesc));
 
 	return size;
@@ -459,6 +475,16 @@ undo_shmem_init(Pointer buf, bool found)
 		o_undo_dirty_bitmaps[i] = (pg_atomic_uint32 *) ptr;
 		ptr += CACHELINEALIGN(o_undo_dirty_words[i] *
 							  sizeof(pg_atomic_uint32));
+	}
+
+	slot_retain_candidates = (SlotRetainCandidate *) ptr;
+	ptr += CACHELINEALIGN(mul_size(max_replication_slots,
+								   sizeof(SlotRetainCandidate)));
+
+	if (!found)
+	{
+		memset(slot_retain_candidates, 0,
+			   mul_size(max_replication_slots, sizeof(SlotRetainCandidate)));
 	}
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
@@ -913,10 +939,21 @@ logical_retain_now(void)
 /*
  * What the slot has to retain of the system undo log, or zero to keep what
  * it has.
+ *
+ * Decoding restarts at restart_lsn, which lags behind confirmed_flush, and
+ * reads every record from there again, even of transactions already sent.
+ * So, like catalog_xmin, the retain follows restart_lsn: when the slot
+ * catches up, remember what decoding from the current WAL position needs,
+ * and hand it over once restart_lsn has reached that position.
  */
 static uint64
 o_slot_retain_location(ReplicationSlot *slot)
 {
+	SlotRetainCandidate *cand;
+	XLogRecPtr	restart_lsn;
+	pid_t		active_pid;
+	uint64		result = 0;
+
 	if (wal_level < WAL_LEVEL_LOGICAL || oProcData == NULL)
 		return 0;
 
@@ -940,7 +977,44 @@ o_slot_retain_location(ReplicationSlot *slot)
 	}
 #endif
 
-	return logical_retain_now();
+	cand = &slot_retain_candidates[slot - ReplicationSlotCtl->replication_slots];
+
+	SpinLockAcquire(&slot->mutex);
+	restart_lsn = slot->data.restart_lsn;
+	active_pid = slot->active_pid;
+	SpinLockRelease(&slot->mutex);
+
+	/* A slot being created decodes only what is written from now on */
+	if (XLogRecPtrIsInvalid(restart_lsn))
+	{
+		cand->lsn = InvalidXLogRecPtr;
+		return logical_retain_now();
+	}
+
+	/* Restored at startup: we know nothing yet, keep what we have */
+	if (active_pid != MyProcPid)
+		return 0;
+
+	if (!XLogRecPtrIsInvalid(cand->lsn) && cand->lsn <= restart_lsn)
+	{
+		result = cand->location;
+		cand->lsn = InvalidXLogRecPtr;
+	}
+
+	if (XLogRecPtrIsInvalid(cand->lsn))
+	{
+		/*
+		 * Read the retain before the WAL position: a record written after
+		 * that position was stamped either later or while its transaction
+		 * still held its logical retain.
+		 */
+		cand->location = logical_retain_now();
+		pg_memory_barrier();
+		cand->lsn = RecoveryInProgress() ? GetXLogReplayRecPtr(NULL) :
+			GetXLogInsertRecPtr();
+	}
+
+	return result;
 }
 
 /*
