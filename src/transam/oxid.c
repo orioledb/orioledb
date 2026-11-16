@@ -762,10 +762,22 @@ free_abort_logged_xids(void)
 /*
  * Keep the logical xid of a subtransaction released into parentSubid up to
  * the top-level end.
+ *
+ * Without logical decoding no decoder buffers changes under the xid, so give
+ * it back at once: the bitmap it comes from is shared by the whole cluster,
+ * and one long transaction would starve every other session.
  */
 static void
 retain_released_logical_xid(TransactionId xid, SubTransactionId parentSubid)
 {
+	LogicalXidCtx ctx = {xid, false};
+
+	if (wal_level < WAL_LEVEL_LOGICAL)
+	{
+		release_logical_xid(&ctx);
+		return;
+	}
+
 	if (nReleasedLogicalXids >= maxReleasedLogicalXids)
 	{
 		int			newmax = Max(maxReleasedLogicalXids * 2, 16);
