@@ -11,6 +11,7 @@ The file `include/orioledb.h` contains several OrioleDB binary-compatibility
 related version variables. Currently it contains the following version variables:
 
 - `ORIOLEDB_BINARY_VERSION` - version of a database instance
+- `ORIOLEDB_UNDO_VERSION` - version of undo log on-disk format
 - `ORIOLEDB_SYS_TREE_VERSION` - version of system trees format
 - `ORIOLEDB_PAGE_VERSION` - version of OrioleDB pages format
 - `ORIOLEDB_COMPRESS_VERSION` - version of OrioleDB pages compression format
@@ -19,6 +20,13 @@ Two more version variables are defined in other files:
 
 - `ORIOLEDB_WAL_VERSION` (`include/recovery/wal.h`) - version of OrioleDB WAL format
 - `ORIOLEDB_CHECKPOINT_CONTROL_VERSION` (`include/checkpoint/control.h`) - version of OrioleDB control file format
+
+Bump `ORIOLEDB_UNDO_VERSION` every time the undo log on-disk format changes.
+The version is stored in the checkpoint control file alongside `binaryVersion`
+(split from the same `uint32` slot, so the binary layout is unchanged).
+At recovery, if the stored `undoVersion` exceeds the compiled
+`ORIOLEDB_UNDO_VERSION`, the cluster refuses to start. Old clusters that
+predate this field store 0, which is always accepted.
 
 If you change the relevant format and its version wasn't incremented since the last
 release, you need to increment it. To check whether it was already bumped,
