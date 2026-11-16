@@ -145,6 +145,15 @@ static List *prevLogicalXids = NIL; /* stack of PrevLogicalXidEntry for all
 									 * restore and release */
 
 /*
+ * Logical xids of released subtransactions, freed at the top-level end.  The
+ * decoder keeps a released subtransaction's changes under its xid up to the
+ * top-level commit, so no other subtransaction may get that xid before.
+ * Rolled back subtransactions don't need this: the decoder drops them at
+ * ROLLBACK TO.
+ */
+static List *releasedLogicalXids = NIL;
+
+/*
  * Check whether the top of prevLogicalXids was pushed by the subtransaction
  * identified by subid.
  */
@@ -709,7 +718,13 @@ oxid_subxact_callback(
 					if (TransactionIdIsValid(logicalXidContext.xid) &&
 						prev_logical_xid_pushed_by(mySubid))
 					{
-						release_logical_xid(&logicalXidContext);
+						MemoryContext mcxt;
+
+						/* Keep the xid up to the top-level end */
+						mcxt = MemoryContextSwitchTo(TopMemoryContext);
+						releasedLogicalXids = lappend_xid(releasedLogicalXids,
+														  logicalXidContext.xid);
+						MemoryContextSwitchTo(mcxt);
 
 						heapXid = GetTopTransactionIdIfAny();
 						if (TransactionIdIsValid(heapXid))
@@ -2003,6 +2018,15 @@ release_assigned_logical_xids(void)
 		}
 		list_free(prevLogicalXids);
 		prevLogicalXids = NIL;
+
+		foreach(lc, releasedLogicalXids)
+		{
+			LogicalXidCtx ctx = {lfirst_xid(lc), false};
+
+			release_logical_xid(&ctx);
+		}
+		list_free(releasedLogicalXids);
+		releasedLogicalXids = NIL;
 	}
 }
 

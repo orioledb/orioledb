@@ -303,6 +303,7 @@ enough memory set it near a value (`orioledb.rewind_max_transactions` / 8000) MB
 
 Size of OrioleDB in-memory buffers for logical transaction IDs to be assigned to running subtransactions. Each MB
 can accommodate 8 million of running subtransactions. So default value corresponds to 4 million subtransactions.
+A released subtransaction keeps its logical transaction ID until its top-level transaction ends.
 
 ## Debugging options
 
