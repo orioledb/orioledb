@@ -301,8 +301,12 @@ class LogicalTest(BaseTest):
 		    "table public.data: INSERT: id[integer]:4 data[text]:'final'\n"
 		    "COMMIT\n")
 
-	def crash_open_xact(self, shape):
+	def crash_open_xact(self, shape, checkpoint=False):
 		"""Crash with an open transaction, then commit from new backends.
+
+		With checkpoint=True, a checkpoint taken after the open transaction's
+		last change leaves recovery without a single record of it in the WAL
+		it replays, so it knows the transaction from the checkpoint alone.
 
 		After the crash, recovery writes a ROLLBACK for the open
 		transaction.  If neither that ROLLBACK nor ReorderBufferAbortOld()
@@ -325,6 +329,8 @@ class LogicalTest(BaseTest):
 		con = node.connect()
 		con.begin()
 		self.run_open_xact(con, shape)
+		if checkpoint:
+			node.safe_psql('postgres', "CHECKPOINT;")
 
 		# Flush WAL, so the open transaction's records survive the crash.
 		node.execute("SELECT pg_switch_wal();")
@@ -411,6 +417,26 @@ class LogicalTest(BaseTest):
 	                 "'test_decoding' is not installed")
 	def test_crash_open_xact_oriole_first(self):
 		self.crash_open_xact(XactShape.ORIOLE_FIRST)
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_crash_open_xact_subxact_checkpoint(self):
+		self.crash_open_xact(XactShape.SUBXACT, checkpoint=True)
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_crash_open_xact_toplevel_checkpoint(self):
+		self.crash_open_xact(XactShape.TOPLEVEL, checkpoint=True)
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_crash_open_xact_heap_first_checkpoint(self):
+		self.crash_open_xact(XactShape.HEAP_FIRST, checkpoint=True)
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_crash_open_xact_oriole_first_checkpoint(self):
+		self.crash_open_xact(XactShape.ORIOLE_FIRST, checkpoint=True)
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")

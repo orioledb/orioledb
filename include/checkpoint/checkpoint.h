@@ -154,16 +154,37 @@ typedef enum
 	XidRecRewindUndoRegular = UndoLogsCount + UndoLogRegular,
 	XidRecRewindUndoRegularPageLevel = UndoLogsCount + UndoLogRegularPageLevel,
 	XidRecRewindUndoSystem = UndoLogsCount + UndoLogSystem,
-	XidRecPendingSkFixup = 2 * UndoLogsCount
+	XidRecPendingSkFixup = 2 * UndoLogsCount,
+	XidRecXids
 } XidRecKind;
 
+/*
+ * An XidRecXids record binds an in-progress oxid to the PostgreSQL xids its
+ * WAL_REC_XID records name.  Recovery that starts after the transaction's
+ * last WAL record learns them from here alone, and needs them to announce
+ * the transaction's rollback to logical decoding.
+ */
 typedef struct
 {
 	OXid		oxid;
 	XidRecKind	kind;
-	UndoStackLocations undoLocation;
-	UndoLocation retainLocation;
+	union
+	{
+		struct
+		{
+			UndoStackLocations undoLocation;
+			UndoLocation retainLocation;
+		};
+		struct
+		{
+			TransactionId heapXid;
+			TransactionId logicalXid;
+		};
+	};
 } XidFileRec;
+
+StaticAssertDecl(sizeof(XidFileRec) == 56,
+				 "XidFileRec is a part of the on-disk xid file format");
 
 /*
  * An XidRecPendingSkFixup record describes a run of PK modifications whose
@@ -305,6 +326,8 @@ extern void systrees_lock_callback(UndoLogType undoType,
 								   UndoStackItem *baseItem, OXid oxid,
 								   OUndoCallbackStage stage, bool changeCountsValid);
 extern void write_to_xids_queue(XidFileRec *rec);
+extern void write_xid_binding_to_xids_queue(OXid oxid, TransactionId heapXid,
+											TransactionId logicalXid);
 void		checkpoint_write_rewind_item(RewindItem *rewindItem);
 
 #endif							/* __CHECKPOINT_H__ */
