@@ -227,10 +227,6 @@ class LogicalUndoRetainTest(BaseTest):
 
 		self.check_survived_restart(node)
 
-	@unittest.skip("a page undo chain can still lead below the retained floor "
-	               "after a crash: see issue #1081")
-	@unittest.skip("a page undo chain can still lead below the retained "
-	               "floor after a crash: see issue #1081")
 	def test_idle_slot_survives_crash_restart(self):
 		node = self.start_node()
 		self.write_records_for_an_idle_slot(node)
@@ -240,8 +236,6 @@ class LogicalUndoRetainTest(BaseTest):
 
 		self.check_survived_restart(node)
 
-	@unittest.skip("a page undo chain can still lead below the retained floor "
-	               "after a crash: see issue #1081")
 	@unittest.skip("a page undo chain can still lead below the retained "
 	               "floor after a crash: see issue #1081")
 	def test_idle_slot_survives_crash_restart_after_checkpoint(self):
