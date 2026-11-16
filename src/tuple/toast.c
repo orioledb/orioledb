@@ -1556,7 +1556,7 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 				(errcode(ERRCODE_INTERNAL_ERROR),
 				 errmsg("Unable to insert TOASTable value in \"%s\"",
 						RelationGetRelationName(rel)),
-				 errdetail("Unable to insert column \"%s\" for primary key %s into TOAST",
+				 errdetail("Column \"%s\" of the row with primary key %s.",
 						   failed_colname ? failed_colname : "unknown",
 						   failed_pk_str ? failed_pk_str : "unknown")));
 }
