@@ -145,14 +145,13 @@ static List *prevLogicalXids = NIL; /* stack of PrevLogicalXidEntry for all
 									 * restore and release */
 
 /*
- * Logical xid of a released subtransaction, the subtransaction it was
- * released into, and whether log_released_xids_abort() logged its abort.
+ * Logical xid of a released subtransaction and the subtransaction it was
+ * released into.
  */
 typedef struct
 {
 	TransactionId xid;
 	SubTransactionId parentSubid;
-	bool		abortLogged;
 } ReleasedLogicalXid;
 
 /*
@@ -162,8 +161,14 @@ typedef struct
  * subtransactions don't need this: the decoder drops them at ROLLBACK TO.
  * Neither do released ones whose enclosing savepoint is rolled back: see
  * log_released_xids_abort().
+ *
+ * Entries are in release order, and nAbortLoggedXids counts the ones at the
+ * end whose abort log_released_xids_abort() has just logged.
  */
-static List *releasedLogicalXids = NIL;
+static ReleasedLogicalXid *releasedLogicalXids = NULL;
+static int	nReleasedLogicalXids = 0;
+static int	maxReleasedLogicalXids = 0;
+static int	nAbortLoggedXids = 0;
 
 /*
  * Check whether the top of prevLogicalXids was pushed by the subtransaction
@@ -721,18 +726,17 @@ setup_prev_logical_xid_ctx(SubTransactionId mySubid)
 void
 log_released_xids_abort(SubTransactionId subid)
 {
-	ListCell   *lc;
+	int			i;
 
-	foreach(lc, releasedLogicalXids)
+	for (i = nReleasedLogicalXids; i > 0; i--)
 	{
-		ReleasedLogicalXid *entry = (ReleasedLogicalXid *) lfirst(lc);
+		if (releasedLogicalXids[i - 1].parentSubid < subid)
+			break;
 
-		if (entry->parentSubid < subid)
-			continue;
-
-		add_subxact_abort_wal_record(entry->xid);
-		entry->abortLogged = true;
+		add_subxact_abort_wal_record(releasedLogicalXids[i - 1].xid);
 	}
+
+	nAbortLoggedXids = nReleasedLogicalXids - i;
 }
 
 /*
@@ -744,20 +748,46 @@ log_released_xids_abort(SubTransactionId subid)
 static void
 free_abort_logged_xids(void)
 {
-	ListCell   *lc;
-
-	foreach(lc, releasedLogicalXids)
+	while (nAbortLoggedXids > 0)
 	{
-		ReleasedLogicalXid *entry = (ReleasedLogicalXid *) lfirst(lc);
-		LogicalXidCtx ctx = {entry->xid, false};
-
-		if (!entry->abortLogged)
-			continue;
+		TransactionId xid = releasedLogicalXids[nReleasedLogicalXids - 1].xid;
+		LogicalXidCtx ctx = {xid, false};
 
 		release_logical_xid(&ctx);
-		pfree(entry);
-		releasedLogicalXids = foreach_delete_current(releasedLogicalXids, lc);
+		nReleasedLogicalXids--;
+		nAbortLoggedXids--;
 	}
+}
+
+/*
+ * Keep the logical xid of a subtransaction released into parentSubid up to
+ * the top-level end.
+ */
+static void
+retain_released_logical_xid(TransactionId xid, SubTransactionId parentSubid)
+{
+	if (nReleasedLogicalXids >= maxReleasedLogicalXids)
+	{
+		int			newmax = Max(maxReleasedLogicalXids * 2, 16);
+		Size		newsize = newmax * sizeof(ReleasedLogicalXid);
+
+		if (releasedLogicalXids == NULL)
+		{
+			releasedLogicalXids = (ReleasedLogicalXid *)
+				MemoryContextAlloc(TopMemoryContext, newsize);
+		}
+		else
+		{
+			releasedLogicalXids = (ReleasedLogicalXid *)
+				repalloc(releasedLogicalXids, newsize);
+		}
+
+		maxReleasedLogicalXids = newmax;
+	}
+
+	releasedLogicalXids[nReleasedLogicalXids].xid = xid;
+	releasedLogicalXids[nReleasedLogicalXids].parentSubid = parentSubid;
+	nReleasedLogicalXids++;
 }
 
 void
@@ -789,17 +819,8 @@ oxid_subxact_callback(
 					if (TransactionIdIsValid(logicalXidContext.xid) &&
 						prev_logical_xid_pushed_by(mySubid))
 					{
-						ReleasedLogicalXid *entry;
-						MemoryContext mcxt;
-
-						/* Keep the xid up to the top-level end */
-						mcxt = MemoryContextSwitchTo(TopMemoryContext);
-						entry = (ReleasedLogicalXid *) palloc(sizeof(ReleasedLogicalXid));
-						entry->xid = logicalXidContext.xid;
-						entry->parentSubid = parentSubid;
-						entry->abortLogged = false;
-						releasedLogicalXids = lappend(releasedLogicalXids, entry);
-						MemoryContextSwitchTo(mcxt);
+						retain_released_logical_xid(logicalXidContext.xid,
+													parentSubid);
 
 						heapXid = GetTopTransactionIdIfAny();
 						if (TransactionIdIsValid(heapXid))
@@ -2082,6 +2103,7 @@ release_assigned_logical_xids(void)
 	{
 		ListCell   *lc = NULL;
 		PrevLogicalXidEntry *entry = NULL;
+		int			i;
 
 		foreach(lc, prevLogicalXids)
 		{
@@ -2097,15 +2119,20 @@ release_assigned_logical_xids(void)
 		list_free(prevLogicalXids);
 		prevLogicalXids = NIL;
 
-		foreach(lc, releasedLogicalXids)
+		for (i = 0; i < nReleasedLogicalXids; i++)
 		{
-			ReleasedLogicalXid *released = (ReleasedLogicalXid *) lfirst(lc);
-			LogicalXidCtx ctx = {released->xid, false};
+			LogicalXidCtx ctx = {releasedLogicalXids[i].xid, false};
 
 			release_logical_xid(&ctx);
 		}
-		list_free_deep(releasedLogicalXids);
-		releasedLogicalXids = NIL;
+
+		if (releasedLogicalXids != NULL)
+			pfree(releasedLogicalXids);
+
+		releasedLogicalXids = NULL;
+		nReleasedLogicalXids = 0;
+		maxReleasedLogicalXids = 0;
+		nAbortLoggedXids = 0;
 	}
 }
 
