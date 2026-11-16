@@ -883,32 +883,11 @@ wait_for_even_write_in_progress_changecount(UndoMeta *meta)
  * yet reaches back to where that retain points.
  */
 static uint64
-o_slot_retain_location(ReplicationSlot *slot)
+logical_retain_now(void)
 {
 	UndoMeta   *meta = get_undo_meta_by_type(UndoLogSystem);
 	UndoLocation result;
 	int			i;
-
-	if (!XLogLogicalInfoActive() || oProcData == NULL)
-		return 0;
-
-#if PG_VERSION_NUM >= 170000
-	if (slot != NULL && slot->data.synced)
-	{
-		/*
-		 * A slot synchronised from a primary has decoded nothing here, and
-		 * its restart_lsn points into WAL this server replayed rather than
-		 * wrote.  Whatever it will ask for after a failover is somewhere
-		 * behind that, so hold everything we still have and let it move on
-		 * once it starts decoding for real.
-		 *
-		 * Defensive as things stand: a standby's floor does not move while it
-		 * is replaying, so the answer below would be just as low.  It is the
-		 * assumption that would be silently wrong if that ever changed.
-		 */
-		return Max(pg_atomic_read_u64(&meta->minProcRetainLocation), 1);
-	}
-#endif
 
 	result = pg_atomic_read_u64(&meta->minProcTransactionRetainLocation);
 
@@ -929,6 +908,39 @@ o_slot_retain_location(ReplicationSlot *slot)
 	 * One is below every record and retains just as much.
 	 */
 	return result == 0 ? 1 : result;
+}
+
+/*
+ * What the slot has to retain of the system undo log, or zero to keep what
+ * it has.
+ */
+static uint64
+o_slot_retain_location(ReplicationSlot *slot)
+{
+	if (!XLogLogicalInfoActive() || oProcData == NULL)
+		return 0;
+
+#if PG_VERSION_NUM >= 170000
+	if (slot != NULL && slot->data.synced)
+	{
+		UndoMeta   *meta = get_undo_meta_by_type(UndoLogSystem);
+
+		/*
+		 * A slot synchronised from a primary has decoded nothing here, and
+		 * its restart_lsn points into WAL this server replayed rather than
+		 * wrote.  Whatever it will ask for after a failover is somewhere
+		 * behind that, so hold everything we still have and let it move on
+		 * once it starts decoding for real.
+		 *
+		 * Defensive as things stand: a standby's floor does not move while it
+		 * is replaying, so the answer below would be just as low.  It is the
+		 * assumption that would be silently wrong if that ever changed.
+		 */
+		return Max(pg_atomic_read_u64(&meta->minProcRetainLocation), 1);
+	}
+#endif
+
+	return logical_retain_now();
 }
 
 /*
