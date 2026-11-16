@@ -149,6 +149,29 @@ class EvictionTest(BaseTest):
 		con1.close()
 		node.stop()
 
+	def test_eviction_ctid_primary(self):
+		"""
+		The background writer evicts pages of a table with no primary key.
+
+		Eviction finds a page's parent with a MODIFY descent, and the
+		background writer has no catalog access.  A table without a primary
+		key is keyed by ctid, whose default btree opclass the downlink
+		fastpath resolves through the syscache on first use; a MODIFY
+		descent from the background writer must not be the one to do it.
+		"""
+		node = self.node
+		node.append_conf('postgresql.conf', "orioledb.main_buffers = 8MB\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_noprimary (a int, b text) USING orioledb;\n"
+		    "INSERT INTO o_noprimary\n"
+		    "    (SELECT i, repeat('x', 200) "
+		    "FROM generate_series(1, 300000) i);")
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_noprimary;")[0][0], 300000)
+		node.stop()
+
 	def test_eviction_tree(self):
 		node = self.node
 		node.append_conf(
