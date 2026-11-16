@@ -3560,8 +3560,8 @@ COMMIT\n""")
 		multiple rows toast the same attribute.
 
 		Covers two TOAST columns per row and a value large enough to
-		exceed O_TOAST_MULTI_MAX_CHUNKS (128) chunks, crossing a
-		sub-batch boundary.
+		exceed O_TOAST_MULTI_MAX_CHUNKS (128) chunks on its own,
+		crossing a sub-batch boundary.
 		"""
 		with self.node as publisher:
 			publisher.start()
@@ -3601,7 +3601,7 @@ COMMIT\n""")
 					COPY (
 						SELECT i,
 							   generate_string(i, CASE WHEN i = 5
-								   THEN 300000 ELSE 10000 END),
+								   THEN 400000 ELSE 10000 END),
 							   generate_string(i + 100, 10000)
 						FROM generate_series(1, 5) i
 					) TO '%s';
