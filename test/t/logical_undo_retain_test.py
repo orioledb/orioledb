@@ -301,15 +301,53 @@ class LogicalUndoRetainTest(BaseTest):
 		    "the slot moved past a record that is still waiting in its "
 		    "transaction's WAL buffer")
 
-		# Once that transaction is done and decoded, it may move.
+		# Once that transaction is done and decoded, and restart_lsn has
+		# moved past it, it may move.  CHECKPOINT logs the running xacts that
+		# let restart_lsn move.
 		old_con.commit()
 		old_con.close()
 		with node.connect(autocommit=True) as churn:
 			self.churn(churn, 'freed', 20)
-		self.decoded(node)
+		for _ in range(5):
+			node.safe_psql('postgres', "CHECKPOINT;")
+			self.decoded(node)
+			if self.slot_retain(node) > held:
+				break
 
 		self.assertGreater(self.slot_retain(node), held,
 		                   "the slot never moved on after catching up")
+
+	def test_decode_again_from_restart_lsn(self):
+		"""
+		Decoding restarts at restart_lsn, which stays behind confirmed_flush.
+		Records in between belong to transactions already sent, and the slot
+		no longer retains the undo needed to read their CSN.
+		"""
+		node = self.start_node()
+		self.create_slot(node)
+
+		node.safe_psql('postgres', "INSERT INTO o_decoded VALUES (1, 'a');")
+		self.decoded(node)
+
+		# Change the o_tables row of o_decoded, so that reading it at the
+		# INSERT's CSN needs this undo.
+		node.safe_psql('postgres', "ALTER TABLE o_decoded ADD COLUMN w int;")
+		self.decoded(node)
+
+		# Each call catches up and lets the slot release more undo.  Go on
+		# until the floor passes the ALTER's undo.
+		with node.connect(autocommit=True) as con:
+			target = self.system_undo(con)[0]
+			for round in range(6):
+				self.churn(con, f'r{round}', 40)
+				self.decoded(node)
+				if self.system_undo(con)[1] > target:
+					break
+
+		node.safe_psql('postgres', "INSERT INTO o_decoded VALUES (2, 'b');")
+		self.assertIn(
+		    "table public.o_decoded: INSERT: id[integer]:2 v[text]:'b' "
+		    "w[integer]:null", self.decoded(node))
 
 	def test_standby_decodes_with_its_own_slot(self):
 		"""
