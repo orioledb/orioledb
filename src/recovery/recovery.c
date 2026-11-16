@@ -1226,6 +1226,17 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			else
 				state->used_by = NULL;
 		}
+
+		if (xidRec.kind == XidRecXids)
+		{
+			if (!TransactionIdIsValid(state->xid))
+				state->xid = xidRec.heapXid;
+			if (!TransactionIdIsValid(state->logicalXid))
+				state->logicalXid = xidRec.logicalXid;
+			offset += sizeof(xidRec);
+			continue;
+		}
+
 		if (worker_id < 0)
 		{
 			ODBProcData *curProcData = GET_CUR_PROCDATA();
@@ -2500,6 +2511,14 @@ o_emit_recovery_finish_rollbacks(void)
 		 */
 		if (TransactionIdIsValid(xid) && xid != logicalXid)
 			wal_emit_recovery_finish_rollback(oxid, xid);
+
+		/*
+		 * Neither xid is known, e.g. the xid file predates the records that
+		 * carry them.  Standbys still hold the oxid in progress, so announce
+		 * the rollback by oxid alone.
+		 */
+		if (!TransactionIdIsValid(xid) && !TransactionIdIsValid(logicalXid))
+			wal_emit_recovery_finish_rollback(oxid, InvalidTransactionId);
 	}
 
 	if (recovery_finish_aborted_oxids != NULL)
@@ -3602,6 +3621,8 @@ recovery_write_to_xids_queue(int worker_id, uint32 requestNumber)
 			rec.retainLocation = state->retain_locs[i];
 			write_to_xids_queue(&rec);
 		}
+		write_xid_binding_to_xids_queue(state->oxid, state->xid,
+										state->logicalXid);
 
 		dlist_foreach(iter, &state->checkpoint_undo_stacks)
 		{

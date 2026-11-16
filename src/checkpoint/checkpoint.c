@@ -972,6 +972,26 @@ write_to_xids_queue(XidFileRec *rec)
 }
 
 /*
+ * Write the record binding an in-progress oxid to its known xids.
+ */
+void
+write_xid_binding_to_xids_queue(OXid oxid, TransactionId heapXid,
+								TransactionId logicalXid)
+{
+	XidFileRec	rec;
+
+	if (!TransactionIdIsValid(heapXid) && !TransactionIdIsValid(logicalXid))
+		return;
+
+	memset(&rec, 0, sizeof(rec));
+	rec.oxid = oxid;
+	rec.kind = XidRecXids;
+	rec.heapXid = heapXid;
+	rec.logicalXid = logicalXid;
+	write_to_xids_queue(&rec);
+}
+
+/*
  * Prepare xids queue for writes.
  */
 static void
@@ -1172,6 +1192,27 @@ finish_write_xids(uint32 chkpnum, bool shutdown)
 					}
 					break;
 				}
+			}
+
+			while (true)
+			{
+				OXid		oxid = oProcData[i].vxids[j].oxid;
+				TransactionId heapXid,
+							logicalXid;
+
+				if (!OXidIsValid(oxid))
+					break;
+
+				pg_read_barrier();
+				heapXid = oProcData[i].vxids[j].heapXid;
+				logicalXid = oProcData[i].vxids[j].logicalXid;
+				pg_read_barrier();
+
+				if (oxid != oProcData[i].vxids[j].oxid)
+					continue;
+
+				write_xid_binding_to_xids_queue(oxid, heapXid, logicalXid);
+				break;
 			}
 		}
 		oProcData[i].flushUndoLocations = false;

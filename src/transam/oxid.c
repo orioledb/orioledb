@@ -1792,6 +1792,9 @@ get_current_oxid(void)
 		Assert(nestingLevel >= 0 && nestingLevel < PROC_XID_ARRAY_SIZE);
 		vxidElem = &GET_CUR_PROCDATA()->vxids[nestingLevel];
 
+		vxidElem->heapXid = InvalidTransactionId;
+		vxidElem->logicalXid = InvalidTransactionId;
+		pg_write_barrier();
 		vxidElem->oxid = newOxid;
 		vxidElem->vxid.BACKENDID = MyProc->PROCBACKENDID;
 		vxidElem->vxid.localTransactionId = MyProc->LXID;
