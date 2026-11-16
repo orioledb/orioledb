@@ -26,6 +26,7 @@
 #include "catalog/o_sys_cache.h"
 #include "catalog/o_tables.h"
 #include "checkpoint/checkpoint.h"
+#include "checkpoint/control.h"
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
 #include "recovery/wal.h"
@@ -1287,6 +1288,20 @@ o_recovery_start_hook(void)
 	else
 	{
 		elog(LOG, "orioledb recovery started.");
+	}
+
+	{
+		CheckpointControl control;
+
+		if (get_checkpoint_control_data(&control) &&
+			UNPACK_UNDO_VERSION(control.binaryVersion) > ORIOLEDB_UNDO_VERSION)
+			ereport(FATAL,
+					(errmsg("database files are incompatible with server"),
+					 errdetail("OrioleDB cluster has undo version %d,"
+							   " but the extension supports undo version %d.",
+							   UNPACK_UNDO_VERSION(control.binaryVersion),
+							   ORIOLEDB_UNDO_VERSION),
+					 errhint("Upgrade the OrioleDB extension.")));
 	}
 
 	startup_chkp_num = checkpoint_state->lastCheckpointNumber;
