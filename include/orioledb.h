@@ -85,6 +85,14 @@
  * will check if current ORIOLEDB_BINARY_VERSION is equal to what is in the control file. Otherwise
  * the cluster will refuse to start. (We don't go to the following versions checks in this case)
  *
+ * - ORIOLEDB_UNDO_VERSION - Version of undo log format.
+ *
+ * Bump ORIOLEDB_UNDO_VERSION every time the undo log on-disk format changes. The version is stored
+ * in the checkpoint control file. At recovery, if the stored undoVersion is greater than the
+ * compiled ORIOLEDB_UNDO_VERSION, the cluster will refuse to start (old binary can't recover a
+ * newer cluster's undo). If the stored version is lower (including 0 from old clusters that didn't
+ * have this field), recovery proceeds normally.
+ *
  * - ORIOLEDB_SYS_TREE_VERSION - Version of OrioleDB system trees format
  * - ORIOLEDB_PAGE_VERSION - Version of OrioleDB page format
  * - ORIOLEDB_COMPRESS_VERSION - Version of OrioleDB page compression format
@@ -99,6 +107,8 @@
  */
 #define ORIOLEDB_VERSION "OrioleDB 1.10.3"
 #define ORIOLEDB_BINARY_VERSION 10
+#define ORIOLEDB_UNDO_VERSION	1	/* Version of undo log format; bump on any
+									 * undo on-disk format change */
 #define ORIOLEDB_SYS_TREE_VERSION	1	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION		1	/* Version of binary page format */
 #define ORIOLEDB_COMPRESS_VERSION	1	/* Version of page compression (only
