@@ -225,6 +225,17 @@ lock_chain_stored(const BTreeLeafTuphdr *cur, const LockChainLink *link)
 }
 
 /*
+ * The location a new record linking to the given tuple header must be past.
+ */
+static inline UndoLocation
+undo_link_location(BTreeLeafTuphdr *tuphdr)
+{
+	if (tuphdr && UndoLocationIsValid(tuphdr->undoLocation))
+		return tuphdr->undoLocation;
+	return InvalidUndoLocation;
+}
+
+/*
  * Writes a lock dispatch record whose version is *version and whose lock
  * chain starts at lockChain.  The caller must have the undo reserved.
  */
@@ -235,10 +246,16 @@ make_lock_dispatch(BTreeDescr *desc, BTreeLeafTuphdr *version,
 {
 	BTreeLockDispatchUndoStackItem *item;
 	UndoLocation location;
+	UndoLocation after = undo_link_location(version);
 
-	item = (BTreeLockDispatchUndoStackItem *) get_undo_record(desc->undoType,
-															  &location,
-															  O_LOCK_DISPATCH_UNDO_SIZE);
+	if (UndoLocationIsValid(lockChain) &&
+		(!UndoLocationIsValid(after) || lockChain > after))
+		after = lockChain;
+
+	item = (BTreeLockDispatchUndoStackItem *) get_undo_record_after(desc->undoType,
+																	&location,
+																	O_LOCK_DISPATCH_UNDO_SIZE,
+																	after);
 	memset(item, 0, sizeof(*item));
 	item->base.header.type = LockDispatchUndoItemType;
 	item->base.header.indexType = desc->type;
@@ -631,9 +648,10 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 	}
 
 	size = sizeof(BTreeModifyUndoStackItem) + tuplelen;
-	item = (BTreeModifyUndoStackItem *) get_undo_record(desc->undoType,
-														&undoLocation,
-														MAXALIGN(size));
+	item = (BTreeModifyUndoStackItem *) get_undo_record_after(desc->undoType,
+															  &undoLocation,
+															  MAXALIGN(size),
+															  undo_link_location(curTupHdr));
 	item->header.itemSize = size;
 	if (action == BTreeOperationLock)
 		item->header.type = RowLockUndoItemType;
@@ -936,9 +954,10 @@ make_update_undo_record(BTreeDescr *desc, OTuple oldTuple, OTuple newTuple,
 		nfragments * O_UPDATE_DIFF_FRAGMENT_HEADER_SIZE + bytesLen;
 	Assert(MAXALIGN(size) < MAXALIGN(sizeof(BTreeModifyUndoStackItem) + oldLen));
 
-	item = (BTreeUpdateDiffUndoStackItem *) get_undo_record(desc->undoType,
-															&undoLocation,
-															MAXALIGN(size));
+	item = (BTreeUpdateDiffUndoStackItem *) get_undo_record_after(desc->undoType,
+																  &undoLocation,
+																  MAXALIGN(size),
+																  undo_link_location(curTupHdr));
 	memset(item, 0, sizeof(*item));
 	item->base.header.itemSize = size;
 	item->base.header.type = UpdateDiffUndoItemType;
@@ -1008,9 +1027,11 @@ make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno,
 	tuplelen = o_btree_len(desc, tuple, OTupleKeyLength);
 
 	size = sizeof(BTreeModifyUndoStackItem) + tuplelen;
-	item = (BTreeModifyUndoStackItem *) get_undo_record(desc->undoType,
-														&undoLocation,
-														MAXALIGN(size));
+	item = (BTreeModifyUndoStackItem *) get_undo_record_for_waiter(desc->undoType,
+																   &undoLocation,
+																   MAXALIGN(size),
+																   lockerState->undoNode,
+																   lockerState->undoLastLocation);
 	item->header.itemSize = size;
 	item->header.type = ModifyUndoItemType;
 	item->header.indexType = desc->type;

@@ -487,6 +487,8 @@ extern uint32 undo_buffers_count;
 extern Size xid_circular_buffer_size;
 extern Size rewind_circular_buffer_size;
 extern double regular_block_undo_circular_buffer_fraction;
+extern bool undo_numa_chunks;
+extern Size undo_chunk_size;
 extern double system_undo_circular_buffer_fraction;
 extern uint32 xid_buffers_count;
 extern uint32 rewind_buffers_count;
@@ -542,6 +544,7 @@ extern XLogRecPtr replay_until_lsn;
 extern XLogRecPtr debug_recovery_crash_lsn;
 extern int	debug_commit_window_ms;
 extern bool debug_checkpoint_error;
+extern int	debug_undo_numa_nodes;
 #endif
 
 /* For page eviction/read checkpoint test only */
