@@ -58,6 +58,36 @@ Therefore, OrioleDB writes checkpoints in the following order:
 
 Also, we are writing to the WAL TOAST tuples first and then primary key tuples.
 
+## Logical decoding
+
+PostgreSQL's logical decoding reads the WAL and hands the changes of each transaction to an output plugin, grouped by transaction id and in commit order. The changes of OrioleDB tables are decoded by OrioleDB itself: `orioledb_decode()` in `src/recovery/logical.c` parses the row-level WAL containers and queues their changes in PostgreSQL's reorder buffer, the same structure that holds the changes of heap tables.
+
+### Logical transaction ids
+
+A transaction on OrioleDB tables does not take a PostgreSQL transaction id (heap xid) unless it also writes a heap table, a sequence or the system catalog. The reorder buffer groups changes by a 32-bit xid, so the decoder needs one for every transaction and subtransaction. OrioleDB assigns a *logical xid* for that: a 32-bit number taken from a shared bitmap (`orioledb.logical_xid_buffers`) and never handed to PostgreSQL's transaction machinery. CLOG and the process array know nothing about it. The decoder marks such a transaction as synthetic in the reorder buffer (`RBTXN_DISTR_SYNTHETIC`, a flag added by OrioleDB's PostgreSQL patches), which keeps the reorder buffer from looking the xid up in CLOG and from streaming the transaction before its commit: streaming needs to check that the transaction is still running, and a logical xid cannot answer that. A transaction that exceeds `logical_decoding_work_mem` under a logical xid is spilled to disk and sent at commit.
+
+A WAL container opens with an `XID` record that names the OrioleDB transaction, its logical xid and its heap xid, if it had one when the container was opened. Every record of the container belongs to the logical xid named by the last `XID` or `SAVEPOINT` record before it.
+
+### Mixed transactions and the switch record
+
+A transaction that writes both OrioleDB and heap tables has a heap xid and a logical xid. Its heap part commits through the PostgreSQL commit record, and the OrioleDB part has to commit with it. The decoder learns about the pair from a `SWITCH_LOGICAL_XID` record, which makes the logical xid a subtransaction of the heap xid in the reorder buffer. From then on the heap xid's commit commits the OrioleDB changes with it, its abort drops them, and the reorder buffer checks the liveness of the heap xid for the OrioleDB changes it streams.
+
+### Streaming in-progress transactions
+
+A big transaction on OrioleDB tables alone has no heap xid and so could never be streamed. Once it has written more OrioleDB WAL than `orioledb.logical_heap_xid_threshold`, it takes a heap xid like a mixed transaction, and writes the switch record at once:
+
+```
+container 1:  XID(oxid, lxid=X, heap=0)  INSERT  INSERT ...
+container 2:  XID(oxid, lxid=X, heap=0)  INSERT  SWITCH(heap=H, lxid=X)  INSERT ...
+                                                 ^ the threshold is reached: H is
+                                                   assigned, X becomes H's child
+container 3:  XID(oxid, lxid=X, heap=H)  INSERT ...
+```
+
+When the switch arrives, the reorder buffer moves the changes queued under the logical xid, spilled ones included, under the heap xid and streams the transaction as a whole from then on. The switch is written as soon as the heap xid exists, whoever assigned it: the threshold, a `nextval()`, a catalog write.
+
+After a crash, recovery emits a rollback for the heap xid and the logical xid of every transaction left open, so the decoder drops them and the replication slot moves past the crash point.
+
 When the checkpointing of the primary key trees is finished, we mark the current WAL position of the "toast consistency point". See the picture below.
 
 ![Recovery of secondary indexes](../images/recovery_secondary_indexes.svg)

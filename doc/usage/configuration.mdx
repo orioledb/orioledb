@@ -315,18 +315,40 @@ e.g. PL/pgSQL loops with `EXCEPTION` blocks.
 | ----------- | ---- |
 | **Default** | 8MB |
 
-Amount of WAL a transaction writes for OrioleDB tables before it is assigned a PostgreSQL transaction ID, while
-`wal_level = logical`. Logical decoding can stream a transaction before its commit only under such an ID (see
-`streaming` in `CREATE SUBSCRIPTION`); the ID costs about what a transaction on a PostgreSQL table pays, which is
-negligible for a transaction of this size. Transactions below the threshold are sent at commit, spilled to disk if
-they exceed `logical_decoding_work_mem`. `0` assigns the ID to every transaction that writes to an OrioleDB table,
-so any of them can be streamed. `-1` never assigns it, so none of them is streamed.
+Amount of WAL a transaction writes for OrioleDB tables before it is assigned a PostgreSQL transaction ID (XID),
+while `wal_level = logical`. With any other `wal_level` the setting has no effect.
+
+Logical decoding can stream a transaction before its commit only under an XID (see `streaming` in
+`CREATE SUBSCRIPTION`), because the decoder has to check that a transaction it streams is still running, and only
+an XID answers that. A transaction on OrioleDB tables normally has none: it commits through OrioleDB's own commit
+record. Above the threshold it takes an XID the way a transaction that writes a heap table does: one number from
+the shared XID counter, a slot in the process array, and a commit through the PostgreSQL commit record, from
+which its OrioleDB commit sequence number is then taken. Visibility, locking and the data written do not change.
+For a transaction of this size the cost is negligible; for a workload of many small transactions it would not
+be, which is why small ones stay XID-less.
+
+- Transactions below the threshold are sent at commit, spilled to disk if they exceed `logical_decoding_work_mem`.
+- `0` assigns the XID to every transaction that writes an OrioleDB table, so any of them can be streamed. Every
+  such transaction then consumes an XID, like on a heap table.
+- `-1` never assigns it, so no OrioleDB transaction is streamed. Use it to rule the XID out while looking into
+  a problem, or on a cluster whose subscriptions do not use streaming anyway.
 
 Keep the threshold below about an eighth of `logical_decoding_work_mem`. The decoder holds a change with some
 115 bytes of overhead on top of its WAL bytes, so a transaction of small rows fills the decoder's memory with far
 fewer WAL bytes than it wrote. A transaction that reaches that memory before the threshold is spilled to disk
-first and streamed from there once it has its ID. The threshold only changes when a transaction is streamed, never
-whether its changes arrive.
+first and streamed from there once it has its XID. The threshold only changes when a transaction is streamed,
+never whether its changes arrive.
+
+The setting can be changed per session, per transaction and per role:
+
+```sql
+SET orioledb.logical_heap_xid_threshold = '1MB';
+BEGIN;
+SET LOCAL orioledb.logical_heap_xid_threshold = 0;
+...
+COMMIT;
+ALTER ROLE etl SET orioledb.logical_heap_xid_threshold = '64MB';
+```
 
 ## Debugging options
 
