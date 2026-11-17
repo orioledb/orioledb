@@ -747,20 +747,20 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_SWITCH_LOGICAL_XID:
 			{
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
-				TransactionId topXid = rec->u.swxid.topXid;
-				TransactionId subXid = rec->u.swxid.subXid;
+				TransactionId heapXid = rec->u.swxid.heapXid;
+				TransactionId logicalXid = rec->u.swxid.logicalXid;
 				ReorderBufferTXN *parentTxn;
 
 				elog(DEBUG4, "RECEIVE record type %d (%s) %u=>%u oxid " UINT64_FORMAT " logicalXId %u heapXid %u xlogPtr %X/%X",
-					 rec->type, recname, topXid, subXid,
+					 rec->type, recname, heapXid, logicalXid,
 					 rec->oxid, rec->logicalXid, rec->heapXid, LSN_FORMAT_ARGS(xlogPtr));
 
-				Assert(TransactionIdIsValid(topXid));
-				Assert(TransactionIdIsValid(subXid));
+				Assert(TransactionIdIsValid(heapXid));
+				Assert(TransactionIdIsValid(logicalXid));
 
-				ReorderBufferAssignChild(ctx->decodeCtx->reorder, topXid, subXid, xlogPtr);
+				ReorderBufferAssignChild(ctx->decodeCtx->reorder, heapXid, logicalXid, xlogPtr);
 
-				parentTxn = get_reorder_buffer_txn(ctx->decodeCtx->reorder, topXid);
+				parentTxn = get_reorder_buffer_txn(ctx->decodeCtx->reorder, heapXid);
 				if (parentTxn)
 					parentTxn->txn_flags |= RBTXN_DISTR_SKIP_CLEANUP;
 

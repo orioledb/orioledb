@@ -370,7 +370,7 @@ wal_desc_on_record(WalReaderState *r, WalRecord *rec)
 							 rec->u.cic_phase.indexVersion);
 			break;
 		case WAL_REC_SWITCH_LOGICAL_XID:
-			appendStringInfo(ctx->buf, " (%u %u);", rec->u.swxid.topXid, rec->u.swxid.subXid);
+			appendStringInfo(ctx->buf, " (%u %u);", rec->u.swxid.heapXid, rec->u.swxid.logicalXid);
 			break;
 		default:
 			appendStringInfo(ctx->buf, ";");

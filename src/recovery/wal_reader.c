@@ -339,8 +339,8 @@ wal_parse_rec_switch_logical_xid(WalReaderState *r, WalRecord *rec)
 	Assert(r);
 	Assert(rec);
 
-	WR_PARSE(r, &rec->u.swxid.topXid);
-	WR_PARSE(r, &rec->u.swxid.subXid);
+	WR_PARSE(r, &rec->u.swxid.heapXid);
+	WR_PARSE(r, &rec->u.swxid.logicalXid);
 
 	return WALPARSE_OK;
 }

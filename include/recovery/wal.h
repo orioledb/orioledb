@@ -102,11 +102,18 @@ typedef struct
 	uint8		heapXid[sizeof(TransactionId)];
 } WALRecXid;
 
+/*
+ * Makes the logical xid a subtransaction of the heap xid in logical decoding.
+ *
+ * The parent is always the heap xid of the current transaction: the record
+ * is written because an OrioleDB transaction got a heap xid and must commit
+ * with it.  A reader may rely on this.
+ */
 typedef struct
 {
 	uint8		recType;
-	uint8		topXid[sizeof(TransactionId)];
-	uint8		subXid[sizeof(TransactionId)];
+	uint8		heapXid[sizeof(TransactionId)];
+	uint8		logicalXid[sizeof(TransactionId)];
 } WALRecSwitchLogicalXid;
 
 typedef struct
@@ -276,7 +283,7 @@ extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr, uint32 version, uint32 base_version);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
-extern void add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId logicalXid_sub);
+extern void add_switch_logical_xid_wal_record(TransactionId heapXid, TransactionId logicalXid);
 extern void add_savepoint_wal_record(SubTransactionId parentSubid,
 									 TransactionId parentLogicalXid);
 extern void add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid);

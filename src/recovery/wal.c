@@ -736,8 +736,9 @@ add_database_template_checkpoint_wal_record(Oid src_datoid)
 }
 
 
+/* The parent is the current heap xid, see WALRecSwitchLogicalXid */
 void
-add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId logicalXid_sub)
+add_switch_logical_xid_wal_record(TransactionId heapXid, TransactionId logicalXid)
 {
 	WALRecSwitchLogicalXid *rec;
 
@@ -747,16 +748,17 @@ add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId lo
 	local_wal.contains_switch_xid = true;
 
 	Assert(!is_recovery_process());
-	Assert(TransactionIdIsValid(logicalXid_top));
-	Assert(TransactionIdIsValid(logicalXid_sub));
+	Assert(TransactionIdIsValid(heapXid));
+	Assert(heapXid == GetTopTransactionIdIfAny());
+	Assert(TransactionIdIsValid(logicalXid));
 	flush_local_wal_if_needed(sizeof(*rec));
 	Assert(local_wal.buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
 
 	rec = (WALRecSwitchLogicalXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 
 	rec->recType = WAL_REC_SWITCH_LOGICAL_XID;
-	memcpy(rec->topXid, &logicalXid_top, sizeof(TransactionId));
-	memcpy(rec->subXid, &logicalXid_sub, sizeof(TransactionId));
+	memcpy(rec->heapXid, &heapXid, sizeof(TransactionId));
+	memcpy(rec->logicalXid, &logicalXid, sizeof(TransactionId));
 
 	local_wal.buffer_offset += sizeof(*rec);
 }

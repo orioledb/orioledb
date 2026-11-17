@@ -44,8 +44,8 @@ typedef struct WalRecord
 		}			finish;
 		struct
 		{
-			TransactionId topXid;
-			TransactionId subXid;
+			TransactionId heapXid;
+			TransactionId logicalXid;
 		}			swxid;
 		struct
 		{
