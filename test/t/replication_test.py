@@ -38,7 +38,9 @@ class ReplicationTest(BaseTest):
 		master.safe_psql('moved', "CREATE EXTENSION orioledb;")
 		master.safe_psql(
 		    'moved', """
-			CREATE TABLE t (id int, val int, data text) USING orioledb;
+			CREATE TABLE t (id int, val int, data text) USING orioledb
+				WITH (index_bridging);
+			CREATE INDEX t_val_idx ON t (val) WITH (orioledb_index = off);
 			INSERT INTO t SELECT x, 2 * x, 'test' || x
 				FROM generate_series(1, 10000) x;
 		""")
@@ -60,6 +62,10 @@ class ReplicationTest(BaseTest):
 		self.assertEqual(
 		    replica.execute('moved', "SELECT * FROM t WHERE id = 500;"),
 		    [(500, 1000, 'test500')])
+		with replica.connect('moved') as con:
+			con.execute("SET enable_seqscan = off;")
+			self.assertEqual(con.execute("SELECT * FROM t WHERE val = 1000;"),
+			                 [(500, 1000, 'test500')])
 
 		master.safe_psql("ALTER DATABASE moved SET TABLESPACE ts2;")
 
@@ -75,6 +81,10 @@ class ReplicationTest(BaseTest):
 		self.assertEqual(
 		    replica.execute('moved', "SELECT * FROM t WHERE id = 500;"),
 		    [(500, 1000, 'test500')])
+		with replica.connect('moved') as con:
+			con.execute("SET enable_seqscan = off;")
+			self.assertEqual(con.execute("SELECT * FROM t WHERE val = 1000;"),
+			                 [(500, 1000, 'test500')])
 
 	def test_replication_move_rewritten_database_tablespace_back(self):
 		"""Evicted descriptors must be invalidated using the rewritten relnode."""
