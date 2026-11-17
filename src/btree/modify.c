@@ -751,6 +751,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 * can retry normally.
 				 */
 				if (cbAction == OBTreeCallbackActionXidWait &&
+					IS_SYS_TREE_OIDS(desc->oids) &&
 					LWLockHeldByMe(&checkpoint_state->oSysTreesLock))
 				{
 					OFindPageResult refindResult PG_USED_FOR_ASSERTS_ONLY;
