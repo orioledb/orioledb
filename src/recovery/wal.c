@@ -36,9 +36,9 @@ typedef struct
 	int			buffer_offset;
 	bool		has_material_changes;
 	bool		contains_xid;
-	bool		contains_switch_xid;
 	ORelOids	oids;
 	OIndexType	ix_type;
+	Size		xact_bytes;		/* written for the current transaction */
 	char		buffer[LOCAL_WAL_BUFFER_SIZE];
 } LocalWal;
 
@@ -115,6 +115,9 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 		   rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT ||
 		   rec_type == WAL_REC_UPDATE_PARTIAL);
 	Assert(!O_TUPLE_IS_NULL(tuple));
+
+	/* May add a switch record, so before the space check below */
+	assign_heap_xid_if_large(local_wal.xact_bytes + local_wal.buffer_offset);
 
 	write_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
 
@@ -325,6 +328,9 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 
 	Assert(!is_recovery_process());
 
+	if (!isAutonomous)
+		local_wal.xact_bytes = 0;
+
 	if (!local_wal.has_material_changes)
 	{
 		local_wal.buffer_offset = 0;
@@ -365,6 +371,8 @@ wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId xid,
 								subTransaction);
 	walPos = flush_local_wal(!subTransaction, false);
 	local_wal.has_material_changes = false;
+	if (!subTransaction)
+		local_wal.xact_bytes = 0;
 
 	/*
 	 * Don't need to flush local WAL, because we only commit if builtin
@@ -385,6 +393,9 @@ void
 wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 {
 	XLogRecPtr	wait_pos;
+
+	if (!isAutonomous)
+		local_wal.xact_bytes = 0;
 
 	if (!local_wal.has_material_changes)
 	{
@@ -492,8 +503,6 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 	memcpy(rec->csn, &csn, sizeof(csn));
 
 	local_wal.buffer_offset += sizeof(*rec);
-
-	local_wal.contains_switch_xid = false;
 }
 
 static void
@@ -518,8 +527,6 @@ add_joint_commit_wal_record(TransactionId xid, OXid xmin, bool subTransaction)
 	memcpy(rec->csn, &csn, sizeof(csn));
 	rec->subTransaction = subTransaction ? 1 : 0;
 	local_wal.buffer_offset += sizeof(*rec);
-
-	local_wal.contains_switch_xid = false;
 }
 
 /*
@@ -742,11 +749,6 @@ add_switch_logical_xid_wal_record(TransactionId heapXid, TransactionId logicalXi
 {
 	WALRecSwitchLogicalXid *rec;
 
-	if (local_wal.contains_switch_xid)
-		return;
-
-	local_wal.contains_switch_xid = true;
-
 	Assert(!is_recovery_process());
 	Assert(TransactionIdIsValid(heapXid));
 	Assert(heapXid == GetTopTransactionIdIfAny());
@@ -877,7 +879,6 @@ reset_local_wal_buffer(void)
 {
 	local_wal.buffer_offset = 0;
 	local_wal.contains_xid = false;
-	local_wal.contains_switch_xid = false;
 	local_wal.ix_type = oIndexInvalid;
 	ORelOidsSetInvalid(local_wal.oids);
 }
@@ -1007,6 +1008,8 @@ log_logical_wal_container_with_payload(Pointer ptr, int length,
 		XLogRegisterData(payload1, payload1_length);
 	if (payload2 != NULL && payload2_length > 0)
 		XLogRegisterData(payload2, payload2_length);
+
+	local_wal.xact_bytes += length + payload1_length + payload2_length;
 
 	return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
 }

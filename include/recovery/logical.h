@@ -22,6 +22,5 @@
 
 extern void orioledb_decode(LogicalDecodingContext *ctx,
 							XLogRecordBuffer *buf);
-extern void o_install_decoding_startup_hook(void);
 
 #endif							/* __LOGICAL_H__ */

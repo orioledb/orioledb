@@ -173,6 +173,7 @@ bool		enable_rewind = false;
 int			rewind_max_time = 0;
 int			rewind_max_transactions = 0;
 int			logical_xid_buffers_guc = 64;
+int			logical_heap_xid_threshold = 8192;
 bool		orioledb_strict_mode = false;
 XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
 static char *replay_until_lsn_string;
@@ -668,7 +669,6 @@ _PG_init(void)
 		return;
 
 	o_install_slot_retain_hook();
-	o_install_decoding_startup_hook();
 
 	o_verify_dir_exists_or_create(pstrdup(ORIOLEDB_DATA_DIR), NULL, NULL);
 	o_verify_dir_exists_or_create(pstrdup(ORIOLEDB_UNDO_DIR), NULL, NULL);
@@ -968,6 +968,24 @@ _PG_init(void)
 							1024,
 							PGC_POSTMASTER,
 							GUC_UNIT_BLOCKS,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.logical_heap_xid_threshold",
+							"Amount of OrioleDB WAL a transaction writes"
+							" before it is assigned a PostgreSQL xid for"
+							" logical decoding.",
+							"Logical decoding can stream a transaction before"
+							" commit only under a PostgreSQL xid.  -1 never"
+							" assigns one, so OrioleDB transactions are"
+							" decoded at commit.",
+							&logical_heap_xid_threshold,
+							8192,
+							-1,
+							MAX_KILOBYTES,
+							PGC_USERSET,
+							GUC_UNIT_KB,
 							NULL,
 							NULL,
 							NULL);

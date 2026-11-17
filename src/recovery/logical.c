@@ -34,9 +34,7 @@
 #include "tuple/toast.h"
 
 static inline bool FilterByOrigin(LogicalDecodingContext *ctx, RepOriginId origin_id);
-static void o_decoding_startup(LogicalDecodingContext *ctx);
-
-static logical_decoding_startup_hook_type prev_decoding_startup_hook = NULL;
+static void mark_synthetic(ReorderBuffer *rb, TransactionId xid);
 
 /*
  * Copy identity attributes from srcSlot to dstSlot.
@@ -759,6 +757,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				Assert(TransactionIdIsValid(logicalXid));
 
 				ReorderBufferAssignChild(ctx->decodeCtx->reorder, heapXid, logicalXid, xlogPtr);
+				mark_synthetic(ctx->decodeCtx->reorder, logicalXid);
 
 				parentTxn = get_reorder_buffer_txn(ctx->decodeCtx->reorder, heapXid);
 				if (parentTxn)
@@ -1152,6 +1151,15 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				if (!ctx->decodeCtx->fast_forward)
 				{
 					ReorderBufferAssignChild(ctx->decodeCtx->reorder, rec->u.savepoint.parentLogicalXid, rec->logicalXid, ctx->decodeBuf->origptr);
+					mark_synthetic(ctx->decodeCtx->reorder, rec->logicalXid);
+
+					/*
+					 * The parent is a heap xid when the transaction had one,
+					 * see get_savepoint_parent_xid().  The reader knows it
+					 * from the xid or switch record of the container.
+					 */
+					if (rec->u.savepoint.parentLogicalXid != rec->heapXid)
+						mark_synthetic(ctx->decodeCtx->reorder, rec->u.savepoint.parentLogicalXid);
 
 					parentTxn = get_reorder_buffer_txn(ctx->decodeCtx->reorder, rec->u.savepoint.parentLogicalXid);
 					if (parentTxn)
@@ -1313,7 +1321,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				(void) set_snapshot(ctx->decodeCtx, rec->logicalXid, xlogPtr);
 
 				txn = get_reorder_buffer_txn(ctx->decodeCtx->reorder, rec->logicalXid);
-				txn->txn_flags |= RBTXN_DISTR_SKIP_CLEANUP;
+				txn->txn_flags |= RBTXN_DISTR_SKIP_CLEANUP | RBTXN_DISTR_SYNTHETIC;
 
 				/* Skip actual record processing in fast_forward mode */
 				if (ctx->decodeCtx->fast_forward)
@@ -1449,28 +1457,18 @@ FilterByOrigin(LogicalDecodingContext *ctx, RepOriginId origin_id)
 }
 
 /*
- * Install the hook that disables streaming of in-progress transactions.
- * Done at load time, so it covers every decoding context.
- */
-void
-o_install_decoding_startup_hook(void)
-{
-	prev_decoding_startup_hook = logical_decoding_startup_hook;
-	logical_decoding_startup_hook = o_decoding_startup;
-}
-
-/*
- * OrioleDB can't stream in-progress transactions: logical xids are allocated
- * from a circular buffer.  The output plugin may enable streaming in its
- * startup callback, so turn it off before any WAL record is decoded.
+ * Tell the reorder buffer that xid is a logical xid: it must not look it up
+ * in the clog, and must not stream the transaction until it has a heap
+ * parent, see link_heap_xid().
  */
 static void
-o_decoding_startup(LogicalDecodingContext *ctx)
+mark_synthetic(ReorderBuffer *rb, TransactionId xid)
 {
-	if (prev_decoding_startup_hook)
-	{
-		prev_decoding_startup_hook(ctx);
-	}
+	ReorderBufferTXN *txn = get_reorder_buffer_txn(rb, xid);
 
-	ctx->streaming = false;
+	/* The reorder buffer creates the transaction with its first change */
+	if (txn)
+	{
+		txn->txn_flags |= RBTXN_DISTR_SYNTHETIC;
+	}
 }

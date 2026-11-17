@@ -23,6 +23,8 @@
 
 #include "access/transam.h"
 #include "access/twophase.h"
+#include "access/xact.h"
+#include "access/xlog.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "rewind/rewind.h"
@@ -318,6 +320,7 @@ static OBuffersDesc buffersDesc = {
 };
 
 static TransactionId acquire_logical_xid_wrapper(bool *isValidHeapXid);
+static LogicalXidCtx *top_logical_xid_ctx(void);
 static void advance_global_xmin(OXid newXid);
 
 Size
@@ -645,18 +648,108 @@ get_savepoint_parent_xid(void)
 
 	heapXid = GetTopTransactionIdIfAny();
 	if (TransactionIdIsValid(heapXid))
-		return heapXid;
-
-	if (prevLogicalXids != NIL)
 	{
-		PrevLogicalXidEntry *entry;
-
-		entry = (PrevLogicalXidEntry *) linitial(prevLogicalXids);
-		Assert(TransactionIdIsValid(entry->ctx.xid));
-		return entry->ctx.xid;
+		/* Write the switch before the savepoint names the heap xid */
+		link_heap_xid();
+		return heapXid;
 	}
 
-	return logicalXidContext.xid;
+	return top_logical_xid_ctx()->xid;
+}
+
+/*
+ * The context of the top-level transaction: the one saved by the outermost
+ * pushed subtransaction, or the current one if nothing is pushed.
+ */
+static LogicalXidCtx *
+top_logical_xid_ctx(void)
+{
+	PrevLogicalXidEntry *entry;
+
+	if (prevLogicalXids == NIL)
+	{
+		return &logicalXidContext;
+	}
+
+	entry = (PrevLogicalXidEntry *) linitial(prevLogicalXids);
+	Assert(TransactionIdIsValid(entry->ctx.xid));
+	return &entry->ctx;
+}
+
+/*
+ * Write the switch record once the transaction has a heap xid, so that the
+ * decoder puts the OrioleDB changes under it.
+ *
+ * Pre-commit writes the record too, but by then the reorder buffer has
+ * handled the OrioleDB changes as a transaction of their own, which it
+ * cannot stream.  Written early, everything that follows is streamed under
+ * the heap xid.
+ *
+ * useHeap of the top-level context marks that the record was written.  A
+ * ROLLBACK TO a savepoint without a logical xid of its own clears it: the
+ * rollback record drops the whole logical transaction in the decoder, link
+ * included.
+ */
+void
+link_heap_xid(void)
+{
+	LogicalXidCtx *top = top_logical_xid_ctx();
+	TransactionId heapXid;
+
+	if (!TransactionIdIsValid(top->xid) || top->useHeap)
+	{
+		return;
+	}
+
+	heapXid = GetTopTransactionIdIfAny();
+	if (!TransactionIdIsValid(heapXid))
+	{
+		return;
+	}
+
+	elog(DEBUG4, "SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", heapXid, top->xid);
+	add_switch_logical_xid_wal_record(heapXid, top->xid);
+	top->useHeap = true;
+}
+
+/*
+ * Assign a heap xid to a transaction that wrote walBytes of OrioleDB WAL,
+ * once it is big enough for logical decoding to stream, and write the
+ * switch record.
+ *
+ * A heap xid costs a ProcArray entry, a clog bit and a commit record.  For
+ * a transaction above orioledb.logical_heap_xid_threshold this is cheap,
+ * and without it the reorder buffer spills the transaction to disk and
+ * sends it at commit.
+ */
+void
+assign_heap_xid_if_large(Size walBytes)
+{
+	/* Callers hold no page locks, see AssignTransactionId() */
+	Assert(CritSectionCount == 0);
+
+	/*
+	 * An autonomous transaction has no logical xid.  GetTopTransactionId()
+	 * errors out in a parallel worker and outside a transaction, so check
+	 * those cases here.
+	 */
+	if (logical_heap_xid_threshold < 0 ||
+		walBytes < (Size) logical_heap_xid_threshold * 1024 ||
+		!XLogLogicalInfoActive() ||
+		!TransactionIdIsValid(logicalXidContext.xid) ||
+		TransactionIdIsValid(GetTopTransactionIdIfAny()) ||
+		!IsTransactionState() ||
+		IsInParallelMode() ||
+		RecoveryInProgress())
+	{
+		link_heap_xid();
+		return;
+	}
+
+	elog(DEBUG4, "assign heap xid at " UINT64_FORMAT " bytes of WAL for oriole xid %u",
+		 (uint64) walBytes, top_logical_xid_ctx()->xid);
+	(void) GetTopTransactionId();
+	link_heap_xid();
 }
 
 void
@@ -910,7 +1003,19 @@ oxid_subxact_callback(
 							 * top-level commit record.
 							 */
 							if (prev_logical_xid_pushed_by(mySubid))
+							{
 								release_logical_xid(&logicalXidContext);
+							}
+							else
+							{
+								/*
+								 * The rollback record named the top-level
+								 * logical xid, so the decoder dropped it
+								 * together with the link to the heap xid. Let
+								 * link_heap_xid() write the switch again.
+								 */
+								top_logical_xid_ctx()->useHeap = false;
+							}
 
 							setup_prev_logical_xid_ctx(mySubid);
 						}

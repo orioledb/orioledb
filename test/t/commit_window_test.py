@@ -52,21 +52,31 @@ class CommitWindowTest(BaseTest):
 		    "INSERT INTO o_row VALUES (1, 'seed');\n"
 		    "INSERT INTO h_row VALUES (1, 'seed');")
 
-	def start_writer(self, node):
+	def start_writer(self, node, lazy_xid=False):
 		"""
 		One transaction appending twice to the OrioleDB row and once to the heap
 		row.  The heap row is what gives it a heap xid, so its CSN comes from the
 		heap commit.  COMMIT then sits inside the widened window.
+
+		With lazy_xid the heap xid comes from orioledb.logical_heap_xid_threshold
+		instead, and the transaction touches OrioleDB rows only.
 		"""
 		con = node.connect()
 		con.execute("SET orioledb.debug_commit_window_ms = %d" %
 		            self.WINDOW_MS)
 		con.begin()
+		if lazy_xid:
+			con.execute("SET orioledb.logical_heap_xid_threshold = 1")
+			con.execute("INSERT INTO o_row VALUES (2, repeat('x', 2000))")
 		# The same two appends into both tables, so their values must match.
 		con.execute("UPDATE o_row SET val = val || ',a' WHERE id = 1")
-		con.execute("UPDATE h_row SET val = val || ',a' WHERE id = 1")
+		if not lazy_xid:
+			con.execute("UPDATE h_row SET val = val || ',a' WHERE id = 1")
 		con.execute("UPDATE o_row SET val = val || ',b' WHERE id = 1")
-		con.execute("UPDATE h_row SET val = val || ',b' WHERE id = 1")
+		if not lazy_xid:
+			con.execute("UPDATE h_row SET val = val || ',b' WHERE id = 1")
+		self.assertNotEqual(
+		    con.execute("SELECT orioledb_get_current_heap_xid()")[0][0], 0)
 		t = ThreadQueryExecutor(con, "COMMIT")
 		t.start()
 		return con, t
@@ -112,15 +122,24 @@ class CommitWindowTest(BaseTest):
 		node.stop()
 
 	def test_repeated_read_inside_the_commit_window(self):
+		self.check_repeated_read()
+
+	def test_repeated_read_inside_the_commit_window_lazy_xid(self):
+		self.check_repeated_read(lazy_xid=True)
+
+	def check_repeated_read(self, lazy_xid=False):
 		"""
 		The same thing seen the way jepsen sees it: one key read twice in one
 		transaction, the first read landing inside the window.
 		"""
 		node = self.node
+		if lazy_xid:
+			# The threshold only assigns an xid for logical decoding
+			node.append_conf('postgresql.conf', "wal_level = logical\n")
 		node.start()
 		self.setup_tables(node)
 
-		wcon, wthread = self.start_writer(node)
+		wcon, wthread = self.start_writer(node, lazy_xid)
 		time.sleep(self.WINDOW_MS / 4000.0)
 
 		reader = node.connect()

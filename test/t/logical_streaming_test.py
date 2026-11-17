@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import os
 import time
 import unittest
+
+from testgres.utils import get_pg_config
 
 from .base_test import BaseTest
 from .logical_test import wait_ready
@@ -15,12 +18,15 @@ WAIT_S = 60
 INFLIGHT_WAIT_S = 20
 
 O_REL = "o_data"
+THRESHOLD_GUC = "orioledb.logical_heap_xid_threshold"
 SERIAL_REL = "o_serial"
 SERIAL_SEQ = f"{SERIAL_REL}_id_seq"
 # Sequence cache of the documented workaround (limitation 13): one refill
 # covers a whole big transaction, so nextval() takes no heap xid inside it
 SERIAL_CACHE = 10 * BIG_ROWS
 H_REL = "h_data"
+SEQ = "o_seq"
+NEVER = f"{THRESHOLD_GUC} = -1\n"
 SUB = "test_sub"
 SLOT = "s"
 # Digest expression for the scenarios that add column c on the publisher
@@ -77,13 +83,27 @@ class StreamingTestBase(BaseTest):
 		self.node.append_conf('postgresql.conf', "wal_level = logical\n")
 		self.node.append_conf('postgresql.conf',
 		                      "logical_decoding_work_mem = 64kB\n")
+		# Below the big inserts of the scenarios, above their small ones
+		self.node.append_conf('postgresql.conf', f"{THRESHOLD_GUC} = 64kB\n")
 
-	@staticmethod
-	def immediate_guc():
-		# PG16 has the old name of the developer option
-		if BaseTest.get_pg_version() < 17:
-			return "logical_replication_mode"
-		return "debug_logical_replication_streaming"
+	_immediate_guc = None
+
+	@classmethod
+	def immediate_guc(cls):
+		"""
+		The developer option that streams every transaction at once.
+
+		It was renamed in 17 and the rename was backpatched to 16, and
+		--describe-config does not list it, so read the name out of the
+		server program.
+		"""
+		if cls._immediate_guc is None:
+			new = "debug_logical_replication_streaming"
+			with open(os.path.join(get_pg_config()["BINDIR"], "postgres"),
+			          "rb") as server:
+				found = new.encode() in server.read()
+			cls._immediate_guc = new if found else "logical_replication_mode"
+		return cls._immediate_guc
 
 	def immediate_conf(self):
 		return f"{self.immediate_guc()} = immediate\n"
@@ -287,6 +307,105 @@ class StreamingTestBase(BaseTest):
 			commit;
 		""")
 
+	def sc_savepoints_around_switch(self, pub):
+		# s1 starts before the heap xid is assigned (inside the first big
+		# insert) and is released after it; s2 and s3 start after: 701 rows
+		pub.safe_psql(f"""
+			begin;
+			insert into {O_REL}(id, data) values (1, 'first');
+			savepoint s1;
+			{big_insert(O_REL, 500, start=1001)}
+			savepoint s2;
+			{big_insert(O_REL, 500, start=2001)}
+			rollback to savepoint s2;
+			{big_insert(O_REL, 100, start=3001)}
+			release savepoint s1;
+			savepoint s3;
+			{big_insert(O_REL, 100, start=4001)}
+			rollback to savepoint s3;
+			{big_insert(O_REL, 100, start=5001)}
+			commit;
+		""")
+
+	def sc_switch_in_rolled_back_savepoint(self, pub):
+		# The savepoint has no logical xid of its own, so its rollback drops
+		# the whole logical transaction in the decoder, link included.  The
+		# second insert must be linked again, and streamed: BIG_ROWS rows
+		pub.safe_psql(f"""
+			begin;
+			savepoint s1;
+			{big_insert(O_REL)}
+			rollback to savepoint s1;
+			{big_insert(O_REL, start=10001)}
+			commit;
+		""")
+
+	def sc_heap_then_xidless_savepoint_rollback(self, pub):
+		# Same with the heap xid assigned before the savepoint
+		pub.safe_psql(f"""
+			begin;
+			insert into {H_REL}(id, data) values (1, 'h');
+			savepoint s1;
+			{big_insert(O_REL)}
+			rollback to savepoint s1;
+			{big_insert(O_REL, start=10001)}
+			commit;
+		""")
+
+	# The reader takes the heap xid of a container from its xid record, or
+	# from a later switch record.  Here the xid record does not know the
+	# heap xid yet.
+
+	def sc_spilled_savepoint_heap_inside(self, pub):
+		# Heap xid before the release: the release writes a joint commit
+		pub.safe_psql(f"""
+			begin;
+			insert into {O_REL}(id, data) values (1, 'first');
+			savepoint s1;
+			{big_insert(O_REL, start=1001)}
+			insert into {H_REL}(id, data) values (1, 'h');
+			release savepoint s1;
+			commit;
+		""")
+
+	def sc_spilled_savepoint_heap_after(self, pub):
+		# Heap xid after the release: the switch at commit adopts both
+		pub.safe_psql(f"""
+			begin;
+			insert into {O_REL}(id, data) values (1, 'first');
+			savepoint s1;
+			{big_insert(O_REL, start=1001)}
+			release savepoint s1;
+			insert into {H_REL}(id, data) values (1, 'h');
+			commit;
+		""")
+
+	def sc_switch_in_aborted_savepoint(self, pub):
+		# The heap xid assigned inside s1 outlives its rollback: 2001 rows
+		pub.safe_psql(f"""
+			begin;
+			insert into {O_REL}(id, data) values (1, 'first');
+			savepoint s1;
+			{big_insert(O_REL, start=1001)}
+			rollback to savepoint s1;
+			{big_insert(O_REL, start=10001)}
+			commit;
+		""")
+
+	def sc_savepoint_after_nextval(self, pub):
+		# nextval() assigns the heap xid with no OrioleDB record in between,
+		# so the savepoint is the first record to name it
+		pub.safe_psql(f"create sequence {SEQ};")
+		pub.safe_psql(f"""
+			begin;
+			insert into {O_REL}(id, data) values (1, 'first');
+			select nextval('{SEQ}');
+			savepoint s1;
+			{big_insert(O_REL, start=1001)}
+			release savepoint s1;
+			commit;
+		""")
+
 	def sc_plpgsql_exception_blocks(self, pub):
 		# An exception block is a savepoint released on success: 100 rows
 		pub.safe_psql(f"""
@@ -333,19 +452,21 @@ class StreamingTestBase(BaseTest):
 		""")
 
 	def sc_serial_cached_insert(self, pub):
-		# The documented workaround: a cache that covers the transaction and
-		# a reused session keep it xid-less, the refill lands in the warm-up
+		# The documented workaround: the cache covers the transaction and
+		# the refill lands in the warm-up, so nextval() takes no heap xid.
+		# The big insert gets one from the threshold.
 		pub.safe_psql(f"alter sequence {SERIAL_SEQ} cache {SERIAL_CACHE};")
 		with pub.connect() as con:
 			con.execute(f"insert into {SERIAL_REL}(data) values ('warm-up');")
 			con.commit()
 			con.begin()
-			con.execute(big_serial_insert())
+			con.execute(f"insert into {SERIAL_REL}(data) values ('small');")
 			xidless = con.execute(
 			    "select orioledb_get_current_heap_xid()::text = '0';")[0][0]
+			con.execute(big_serial_insert())
 			con.commit()
 		# The scenario needs the xid-less path
-		self.assertTrue(xidless, "the big transaction got a heap xid")
+		self.assertTrue(xidless, "nextval() took a heap xid")
 
 	def sc_heap_then_oriole(self, pub):
 		pub.safe_psql(f"""
@@ -384,6 +505,18 @@ class StreamingTestBase(BaseTest):
 			commit;
 		""")
 
+	def sc_ddl_before_switch(self, pub):
+		# The catalog write assigns the heap xid below the threshold
+		pub.safe_psql(f"""
+			begin;
+			insert into {O_REL}(id, data) values (1, 'first');
+			alter table {O_REL} add column c int;
+			insert into {O_REL}(id, data, c)
+				select a, repeat(md5(a::text), 20), a
+					from generate_series(2, {BIG_ROWS}) f(a);
+			commit;
+		""")
+
 	def sc_dml_then_ddl(self, pub):
 		pub.safe_psql(f"""
 			begin;
@@ -416,8 +549,6 @@ class StreamingTestBase(BaseTest):
 		""")
 
 
-# OrioleDB turns streaming off, see o_decoding_startup()
-@unittest.expectedFailure
 class LogicalStreamingFunctionalTest(StreamingTestBase):
 	"""
 	The transaction was streamed: pg_stat_replication_slots.stream_txns for a
@@ -443,6 +574,15 @@ class LogicalStreamingFunctionalTest(StreamingTestBase):
 
 	def test_stream_serial_cached_insert(self):
 		self.check_streamed(self.sc_serial_cached_insert, rels=(SERIAL_REL, ))
+
+	def test_stream_savepoints_around_switch(self):
+		self.check_streamed(self.sc_savepoints_around_switch)
+
+	def test_stream_ddl_before_switch(self):
+		self.check_streamed(self.sc_ddl_before_switch)
+
+	def test_stream_savepoint_after_nextval(self):
+		self.check_streamed(self.sc_savepoint_after_nextval)
 
 	def test_stream_heap_then_oriole(self):
 		self.check_streamed(self.sc_heap_then_oriole, rels=(O_REL, H_REL))
@@ -509,6 +649,33 @@ class LogicalStreamingFunctionalTest(StreamingTestBase):
 		self.assert_decoded_stream(self.decode(node),
 		                           "aborting streamed (sub)transaction")
 
+	def check_streamed_after_abort(self, scenario):
+		# The rollback drops the streamed logical transaction; what follows
+		# must be streamed again, under the same heap xid
+		node = self.start_decoding()
+		scenario(node)
+		lines = self.decode(node)
+		self.assert_decoded_stream(lines, "aborting streamed (sub)transaction")
+		aborted = next(i for i, l in enumerate(lines)
+		               if l.startswith("aborting streamed"))
+		self.assertTrue([
+		    l for l in lines[aborted:]
+		    if l.startswith("opening a streamed block")
+		], "nothing streamed after the abort:\n" +
+		                "\n".join(lines[aborted:][:40]))
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_decode_switch_in_rolled_back_savepoint(self):
+		self.check_streamed_after_abort(
+		    self.sc_switch_in_rolled_back_savepoint)
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_decode_heap_then_xidless_savepoint_rollback(self):
+		self.check_streamed_after_abort(
+		    self.sc_heap_then_xidless_savepoint_rollback)
+
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_decode_oriole_then_heap(self):
@@ -569,6 +736,51 @@ class LogicalStreamingCorrectnessTest(StreamingTestBase):
 	def test_apply_first_write_in_savepoint_rollback(self):
 		self.check_apply(self.sc_first_write_in_savepoint_rollback)
 
+	def test_apply_savepoints_around_switch(self):
+		self.check_apply(self.sc_savepoints_around_switch)
+
+	def test_apply_savepoints_around_switch_parallel(self):
+		self.check_apply(self.sc_savepoints_around_switch, 'parallel')
+
+	def test_apply_switch_in_rolled_back_savepoint(self):
+		self.check_apply(self.sc_switch_in_rolled_back_savepoint)
+
+	def test_apply_heap_then_xidless_savepoint_rollback(self):
+		self.check_apply(self.sc_heap_then_xidless_savepoint_rollback,
+		                 rels=(O_REL, H_REL))
+
+	def test_apply_spilled_savepoint_heap_inside(self):
+		self.check_apply(self.sc_spilled_savepoint_heap_inside,
+		                 rels=(O_REL, H_REL))
+
+	def test_apply_spilled_savepoint_heap_inside_never(self):
+		self.check_apply(self.sc_spilled_savepoint_heap_inside,
+		                 rels=(O_REL, H_REL),
+		                 pub_conf=NEVER)
+
+	def test_apply_spilled_savepoint_heap_after(self):
+		self.check_apply(self.sc_spilled_savepoint_heap_after,
+		                 rels=(O_REL, H_REL))
+
+	def test_apply_spilled_savepoint_heap_after_never(self):
+		self.check_apply(self.sc_spilled_savepoint_heap_after,
+		                 rels=(O_REL, H_REL),
+		                 pub_conf=NEVER)
+
+	def test_apply_switch_in_aborted_savepoint(self):
+		self.check_apply(self.sc_switch_in_aborted_savepoint)
+
+	def test_apply_savepoint_after_nextval(self):
+		self.check_apply(self.sc_savepoint_after_nextval)
+
+	def test_apply_savepoint_after_nextval_never(self):
+		self.check_apply(self.sc_savepoint_after_nextval, pub_conf=NEVER)
+
+	def test_apply_oriole_then_heap_never(self):
+		self.check_apply(self.sc_oriole_then_heap,
+		                 rels=(O_REL, H_REL),
+		                 pub_conf=NEVER)
+
 	def test_apply_plpgsql_exception_blocks(self):
 		self.check_apply(self.sc_plpgsql_exception_blocks)
 
@@ -606,6 +818,18 @@ class LogicalStreamingCorrectnessTest(StreamingTestBase):
 
 	def test_apply_dml_then_ddl(self):
 		self.check_apply(self.sc_dml_then_ddl, expr=DDL_EXPR)
+
+	def test_apply_ddl_before_switch(self):
+		self.check_apply(self.sc_ddl_before_switch, expr=DDL_EXPR)
+
+	def test_apply_threshold_disabled(self):
+		# Without a heap xid the transaction can only be spilled
+		pub, sub, _ = self.start_pair(pub_conf=f"{THRESHOLD_GUC} = -1\n")
+		self.sc_large_insert(pub)
+		self.assert_replicated(pub, sub, (O_REL, ))
+		stream_txns, spill_txns = self.slot_stats(pub)
+		self.assertEqual(stream_txns, 0)
+		self.assertGreaterEqual(spill_txns, 1)
 
 	def test_apply_toast(self):
 		self.check_apply(self.sc_toast)
@@ -664,3 +888,98 @@ class LogicalStreamingCorrectnessTest(StreamingTestBase):
 		pub.safe_psql(
 		    f"insert into {O_REL}(id, data) values (1, 'after crash');")
 		self.assert_replicated(pub, sub, (O_REL, ))
+
+	def test_apply_crash_after_switch(self):
+		"""
+		The publisher crashes right after the container that carries the
+		switch to the heap xid was written.  Recovery must abort the heap
+		xid in the decoder too, or the slot can never move past it.
+		"""
+		pub, sub, _ = self.start_pair()
+		con = pub.connect()
+		con.begin()
+		con.execute(f"set {THRESHOLD_GUC} = 1;")
+		# Two rows cross the threshold; then fill the local WAL buffer until
+		# it is written out: the next container stays in memory and is lost
+		# with the crash, so the WAL ends with the one holding the switch
+		lsn = pub.execute("select pg_current_wal_insert_lsn();")[0][0]
+		for i in range(1, 100):
+			con.execute(big_insert(O_REL, 1, start=i))
+			if pub.execute("select pg_current_wal_insert_lsn();")[0][0] != lsn:
+				break
+		else:
+			self.fail("the local WAL buffer never flushed")
+		self.assertNotEqual(
+		    con.execute("select orioledb_get_current_heap_xid();")[0][0], 0)
+		# Everything the decoder will ever see of the transaction is before
+		# this point, so a slot stuck on it never gets past it.  The crash
+		# must not take the container with it: get it to disk
+		pub.safe_psql("select pg_switch_wal();")
+		lsn = pub.execute("select pg_current_wal_flush_lsn();")[0][0]
+
+		pub.stop(['-m', 'immediate'])
+		try:
+			con.close()
+		except Exception:
+			pass
+		pub.start()
+
+		# The slot moves on only once the decoder forgot the crashed
+		# transaction; checkpoints give the walsender running-xacts records
+		for i in range(1, 6):
+			pub.safe_psql(
+			    f"insert into {O_REL}(id, data) values ({1000 + i}, 'after');")
+			self.wait_count(sub, O_REL, i)
+			pub.safe_psql("checkpoint;")
+		moved = self.wait_until(lambda: pub.execute(f"""
+			select restart_lsn > '{lsn}'::pg_lsn
+				from pg_replication_slots where slot_name = '{SUB}';
+		""")[0][0])
+		self.assertTrue(moved, f"restart_lsn stuck\n{self.log_errors(pub)}")
+		self.assert_replicated(pub, sub, (O_REL, ))
+
+
+class LazyHeapXidTest(StreamingTestBase):
+	"""
+	A transaction gets a heap xid once it wrote more OrioleDB WAL than
+	orioledb.logical_heap_xid_threshold, and not before.
+	"""
+
+	def heap_xid_after(self, con, sql):
+		con.execute(sql)
+		return con.execute("select orioledb_get_current_heap_xid();")[0][0]
+
+	def test_heap_xid_above_threshold(self):
+		node = self.node
+		node.start()
+		node.safe_psql(self.publisher_sql)
+		with node.connect() as con:
+			con.begin()
+			self.assertEqual(
+			    self.heap_xid_after(
+			        con, f"insert into {O_REL}(id, data) values (1, 'x');"), 0)
+			self.assertNotEqual(
+			    self.heap_xid_after(con, big_insert(O_REL, start=2)), 0)
+			con.commit()
+
+	def test_no_heap_xid_without_logical_wal(self):
+		# The xid is for logical decoding only, so a big transaction stays
+		# xid-less while nothing can decode it
+		node = self.node
+		node.append_conf('postgresql.conf', "wal_level = replica\n")
+		node.start()
+		node.safe_psql(self.publisher_sql)
+		with node.connect() as con:
+			con.begin()
+			self.assertEqual(self.heap_xid_after(con, big_insert(O_REL)), 0)
+			con.commit()
+
+	def test_no_heap_xid_when_disabled(self):
+		node = self.node
+		node.start()
+		node.safe_psql(self.publisher_sql)
+		with node.connect() as con:
+			con.begin()
+			con.execute(f"set {THRESHOLD_GUC} = -1;")
+			self.assertEqual(self.heap_xid_after(con, big_insert(O_REL)), 0)
+			con.commit()

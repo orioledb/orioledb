@@ -5107,6 +5107,19 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			break;
 
 		case WAL_REC_SWITCH_LOGICAL_XID:
+
+			/*
+			 * The reader took the heap xid from the switch record.  The xid
+			 * record of the container may be older than the heap xid, and
+			 * after a crash right behind this container the switch is the
+			 * only record that names it.  No state means the switch comes
+			 * before the xid record, which then carries the heap xid.
+			 */
+			if (cur_recovery_xid_state != NULL &&
+				!TransactionIdIsValid(cur_recovery_xid_state->xid))
+				cur_recovery_xid_state->xid = rec->heapXid;
+			break;
+
 		case WAL_REC_SUBXACT_ABORT:
 			/* Ignore */
 			break;

@@ -342,6 +342,12 @@ wal_parse_rec_switch_logical_xid(WalReaderState *r, WalRecord *rec)
 	WR_PARSE(r, &rec->u.swxid.heapXid);
 	WR_PARSE(r, &rec->u.swxid.logicalXid);
 
+	/*
+	 * The xid record of the container may be older than the heap xid.  The
+	 * switch names it, so the records that follow belong to it.
+	 */
+	rec->heapXid = rec->u.swxid.heapXid;
+
 	return WALPARSE_OK;
 }
 

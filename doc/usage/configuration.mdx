@@ -7,7 +7,7 @@ sidebar_label: Configuration
 
 ## Main parameters
 
-Most GUC parameters require a postmaster restart. Any user can change `orioledb.serializable`, `orioledb.default_compress`, `orioledb.default_primary_compress`, `orioledb.default_toast_compress`, `orioledb.table_description_compress` and `orioledb.debug_disable_downlink_fastpath` in a session; a superuser can change `orioledb.enable_stopevents` and `orioledb.trace_stopevents` in a session; `orioledb.checksums_enabled` is read-only.
+Most GUC parameters require a postmaster restart. Any user can change `orioledb.serializable`, `orioledb.logical_heap_xid_threshold`, `orioledb.default_compress`, `orioledb.default_primary_compress`, `orioledb.default_toast_compress`, `orioledb.table_description_compress` and `orioledb.debug_disable_downlink_fastpath` in a session; a superuser can change `orioledb.enable_stopevents` and `orioledb.trace_stopevents` in a session; `orioledb.checksums_enabled` is read-only.
 
 ### `orioledb.main_buffers`
 
@@ -308,6 +308,25 @@ transaction ends or its enclosing savepoint is rolled back. A transaction that r
 than the buffers hold fails with `not enough logical xids` (FATAL from a PL/pgSQL `EXCEPTION` block), and
 other sessions cannot start subtransactions while it holds them. Raise the setting for such transactions,
 e.g. PL/pgSQL loops with `EXCEPTION` blocks.
+
+### `orioledb.logical_heap_xid_threshold`
+
+|             |      |
+| ----------- | ---- |
+| **Default** | 8MB |
+
+Amount of WAL a transaction writes for OrioleDB tables before it is assigned a PostgreSQL transaction ID, while
+`wal_level = logical`. Logical decoding can stream a transaction before its commit only under such an ID (see
+`streaming` in `CREATE SUBSCRIPTION`); the ID costs about what a transaction on a PostgreSQL table pays, which is
+negligible for a transaction of this size. Transactions below the threshold are sent at commit, spilled to disk if
+they exceed `logical_decoding_work_mem`. `0` assigns the ID to every transaction that writes to an OrioleDB table,
+so any of them can be streamed. `-1` never assigns it, so none of them is streamed.
+
+Keep the threshold below about an eighth of `logical_decoding_work_mem`. The decoder holds a change with some
+115 bytes of overhead on top of its WAL bytes, so a transaction of small rows fills the decoder's memory with far
+fewer WAL bytes than it wrote. A transaction that reaches that memory before the threshold is spilled to disk
+first and streamed from there once it has its ID. The threshold only changes when a transaction is streamed, never
+whether its changes arrive.
 
 ## Debugging options
 
