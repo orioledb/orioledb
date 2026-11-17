@@ -158,6 +158,7 @@ o_convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 	Datum	   *old_values = palloc0(natts * sizeof(Datum));
 	Datum	   *new_values = palloc0(natts * sizeof(Datum));
 	bool	   *isnull = palloc0(natts * sizeof(bool));
+	HeapTuple	result;
 	int			ctid_off = 0;
 
 	if (indexDescr->primaryIsCtid)
@@ -229,7 +230,9 @@ o_convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 		memcpy(VARDATA_EXTERNAL(new_toastptr), &ve, sizeof(ve));
 		new_values[toast_attn] = PointerGetDatum(new_toastptr);
 	}
-	return heap_form_tuple(descr->tupdesc, new_values, isnull);
+	result = heap_form_tuple(descr->tupdesc, new_values, isnull);
+	o_heap_tuple_clear_datum(result);
+	return result;
 }
 
 static bool
@@ -413,6 +416,7 @@ o_convert_toast_chunk(ReorderBuffer *reorderbuf, OIndexDescr *indexDescr,
 
 	Assert(heap_toast_tupDesc);
 	toasttup = heap_form_tuple(heap_toast_tupDesc, t_values, t_isnull);
+	o_heap_tuple_clear_datum(toasttup);
 
 	result = record_buffer_tuple(reorderbuf, toasttup, true);
 

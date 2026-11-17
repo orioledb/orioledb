@@ -303,7 +303,14 @@ ALTER TYPE record_type_non_altered RENAME TO record_type_renamed;
 ALTER TYPE record_type_altered RENAME TO record_type_altered_new;
 ALTER TYPE record_type_altered_new ADD ATTRIBUTE c int;
 ALTER TYPE record_type_altered_new DROP ATTRIBUTE b;
-ALTER TYPE record_type_altered_new ALTER ATTRIBUTE c TYPE text;
+-- Only the SQLSTATE is checked: the message differs between minor releases.
+DO $$
+BEGIN
+	ALTER TYPE record_type_altered_new ALTER ATTRIBUTE c TYPE text;
+EXCEPTION WHEN feature_not_supported THEN
+	RAISE NOTICE 'cannot alter type: it is used by a column';
+END
+$$;
 
 SELECT * FROM o_test_record_type_alter;
 UPDATE o_test_record_type_alter SET val5.b = 4;

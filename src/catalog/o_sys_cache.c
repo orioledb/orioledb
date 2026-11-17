@@ -135,6 +135,9 @@ static HTAB *sys_caches;
 static ResourceOwner my_owner = NULL;
 static Oid	save_userid;
 static int	save_sec_context;
+#ifdef HEAP_IS_DATUM
+static int	save_composite_type_mismatch;
+#endif
 static int	o_sys_cache_hooks_depth = 0;
 
 /*
@@ -3171,6 +3174,23 @@ o_set_syscache_hooks(void)
 		SetUserIdAndSecContext(BOOTSTRAP_SUPERUSERID,
 							   save_sec_context |
 							   SECURITY_LOCAL_USERID_CHANGE);
+
+#ifdef HEAP_IS_DATUM
+
+		/*
+		 * Composite datums are stamped with the attribute version of the
+		 * tuple descriptor they were formed with, and deforming one against a
+		 * descriptor of a different version is an error.  While hooks are
+		 * set, there is no catalog access, and composite descriptors come
+		 * from OrioleDB's own system trees (see
+		 * o_load_typcache_tupdesc_hook()), which do not store attribute
+		 * versions.  Those descriptors would never match the stamp of the
+		 * stored values (recovery replays values formed by backends), so
+		 * suspend the check until the hooks are unset.
+		 */
+		save_composite_type_mismatch = composite_type_mismatch;
+		composite_type_mismatch = COMPOSITE_TYPE_MISMATCH_DISABLED;
+#endif
 		SearchCatCacheInternal_hook = o_SearchCatCacheInternal_hook;
 		SearchCatCacheList_hook = o_SearchCatCacheList_hook;
 		SysCacheGetAttr_hook = o_SysCacheGetAttr_hook;
@@ -3197,6 +3217,9 @@ o_unset_syscache_hooks(void)
 		load_enum_cache_data_hook = NULL;
 		load_domaintype_info_hook = NULL;
 		SetUserIdAndSecContext(save_userid, save_sec_context);
+#ifdef HEAP_IS_DATUM
+		composite_type_mismatch = save_composite_type_mismatch;
+#endif
 		if (CurrentResourceOwner == my_owner)
 		{
 			CurrentResourceOwner = NULL;
