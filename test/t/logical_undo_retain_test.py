@@ -374,6 +374,11 @@ class LogicalUndoRetainTest(BaseTest):
 			    "hot_standby_feedback = on\n")
 			replica.restart()
 
+			# The standby's snapbuilder needs a XLOG_RUNNING_XACTS
+			# record between the slot's restart_lsn and confirmed_flush
+			# to reach consistency; without one the slot stays temporary.
+			node.safe_psql('postgres', 'CHECKPOINT')
+
 			# A slot is synchronised as temporary until it has a confirmed
 			# position to be synchronised to, so give it one.
 			self.decoded(node)
