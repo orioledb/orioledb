@@ -37,12 +37,12 @@ typedef struct
 /*
  * CheckpointControl.binaryVersion packs two 16-bit values into one uint32,
  * following the PG_PROTOCOL(major,minor) pattern from libpq/pqcomm.h.
- * Old clusters wrote just ORIOLEDB_BINARY_VERSION, so undoVersion reads as 0.
+ * Old clusters wrote just ORIOLEDB_BINARY_VERSION, so checkpointVersion reads as 0.
  */
-#define PACK_BINARY_VERSION(bin, undo) \
-	(((uint32) (bin)) | ((uint32) (undo) << 16))
-#define UNPACK_BINARY_VERSION(v)	((v) & 0xFFFF)
-#define UNPACK_UNDO_VERSION(v)		((v) >> 16)
+#define PACK_BINARY_VERSION(bin, chkp) \
+	(((uint32) (bin)) | ((uint32) (chkp) << 16))
+#define UNPACK_BINARY_VERSION(v)		((v) & 0xFFFF)
+#define UNPACK_CHECKPOINT_VERSION(v)	((v) >> 16)
 
 /*
  * To ensure correct reading of controlFileVersion, changes in struct layout
