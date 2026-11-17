@@ -27,6 +27,8 @@ SERIAL_CACHE = 10 * BIG_ROWS
 H_REL = "h_data"
 SEQ = "o_seq"
 NEVER = f"{THRESHOLD_GUC} = -1\n"
+NEW_REL = "o_new"
+ENUM = "o_color"
 SUB = "test_sub"
 SLOT = "s"
 # Digest expression for the scenarios that add column c on the publisher
@@ -517,6 +519,112 @@ class StreamingTestBase(BaseTest):
 			commit;
 		""")
 
+	def sc_rollback_after_stream(self, pub):
+		# s1 is rolled back once the transaction is being streamed, so the
+		# subscriber gets a stream abort; what follows goes on under the same
+		# heap xid: 2600 rows
+		with pub.connect() as con:
+			con.begin()
+			con.execute(big_insert(O_REL))
+			streamed = self.wait_until(lambda: self.slot_stats(pub)[0] >= 1)
+			self.assertTrue(streamed, self.log_errors(pub))
+			con.execute(f"""
+				savepoint s1;
+				{big_insert(O_REL, 500, start=10001)}
+				rollback to savepoint s1;
+				savepoint s2;
+				{big_insert(O_REL, 500, start=20001)}
+				release savepoint s2;
+				{big_insert(O_REL, 100, start=30001)}
+			""")
+			con.commit()
+
+	def sc_terminated_while_streamed(self, pub):
+		# The backend dies while its transaction is being streamed.  The
+		# subscriber must roll the stream back and keep the later row only
+		con = pub.connect()
+		con.begin()
+		con.execute(big_insert(O_REL))
+		streamed = self.wait_until(lambda: self.slot_stats(pub)[0] >= 1)
+		self.assertTrue(streamed, self.log_errors(pub))
+		pub.safe_psql(f"select pg_terminate_backend({con.pid});")
+		try:
+			con.close()
+		except Exception:
+			pass
+		pub.safe_psql(f"insert into {O_REL}(id, data) values (1, 'after');")
+
+	def sc_plpgsql_switch_in_failed_block(self, pub):
+		# The heap xid arrives inside a block that then fails.  The block
+		# started before the first OrioleDB write, so its rollback drops the
+		# whole logical transaction in the decoder, link included; the
+		# second insert must be linked again and streamed: BIG_ROWS rows
+		pub.safe_psql(f"""
+			do $$
+			begin
+				begin
+					{big_insert(O_REL)}
+					raise exception 'roll back the first block';
+				exception when others then
+					null;
+				end;
+				{big_insert(O_REL, start=10001)}
+			end $$;
+		""")
+
+	def sc_oversized_record_crosses(self, pub):
+		# A REPLICA IDENTITY FULL update of a TOASTed row writes the old
+		# tuple inline, in a WAL container of its own.  The TOAST chunks stay
+		# under the threshold, the old tuple crosses it, and the small insert
+		# after it gets the heap xid
+		pub.safe_psql(f"""
+			alter table {O_REL} replica identity full;
+			insert into {O_REL}(id, data)
+				select 1, string_agg(md5(a::text), '')
+					from generate_series(1, 700) f(a);
+		""")
+		with pub.connect() as con:
+			con.begin()
+			con.execute(f"set {THRESHOLD_GUC} = 32;")
+			con.execute(f"update {O_REL} set data = data || 'y' where id = 1;")
+			self.assertEqual(
+			    con.execute("select orioledb_get_current_heap_xid();")[0][0],
+			    0, "the TOAST chunks crossed the threshold")
+			con.execute(f"insert into {O_REL}(id, data) values (2, 'small');")
+			self.assertNotEqual(
+			    con.execute("select orioledb_get_current_heap_xid();")[0][0],
+			    0, "the old tuple did not count")
+			con.commit()
+
+	def sc_spilled_then_adopted(self, pub):
+		# For spilled_conf(): the start of the transaction is spilled under
+		# the logical xid, the rest streamed under the heap xid
+		pub.safe_psql(f"begin; {big_insert(O_REL, 2 * BIG_ROWS)} commit;")
+
+	@staticmethod
+	def spilled_conf():
+		# Threshold above logical_decoding_work_mem, below the transaction
+		return f"{THRESHOLD_GUC} = 1MB\n"
+
+	def sc_ddl_after_nextval_in_savepoint(self, pub):
+		# nextval() assigns the heap xid inside s1 with no OrioleDB record in
+		# between.  The first OrioleDB writes after it are the catalog and
+		# type cache entries of the new table: BIG_ROWS + 1 rows
+		pub.safe_psql(f"create sequence {SEQ};")
+		pub.safe_psql(f"""
+			begin;
+			insert into {O_REL}(id, data) values (1, 'first');
+			savepoint s1;
+			select nextval('{SEQ}');
+			create type {ENUM} as enum ('r', 'g');
+			create table {NEW_REL}(id int primary key, c {ENUM})
+				using orioledb;
+			insert into {NEW_REL} values (1, 'r');
+			release savepoint s1;
+			{big_insert(O_REL, start=1001)}
+			commit;
+		""")
+
 	def sc_dml_then_ddl(self, pub):
 		pub.safe_psql(f"""
 			begin;
@@ -545,6 +653,92 @@ class StreamingTestBase(BaseTest):
 			begin;
 			insert into {H_REL}(id, data) values (1, 'h');
 			insert into {O_REL}(id, data) values (1, 'o');
+			commit;
+		""")
+
+	def sc_update_delete_toast(self, pub):
+		# Streamed changes other than inserts: every row updated, every
+		# other row deleted, TOASTed values rewritten and replaced
+		pub.safe_psql(f"""
+			alter table {O_REL} alter column data set storage external;
+			{big_insert(O_REL)}
+			insert into {O_REL}(id, data)
+				select a, repeat('x', 100000) || a
+					from generate_series({BIG_ROWS + 1}, {BIG_ROWS + 10}) f(a);
+		""")
+		pub.safe_psql(f"""
+			begin;
+			update {O_REL} set data = data || 'u';
+			delete from {O_REL} where id % 2 = 0;
+			update {O_REL} set data = repeat('y', 100000) || id
+				where id > {BIG_ROWS};
+			{big_insert(O_REL, start=20001)}
+			commit;
+		""")
+
+	def sc_update_delete_full(self, pub):
+		# The same with the old tuples in the WAL
+		pub.safe_psql(f"alter table {O_REL} replica identity full;")
+		self.sc_update_delete_toast(pub)
+
+	def sc_release_in_switch_container(self, pub):
+		# The threshold is crossed inside s1, so the switch of the top-level
+		# logical xid and the one the release writes for s1 land in the same
+		# WAL container: 2151 rows
+		pub.safe_psql(f"""
+			begin;
+			insert into {O_REL}(id, data) values (1, 'first');
+			savepoint s1;
+			{big_insert(O_REL, 150, start=1001)}
+			release savepoint s1;
+			{big_insert(O_REL, start=10001)}
+			commit;
+		""")
+
+	def sc_walsender_restart_while_streamed(self, pub):
+		# The walsender dies mid-stream.  The next one decodes the open
+		# transaction again from the slot's restart point, switch included
+		with pub.connect() as con:
+			con.begin()
+			con.execute(big_insert(O_REL))
+			streamed = self.wait_until(lambda: self.slot_stats(pub)[0] >= 1)
+			self.assertTrue(streamed, self.log_errors(pub))
+			pub.safe_psql(f"""
+				select pg_terminate_backend(active_pid)
+					from pg_replication_slots where slot_name = '{SUB}';
+			""")
+			con.execute(big_insert(O_REL, 500, start=10001))
+			con.commit()
+
+	def sc_ddl_in_savepoint_every_xid(self, pub):
+		# For every_xid_conf(): the catalog and type cache writes of the new
+		# table are the first OrioleDB records, some of them in autonomous
+		# transactions, and s1 started before any of them
+		pub.safe_psql(f"""
+			begin;
+			savepoint s1;
+			create type {ENUM} as enum ('r', 'g');
+			create table {NEW_REL}(id int primary key, c {ENUM})
+				using orioledb;
+			insert into {NEW_REL} values (1, 'r');
+			release savepoint s1;
+			{big_insert(O_REL)}
+			commit;
+		""")
+
+	@staticmethod
+	def every_xid_conf():
+		return f"{THRESHOLD_GUC} = 0\n"
+
+	def sc_switch_inside_toast(self, pub):
+		# One TOASTed row crosses the threshold in the middle of its chunks
+		pub.safe_psql(
+		    f"alter table {O_REL} alter column data set storage external;")
+		pub.safe_psql(f"""
+			begin;
+			set local {THRESHOLD_GUC} = 1;
+			insert into {O_REL}(id, data) values (1, repeat('x', 100000));
+			{big_insert(O_REL, start=2)}
 			commit;
 		""")
 
@@ -583,6 +777,34 @@ class LogicalStreamingFunctionalTest(StreamingTestBase):
 
 	def test_stream_savepoint_after_nextval(self):
 		self.check_streamed(self.sc_savepoint_after_nextval)
+
+	def test_stream_rollback_after_stream(self):
+		self.check_streamed(self.sc_rollback_after_stream)
+
+	def test_stream_plpgsql_switch_in_failed_block(self):
+		self.check_streamed(self.sc_plpgsql_switch_in_failed_block)
+
+	def test_stream_ddl_after_nextval_in_savepoint(self):
+		self.check_streamed(self.sc_ddl_after_nextval_in_savepoint)
+
+	def test_stream_spilled_then_adopted(self):
+		pub, sub, _ = self.start_pair(pub_conf=self.spilled_conf())
+		self.sc_spilled_then_adopted(pub)
+		self.assert_streamed(pub, sub, (O_REL, ))
+		stream_txns, spill_txns = self.slot_stats(pub)
+		self.assertGreaterEqual(spill_txns, 1, "nothing was spilled first")
+
+	def test_stream_update_delete_toast(self):
+		self.check_streamed(self.sc_update_delete_toast)
+
+	def test_stream_release_in_switch_container(self):
+		self.check_streamed(self.sc_release_in_switch_container)
+
+	def test_stream_walsender_restart_while_streamed(self):
+		self.check_streamed(self.sc_walsender_restart_while_streamed)
+
+	def test_stream_switch_inside_toast(self):
+		self.check_streamed(self.sc_switch_inside_toast)
 
 	def test_stream_heap_then_oriole(self):
 		self.check_streamed(self.sc_heap_then_oriole, rels=(O_REL, H_REL))
@@ -781,6 +1003,64 @@ class LogicalStreamingCorrectnessTest(StreamingTestBase):
 		                 rels=(O_REL, H_REL),
 		                 pub_conf=NEVER)
 
+	def test_apply_rollback_after_stream(self):
+		self.check_apply(self.sc_rollback_after_stream)
+
+	def test_apply_rollback_after_stream_parallel(self):
+		self.check_apply(self.sc_rollback_after_stream, 'parallel')
+
+	def test_apply_terminated_while_streamed(self):
+		self.check_apply(self.sc_terminated_while_streamed)
+
+	def test_apply_terminated_while_streamed_parallel(self):
+		self.check_apply(self.sc_terminated_while_streamed, 'parallel')
+
+	def test_apply_plpgsql_switch_in_failed_block(self):
+		self.check_apply(self.sc_plpgsql_switch_in_failed_block)
+
+	def test_apply_oversized_record_crosses(self):
+		self.check_apply(self.sc_oversized_record_crosses)
+
+	def test_apply_spilled_then_adopted(self):
+		self.check_apply(self.sc_spilled_then_adopted,
+		                 pub_conf=self.spilled_conf())
+
+	def test_apply_spilled_then_adopted_parallel(self):
+		self.check_apply(self.sc_spilled_then_adopted,
+		                 'parallel',
+		                 pub_conf=self.spilled_conf())
+
+	def test_apply_ddl_after_nextval_in_savepoint(self):
+		self.check_apply(self.sc_ddl_after_nextval_in_savepoint)
+
+	def test_apply_update_delete_toast(self):
+		self.check_apply(self.sc_update_delete_toast)
+
+	def test_apply_update_delete_toast_parallel(self):
+		self.check_apply(self.sc_update_delete_toast, 'parallel')
+
+	def test_apply_update_delete_full(self):
+		self.check_apply(self.sc_update_delete_full)
+
+	def test_apply_update_delete_full_parallel(self):
+		self.check_apply(self.sc_update_delete_full, 'parallel')
+
+	def test_apply_release_in_switch_container(self):
+		self.check_apply(self.sc_release_in_switch_container)
+
+	def test_apply_walsender_restart_while_streamed(self):
+		self.check_apply(self.sc_walsender_restart_while_streamed)
+
+	def test_apply_walsender_restart_while_streamed_parallel(self):
+		self.check_apply(self.sc_walsender_restart_while_streamed, 'parallel')
+
+	def test_apply_ddl_in_savepoint_every_xid(self):
+		self.check_apply(self.sc_ddl_in_savepoint_every_xid,
+		                 pub_conf=self.every_xid_conf())
+
+	def test_apply_switch_inside_toast(self):
+		self.check_apply(self.sc_switch_inside_toast)
+
 	def test_apply_plpgsql_exception_blocks(self):
 		self.check_apply(self.sc_plpgsql_exception_blocks)
 
@@ -889,31 +1169,28 @@ class LogicalStreamingCorrectnessTest(StreamingTestBase):
 		    f"insert into {O_REL}(id, data) values (1, 'after crash');")
 		self.assert_replicated(pub, sub, (O_REL, ))
 
-	def test_apply_crash_after_switch(self):
+	def fill_until_flushed(self, pub, con):
 		"""
-		The publisher crashes right after the container that carries the
-		switch to the heap xid was written.  Recovery must abort the heap
-		xid in the decoder too, or the slot can never move past it.
+		Insert single rows until the local WAL buffer is written out.  The
+		next container stays in memory and is lost with a crash, so the WAL
+		ends with the one just written.
 		"""
-		pub, sub, _ = self.start_pair()
-		con = pub.connect()
-		con.begin()
-		con.execute(f"set {THRESHOLD_GUC} = 1;")
-		# Two rows cross the threshold; then fill the local WAL buffer until
-		# it is written out: the next container stays in memory and is lost
-		# with the crash, so the WAL ends with the one holding the switch
 		lsn = pub.execute("select pg_current_wal_insert_lsn();")[0][0]
 		for i in range(1, 100):
 			con.execute(big_insert(O_REL, 1, start=i))
 			if pub.execute("select pg_current_wal_insert_lsn();")[0][0] != lsn:
-				break
-		else:
-			self.fail("the local WAL buffer never flushed")
+				return
+		self.fail("the local WAL buffer never flushed")
+
+	def crash_and_move_past(self, pub, sub, con):
+		"""
+		Crash the publisher with con's transaction open and check that the
+		slot moves past it after the restart.
+		"""
 		self.assertNotEqual(
 		    con.execute("select orioledb_get_current_heap_xid();")[0][0], 0)
-		# Everything the decoder will ever see of the transaction is before
-		# this point, so a slot stuck on it never gets past it.  The crash
-		# must not take the container with it: get it to disk
+		# Get the last container to disk, or the crash drops it and nothing
+		# is tested
 		pub.safe_psql("select pg_switch_wal();")
 		lsn = pub.execute("select pg_current_wal_flush_lsn();")[0][0]
 
@@ -937,6 +1214,52 @@ class LogicalStreamingCorrectnessTest(StreamingTestBase):
 		""")[0][0])
 		self.assertTrue(moved, f"restart_lsn stuck\n{self.log_errors(pub)}")
 		self.assert_replicated(pub, sub, (O_REL, ))
+
+	def test_apply_crash_after_switch(self):
+		"""
+		The publisher crashes right after the container that carries the
+		switch to the heap xid was written.  The container's xid record
+		predates the heap xid, so recovery can only learn it from the
+		switch.  It must abort the heap xid in the decoder too, or the slot
+		can never move past it.
+		"""
+		pub, sub, _ = self.start_pair()
+		con = pub.connect()
+		con.begin()
+		con.execute(f"set {THRESHOLD_GUC} = 1;")
+		# Two rows cross the threshold, inside the first container
+		self.fill_until_flushed(pub, con)
+		self.crash_and_move_past(pub, sub, con)
+
+	def test_apply_crash_heap_first(self):
+		"""
+		The transaction has its heap xid before its first OrioleDB write, so
+		the switch is the first record of its container, ahead of the xid
+		record.  Recovery has no transaction state at the switch then and
+		must take the heap xid from the xid record instead.
+		"""
+		pub, sub, _ = self.start_pair()
+		con = pub.connect()
+		con.begin()
+		con.execute(f"insert into {H_REL}(id, data) values (1, 'h');")
+		self.fill_until_flushed(pub, con)
+		self.crash_and_move_past(pub, sub, con)
+
+	def test_apply_crash_after_checkpoint(self):
+		"""
+		A checkpoint lands between the switch and the crash.  Recovery
+		starts after the switch and learns the heap xid from the xid record
+		of a later container, written under it.
+		"""
+		pub, sub, _ = self.start_pair()
+		con = pub.connect()
+		con.begin()
+		con.execute(big_insert(O_REL))
+		streamed = self.wait_until(lambda: self.slot_stats(pub)[0] >= 1)
+		self.assertTrue(streamed, self.log_errors(pub))
+		pub.safe_psql("checkpoint;")
+		con.execute(big_insert(O_REL, 100, start=10001))
+		self.crash_and_move_past(pub, sub, con)
 
 
 class LazyHeapXidTest(StreamingTestBase):
@@ -982,4 +1305,28 @@ class LazyHeapXidTest(StreamingTestBase):
 			con.begin()
 			con.execute(f"set {THRESHOLD_GUC} = -1;")
 			self.assertEqual(self.heap_xid_after(con, big_insert(O_REL)), 0)
+			con.commit()
+
+	def test_threshold_per_role_and_transaction(self):
+		node = self.node
+		node.start()
+		node.safe_psql(self.publisher_sql)
+		node.safe_psql(f"alter role current_user set {THRESHOLD_GUC} = -1;")
+		with node.connect() as con:
+			con.begin()
+			self.assertEqual(self.heap_xid_after(con, big_insert(O_REL)), 0)
+			con.commit()
+
+			con.begin()
+			con.execute(f"set local {THRESHOLD_GUC} = 0;")
+			self.assertNotEqual(
+			    self.heap_xid_after(
+			        con,
+			        f"insert into {O_REL}(id, data) values (10001, 'x');"), 0)
+			con.commit()
+
+			# SET LOCAL ended with its transaction, the role setting is back
+			con.begin()
+			self.assertEqual(
+			    self.heap_xid_after(con, big_insert(O_REL, start=20001)), 0)
 			con.commit()
