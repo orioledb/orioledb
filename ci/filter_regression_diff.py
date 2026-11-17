@@ -189,6 +189,27 @@ skip_hunk_errors = {
     # doesn't do IOS for bridged indices.
     r"ERROR:  lossy distance functions are not supported in index-only scans":
     ["gist"],
+    # PG 17.12 / 18.7 added a REINDEX CONCURRENTLY test (23e7e2bde0) whose
+    # index function is plpgsql.  orioledb only allows immutable C and SQL
+    # functions in index expressions, so CREATE INDEX fails here, and heap's
+    # later "cannot DROP INDEX" error (with its CONTEXT lines), which comes
+    # from running that function during REINDEX, never appears.  Drop the
+    # hunk together with those lines.
+    r"ERROR:  function \"concur_reindex_ddl_im\" cannot be used here":
+    ["create_index"],
+    # The subselect test added by 6c0698339e samples int4_tbl, which is an
+    # orioledb table here, and orioledb has no TABLESAMPLE.  The "(0 rows)"
+    # heap result goes away together with the hunk.
+    r"ERROR:  orioledb table \"[a-z0-9_]+\" does not support TABLESAMPLE":
+    ["subselect"],
+    # EXPLAIN of the hashed SubPlan case added to subselect: the subplan scan
+    # is an o_scan node, which also adds an "Forward index only scan of" line
+    # and so changes the row count under the plan.
+    r"\s+->  Custom Scan \(o_scan\) on tenk1 k\s*$": ["subselect"],
+    # The toast test added by 8bccf01594 counts chunks with
+    # pg_column_toast_chunk_id(), which is disabled for orioledb TOAST, so
+    # the count is 0 instead of 2.
+    r"\s+toasted_chunks\s*$": ["sqljson_queryfuncs"],
 }
 
 
