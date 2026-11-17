@@ -561,24 +561,21 @@ acquire_logical_xid(bool *isValidHeapXid)
 }
 
 static void
-release_logical_xid(LogicalXidCtx *ctx)
+release_logical_xid(TransactionId xid)
 {
-	uint32		itemsCount = 0,
-				mynum = 0;
+	uint32		itemsCount;
+	uint32		mynum;
 	uint32		value PG_USED_FOR_ASSERTS_ONLY;
 
-	if (ctx)
-	{
-		itemsCount = logical_xid_buffers_guc * (BLCKSZ / sizeof(pg_atomic_uint32));
-		mynum = ctx->xid % (itemsCount * 32);
+	Assert(TransactionIdIsNormal(xid));
 
-		Assert(TransactionIdIsNormal(ctx->xid));
+	itemsCount = logical_xid_buffers_guc * (BLCKSZ / sizeof(pg_atomic_uint32));
+	mynum = xid % (itemsCount * 32);
 
-		value = pg_atomic_fetch_and_u32(&logicalXidsShmemMap[mynum / 32],
-										~(1 << (mynum % 32)));
+	value = pg_atomic_fetch_and_u32(&logicalXidsShmemMap[mynum / 32],
+									~(1 << (mynum % 32)));
 
-		Assert((value & (1 << (mynum % 32))) != 0);
-	}
+	Assert((value & (1 << (mynum % 32))) != 0);
 }
 
 static TransactionId
@@ -750,10 +747,7 @@ free_abort_logged_xids(void)
 {
 	while (nAbortLoggedXids > 0)
 	{
-		TransactionId xid = releasedLogicalXids[nReleasedLogicalXids - 1].xid;
-		LogicalXidCtx ctx = {xid, false};
-
-		release_logical_xid(&ctx);
+		release_logical_xid(releasedLogicalXids[nReleasedLogicalXids - 1].xid);
 		nReleasedLogicalXids--;
 		nAbortLoggedXids--;
 	}
@@ -770,11 +764,9 @@ free_abort_logged_xids(void)
 static void
 retain_released_logical_xid(TransactionId xid, SubTransactionId parentSubid)
 {
-	LogicalXidCtx ctx = {xid, false};
-
 	if (!XLogLogicalInfoActive())
 	{
-		release_logical_xid(&ctx);
+		release_logical_xid(xid);
 		return;
 	}
 
@@ -910,7 +902,7 @@ oxid_subxact_callback(
 							 * top-level commit record.
 							 */
 							if (prev_logical_xid_pushed_by(mySubid))
-								release_logical_xid(&logicalXidContext);
+								release_logical_xid(logicalXidContext.xid);
 
 							setup_prev_logical_xid_ctx(mySubid);
 						}
@@ -2107,7 +2099,7 @@ release_assigned_logical_xids(void)
 {
 	if (TransactionIdIsValid(logicalXidContext.xid))
 	{
-		release_logical_xid(&logicalXidContext);
+		release_logical_xid(logicalXidContext.xid);
 		reset_logical_xid_ctx();
 	}
 
@@ -2124,7 +2116,7 @@ release_assigned_logical_xids(void)
 			{
 				/* Entries saved before the first assignment hold no xid */
 				if (TransactionIdIsValid(entry->ctx.xid))
-					release_logical_xid(&entry->ctx);
+					release_logical_xid(entry->ctx.xid);
 				pfree(entry);
 			}
 		}
@@ -2132,11 +2124,7 @@ release_assigned_logical_xids(void)
 		prevLogicalXids = NIL;
 
 		for (i = 0; i < nReleasedLogicalXids; i++)
-		{
-			LogicalXidCtx ctx = {releasedLogicalXids[i].xid, false};
-
-			release_logical_xid(&ctx);
-		}
+			release_logical_xid(releasedLogicalXids[i].xid);
 
 		if (releasedLogicalXids != NULL)
 			pfree(releasedLogicalXids);
