@@ -1983,12 +1983,10 @@ set_current_oxid(OXid oxid)
 void
 set_current_logical_xid(LogicalXidCtx *in)
 {
-	if (in)
-	{
-		Assert(!TransactionIdIsValid(logicalXidContext.xid));
-		logicalXidContext.xid = in->xid;
-		logicalXidContext.useHeap = in->useHeap;
-	}
+	Assert(in);
+	Assert(!TransactionIdIsValid(logicalXidContext.xid));
+	logicalXidContext.xid = in->xid;
+	logicalXidContext.useHeap = in->useHeap;
 }
 
 void
@@ -2030,11 +2028,9 @@ get_current_logical_xid(void)
 void
 get_current_logical_xid_ctx(LogicalXidCtx *output)
 {
-	if (output)
-	{
-		output->xid = logicalXidContext.xid;
-		output->useHeap = logicalXidContext.useHeap;
-	}
+	Assert(output);
+	output->xid = logicalXidContext.xid;
+	output->useHeap = logicalXidContext.useHeap;
 }
 
 void
