@@ -1375,7 +1375,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 
 				result = o_indices_add(new_table, new_keys[j].ixNum,
 									   oxid, csn);
-				Assert(result);
+				Assert(result || allow_missing_indices);
 			}
 			reuse_relnode = false;
 			j++;
