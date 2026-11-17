@@ -665,24 +665,62 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		{
 			OTable	   *cur;
 			OIndexKey	key = {.oids = table_index->oids};
+			bool		retry = false;
 
 			STOPEVENT(STOPEVENT_DEFINE_INDEX_BEFORE_UPDATE, NULL);
 
-			systrees_modify_start();
-			cur = o_tables_get(oids);
-			cur->indices = (OTableIndex *)
-				repalloc(cur->indices, sizeof(OTableIndex) *
-						 (cur->nindices + 1));
-			memcpy(&cur->indices[cur->nindices],
-				   &o_table->indices[ix_num],
-				   sizeof(OTableIndex));
-			cur->indices[cur->nindices].index_mctx = NULL;
-			ix_num = cur->nindices;
-			cur->nindices++;
-			o_tables_update_locked(cur, oxid, oSnapshot.csn, false);
-			add_undo_create_relnode(o_table->oids, &key, 1, !is_temp);
-			systrees_modify_end(!is_temp);
-			o_table_free(cur);
+			/*
+			 * Re-read the OTable under oSysTreesLock, append our index, and
+			 * write.  o_tables_update_locked may release oSysTreesLock while
+			 * waiting for a conflicting transaction, letting another backend
+			 * overwrite our entry.  Loop until our index is durably present.
+			 */
+			for (;;)
+			{
+				systrees_modify_start();
+				cur = o_tables_get(oids);
+
+				if (retry)
+				{
+					bool		found_ours = false;
+					int			si;
+
+					for (si = 0; si < cur->nindices; si++)
+					{
+						if (ORelOidsIsEqual(cur->indices[si].oids,
+											table_index->oids))
+						{
+							found_ours = true;
+							ix_num = si;
+							break;
+						}
+					}
+
+					if (found_ours)
+					{
+						systrees_modify_end(false);
+						o_table_free(cur);
+						break;
+					}
+				}
+
+				cur->indices = (OTableIndex *)
+					repalloc(cur->indices, sizeof(OTableIndex) *
+							 (cur->nindices + 1));
+				memcpy(&cur->indices[cur->nindices],
+					   table_index,
+					   sizeof(OTableIndex));
+				cur->indices[cur->nindices].index_mctx = NULL;
+				ix_num = cur->nindices;
+				cur->nindices++;
+				o_tables_update_locked(cur, oxid, oSnapshot.csn, retry);
+				if (!retry)
+					add_undo_create_relnode(o_table->oids, &key, 1,
+											!is_temp);
+				systrees_modify_end(!is_temp);
+				o_table_free(cur);
+				retry = true;
+			}
 		}
 		else
 		{
