@@ -2062,7 +2062,7 @@ o_perform_checkpoint_guts(int flags)
 	control.checkpointRetainXmin = checkpoint_xmin;
 	control.checkpointRetainXmax = checkpoint_xmax;
 	control.binaryVersion = PACK_BINARY_VERSION(ORIOLEDB_BINARY_VERSION,
-												ORIOLEDB_UNDO_VERSION);
+												ORIOLEDB_CHECKPOINT_VERSION);
 	control.s3Mode = orioledb_s3_mode;
 	control.checksums_enabled = orioledb_checksums_enabled;
 	control.controlFileVersion = ORIOLEDB_CHECKPOINT_CONTROL_VERSION;

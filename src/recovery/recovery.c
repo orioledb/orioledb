@@ -1397,13 +1397,13 @@ o_recovery_start_hook(void)
 		CheckpointControl control;
 
 		if (get_checkpoint_control_data(&control) &&
-			UNPACK_UNDO_VERSION(control.binaryVersion) > ORIOLEDB_UNDO_VERSION)
+			UNPACK_CHECKPOINT_VERSION(control.binaryVersion) > ORIOLEDB_CHECKPOINT_VERSION)
 			ereport(FATAL,
 					(errmsg("database files are incompatible with server"),
-					 errdetail("OrioleDB cluster has undo version %d,"
-							   " but the extension supports undo version %d.",
-							   UNPACK_UNDO_VERSION(control.binaryVersion),
-							   ORIOLEDB_UNDO_VERSION),
+					 errdetail("OrioleDB cluster has checkpoint version %d,"
+							   " but the extension supports checkpoint version %d.",
+							   UNPACK_CHECKPOINT_VERSION(control.binaryVersion),
+							   ORIOLEDB_CHECKPOINT_VERSION),
 					 errhint("Upgrade the OrioleDB extension.")));
 	}
 
