@@ -552,6 +552,7 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 			vxidElem->heapXid = heapXid;
 		if (!TransactionIdIsValid(vxidElem->logicalXid))
 			vxidElem->logicalXid = logicalXid;
+		pg_write_barrier();
 	}
 
 	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);

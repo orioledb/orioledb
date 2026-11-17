@@ -1244,7 +1244,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			UndoLocation retainUndoLocation;
 			XidRecKind	kind = xidRec.kind;
 
-			if ((int) kind < 0 || (int) kind > (int) XidRecPendingSkFixup)
+			if ((int) kind < 0 || (int) kind > (int) XidRecXids)
 				ereport(FATAL,
 						(errcode(ERRCODE_DATA_CORRUPTED),
 						 errmsg("corrupted checkpoint xid file: invalid kind %d",
