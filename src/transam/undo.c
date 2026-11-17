@@ -958,7 +958,7 @@ o_slot_retain_location(ReplicationSlot *slot)
 		return 0;
 
 #if PG_VERSION_NUM >= 170000
-	if (slot != NULL && slot->data.synced)
+	if (slot->data.synced)
 	{
 		UndoMeta   *meta = get_undo_meta_by_type(UndoLogSystem);
 
