@@ -36,18 +36,18 @@ def crc32c(data):
 	return crc ^ 0xFFFFFFFF
 
 
-def patch_undo_version(control_path, undo_version):
+def patch_checkpoint_version(control_path, checkpoint_version):
 	"""
-	Patch the undo version packed in binaryVersion and recompute CRC.
+	Patch the checkpoint version packed in binaryVersion and recompute CRC.
 
-	binaryVersion packs (binaryVersion & 0xFFFF) | (undoVersion << 16).
+	binaryVersion packs (binaryVersion & 0xFFFF) | (checkpointVersion << 16).
 	"""
 	with open(control_path, "rb") as f:
 		data = bytearray(f.read())
 
 	old_val = struct.unpack_from("<I", data, BINARY_VERSION_OFFSET)[0]
 	bin_ver = old_val & 0xFFFF
-	new_val = bin_ver | (undo_version << 16)
+	new_val = bin_ver | (checkpoint_version << 16)
 	struct.pack_into("<I", data, BINARY_VERSION_OFFSET, new_val)
 
 	new_crc = crc32c(data[:CRC_OFFSET])
@@ -57,12 +57,12 @@ def patch_undo_version(control_path, undo_version):
 		f.write(data)
 
 
-class UndoVersionTest(BaseTest):
+class CheckpointVersionTest(BaseTest):
 
-	def test_undo_version_recovery_check(self):
+	def test_checkpoint_version_recovery_check(self):
 		"""
 		After a crash, recovery must refuse to start if the control file's
-		undo version exceeds the compiled ORIOLEDB_UNDO_VERSION.
+		checkpoint version exceeds the compiled ORIOLEDB_CHECKPOINT_VERSION.
 		"""
 		node = self.node
 		node.start()
@@ -80,15 +80,15 @@ class UndoVersionTest(BaseTest):
 		with open(control_path, "rb") as f:
 			original = f.read()
 
-		# Patch undo version to a value higher than any compiled version.
-		patch_undo_version(control_path, 0xFFFE)
+		# Patch checkpoint version to a value higher than any compiled version.
+		patch_checkpoint_version(control_path, 0xFFFE)
 
 		with self.assertRaises(StartNodeException):
 			node.start()
 
 		with open(node.pg_log_file) as f:
 			log = f.read()
-			self.assertIn("undo version", log)
+			self.assertIn("checkpoint version", log)
 
 		# Restore the original control file; recovery should succeed.
 		with open(control_path, "wb") as f:
