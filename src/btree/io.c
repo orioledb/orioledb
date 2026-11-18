@@ -2373,13 +2373,14 @@ perform_page_io_build(BTreeDescr *desc, Page img,
 
 	if (orioledb_s3_mode)
 	{
-		int			threshold = ORIOLEDB_S3_PART_SIZE / (OCompressIsValid(desc->compress) ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ);
+		uint64		blcksz = OCompressIsValid(desc->compress) ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ;
+		int			threshold = ORIOLEDB_S3_PART_SIZE / blcksz;
 
 		if ((extent->off + threshold - 1) / threshold !=
 			(extent->off + threshold - 1 + extent->len) / threshold)
 		{
 			S3HeaderTag tag;
-			uint64		offset = (extent->off + extent->len - 1) * (OCompressIsValid(desc->compress) ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ);
+			uint64		offset = (extent->off + extent->len - 1) * blcksz;
 			int			index;
 
 			Assert((extent->off + threshold - 1) / threshold + 1 ==
