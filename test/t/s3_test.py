@@ -570,7 +570,6 @@ class S3Test(S3BaseTest):
 			                 new_node.execute("SELECT * FROM o_test_1"))
 			new_node.stop()
 			new_node.cleanup()
-		node.stop()
 
 	@s3_test_attrs(host=f'{S3BaseTest.bucket_name}.{S3BaseTest.host}',
 	               prefix=S3BaseTest.optional_prefix)
@@ -626,7 +625,6 @@ class S3Test(S3BaseTest):
 			                 new_node.execute("SELECT * FROM o_test_1"))
 			new_node.stop()
 			new_node.cleanup()
-		node.stop()
 
 	@s3_test_attrs(http=True,
 	               host=f'{S3BaseTest.bucket_name}.{S3BaseTest.host}')
@@ -679,7 +677,6 @@ class S3Test(S3BaseTest):
 			                 new_node.execute("SELECT * FROM o_test_1"))
 			new_node.stop()
 			new_node.cleanup()
-		node.stop()
 
 	@s3_test_attrs(host=f'{S3BaseTest.bucket_name}.{S3BaseTest.host}')
 	def test_s3_https_virtual_host(self):
@@ -731,7 +728,6 @@ class S3Test(S3BaseTest):
 			                 new_node.execute("SELECT * FROM o_test_1"))
 			new_node.stop()
 			new_node.cleanup()
-		node.stop()
 
 	def test_s3_check_control(self):
 		node = self.node

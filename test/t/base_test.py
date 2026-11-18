@@ -22,7 +22,9 @@ import unittest
 from threading import Thread
 from testgres.enums import NodeStatus
 from testgres.exceptions import PortForException
+from testgres.exceptions import NodeException, QueryException
 from testgres.node import PostgresNode
+from testgres.operations.exceptions import ExecUtilException
 from testgres.operations.local_ops import LocalOperations
 from testgres.port_manager import PortManager
 from testgres.utils import get_pg_version, get_pg_config
@@ -576,6 +578,11 @@ class BaseTest(unittest.TestCase):
 		if (hasattr(e, 'exception')):
 			e = e.exception
 
+		# Newer testgres wraps driver errors; the original keeps `pgerror`
+		cause = getattr(e, '__cause__', None)
+		if not hasattr(e, 'pgerror') and hasattr(cause, 'pgerror'):
+			e = cause
+
 		if (hasattr(e, 'pgerror')) or (hasattr(e, 'message')):
 			exp_msg = "ERROR:  %s\n" % (err_msg)
 			if (second_msg != None):
@@ -780,20 +787,6 @@ def release_parked_flush_on_lock(node,
 	t.join()
 
 
-# workaround for testgres error messages on empty results
-def new_execute(self, query, *args):
-	self.cursor.execute(query, args)
-	try:
-		res = self.cursor.fetchall()
-		# pg8000 might return tuples
-		if isinstance(res, tuple):
-			res = [tuple(t) for t in res]
-
-		return res
-	except Exception as e:
-		return None
-
-
 # Convert output of orioledb_tbl_structure/orioledb_idx_structure to json
 def tbl_structure_to_json(structure: str) -> dict[str, dict[int, Any]]:
 	res = dict()
@@ -860,9 +853,6 @@ def tbl_structure_to_json(structure: str) -> dict[str, dict[int, Any]]:
 	return res
 
 
-testgres.NodeConnection.execute = new_execute
-
-
 # Newer testgres derives `is_started` from the postmaster pid and makes it
 # read-only, but tests tell it that a node was stopped/started behind its back.
 def _set_is_started(self, value):
@@ -875,3 +865,15 @@ def _set_is_started(self, value):
 _is_started = getattr(PostgresNode, 'is_started', None)
 if isinstance(_is_started, property) and _is_started.fset is None:
 	PostgresNode.is_started = _is_started.setter(_set_is_started)
+
+
+# Newer testgres makes `message` the full text (command, exit code, output)
+# and moves the original text to `description`.  Tests compare against the
+# original text, so keep `message` returning it.
+def _plain_message(self):
+	return self.description
+
+
+for _exc in (ExecUtilException, NodeException, QueryException):
+	if isinstance(getattr(_exc, 'description', None), property):
+		_exc.message = property(_plain_message)
