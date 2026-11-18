@@ -35,6 +35,9 @@ concurrency:
   group: sqlsmith-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   sqlsmith:
     # A fork syncing main should not spend four jobs on it; its own pull

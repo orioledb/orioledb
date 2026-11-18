@@ -12,6 +12,9 @@ on:
       - "**/*.py"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   pgindent:
     runs-on:

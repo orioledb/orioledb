@@ -43,6 +43,9 @@ on:
         options: [all, normal, debug, sanitize, check_page, valgrind_1, valgrind_2, pg_tests, dm_log_writes]
         default: all
 
+permissions:
+  contents: read
+
 jobs:
   matrix:
     runs-on: blacksmith-2vcpu-ubuntu-2404

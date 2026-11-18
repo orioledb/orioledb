@@ -19,6 +19,9 @@ on:
         description: "Benchmark script args"
         required: true
         default: "--shared_buffers=32GB --max_wal_size=4GB --clients=160,180,200,220,240 --max_connections=300 --time=60 --engines=orioledb,builtin --tests=read-only-9,read-write-proc --scale=1000 --base_dir=/mnt"
+permissions:
+  contents: read
+
 jobs:
   start-runner:
     name: Start self-hosted EC2 runner

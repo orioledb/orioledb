@@ -28,6 +28,9 @@ on:
 env:
   REGISTRY_IMAGE: orioledb/orioledb
 
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:

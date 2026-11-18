@@ -17,6 +17,9 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+
 jobs:
   test-docker-builds:
     strategy:

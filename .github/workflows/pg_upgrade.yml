@@ -13,6 +13,9 @@ on:
       - "test/integration/**"
       - "doc/**"
 
+permissions:
+  contents: read
+
 jobs:
   pg_upgrade:
     strategy:
