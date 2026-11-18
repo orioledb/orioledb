@@ -872,9 +872,11 @@ class PgBenchTest:
 		self.results = {}
 		for engine in args.engines:
 			for test_name in args.tests:
-				test_file = tempfile.mktemp(prefix='benchmark_')
-				with open(test_file, 'wt') as f:
+				with tempfile.NamedTemporaryFile('wt',
+				                                 prefix='benchmark_',
+				                                 delete=False) as f:
 					f.write(self.tests[test_name].getScript(engine))
+					test_file = f.name
 				serie = []
 				for c in args.clients:
 					measures = []
