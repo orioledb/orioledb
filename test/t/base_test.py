@@ -14,6 +14,7 @@ import string
 import subprocess
 import sys
 import testgres
+import threading
 import time
 import typing
 import unittest
@@ -22,8 +23,8 @@ from threading import Thread
 from testgres.enums import NodeStatus
 from testgres.exceptions import PortForException
 from testgres.node import PostgresNode
-from testgres.operations.os_ops import OsOperations, ConnectionParams
-from testgres.port_manager import PortManager__Generic
+from testgres.operations.local_ops import LocalOperations
+from testgres.port_manager import PortManager
 from testgres.utils import get_pg_version, get_pg_config
 from typing import Any, List, Optional
 
@@ -207,12 +208,15 @@ class DmLogWritesContext:
 		self._tmpdir = None
 
 
-class TestPortManager(PortManager__Generic):
+class TestPortManager(PortManager):
+	"""Hands out only base_port and base_port + 1, so tests get fixed ports."""
 
-	def __init__(self, os_ops: OsOperations, base_port: int):
-		super().__init__(os_ops)
+	def __init__(self, base_port: int):
+		super().__init__()
+		self._guard = threading.Lock()
 		self._available_ports: typing.Set[int] = set(
 		    [base_port, base_port + 1])
+		self._reserved_ports: typing.Set[int] = set()
 
 	def is_port_free(self, port: int):
 		port_free = port in self._available_ports
@@ -228,30 +232,22 @@ class TestPortManager(PortManager__Generic):
 		return False
 
 	def reserve_port(self) -> int:
-		assert self._guard is not None
-		assert type(self._available_ports) == set  # noqa: E721t
-		assert type(self._reserved_ports) == set  # noqa: E721
-
 		with self._guard:
-			t = tuple(self._available_ports)
-			assert len(t) == len(self._available_ports)
-			t = None
-
-			for port in self._available_ports:
-				assert not (port in self._reserved_ports)
-
-				port_free = self.is_port_free(port)
-
-				if not port_free:
+			for port in sorted(self._available_ports):
+				if not self.is_port_free(port):
 					continue
 
 				self._reserved_ports.add(port)
 				self._available_ports.discard(port)
-				assert port in self._reserved_ports
-				assert not (port in self._available_ports)
 				return port
 
 		raise PortForException("Can't select a port.")
+
+	def release_port(self, number: int) -> None:
+		with self._guard:
+			assert number in self._reserved_ports
+			self._reserved_ports.discard(number)
+			self._available_ports.add(number)
 
 
 class BaseTest(unittest.TestCase):
@@ -346,10 +342,10 @@ class BaseTest(unittest.TestCase):
 			                       self.myName + '_' + suffix)
 			if os.path.exists(baseDir):
 				shutil.rmtree(baseDir)
-		port_manager = TestPortManager(
-		    PostgresNode._get_os_ops(ConnectionParams()), base_port)
+		port_manager = TestPortManager(base_port)
 		node = testgres.get_new_node('test',
 		                             base_dir=baseDir,
+		                             os_ops=LocalOperations(),
 		                             port_manager=port_manager)
 		node.init(initdb_args if initdb_args is not None else
 		          ["--no-locale", "--encoding=UTF8"])
@@ -865,3 +861,17 @@ def tbl_structure_to_json(structure: str) -> dict[str, dict[int, Any]]:
 
 
 testgres.NodeConnection.execute = new_execute
+
+
+# Newer testgres derives `is_started` from the postmaster pid and makes it
+# read-only, but tests tell it that a node was stopped/started behind its back.
+def _set_is_started(self, value):
+	if value:
+		self._manually_started_pm_pid = PostgresNode._C_PM_PID__IS_NOT_DETECTED
+	else:
+		self._manually_started_pm_pid = None
+
+
+_is_started = getattr(PostgresNode, 'is_started', None)
+if isinstance(_is_started, property) and _is_started.fset is None:
+	PostgresNode.is_started = _is_started.setter(_set_is_started)
