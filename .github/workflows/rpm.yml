@@ -12,6 +12,9 @@ on:
         required: true
         default: 'nosignbuild14'
 
+permissions:
+  contents: read
+
 jobs:
   build_rpms:
     runs-on: [self-hosted, X64, CentOS]

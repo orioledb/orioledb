@@ -10,6 +10,9 @@ on:
         required: false
         default: ""
 
+permissions:
+  contents: read
+
 jobs:
   build-publish:
     # Only run on releases this workflow owns. Auto-generated streams such as

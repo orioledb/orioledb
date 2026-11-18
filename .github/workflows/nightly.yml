@@ -9,6 +9,9 @@ concurrency:
   group: nightly
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   prepare:
     # Skip cron runs in forks; allow manual dispatch anywhere for testing.
