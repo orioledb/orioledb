@@ -26,5 +26,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
           EVENT_ACTION: ${{ github.event.action }}
         run: ci/backpatch/backpatch_check.sh

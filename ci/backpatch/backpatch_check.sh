@@ -28,6 +28,11 @@ if is_release_branch "$BASE_REF"; then
 	exit 0
 fi
 
+if is_release_branch "${HEAD_REF:-}"; then
+	echo "::error::The pull request comes from release branch $HEAD_REF, which must not be merged into main."
+	exit 1
+fi
+
 summary() {
 	echo "$*"
 	if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
