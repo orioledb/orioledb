@@ -211,7 +211,7 @@ static void checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 									 int level, WalkMessage *message);
 static void prepare_leaf_page(BTreeDescr *descr, CheckpointState *state);
 static void checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
-								 OInMemoryBlkno *blkno, uint32 page_chage_count,
+								 OInMemoryBlkno *blkno, uint32 page_change_count,
 								 int level);
 static void checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 									   ORelOids tableOids, void *arg);
@@ -3786,7 +3786,7 @@ checkpointer_update_autonomous(BTreeDescr *desc, CheckpointState *state)
  */
 static void
 checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
-					 OInMemoryBlkno *blkno, uint32 page_chage_count, int level)
+					 OInMemoryBlkno *blkno, uint32 page_change_count, int level)
 {
 	Page		page,
 				img;
@@ -3806,8 +3806,8 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 
 	if (*blkno != descr->rootInfo.rootPageBlkno)
 	{
-		Assert(page_chage_count != InvalidOPageChangeCount);
-		Assert(page_chage_count != O_PAGE_GET_CHANGE_COUNT(page));
+		Assert(page_change_count != InvalidOPageChangeCount);
+		Assert(page_change_count != O_PAGE_GET_CHANGE_COUNT(page));
 		return;
 	}
 
@@ -4043,7 +4043,7 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
  */
 static void
 checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
-								   OInMemoryBlkno *blkno, uint32 page_chage_count, int level)
+								   OInMemoryBlkno *blkno, uint32 page_change_count, int level)
 {
 	OInMemoryBlkno old_blkno;
 
@@ -4055,16 +4055,16 @@ checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
 
 		old_blkno = *blkno;
 
-		checkpoint_lock_page(descr, state, blkno, page_chage_count, level);
+		checkpoint_lock_page(descr, state, blkno, page_change_count, level);
 
-		if (old_blkno == *blkno && page_chage_count != InvalidOPageChangeCount &&
-			O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(*blkno) != page_chage_count)
+		if (old_blkno == *blkno && page_change_count != InvalidOPageChangeCount &&
+			O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(*blkno) != page_change_count)
 			break;
 
 		Assert(level >= 0 && level < ORIOLEDB_MAX_DEPTH);
 
 		if (o_btree_split_is_incomplete(*blkno,
-										page_chage_count,
+										page_change_count,
 										&relocked))
 		{
 			o_btree_split_fix_and_unlock(descr, *blkno);
@@ -4246,7 +4246,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 				i;
 	BTreeDescr *descr = *descrPtr;
 	OInMemoryBlkno blkno = descr->rootInfo.rootPageBlkno;
-	uint32		page_chage_count = InvalidOPageChangeCount;
+	uint32		page_change_count = InvalidOPageChangeCount;
 	uint		blcksz = OCompressIsValid(descr->compress) ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ;
 	uint32		chkpNum = checkpoint_state->lastCheckpointNumber + 1;
 
@@ -4316,9 +4316,9 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 			level--;
 
 			blkno = message.content.downwards.blkno;
-			page_chage_count = message.content.downwards.pageChangeCount;
+			page_change_count = message.content.downwards.pageChangeCount;
 
-			checkpoint_fix_split_and_lock_page(descr, state, &blkno, page_chage_count, level);
+			checkpoint_fix_split_and_lock_page(descr, state, &blkno, page_change_count, level);
 
 			page = O_GET_IN_MEMORY_PAGE(blkno);
 
@@ -4515,7 +4515,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 			valid_doff = DiskDownlinkIsValid(message.content.upwards.diskDownlink);
 
 			level = level + 1;
-			page_chage_count = InvalidOPageChangeCount;
+			page_change_count = InvalidOPageChangeCount;
 
 			state->stack[level].autonomousTupleExist = save_item;
 			/* Is everything done? */
@@ -4576,7 +4576,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 			}
 
 			blkno = state->stack[level].blkno;
-			checkpoint_fix_split_and_lock_page(descr, state, &blkno, page_chage_count, level);
+			checkpoint_fix_split_and_lock_page(descr, state, &blkno, page_change_count, level);
 			page = O_GET_IN_MEMORY_PAGE(blkno);
 
 			if (message.content.upwards.parentDirty)
@@ -4584,7 +4584,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 		}
 		else if (message.action == WalkContinue)
 		{
-			checkpoint_fix_split_and_lock_page(descr, state, &blkno, page_chage_count, level);
+			checkpoint_fix_split_and_lock_page(descr, state, &blkno, page_change_count, level);
 		}
 		else
 		{
