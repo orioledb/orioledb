@@ -68,6 +68,30 @@ class VacuumTest(BaseTest):
 		con.close()
 		node.stop()
 
+	def test_vacuum_parallel_gin_expression_index(self):
+		node = self.node
+		node.append_conf("max_parallel_maintenance_workers = 2\n")
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test_gin (
+				id bigint PRIMARY KEY,
+				body text
+			) USING orioledb;
+			INSERT INTO o_test_gin
+				SELECT i, 'hello world number ' || i
+				FROM generate_series(1, 10000) i;
+			CREATE INDEX o_test_gin_body_idx ON o_test_gin
+				USING gin (to_tsvector('english', body));
+		""")
+
+		con = node.connect(autocommit=True)
+		con.execute("SET min_parallel_index_scan_size = 0;")
+		con.execute("VACUUM o_test_gin;")
+		con.execute("VACUUM ANALYZE o_test_gin;")
+		con.close()
+		node.stop()
+
 	def test_vacuum_disable_page_skipping(self):
 		node = self.node
 		node.start()
