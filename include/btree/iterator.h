@@ -84,6 +84,46 @@ extern OTuple o_btree_iterator_fetch(BTreeIterator *it,
 									 void *endKey, BTreeKeyType endKind,
 									 bool endIsIncluded,
 									 BTreeLocationHint *hint);
+
+/*
+ * Rows an iterator hands out in one go: `count` leaf items from `loc` on, all
+ * in one chunk of the iterator's page image, every one visible and within the
+ * end bound.  The image belongs to the iterator, so the rows must be read
+ * before the iterator is called again.
+ */
+typedef struct BTreeIteratorBatch
+{
+	Page		img;
+	BTreePageItemLocator loc;
+	OffsetNumber count;
+	CommitSeqNo csn;
+} BTreeIteratorBatch;
+
+extern bool o_btree_iterator_fetch_batch(BTreeIterator *it,
+										 void *endKey, BTreeKeyType endKind,
+										 bool endIsIncluded,
+										 BTreeIteratorBatch *batch);
+
+/* The batch's current row */
+static inline OTuple
+o_btree_iterator_batch_tuple(BTreeIteratorBatch *batch)
+{
+	OTuple		tuple;
+
+	Assert(batch->count > 0);
+	BTREE_PAGE_READ_LEAF_TUPLE(tuple, batch->img, &batch->loc);
+	return tuple;
+}
+
+/* Step to the batch's next row */
+static inline void
+o_btree_iterator_batch_next(BTreeIteratorBatch *batch)
+{
+	Assert(batch->count > 0);
+	batch->count--;
+	batch->loc.itemOffset++;
+}
+
 extern OTuple btree_iterate_raw(BTreeIterator *it, void *end,
 								BTreeKeyType endKind, bool endInclude,
 								bool *scanEnd, BTreeLocationHint *hint);

@@ -1448,6 +1448,76 @@ o_exec_parallel_idx_scan(OScanState *ostate, ScanState *ss)
 	}
 }
 
+/*
+ * Can rows of this scan be taken from a batch (o_btree_iterator_fetch_batch())
+ * straight into the slot?  Only for an index-only scan of a secondary index
+ * whose rows need nothing per row beyond what the batch has checked -- no
+ * array or skip keys, no key condition is_tuple_valid() would test -- and
+ * whose leaf values the slot takes one for one
+ * (tts_orioledb_store_index_values()).
+ */
+static bool
+o_scan_can_batch(OTableDescr *descr, OScanState *ostate, TupleTableSlot *slot)
+{
+	BTScanOpaque so = (BTScanOpaque) ostate->scandesc.opaque;
+	OIndexDescr *id;
+	int			i;
+
+	if (!ostate->onlyCurIx || ostate->ixNum == PrimaryIndexNumber ||
+		ostate->iterator == NULL || ostate->exact ||
+		ostate->curKeyRange.empty || !ostate->curKeyRangeIsLoaded ||
+		ostate->scanDir != ForwardScanDirection)
+		return false;
+#if PG_VERSION_NUM >= 180000
+	if (ostate->skipScanProbePending)
+		return false;
+#endif
+	if (tuple_valid_check_needed(&ostate->curKeyRange, so,
+								 ostate->numPrefixExactKeys))
+		return false;
+
+	id = descr->indices[ostate->ixNum];
+	if (id->desc.type == oIndexExclusion || id->bridging ||
+		GET_PRIMARY(descr)->primaryIsCtid || GET_PRIMARY(descr)->bridging ||
+		slot->tts_tupleDescriptor->natts != id->leafTupdesc->natts)
+		return false;
+
+	for (i = 0; i < id->leafTupdesc->natts; i++)
+		if (TupleDescAttr(id->leafTupdesc, i)->attlen <= 0)
+			return false;
+
+	return true;
+}
+
+/* Put the next row of the scan's batch into the slot; false when none */
+static bool
+o_exec_fetch_batch(OTableDescr *descr, OScanState *ostate, ScanState *ss)
+{
+	if (ostate->batch.count == 0)
+	{
+		bool		found;
+
+		if (!o_scan_can_batch(descr, ostate, ss->ss_ScanTupleSlot))
+			return false;
+
+		/* As o_index_scan_getnext(): the iterator may step pages */
+		descr->noInvalidation = true;
+		found = o_btree_iterator_fetch_batch(ostate->iterator,
+											 &ostate->curKeyRange.high,
+											 BTreeKeyBound, true,
+											 &ostate->batch);
+		descr->noInvalidation = false;
+		if (!found)
+			return false;
+	}
+
+	tts_orioledb_store_index_values(ss->ss_ScanTupleSlot,
+									o_btree_iterator_batch_tuple(&ostate->batch),
+									descr, ostate->batch.csn, ostate->ixNum);
+	o_btree_iterator_batch_next(&ostate->batch);
+	return true;
+}
+
 /* fetches next tuple for oIterateDirectModify */
 TupleTableSlot *
 o_exec_fetch(OScanState *ostate, ScanState *ss)
@@ -1466,6 +1536,12 @@ o_exec_fetch(OScanState *ostate, ScanState *ss)
 	{
 		BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
 		CommitSeqNo tupleCsn;
+
+		if (o_exec_fetch_batch(descr, ostate, ss))
+		{
+			slot = ss->ss_ScanTupleSlot;
+			continue;
+		}
 
 		if (!ostate->curKeyRangeIsLoaded)
 			ostate->curKeyRange.empty = true;

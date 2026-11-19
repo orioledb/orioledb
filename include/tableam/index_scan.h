@@ -19,6 +19,7 @@
 
 #include "access/nbtree.h"
 #include "access/sdir.h"
+#include "btree/iterator.h"
 #include "btree/scan.h"
 
 typedef struct OScanState
@@ -66,6 +67,8 @@ typedef struct OScanState
 #endif
 	OBTreeKeyRange curKeyRange;
 	BTreeIterator *iterator;
+	/* rows the iterator handed out in one go (o_exec_fetch()) */
+	BTreeIteratorBatch batch;
 	List	   *indexQuals;
 	/* used only by direct modify functions */
 	CmdType		cmd;

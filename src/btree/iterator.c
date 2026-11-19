@@ -1500,6 +1500,141 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 }
 
 /*
+ * Is this leaf item's own version the one `snapshot` sees, with nothing to
+ * walk?  It is when its transaction finished before any snapshot taken now
+ * could start -- o_find_tuple_version() would stop at it at once -- and it
+ * neither deletes the row nor only locks it.
+ */
+static inline bool
+leaf_item_visible_as_is(BTreeLeafTuphdr *tuphdr, OSnapshot *snapshot)
+{
+	OXid		oxid;
+
+	if (tuphdr->deleted != BTreeLeafTupleNonDeleted ||
+		XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo))
+		return false;
+
+	oxid = XACT_INFO_GET_OXID(tuphdr->xactInfo);
+	return oxid == BootstrapTransactionId || oxid < snapshot->xmin;
+}
+
+/*
+ * Hand out the next rows of the chunk the iterator is in as one batch, for
+ * a caller that would otherwise fetch them one by one: those the iterator
+ * would return as they lie, up to the end bound.  The iterator moves past
+ * the rows handed out.
+ *
+ * False when no row qualifies, leaving the iterator where it was for
+ * o_btree_iterator_fetch() to go on.  Backward scans, scans merging undo
+ * images, scans with a fetch callback and scans as of a WAL position are
+ * left to it as well.
+ */
+bool
+o_btree_iterator_fetch_batch(BTreeIterator *it, void *endKey,
+							 BTreeKeyType endKind, bool endIsIncluded,
+							 BTreeIteratorBatch *batch)
+{
+	BTreeDescr *desc = it->context.desc;
+	OBTreeFindPageContext *context = &it->context;
+	BtreeIterationEnd end;
+	BtreeIterationEnd *endPtr = NULL;
+	BTreePageItemLocator *loc;
+	BTreePageItemLocator probe;
+	OffsetNumber stop;
+	bool		partial;
+
+	if (!IT_IS_FORWARD(it) || it->fetchCallback != NULL ||
+		!XLogRecPtrIsInvalid(it->oSnapshot.xlogptr) ||
+		!COMMITSEQNO_IS_NORMAL(it->oSnapshot.csn))
+		return false;
+
+	if (endKey != NULL && endKind != BTreeKeyNone)
+	{
+		end.key = endKey;
+		end.keyKind = endKind;
+		end.isIncluded = endIsIncluded;
+		endPtr = &end;
+	}
+
+	if ((it->combinedPage ||
+		 !BTREE_PAGE_LOCATOR_IS_VALID(context->img,
+									  &context->items[context->index].locator)) &&
+		!btree_iterator_check_load_next_page(it, endPtr))
+		return false;
+	if (it->combinedPage)
+		return false;
+
+	loc = &context->items[context->index].locator;
+
+	/*
+	 * A partial page has to have the chunk loaded to be read.  A load that
+	 * fails is left to the fetch, which re-finds the position.
+	 */
+	partial = BTREE_PAGE_FIND_IS(context, FETCH);
+	if (partial &&
+		!partial_load_chunk(&context->partial, context->img,
+							loc->chunkOffset, NULL))
+		return false;
+
+	/* Where the end bound cuts the chunk, when it may be on this leaf */
+	stop = loc->chunkItemsCount;
+	if (endPtr != NULL && iterator_end_may_be_on_page(it, endPtr))
+	{
+		OTuple		tuple;
+
+		probe = *loc;
+		for (; probe.itemOffset < stop; probe.itemOffset++)
+		{
+			BTREE_PAGE_READ_LEAF_TUPLE(tuple, context->img, &probe);
+			if (o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple, endKey,
+							endKind) >= (endIsIncluded ? 1 : 0))
+				break;
+		}
+		stop = probe.itemOffset;
+	}
+
+	/* And where the first row that needs a closer look is */
+	probe = *loc;
+	for (; probe.itemOffset < stop; probe.itemOffset++)
+	{
+		if (!leaf_item_visible_as_is((BTreeLeafTuphdr *)
+									 BTREE_PAGE_LOCATOR_GET_ITEM(context->img,
+																 &probe),
+									 &it->oSnapshot))
+			break;
+	}
+	stop = probe.itemOffset;
+
+	if (stop <= loc->itemOffset)
+		return false;
+
+	/*
+	 * Stepping off a partial page's chunk needs its high keys.  Load them
+	 * now: a load failing after the batch was handed out would re-find the
+	 * position into the image the batch is read from.
+	 */
+	if (partial && stop == loc->chunkItemsCount &&
+		!partial_load_hikeys_chunk(&context->partial, context->img))
+		return false;
+
+	batch->img = context->img;
+	batch->loc = *loc;
+	batch->count = stop - loc->itemOffset;
+	batch->csn = it->oSnapshot.csn;
+
+	/* As if each row had been fetched: a re-find resumes after the last */
+	loc->itemOffset = stop - 1;
+	it->curKeyLoc = *loc;
+	it->curKeyLazy = true;
+	it->curKeySet = true;
+	it->curKeyReturned = true;
+	it->resumeLocValid = false;
+	IT_NEXT_OFFSET(it, loc);
+
+	return true;
+}
+
+/*
  * Free resources associated with iterator.
  *
  * fromResowner is true when we are called (perhaps indirectly) from the
