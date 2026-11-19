@@ -1583,17 +1583,23 @@ o_btree_iterator_fetch_batch(BTreeIterator *it, void *endKey,
 	stop = loc->chunkItemsCount;
 	if (endPtr != NULL && iterator_end_may_be_on_page(it, endPtr))
 	{
+		OffsetNumber low = loc->itemOffset,
+					high = stop;
 		OTuple		tuple;
 
+		/* The first item past the bound; the chunk is sorted */
 		probe = *loc;
-		for (; probe.itemOffset < stop; probe.itemOffset++)
+		while (low < high)
 		{
+			probe.itemOffset = low + (high - low) / 2;
 			BTREE_PAGE_READ_LEAF_TUPLE(tuple, context->img, &probe);
 			if (o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple, endKey,
 							endKind) >= (endIsIncluded ? 1 : 0))
-				break;
+				high = probe.itemOffset;
+			else
+				low = probe.itemOffset + 1;
 		}
-		stop = probe.itemOffset;
+		stop = low;
 	}
 
 	/* And where the first row that needs a closer look is */
