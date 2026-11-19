@@ -1836,31 +1836,6 @@ o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 	}
 }
 
-bool
-o_tables_rel_try_lock_extended(ORelOids *oids, int lockmode,
-							   bool *nested, bool checkpoint)
-{
-	LOCKTAG		locktag;
-	LockAcquireResult result;
-
-	o_tables_rel_fill_locktag(&locktag, oids, lockmode, checkpoint);
-
-	if (nested != NULL)
-		*nested = DoLocalLockExist(&locktag);
-
-	if (lockmode == AccessExclusiveLock &&
-		locktag.locktag_lockmethodid == DEFAULT_LOCKMETHOD)
-		locktag.locktag_lockmethodid = NO_LOG_LOCKMETHOD;
-	result = LockAcquire(&locktag, lockmode, false, true);
-
-	if (result != LOCKACQUIRE_NOT_AVAIL)
-	{
-		AcceptInvalidationMessages();
-		return true;
-	}
-	return false;
-}
-
 /*
  * LockAcquire() with dontWait, that also declines to raise an error when the
  * shared lock table has no room left: the caller gets LOCKACQUIRE_NOT_AVAIL
@@ -1878,6 +1853,31 @@ lock_acquire_no_wait_no_memory_error(const LOCKTAG *locktag, LOCKMODE lockmode)
 							   ,false	/* logLockFailure */
 #endif
 		);
+}
+
+bool
+o_tables_rel_try_lock_extended(ORelOids *oids, int lockmode,
+							   bool *nested, bool checkpoint)
+{
+	LOCKTAG		locktag;
+	LockAcquireResult result;
+
+	o_tables_rel_fill_locktag(&locktag, oids, lockmode, checkpoint);
+
+	if (nested != NULL)
+		*nested = DoLocalLockExist(&locktag);
+
+	if (lockmode == AccessExclusiveLock &&
+		locktag.locktag_lockmethodid == DEFAULT_LOCKMETHOD)
+		locktag.locktag_lockmethodid = NO_LOG_LOCKMETHOD;
+	result = lock_acquire_no_wait_no_memory_error(&locktag, lockmode);
+
+	if (result != LOCKACQUIRE_NOT_AVAIL)
+	{
+		AcceptInvalidationMessages();
+		return true;
+	}
+	return false;
 }
 
 void
