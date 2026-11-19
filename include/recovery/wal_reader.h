@@ -14,6 +14,7 @@
 #ifndef __WAL_READER_H__
 #define __WAL_READER_H__
 
+#include "btree/page_contents.h"
 #include "recovery/wal_record.h"
 
 /*

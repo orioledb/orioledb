@@ -29,6 +29,7 @@
 #include "checkpoint/control.h"
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
+#include "recovery/safe_recovery.h"
 #include "recovery/wal.h"
 #include "recovery/wal_partial.h"
 #include "recovery/wal_reader.h"
@@ -948,6 +949,7 @@ pg_atomic_uint64 *recovery_ptr;
 static pg_atomic_uint64 *recovery_main_retain_ptr;
 pg_atomic_uint64 *recovery_finished_list_ptr;
 bool	   *recovery_single_process;
+bool	   *recovery_safe_process;
 bool	   *was_in_recovery;
 pg_atomic_uint32 *after_recovery_cleaned;
 
@@ -968,9 +970,6 @@ static void apply_deferred_checkpoint_undo(void);
 static void o_handle_startup_proc_interrupts_hook(void);
 static void abort_recovery(RecoveryWorkerState *workers_pool, bool send_to_idx_pool);
 
-static bool replay_container(Pointer startPtr, Pointer endPtr,
-							 bool single, XLogRecPtr xlogRecPtr,
-							 XLogRecPtr xlogRecEndPtr);
 
 static void worker_send_modify(int worker_id, BTreeDescr *desc,
 							   RecoveryMsgType recType,
@@ -1007,6 +1006,7 @@ recovery_shmem_needs(void)
 	size = add_size(size, mul_size(CACHELINEALIGN((Size) recovery_queue_size_guc * 1024),
 								   recovery_pool_size_guc + recovery_idx_pool_size_guc));
 	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
+	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
@@ -1039,6 +1039,9 @@ recovery_shmem_init(Pointer ptr, bool found)
 					recovery_pool_size_guc + recovery_idx_pool_size_guc);
 
 	recovery_single_process = (bool *) ptr;
+	ptr += CACHELINEALIGN(sizeof(bool));
+
+	recovery_safe_process = (bool *) ptr;
 	ptr += CACHELINEALIGN(sizeof(bool));
 
 	worker_finish_count = (pg_atomic_uint32 *) ptr;
@@ -1104,6 +1107,7 @@ recovery_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(recovery_finished_list_ptr, InvalidXLogRecPtr);
 
 		*was_in_recovery = false;
+		*recovery_safe_process = false;
 		pg_atomic_init_u32(after_recovery_cleaned, 0);
 
 		pg_atomic_init_u64(recovery_index_next_pos, 0);
@@ -1383,8 +1387,14 @@ o_recovery_start_hook(void)
 	bool		recovery_single;
 
 	before_shmem_exit(recovery_on_proc_exit, (Datum) -1);
-	recovery_single = *recovery_single_process = IsFatalError();
-	if (recovery_single)
+	*recovery_safe_process = safe_recovery_guc;
+	recovery_single = *recovery_single_process = IsFatalError() || safe_recovery_guc;
+	if (*recovery_safe_process)
+	{
+		elog(LOG, "orioledb recovery started in safe recovery mode (single-process).");
+		safe_recovery_startup();
+	}
+	else if (recovery_single)
 	{
 		elog(LOG, "orioledb recovery after fatal error started.  Unable to make multiprocess recovery.");
 	}
@@ -1595,8 +1605,16 @@ orioledb_redo(XLogReaderState *record)
 
 	if (record->ReadRecPtr >= checkpoint_state->controlSysTreesStartPtr)
 	{
-		if (!replay_container(msg_start, msg_start + msg_len, recovery_single,
-							  record->ReadRecPtr, record->EndRecPtr))
+		bool		ok;
+
+		if (*recovery_safe_process)
+			ok = safe_recovery_replay_container(msg_start, msg_start + msg_len,
+												record->ReadRecPtr,
+												record->EndRecPtr);
+		else
+			ok = replay_container(msg_start, msg_start + msg_len, recovery_single,
+								  record->ReadRecPtr, record->EndRecPtr);
+		if (!ok)
 		{
 			abort_recovery(workers_pool, false);
 			elog(ERROR, "orioledb recovery worker failed to replay WAL container.");
@@ -1679,6 +1697,9 @@ o_recovery_finish_hook(bool cleanup)
 	bool		recovery_single;
 
 	recovery_single = *recovery_single_process;
+
+	if (*recovery_safe_process)
+		safe_recovery_finish();
 
 	if (!recovery_single)
 	{
@@ -4989,7 +5010,7 @@ invalidate_typcache(void)
 	SendSharedInvalidMessages(&msg, 1);
 }
 
-static WalParseResult
+WalParseResult
 replay_check_version(const WalReaderState *r)
 {
 	Assert(r);
@@ -5005,7 +5026,7 @@ replay_check_version(const WalReaderState *r)
 	return WALPARSE_OK;
 }
 
-static WalParseResult
+WalParseResult
 replay_on_container(WalReaderState *r)
 {
 	if (r->container.flags & WAL_CONTAINER_HAS_XACT_INFO)
@@ -5020,20 +5041,6 @@ replay_on_container(WalReaderState *r)
 
 	return WALPARSE_OK;
 }
-
-typedef struct
-{
-	/* Input params */
-	bool		single;
-	XLogRecPtr	xlogRecPtr;
-	XLogRecPtr	xlogRecEndPtr;
-
-	/* Replay state params */
-	int			sys_tree_num;
-	OTableDescr *descr;
-	OIndexDescr *indexDescr;
-
-} ReplayWalDescCtx;
 
 /*
  * Params of the replay_on_record stop event: the record about to be replayed,
@@ -5060,7 +5067,7 @@ replay_record_stopevent_params(WalRecord *rec)
 	return res;
 }
 
-static WalParseResult
+WalParseResult
 replay_on_record(WalReaderState *r, WalRecord *rec)
 {
 	ReplayWalDescCtx *ctx = (ReplayWalDescCtx *) r->ctx;
@@ -5696,7 +5703,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 /*
  * Replays a single orioledb WAL container.
  */
-static bool
+bool
 replay_container(Pointer startPtr, Pointer endPtr,
 				 bool single, XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr)
 {
@@ -5737,6 +5744,9 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn, bool commit)
 {
 	dlist_mutable_iter miter;
 	bool		single = *recovery_single_process;
+
+	if (*recovery_safe_process)
+		safe_recovery_xact_redo(xid, lsn, commit);
 
 	dlist_foreach_modify(miter, &joint_commit_list)
 	{

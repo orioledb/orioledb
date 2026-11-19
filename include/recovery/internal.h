@@ -19,6 +19,34 @@
 #include "orioledb.h"
 
 #include "postmaster/bgworker.h"
+#include "recovery/wal_reader.h"
+
+struct OTableDescr;
+struct OIndexDescr;
+
+/*
+ * Per-container replay state passed to the replay_on_* callbacks via
+ * WalReaderState.ctx.
+ */
+typedef struct
+{
+	/* Input params */
+	bool		single;
+	XLogRecPtr	xlogRecPtr;
+	XLogRecPtr	xlogRecEndPtr;
+
+	/* Replay state params */
+	int			sys_tree_num;
+	struct OTableDescr *descr;
+	struct OIndexDescr *indexDescr;
+} ReplayWalDescCtx;
+
+extern WalParseResult replay_check_version(const WalReaderState *r);
+extern WalParseResult replay_on_container(WalReaderState *r);
+extern WalParseResult replay_on_record(WalReaderState *r, WalRecord *rec);
+extern bool replay_container(Pointer startPtr, Pointer endPtr,
+							 bool single, XLogRecPtr xlogRecPtr,
+							 XLogRecPtr xlogRecEndPtr);
 
 /*
  * Recovery transaction support functions.
@@ -172,6 +200,7 @@ extern pg_atomic_uint32 *worker_ptrs_changes;
 extern RecoveryWorkerPtrs *worker_ptrs;
 extern pg_atomic_uint64 *recovery_ptr;
 extern bool *recovery_single_process;
+extern bool *recovery_safe_process;
 extern RecoveryUndoLocFlush *recovery_undo_loc_flush;
 
 extern bool *was_in_recovery;
