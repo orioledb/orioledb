@@ -204,13 +204,13 @@ class CheckpointConcurrentTest(BaseTest):
 		    "	secid int NOT NULL,\n"
 		    "	PRIMARY KEY (id)\n"
 		    ") USING orioledb;\n"
-		    "CREATE UNIQUE INDEX o_checkpont_ix1 ON o_checkpoint (secid);\n"
+		    "CREATE UNIQUE INDEX o_checkpoint_ix1 ON o_checkpoint (secid);\n"
 		    "INSERT INTO o_checkpoint VALUES (0, 1);\n")
 		con1 = node.connect()
 		con2 = node.connect()
 
 		con2.execute("SELECT pg_stopevent_set('checkpoint_index_start',\n"
-		             "'$.treeName == \"o_checkpont_ix1\"');")
+		             "'$.treeName == \"o_checkpoint_ix1\"');")
 		t1 = ThreadQueryExecutor(con1, "CHECKPOINT;")
 		t1.start()
 
