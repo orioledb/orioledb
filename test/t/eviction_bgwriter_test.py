@@ -177,6 +177,65 @@ class EvictionBGWriterTest(BaseTest):
 			    "rows lost for key type %s across restart" % name)
 		node.stop()
 
+	def test_transactional_eviction_uncommitted_type(self):
+		"""Autovacuum must not resolve another transaction's uncommitted
+		catalog-dependent index type while evicting pages."""
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.main_buffers = 8MB\n"
+		    "orioledb.bgwriter_num_workers = 1\n"
+		    "autovacuum_naptime = 1s\n"
+		    "log_autovacuum_min_duration = 0\n")
+		node.start()
+		node.safe_psql('postgres',
+		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
+
+		# Give autovacuum several committed relations to process while the
+		# composite-key index below is being built.
+		key_types = [
+		    ('int4range', 'int4range', 'int4range(id, id + 10)'),
+		    ('int4multirange', 'int4multirange',
+		     'int4multirange(int4range(id, id + 10))'),
+		    ('intarray', 'int[]', 'ARRAY[id, id + 1, id + 2]'),
+		]
+		for name, decl, expr in key_types:
+			table = 'o_eviction_%s' % name
+			node.safe_psql(
+			    'postgres', "CREATE TABLE %s (\n"
+			    "\tid integer NOT NULL,\n"
+			    "\tk %s,\n"
+			    "\tPRIMARY KEY (id)\n"
+			    ") USING orioledb;\n"
+			    "CREATE INDEX %s_k_idx ON %s (k);\n"
+			    "INSERT INTO %s\n"
+			    "\tSELECT id, %s FROM generate_series(1, 600000) id;\n" %
+			    (table, decl, table, table, table, expr))
+
+		# One query string keeps all of this DDL and the insert in the same
+		# implicit transaction.
+		node.safe_psql(
+		    'postgres', "CREATE TYPE bgw_ctype AS (a int, b text);\n"
+		    "CREATE TABLE o_eviction_composite (\n"
+		    "\tid integer NOT NULL,\n"
+		    "\tk bgw_ctype,\n"
+		    "\tPRIMARY KEY (id)\n"
+		    ") USING orioledb;\n"
+		    "CREATE INDEX o_eviction_composite_k_idx\n"
+		    "\tON o_eviction_composite (k);\n"
+		    "INSERT INTO o_eviction_composite\n"
+		    "\tSELECT id, ROW(id, 'v' || id)::bgw_ctype\n"
+		    "\tFROM generate_series(1, 600000) id;\n")
+
+		with open(node.pg_log_file) as f:
+			log = f.read()
+		self.assertNotIn(
+		    'type with OID', log,
+		    "transactional maintenance resolved an uncommitted index type")
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_eviction_composite;")[0][0],
+		    600000)
+		node.stop()
+
 	def test_bgwriter_keeps_number_across_crash(self):
 		node = self.node
 		node.append_conf(
