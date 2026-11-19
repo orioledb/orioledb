@@ -91,6 +91,18 @@ static pairingheap retainUndoLocHeaps[(int) UndoLogsCount] =
 static SubTransactionId minParentSubId = InvalidSubTransactionId;
 static XLogRecPtr xidless_commit_lsn = InvalidXLogRecPtr;
 
+/*
+ * System undo location a logical slot may retain from once its restart_lsn
+ * reaches lsn.  One per slot, indexed like ReplicationSlotCtl.
+ */
+typedef struct
+{
+	XLogRecPtr	lsn;
+	UndoLocation location;
+} SlotRetainCandidate;
+
+static SlotRetainCandidate *slot_retain_candidates = NULL;
+
 typedef void (*UndoCallback) (UndoLogType undoType, UndoLocation location,
 							  UndoStackItem *item, OXid oxid,
 							  OUndoCallbackStage stage,
@@ -430,6 +442,10 @@ undo_shmem_needs(void)
 		}
 	}
 
+	size = add_size(size,
+					CACHELINEALIGN(mul_size(max_replication_slots,
+											sizeof(SlotRetainCandidate))));
+
 	size = add_size(size, o_buffers_shmem_needs(&undoBuffersDesc));
 
 	return size;
@@ -459,6 +475,16 @@ undo_shmem_init(Pointer buf, bool found)
 		o_undo_dirty_bitmaps[i] = (pg_atomic_uint32 *) ptr;
 		ptr += CACHELINEALIGN(o_undo_dirty_words[i] *
 							  sizeof(pg_atomic_uint32));
+	}
+
+	slot_retain_candidates = (SlotRetainCandidate *) ptr;
+	ptr += CACHELINEALIGN(mul_size(max_replication_slots,
+								   sizeof(SlotRetainCandidate)));
+
+	if (!found)
+	{
+		memset(slot_retain_candidates, 0,
+			   mul_size(max_replication_slots, sizeof(SlotRetainCandidate)));
 	}
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
@@ -883,32 +909,11 @@ wait_for_even_write_in_progress_changecount(UndoMeta *meta)
  * yet reaches back to where that retain points.
  */
 static uint64
-o_slot_retain_location(ReplicationSlot *slot)
+logical_retain_now(void)
 {
 	UndoMeta   *meta = get_undo_meta_by_type(UndoLogSystem);
 	UndoLocation result;
 	int			i;
-
-	if (wal_level < WAL_LEVEL_LOGICAL || oProcData == NULL)
-		return 0;
-
-#if PG_VERSION_NUM >= 170000
-	if (slot != NULL && slot->data.synced)
-	{
-		/*
-		 * A slot synchronised from a primary has decoded nothing here, and
-		 * its restart_lsn points into WAL this server replayed rather than
-		 * wrote.  Whatever it will ask for after a failover is somewhere
-		 * behind that, so hold everything we still have and let it move on
-		 * once it starts decoding for real.
-		 *
-		 * Defensive as things stand: a standby's floor does not move while it
-		 * is replaying, so the answer below would be just as low.  It is the
-		 * assumption that would be silently wrong if that ever changed.
-		 */
-		return Max(pg_atomic_read_u64(&meta->minProcRetainLocation), 1);
-	}
-#endif
 
 	result = pg_atomic_read_u64(&meta->minProcTransactionRetainLocation);
 
@@ -929,6 +934,91 @@ o_slot_retain_location(ReplicationSlot *slot)
 	 * One is below every record and retains just as much.
 	 */
 	return result == 0 ? 1 : result;
+}
+
+/*
+ * What the slot has to retain of the system undo log, or zero to keep what
+ * it has.
+ *
+ * Decoding restarts at restart_lsn, which lags behind confirmed_flush, and
+ * reads every record from there again, even of transactions already sent.
+ * So, like catalog_xmin, the retain follows restart_lsn: when the slot
+ * catches up, remember what decoding from the current WAL position needs,
+ * and hand it over once restart_lsn has reached that position.
+ */
+static uint64
+o_slot_retain_location(ReplicationSlot *slot)
+{
+	SlotRetainCandidate *cand;
+	XLogRecPtr	restart_lsn;
+	pid_t		active_pid;
+	uint64		result = 0;
+
+	if (wal_level < WAL_LEVEL_LOGICAL || oProcData == NULL)
+		return 0;
+
+#if PG_VERSION_NUM >= 170000
+	if (slot->data.synced)
+	{
+		UndoMeta   *meta = get_undo_meta_by_type(UndoLogSystem);
+
+		/*
+		 * A slot synchronised from a primary has decoded nothing here, and
+		 * its restart_lsn points into WAL this server replayed rather than
+		 * wrote.  Whatever it will ask for after a failover is somewhere
+		 * behind that, so hold everything we still have and let it move on
+		 * once it starts decoding for real.
+		 *
+		 * Defensive as things stand: a standby's floor does not move while it
+		 * is replaying, so the answer below would be just as low.  It is the
+		 * assumption that would be silently wrong if that ever changed.
+		 */
+		return Max(pg_atomic_read_u64(&meta->minProcRetainLocation), 1);
+	}
+#endif
+
+	cand = &slot_retain_candidates[slot - ReplicationSlotCtl->replication_slots];
+
+	SpinLockAcquire(&slot->mutex);
+	restart_lsn = slot->data.restart_lsn;
+	active_pid = slot->active_pid;
+	SpinLockRelease(&slot->mutex);
+
+	/*
+	 * A slot being created.  A copy gets the source's restart_lsn later, and
+	 * decodes from there, so "from now on" is too late for it.  Keep what we
+	 * have until the slot catches up.
+	 */
+	if (XLogRecPtrIsInvalid(restart_lsn))
+	{
+		cand->lsn = InvalidXLogRecPtr;
+		return 0;
+	}
+
+	/* Restored at startup: we know nothing yet, keep what we have */
+	if (active_pid != MyProcPid)
+		return 0;
+
+	if (!XLogRecPtrIsInvalid(cand->lsn) && cand->lsn <= restart_lsn)
+	{
+		result = cand->location;
+		cand->lsn = InvalidXLogRecPtr;
+	}
+
+	if (XLogRecPtrIsInvalid(cand->lsn))
+	{
+		/*
+		 * Read the retain before the WAL position: a record written after
+		 * that position was stamped either later or while its transaction
+		 * still held its logical retain.
+		 */
+		cand->location = logical_retain_now();
+		pg_memory_barrier();
+		cand->lsn = RecoveryInProgress() ? GetXLogReplayRecPtr(NULL) :
+			GetXLogInsertRecPtr();
+	}
+
+	return result;
 }
 
 /*

@@ -10,6 +10,7 @@ from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 
 SLOT = 'regression_slot'
+COPY = 'copied_slot'
 
 # A small system undo log, so that a moderate amount of DDL is enough to push
 # the retain floor forward.
@@ -56,11 +57,11 @@ class LogicalUndoRetainTest(BaseTest):
 		    'postgres', f"SELECT pg_create_logical_replication_slot("
 		    f"'{SLOT}', 'test_decoding');")
 
-	def decoded(self, node):
+	def decoded(self, node, slot=SLOT):
 		return [
 		    row[0] for row in node.execute(
 		        f"SELECT data FROM pg_logical_slot_get_changes("
-		        f"'{SLOT}', NULL, NULL);")
+		        f"'{slot}', NULL, NULL);")
 		]
 
 	def system_undo(self, con):
@@ -227,10 +228,6 @@ class LogicalUndoRetainTest(BaseTest):
 
 		self.check_survived_restart(node)
 
-	@unittest.skip("a page undo chain can still lead below the retained floor "
-	               "after a crash: see issue #1081")
-	@unittest.skip("a page undo chain can still lead below the retained "
-	               "floor after a crash: see issue #1081")
 	def test_idle_slot_survives_crash_restart(self):
 		node = self.start_node()
 		self.write_records_for_an_idle_slot(node)
@@ -240,8 +237,6 @@ class LogicalUndoRetainTest(BaseTest):
 
 		self.check_survived_restart(node)
 
-	@unittest.skip("a page undo chain can still lead below the retained floor "
-	               "after a crash: see issue #1081")
 	@unittest.skip("a page undo chain can still lead below the retained "
 	               "floor after a crash: see issue #1081")
 	def test_idle_slot_survives_crash_restart_after_checkpoint(self):
@@ -266,17 +261,18 @@ class LogicalUndoRetainTest(BaseTest):
 	def test_slot_says_what_it_retains(self):
 		"""
 		The slot is the one holding the undo now, so its value has to behave:
-		nothing without a slot, something once one exists, standing still
-		while a transaction has a record stamped but not flushed, and moving
-		on once that transaction is done and decoded.
+		nothing without a slot, zero (keep what there is) until a new slot
+		has caught up, standing still while a transaction has a record
+		stamped but not flushed, and moving on once that transaction is done
+		and decoded.
 		"""
 		node = self.start_node()
 		self.assertIsNone(self.slot_retain(node),
 		                  "nothing to retain while no slot exists")
 
 		self.create_slot(node)
-		self.assertIsNotNone(self.slot_retain(node),
-		                     "a slot has to say what it retains")
+		self.assertEqual(self.slot_retain(node), 0,
+		                 "a new slot keeps what there is")
 
 		# A transaction that has stamped a record with a CSN but has not
 		# flushed it: what that record needs is held from here on.
@@ -302,15 +298,85 @@ class LogicalUndoRetainTest(BaseTest):
 		    "the slot moved past a record that is still waiting in its "
 		    "transaction's WAL buffer")
 
-		# Once that transaction is done and decoded, it may move.
+		# Once that transaction is done and decoded, and restart_lsn has
+		# moved past it, it may move.  CHECKPOINT logs the running xacts that
+		# let restart_lsn move.
 		old_con.commit()
 		old_con.close()
 		with node.connect(autocommit=True) as churn:
 			self.churn(churn, 'freed', 20)
-		self.decoded(node)
+		for _ in range(5):
+			node.safe_psql('postgres', "CHECKPOINT;")
+			self.decoded(node)
+			if self.slot_retain(node) > held:
+				break
 
 		self.assertGreater(self.slot_retain(node), held,
 		                   "the slot never moved on after catching up")
+
+	def test_decode_again_from_restart_lsn(self):
+		"""
+		Decoding restarts at restart_lsn, which stays behind confirmed_flush.
+		Records in between belong to transactions already sent, and the slot
+		no longer retains the undo needed to read their CSN.
+		"""
+		node = self.start_node()
+		self.create_slot(node)
+
+		node.safe_psql('postgres', "INSERT INTO o_decoded VALUES (1, 'a');")
+		self.decoded(node)
+
+		# Change the o_tables row of o_decoded, so that reading it at the
+		# INSERT's CSN needs this undo.
+		node.safe_psql('postgres', "ALTER TABLE o_decoded ADD COLUMN w int;")
+		self.decoded(node)
+
+		# Each call catches up and lets the slot release more undo.  Go on
+		# until the floor passes the ALTER's undo.
+		with node.connect(autocommit=True) as con:
+			target = self.system_undo(con)[0]
+			for round in range(6):
+				self.churn(con, f'r{round}', 40)
+				self.decoded(node)
+				if self.system_undo(con)[1] > target:
+					break
+
+		node.safe_psql('postgres', "INSERT INTO o_decoded VALUES (2, 'b');")
+		self.assertIn(
+		    "table public.o_decoded: INSERT: id[integer]:2 v[text]:'b' "
+		    "w[integer]:null", self.decoded(node))
+
+	def test_copied_slot_decodes_again(self):
+		"""
+		A copy starts at the source's restart_lsn, which lags behind the
+		present, which a new slot has no way to tell from a fresh one.
+		"""
+		node = self.start_node()
+		self.create_slot(node)
+
+		node.safe_psql('postgres', "INSERT INTO o_decoded VALUES (1, 'a');")
+		self.decoded(node)
+		node.safe_psql('postgres', "ALTER TABLE o_decoded ADD COLUMN w int;")
+		self.decoded(node)
+
+		# The source goes no further, so its restart_lsn stays behind the
+		# ALTER, while the present moves on.
+		with node.connect(autocommit=True) as con:
+			self.churn(con, 'before', 40)
+
+			node.safe_psql(
+			    'postgres', f"SELECT pg_copy_logical_replication_slot("
+			    f"'{SLOT}', '{COPY}');")
+			node.safe_psql('postgres',
+			               f"SELECT pg_drop_replication_slot('{SLOT}');")
+
+			# Only the copy holds undo now.
+			self.churn(con, 'after', 240)
+
+		node.safe_psql('postgres', "INSERT INTO o_decoded VALUES (2, 'b');")
+		self.assertIn(
+		    "table public.o_decoded: INSERT: id[integer]:2 v[text]:'b' "
+		    "w[integer]:null", self.decoded(node, COPY))
 
 	def test_standby_decodes_with_its_own_slot(self):
 		"""
