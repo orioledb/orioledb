@@ -178,6 +178,14 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 
 	meta->enabled = true;
 	meta->length = MAXALIGN(id->nonLeafSpec.len);
+
+	meta->rawOrderExact = true;
+	for (i = 0; i < numKeys; i++)
+	{
+		/* The float searches do not order NaN as the opclass does */
+		if (types[i] == FLOAT4OID || types[i] == FLOAT8OID)
+			meta->rawOrderExact = false;
+	}
 }
 
 static ArraySearchDesc *
@@ -580,8 +588,14 @@ fastpath_find_chunk(Pointer pagePtr,
 
 	pg_read_barrier();
 
-	/* Possible we need to visit the rightlink */
-	if (*chunkIndex >= count)
+	/*
+	 * Past every high key: on the rightmost page that is its last chunk,
+	 * which has none; on any other the key may be past the page, and the
+	 * rightlink may have to be visited.
+	 */
+	if (*chunkIndex >= count &&
+		!(O_PAGE_IS(pagePtr, RIGHTMOST) && *chunkIndex == count &&
+		  meta->rawOrderExact))
 		return OBTreeFastPathFindSlowpath;
 
 	state = pg_atomic_read_u64(&hdr->o_header.state);

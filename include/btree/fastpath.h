@@ -52,6 +52,9 @@ typedef struct
 	Datum		values[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 	uint8		flags[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 	bool		ascending[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
+
+	/* Raw values of the key types order exactly as their opclasses do */
+	bool		rawOrderExact;
 } FastpathFindDownlinkMeta;
 
 typedef enum
