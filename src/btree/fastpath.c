@@ -360,9 +360,6 @@ find_downlink_get_keys(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 		{
 			uint8		f = bound->keys[i].flags;
 
-			if (bound->keys[i].type != types[i])
-				return false;
-
 			if (exclusiveFence)
 			{
 				/*
@@ -400,6 +397,12 @@ find_downlink_get_keys(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 			}
 			else
 			{
+				/*
+				 * Only a value has a type to check: an unbounded or NULL
+				 * bound carries none.
+				 */
+				if (bound->keys[i].type != types[i])
+					return false;
 				flags[i] = 0;
 				values[i] = bound->keys[i].value;
 
