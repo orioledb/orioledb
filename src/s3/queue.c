@@ -249,8 +249,8 @@ s3_queue_get_task(S3TaskLocation taskLocation)
 
 		Assert(firstChunkLen >= sizeof(uint32));
 
-		memcpy(s3_queue_buffer + taskLocation % s3_queue_size + sizeof(uint32),
-			   result,
+		memcpy(result,
+			   s3_queue_buffer + taskLocation % s3_queue_size + sizeof(uint32),
 			   firstChunkLen - sizeof(uint32));
 		memcpy(result + (firstChunkLen - sizeof(uint32)),
 			   s3_queue_buffer,
@@ -346,3 +346,73 @@ s3_queue_wait_for_location(S3TaskLocation location)
 	if (slept)
 		ConditionVariableCancelSleep();
 }
+
+#ifdef IS_DEV
+/* ------------------------------------------------------------------------
+ * C-side test helper.  Compiled only when IS_DEV is defined (-DIS_DEV);
+ * the SQL binding is registered in the 1.10->1.11 dev migration.  See
+ * test/t/s3_test.py for the test driver.
+ * ------------------------------------------------------------------------ */
+
+#include "fmgr.h"
+
+/*
+ * Put, read back and erase 88-byte tasks in a backend-local 1 kB queue.
+ * With its length word a task takes 92 bytes, so some tasks are split across
+ * the buffer end, each at a different offset, including one where only the
+ * length word fits before the end.  Only one task is in the queue at a time,
+ * so s3_queue_put_task() never waits.  Returns the number of tasks whose
+ * contents did not match.
+ */
+PG_FUNCTION_INFO_V1(orioledb_test_s3_queue_wraparound);
+Datum
+orioledb_test_s3_queue_wraparound(PG_FUNCTION_ARGS)
+{
+	Size		saved_size = s3_queue_size;
+	S3TaskQueueMeta *saved_meta = s3_queue_meta;
+	Pointer		saved_buffer = s3_queue_buffer;
+	S3TaskQueueMeta meta;
+	Pointer		buffer;
+	char		task[88];
+	int			mismatches = 0;
+
+	buffer = palloc0(1024);
+	pg_atomic_init_u64(&meta.insertLocation, 0);
+	pg_atomic_init_u64(&meta.pickLocation, 0);
+	pg_atomic_init_u64(&meta.erasedLocation, 0);
+	ConditionVariableInit(&meta.insertLocationCV);
+	ConditionVariableInit(&meta.erasedLocationCV);
+
+	s3_queue_size = 1024;
+	s3_queue_meta = &meta;
+	s3_queue_buffer = buffer;
+
+	PG_TRY();
+	{
+		for (int i = 0; i < 100; i++)
+		{
+			S3TaskLocation location;
+			Pointer		result;
+
+			for (Size j = 0; j < sizeof(task); j++)
+				task[j] = (char) (i + j);
+			location = s3_queue_put_task(task, sizeof(task));
+			result = s3_queue_get_task(location);
+			if (memcmp(result, task, sizeof(task)) != 0)
+				mismatches++;
+			pfree(result);
+			s3_queue_erase_task(location);
+		}
+	}
+	PG_FINALLY();
+	{
+		s3_queue_size = saved_size;
+		s3_queue_meta = saved_meta;
+		s3_queue_buffer = saved_buffer;
+	}
+	PG_END_TRY();
+
+	pfree(buffer);
+	PG_RETURN_INT32(mismatches);
+}
+#endif							/* IS_DEV */
