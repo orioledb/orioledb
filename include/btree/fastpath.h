@@ -53,8 +53,23 @@ typedef struct
 	uint8		flags[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 	bool		ascending[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 
+	/*
+	 * The same search applies to a leaf chunk of fixed-format items, which
+	 * lie at a fixed stride with the key columns leading: see
+	 * fastpath_search_leaf_items().
+	 */
 	/* Raw values of the key types order exactly as their opclasses do */
 	bool		rawOrderExact;
+
+	bool		leafSearch;
+	int			leafStride;
+
+	/*
+	 * Per key column with a value: where an exclusive bound lies against the
+	 * run of items equal to that value -- after it (1), before it (-1), or,
+	 * for an inclusive bound, not decided there (0).
+	 */
+	int8		leafExclusive[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 } FastpathFindDownlinkMeta;
 
 typedef enum
@@ -69,6 +84,8 @@ extern void can_fastpath_find_downlink(OBTreeFindPageContext *context,
 									   void *key,
 									   BTreeKeyType keyType,
 									   FastpathFindDownlinkMeta *meta);
+extern bool fastpath_search_leaf_items(FastpathFindDownlinkMeta *meta,
+									   BTreePageItemLocator *loc);
 extern OBTreeFastPathFindResult fastpath_find_chunk(Pointer pagePtr,
 													OInMemoryBlkno blkno,
 													FastpathFindDownlinkMeta *meta,

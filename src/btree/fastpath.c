@@ -186,6 +186,108 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 		if (types[i] == FLOAT4OID || types[i] == FLOAT8OID)
 			meta->rawOrderExact = false;
 	}
+
+	/*
+	 * A leaf item is fixed-format only when every attribute of the leaf tuple
+	 * is, and then the key columns sit at the offsets just computed if they
+	 * are its leading attributes.
+	 */
+	meta->leafSearch = (meta->rawOrderExact && keyType == BTreeKeyBound &&
+						id->leafSpec.natts == id->leafTupdesc->natts &&
+						!id->bridging);
+	if (meta->leafSearch)
+	{
+		OBTreeKeyBound *bound = (OBTreeKeyBound *) key;
+
+		/*
+		 * Equal to an item's value, an exclusive bound sorts after it (lower)
+		 * or before it (upper) whatever the columns after say, and an
+		 * inclusive one leaves it to them: o_idx_cmp_range_key_to_value(). A
+		 * NULL bound or an exclusion operator compares otherwise, so they
+		 * take the item-by-item search.
+		 */
+		for (i = 0; meta->leafSearch && i < Min(numKeys, bound->nkeys); i++)
+		{
+			uint8		f = bound->keys[i].flags;
+
+			meta->leafExclusive[i] = 0;
+			if ((f & O_VALUE_BOUND_NULL) || bound->keys[i].exclusion_fn)
+				meta->leafSearch = false;
+			else if (!(f & O_VALUE_BOUND_INCLUSIVE))
+			{
+				if (f & O_VALUE_BOUND_LOWER)
+					meta->leafExclusive[i] = 1;
+				else if (f & O_VALUE_BOUND_UPPER)
+					meta->leafExclusive[i] = -1;
+			}
+		}
+	}
+	for (i = 0; meta->leafSearch && i < numKeys; i++)
+	{
+		if (OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, id, i + 1) != i + 1 ||
+			TupleDescAttr(id->leafTupdesc, i)->atttypid != types[i])
+			meta->leafSearch = false;
+	}
+	meta->leafStride = BTreeLeafTuphdrSize + MAXALIGN(id->leafSpec.len);
+}
+
+/*
+ * Search a loaded leaf chunk the way fastpath_find_downlink() searches an
+ * internal one, for the first item the bound admits: possible when the
+ * chunk holds only fixed-format items, which then lie one after another at
+ * the same stride.  The chunk is the caller's copy, consistent already.
+ * False when the chunk is not laid out like that, leaving the caller to
+ * search it item by item.
+ */
+bool
+fastpath_search_leaf_items(FastpathFindDownlinkMeta *meta,
+						   BTreePageItemLocator *loc)
+{
+	BTreePageChunk *chunk = loc->chunk;
+	int			count = loc->chunkItemsCount;
+	int			first;
+	Pointer		base;
+	int			lower,
+				upper,
+				i;
+
+	if (!meta->leafSearch || count == 0)
+		return false;
+
+	first = MAXALIGN(sizeof(LocationIndex) * count);
+	if (loc->chunkSize != first + meta->leafStride * count)
+		return false;
+	for (i = 0; i < count; i++)
+	{
+		if (ITEM_GET_OFFSET(chunk->items[i]) != first + meta->leafStride * i ||
+			!(ITEM_GET_FLAGS(chunk->items[i]) & O_TUPLE_FLAGS_FIXED_FORMAT))
+			return false;
+	}
+
+	base = (Pointer) chunk + first + BTreeLeafTuphdrSize;
+	lower = 0;
+	upper = count;
+	for (i = 0; lower < upper && i < meta->numKeys; i++)
+	{
+		if (meta->flags[i] == 0)
+		{
+			meta->funcs[i] (base + meta->offsets[i], meta->leafStride,
+							&lower, &upper, meta->values[i],
+							meta->ascending[i]);
+			if (meta->leafExclusive[i] > 0)
+				lower = upper;
+			else if (meta->leafExclusive[i] < 0)
+				upper = lower;
+		}
+		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_FIRST)
+			upper = lower;
+		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_LAST)
+			lower = upper;
+	}
+
+	/* Items equal to every value of an inclusive bound do not sort below it */
+	loc->itemOffset = lower;
+	return true;
 }
 
 static ArraySearchDesc *
