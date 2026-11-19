@@ -365,15 +365,11 @@ find_downlink_get_keys(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 			if (f & O_VALUE_BOUND_UNBOUNDED)
 			{
 				/*
-				 * An unbounded-below column is a -infinity value, unbounded-
-				 * above a +infinity value.  Map the value extreme to a
-				 * storage slot through the column's ASC/DESC ordering: -inf
-				 * sits at the first slot for ASC and the last for DESC, +inf
-				 * vice versa.
+				 * An unbounded column's direction is already a storage
+				 * direction: o_idx_cmp_key_bound_to_tuple() puts "lower"
+				 * before every entry whatever the column's ASC/DESC.
 				 */
-				bool		valueMinusInf = (f & O_VALUE_BOUND_LOWER) != 0;
-
-				flags[i] = (valueMinusInf == id->fields[i].ascending) ?
+				flags[i] = (f & O_VALUE_BOUND_LOWER) ?
 					FASTPATH_FIND_DOWNLINK_FLAG_FIRST : FASTPATH_FIND_DOWNLINK_FLAG_LAST;
 				values[i] = (Datum) 0;
 			}
