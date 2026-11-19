@@ -6,12 +6,9 @@ CREATE EXTENSION orioledb;
 SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
 
--- autovacuum off: the test repeatedly DROP OPERATOR CLASS ... CASCADE's
--- indexes of this table; a concurrent ANALYZE deadlocks with the cascading
--- index drop (heap SUE + index ASL vs index AEL + heap AEL).
 CREATE TABLE o_test_custom_opclass (
 	int_val int
-) USING orioledb WITH (autovacuum_enabled = false);
+) USING orioledb;
 
 CREATE FUNCTION cmp_is_valid_prepare(test_proc regproc)
 RETURNS TABLE (a int, b int, ab int, ba int, abn int, ban int, valid bool)
