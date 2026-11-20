@@ -38,13 +38,39 @@ included, since a read that returns the right keys with a stale version is
 exactly what an isolation checker reports.
 """
 
+import re
 import unittest
 
-from .base_test import BaseTest
+from .base_test import BaseTest, tbl_structure_to_json
 
 ROWS = 2000
 PAD = 100
 SAMPLE_COUNT = 5
+
+# Compaction without a dropped tuple: a small table of one leaf, scattered
+# update sizes (every update changes a row size, so the leaf compacts), and
+# enough updates for the leaf to compact more than once.  SIZE_SPAN bounds the
+# payloads to SIZE_MIN..SIZE_MIN+SIZE_SPAN-1, which keeps the rows in one
+# leaf; SIZE_STRIDE scatters consecutive sizes over that range.  Consecutive
+# sizes would make every row large at once, and the leaf would split after its
+# first compaction.
+SMALL_ROWS = 50
+SMALL_PAD = 100
+SIZE_MIN = 20
+SIZE_SPAN = 130
+SIZE_STRIDE = 37
+UPDATES = 1000
+DELETE_MODULUS = 3
+# Three leaves of SMALL_PAD rows, and the rows of the second leaf that the
+# updates hit.
+THREE_LEAF_ROWS = 120
+HOT_ROWS = 30
+# Arguments of orioledb_tbl_structure(): the flags and the depth to print.
+STRUCTURE_FLAGS = 'nue'
+STRUCTURE_DEPTH = 4
+# A compaction drops a committed deleted tuple only if its leaf holds one:
+# deleting every DROP_EVERY-th live row gives each leaf some.
+DROP_EVERY = 8
 
 
 class UndoImageChainTest(BaseTest):
@@ -120,10 +146,25 @@ class UndoImageChainTest(BaseTest):
 		                  "FROM generate_series(1, %d) id);" %
 		                  (table, step, offset, payload, PAD, ROWS))
 
+	def _delete_every_nth(self, table):
+		"""
+		Commit deletes for the next compaction to drop: a compaction that drops
+		no tuple writes no page image.  Removes every DROP_EVERY-th live row.
+		"""
+		self.node.safe_psql(
+		    'postgres', "DELETE FROM %s WHERE id IN ("
+		    "SELECT id FROM (SELECT id, row_number() OVER (ORDER BY id) AS n "
+		    "FROM %s) s WHERE mod(n, %d) = 0);" % (table, table, DROP_EVERY))
+
 	def _rewrite(self, table, payload):
 		"""Grow every row: compacts the leaves and splits some of them."""
 		self.node.execute("UPDATE %s SET payload = repeat('%s', %d);" %
 		                  (table, payload, PAD + 10))
+
+	def _rewrite_dropping(self, table, payload):
+		"""Rewrite every row after deletes, so the compactions drop tuples."""
+		self._delete_every_nth(table)
+		self._rewrite(table, payload)
 
 	def _rewrite_by(self, table, payload, pad):
 		"""Rewrite every row at a given length."""
@@ -153,6 +194,7 @@ class UndoImageChainTest(BaseTest):
 					self._interleave(table, offset, step, payload)
 				offset += 1
 			else:
+				self._delete_every_nth(table)
 				self._rewrite_by(table, 'w%d' % (i % 10), PAD + i)
 		return offset
 
@@ -166,8 +208,9 @@ class UndoImageChainTest(BaseTest):
 
 	def _drop_third(self, table):
 		"""Settled deletes, so a later merge has tuples to drop."""
-		self.node.safe_psql('postgres',
-		                    "DELETE FROM %s WHERE MOD(id, 3) = 0;" % table)
+		self.node.safe_psql(
+		    'postgres',
+		    "DELETE FROM %s WHERE MOD(id, %d) = 0;" % (table, DELETE_MODULUS))
 
 	def _merge(self, table):
 		"""CHECKPOINT's page-merge pass, on a table sparse enough to merge."""
@@ -291,11 +334,12 @@ class UndoImageChainTest(BaseTest):
 		"""
 		A differential split above a full compaction image.
 
-		Measured: Compact=288 and SplitFull=96 from the rewrite, then
-		SplitDiff=96.
+		The rewrite drops the rows deleted before it, so its compactions write
+		full images.  Measured walks: SplitDiff>Compact and
+		SplitDiff>SplitDiff>Compact.
 		"""
 		self._run('o_uic_diff_over_compact',
-		          seed=lambda t: self._rewrite(t, 'v1'),
+		          seed=lambda t: self._rewrite_dropping(t, 'v1'),
 		          rest=lambda t: self._interleave(t, 1, 4, 'v2'),
 		          step=4)
 
@@ -353,9 +397,10 @@ class UndoImageChainTest(BaseTest):
 		"""
 		A differential merge image above the full images that seeded it.
 
-		Measured: Compact and SplitFull from the rewrite, then MergeDiff -- the
-		merge drops nothing, and the pages already carry a retained image, so it
-		writes the boundary key only.
+		Measured: SplitFull from the rewrite (its compactions drop nothing, so
+		they write no image), then MergeDiff -- the merge drops nothing, and the
+		pages already carry a retained image, so it writes the boundary key
+		only.  Measured walk: MergeDiff>Split.
 		"""
 		self._run('o_uic_merge_diff',
 		          seed=lambda t: self._rewrite(t, 'v1'),
@@ -432,7 +477,7 @@ class UndoImageChainTest(BaseTest):
 		Fifteen rounds, alternating differential splits and compactions above the
 		seeding full image.
 
-		Measured walk depth 11, distributed over 2, 4, 5, 6, 8, 9, 10 and 11 --
+		Measured walk depth 8, distributed over 3, 4, 5, 6, 7 and 8 --
 		different leaves reach different depths in one run, so a single pass
 		covers a range of them rather than one number.
 		"""
@@ -440,11 +485,12 @@ class UndoImageChainTest(BaseTest):
 
 	def test_deep_chain_full_in_the_middle(self):
 		"""
-		The same depth with a full split image half way down the chain, so the
+		The same depth with a whole-page image half way down the chain, so the
 		walk applies differential records, then a record that overwrites the page
-		whole, then more differential ones.
+		whole, then more differential ones.  The whole-page record is a
+		compaction image: the rewrite rounds drop deleted tuples.
 
-		Measured walk depth 11.  This is the shape a rule keyed on "did the walk
+		Measured walk depth 8.  This is the shape a rule keyed on "did the walk
 		pass a differential record" gets wrong: by the time the walk ends, the
 		narrowing those records applied is long overwritten.
 		"""
@@ -455,7 +501,7 @@ class UndoImageChainTest(BaseTest):
 		Control at the same depth with no differential record at all: parked
 		splits and compactions only.
 
-		Measured walk depth 11.  Every leaf that reaches a given record holds its
+		Measured walk depth 8.  Every leaf that reaches a given record holds its
 		bytes, so the identity is unambiguous -- if this one ever fails, the
 		defect is not in telling differential records apart.
 		"""
@@ -548,6 +594,189 @@ class UndoImageChainTest(BaseTest):
 	def _parked_rewrite(self, table, payload):
 		with self._park_seq_scan(table):
 			self._rewrite(table, payload)
+
+	# ---------------------------------- compaction without a dropped tuple
+
+	def _page_undo_used(self):
+		return self.node.execute(
+		    "SELECT lastUsedLocation FROM orioledb_get_undo_meta() "
+		    "WHERE undo_type = 'page'")[0][0]
+
+	def _leaf_count(self, table):
+		structure = self.node.execute(
+		    "SELECT orioledb_tbl_structure('%s'::regclass, '%s', %d);" %
+		    (table, STRUCTURE_FLAGS, STRUCTURE_DEPTH))[0][0]
+		return structure, len(
+		    tbl_structure_to_json(structure)[table + '_pkey'][0])
+
+	def _make_small(self, table):
+		self.node.safe_psql(
+		    'postgres', "CREATE TABLE %s ("
+		    "    id int NOT NULL,"
+		    "    payload text NOT NULL,"
+		    "    PRIMARY KEY (id)"
+		    ") USING orioledb;"
+		    "INSERT INTO %s "
+		    "(SELECT id, repeat('a', %d) FROM generate_series(1, %d) id);" %
+		    (table, table, SMALL_PAD, SMALL_ROWS))
+
+	def _scatter_updates(self, table, ids):
+		"""
+		Update the rows one by one, each time to a different size.  The
+		stride scatters consecutive sizes over SIZE_MIN..SIZE_MIN+SIZE_SPAN-1,
+		so the leaf compacts instead of splitting.
+		"""
+		con = self.node.connect(autocommit=True)
+		try:
+			for i in range(1, UPDATES + 1):
+				con.execute(
+				    "UPDATE %s SET payload = repeat('b', %d + mod(%d * %d, %d)) "
+				    "WHERE id = %d;" % (table, SIZE_MIN, i, SIZE_STRIDE,
+				                        SIZE_SPAN, ids[i % len(ids)]))
+		finally:
+			con.close()
+
+	def _cursor_reader(self, table, seq_scan=False):
+		"""
+		An RR reader that has read its view and holds a scan open on the table:
+		an index scan, or a sequential scan when seq_scan.
+		"""
+		con = self.node.connect()
+		con.begin()
+		con.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+		view = con.execute("SELECT id, payload FROM %s ORDER BY id;" % table)
+		if seq_scan:
+			con.execute("SET enable_indexscan = off;")
+			con.execute("SET enable_bitmapscan = off;")
+			query = "SELECT id, payload FROM %s" % table
+		else:
+			con.execute("SET enable_seqscan = off;")
+			con.execute("SET enable_bitmapscan = off;")
+			query = "SELECT id, payload FROM %s ORDER BY id" % table
+		con.execute("DECLARE ch NO SCROLL CURSOR FOR %s;" % query)
+		first = con.execute("FETCH 1 FROM ch;")
+		self.assertEqual(len(first), 1)
+		return con, view, first
+
+	def _compaction_keeps_reader(self, table, index_cursor):
+		"""
+		No tuple is deleted, so compaction has nothing to drop: the reader
+		keeps its view, and the compactions write no page image.
+		"""
+		self._make_small(table)
+		self.assertEqual(self._leaf_count(table)[1], 1)
+		if index_cursor:
+			con, view, first = self._cursor_reader(table)
+		else:
+			con, view = self._snapshot(table)
+			first = []
+		try:
+			used = self._page_undo_used()
+			self._scatter_updates(table, list(range(1, SMALL_ROWS + 1)))
+			self.assertEqual(self._page_undo_used(), used)
+			if index_cursor:
+				rest = con.execute("FETCH ALL FROM ch;")
+				self.assertEqual(sorted(first + rest), sorted(view))
+				con.execute("CLOSE ch;")
+			self._verify(con, table, view, 'compaction-no-drop')
+		finally:
+			self._close(con)
+
+	def test_compaction_without_drop_writes_no_image(self):
+		self._compaction_keeps_reader('o_uic_nodrop', False)
+
+	def test_compaction_without_drop_index_scan_open(self):
+		self._compaction_keeps_reader('o_uic_nodrop_idx', True)
+
+	def _three_leaf_seq_cursor(self, table, drop):
+		"""
+		A sequential scan copies a leaf when it reaches it, so the cursor reads
+		the first leaf at FETCH 1 and the second one only at FETCH ALL.  The
+		updates hit the second leaf only and compact it without a split.  With
+		committed deletes among them the compactions drop tuples and must write
+		an image; without, they must write none.  Either way the cursor returns
+		the rows of its snapshot.
+		"""
+		self.node.safe_psql(
+		    'postgres', "CREATE TABLE %s ("
+		    "    id int NOT NULL,"
+		    "    payload text NOT NULL,"
+		    "    PRIMARY KEY (id)"
+		    ") USING orioledb;"
+		    "INSERT INTO %s "
+		    "(SELECT id, repeat('a', %d) FROM generate_series(1, %d) id);" %
+		    (table, table, SMALL_PAD, THREE_LEAF_ROWS))
+		structure, leaves = self._leaf_count(table)
+		self.assertGreaterEqual(leaves, 3)
+		bounds = [
+		    int(key) for key in re.findall(
+		        r"downlink = \d+, key = \('(\d+)'\)", structure)
+		]
+		self.assertGreaterEqual(bounds[1] - HOT_ROWS, bounds[0])
+		con, view, first = self._cursor_reader(table, seq_scan=True)
+		try:
+			# The second leaf ends where the second downlink key starts.
+			hot = list(range(bounds[1] - HOT_ROWS, bounds[1]))
+			if drop:
+				self.node.safe_psql(
+				    'postgres', "DELETE FROM %s WHERE id IN (%s) "
+				    "AND mod(id, %d) = 0;" %
+				    (table, ','.join(map(str, hot)), DELETE_MODULUS))
+				hot = [i for i in hot if i % DELETE_MODULUS != 0]
+			used = self._page_undo_used()
+			self._scatter_updates(table, hot)
+			if drop:
+				self.assertGreater(self._page_undo_used(), used)
+			else:
+				self.assertEqual(self._page_undo_used(), used)
+			self.assertEqual(self._leaf_count(table)[1], leaves)
+			rest = con.execute("FETCH ALL FROM ch;")
+			self.assertEqual(sorted(first + rest), sorted(view))
+			con.execute("CLOSE ch;")
+		finally:
+			self._close(con)
+
+	def _compaction_drops_keep_reader(self, table, index_cursor):
+		"""
+		Committed deletes after the reader's snapshot: a compaction drops
+		those tuples, so it must write an image the reader can read them from.
+		"""
+		self._make_small(table)
+		self.assertEqual(self._leaf_count(table)[1], 1)
+		if index_cursor:
+			con, view, first = self._cursor_reader(table)
+		else:
+			con, view = self._snapshot(table)
+			first = []
+		try:
+			self._drop_third(table)
+			live = [
+			    r[0]
+			    for r in self.node.execute("SELECT id FROM %s ORDER BY id;" %
+			                               table)
+			]
+			used = self._page_undo_used()
+			self._scatter_updates(table, live)
+			self.assertGreater(self._page_undo_used(), used)
+			if index_cursor:
+				rest = con.execute("FETCH ALL FROM ch;")
+				self.assertEqual(sorted(first + rest), sorted(view))
+				con.execute("CLOSE ch;")
+			self._verify(con, table, view, 'compaction-drop')
+		finally:
+			self._close(con)
+
+	def test_compaction_with_drop_writes_image(self):
+		self._compaction_drops_keep_reader('o_uic_drop', False)
+
+	def test_compaction_with_drop_index_scan_open(self):
+		self._compaction_drops_keep_reader('o_uic_drop_idx', True)
+
+	def test_compaction_without_drop_seq_scan_open(self):
+		self._three_leaf_seq_cursor('o_uic_nodrop_seq', False)
+
+	def test_compaction_with_drop_seq_scan_open(self):
+		self._three_leaf_seq_cursor('o_uic_drop_seq', True)
 
 
 if __name__ == '__main__':

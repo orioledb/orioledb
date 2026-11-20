@@ -42,6 +42,7 @@ make_split_items(BTreeDescr *desc, Page page,
 	int			maxKeyLen = MAXALIGN(((BTreePageHeader *) page)->maxKeyLen);
 
 	i = 0;
+	items->droppedTuple = false;
 	BTREE_PAGE_LOCATOR_FIRST(page, &loc);
 	while (BTREE_PAGE_LOCATOR_IS_VALID(page, &loc) || i == *offset)
 	{
@@ -85,6 +86,7 @@ make_split_items(BTreeDescr *desc, Page page,
 			if (finished && tupHdr->deleted &&
 				(COMMITSEQNO_IS_INPROGRESS(csn) || XACT_INFO_MAP_CSN(tupHdr->xactInfo) < csn))
 			{
+				items->droppedTuple = true;
 				if (i < *offset)
 					(*offset)--;
 				BTREE_PAGE_LOCATOR_NEXT(page, &loc);
