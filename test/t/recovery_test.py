@@ -5294,8 +5294,6 @@ recovery_target_action = 'pause'
 			    replica, 'sk_modify_pending')
 
 			os.kill(worker_pid, signal.SIGTERM)
-			replica.safe_psql(
-			    "SELECT pg_stopevent_reset('sk_modify_pending');")
 
 			replica_log = ""
 			deadline = time.time() + 120
