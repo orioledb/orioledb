@@ -705,6 +705,67 @@ decode_on_container(WalReaderState *r)
 	return WALPARSE_OK;
 }
 
+/*
+ * Make childXid a subtransaction of parentXid.
+ *
+ * The reorder buffer only supports a single level of subtransactions, but
+ * OrioleDB can report a savepoint under a logical xid that is itself later
+ * (or already) attached to a heap top-level xid.  Keep the tree flat: attach
+ * to the top-level transaction of parentXid, and move any children of
+ * childXid up to the new top-level transaction.
+ */
+static void
+o_assign_child(ReorderBuffer *rb, TransactionId parentXid,
+			   TransactionId childXid, XLogRecPtr lsn)
+{
+	ReorderBufferTXN *parent = get_reorder_buffer_txn(rb, parentXid);
+	ReorderBufferTXN *child = get_reorder_buffer_txn(rb, childXid);
+	dlist_head	orphans;
+
+	dlist_init(&orphans);
+
+	if (parent && parent->toptxn)
+	{
+		parentXid = parent->toptxn->xid;
+		if (parentXid == childXid)
+			return;
+	}
+
+	if (child)
+	{
+		dlist_mutable_iter iter;
+
+		dlist_foreach_modify(iter, &child->subtxns)
+		{
+			ReorderBufferTXN *grandchild = dlist_container(ReorderBufferTXN, node, iter.cur);
+
+			dlist_delete(&grandchild->node);
+			child->nsubtxns--;
+			dlist_push_tail(&orphans, &grandchild->node);
+		}
+
+		/*
+		 * Aborting a savepoint (ROLLBACK TO) frees its reorder buffer
+		 * transaction without decrementing the parent's counter, so the
+		 * counter can be stale; ReorderBufferAssignChild() asserts on it.
+		 */
+		if (dlist_is_empty(&child->subtxns))
+			child->nsubtxns = 0;
+	}
+
+	ReorderBufferAssignChild(rb, parentXid, childXid, lsn);
+	parent = get_reorder_buffer_txn(rb, parentXid);
+	while (parent && !dlist_is_empty(&orphans))
+	{
+		ReorderBufferTXN *grandchild = dlist_container(ReorderBufferTXN, node,
+													   dlist_pop_head_node(&orphans));
+
+		grandchild->toptxn = parent;
+		dlist_push_tail(&parent->subtxns, &grandchild->node);
+		parent->nsubtxns++;
+	}
+}
+
 static WalParseResult
 decode_on_record(WalReaderState *r, WalRecord *rec)
 {
@@ -758,7 +819,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				Assert(TransactionIdIsValid(topXid));
 				Assert(TransactionIdIsValid(subXid));
 
-				ReorderBufferAssignChild(ctx->decodeCtx->reorder, topXid, subXid, xlogPtr);
+				o_assign_child(ctx->decodeCtx->reorder, topXid, subXid, xlogPtr);
 
 				parentTxn = get_reorder_buffer_txn(ctx->decodeCtx->reorder, topXid);
 				if (parentTxn)
@@ -1151,7 +1212,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 
 				if (!ctx->decodeCtx->fast_forward)
 				{
-					ReorderBufferAssignChild(ctx->decodeCtx->reorder, rec->u.savepoint.parentLogicalXid, rec->logicalXid, ctx->decodeBuf->origptr);
+					o_assign_child(ctx->decodeCtx->reorder, rec->u.savepoint.parentLogicalXid, rec->logicalXid, ctx->decodeBuf->origptr);
 
 					parentTxn = get_reorder_buffer_txn(ctx->decodeCtx->reorder, rec->u.savepoint.parentLogicalXid);
 					if (parentTxn)
