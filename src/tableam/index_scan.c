@@ -120,6 +120,35 @@ row_key_tuple_is_valid(OBtreeRowKeyBound *row_key, OTuple tup, OIndexDescr *id,
 	return valid;
 }
 
+/*
+ * Could is_tuple_valid() reject any tuple of this key range?
+ *
+ * Its loops are driven entirely by the range and the scan keys, so when all of
+ * them would spin zero times the answer is "no" for every row of the range.
+ * The function then does nothing and costs only the call -- which over a
+ * million rows is not nothing.  Decide it once per range instead.
+ */
+static bool
+tuple_valid_check_needed(OBTreeKeyRange *range, BTScanOpaque so,
+						 int numPrefixExactKeys)
+{
+	int			i;
+
+	if (so->numArrayKeys != 0)
+		return true;
+	if (range->low.n_row_keys != 0 || range->high.n_row_keys != 0)
+		return true;
+
+	for (i = numPrefixExactKeys + 1; i < range->low.nkeys; i++)
+	{
+		if (!(range->low.keys[i].flags & O_VALUE_BOUND_UNBOUNDED) ||
+			!(range->high.keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
+			return true;
+	}
+
+	return false;
+}
+
 static bool
 is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 			   BTScanOpaque so, int numPrefixExactKeys)
@@ -135,11 +164,24 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 
 	for (i = numPrefixExactKeys + 1; valid && i < low->nkeys; i++)
 	{
-		int			attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple,
-														  id, i + 1);
+		int			attnum;
 		bool		isnull;
-		Datum		value = o_fastgetattr(tup, attnum, id->leafTupdesc,
-										  &id->leafSpec, &isnull);
+		Datum		value;
+
+		/*
+		 * Both tests below are skipped for an unbounded side, so a key column
+		 * unbounded at both ends has no say in the verdict.  Decoding it
+		 * would still cost a walk of the tuple up to that column, once per
+		 * row -- and the trailing columns of a multi-column index are exactly
+		 * the ones a range query leaves unbounded.
+		 */
+		if ((low->keys[i].flags & O_VALUE_BOUND_UNBOUNDED) &&
+			(high->keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
+			continue;
+
+		attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, id, i + 1);
+		value = o_fastgetattr(tup, attnum, id->leafTupdesc,
+							  &id->leafSpec, &isnull);
 
 		if (!(low->keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
 		{
@@ -621,6 +663,9 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 										  indexDescr->nonLeafTupdesc->natts,
 										  indexDescr->fields);
 	ostate->curKeyRangeIsLoaded = true;
+	ostate->tupleValidNeeded = tuple_valid_check_needed(&ostate->curKeyRange,
+														so,
+														ostate->numPrefixExactKeys);
 
 	if (!ostate->exact)
 	{
@@ -827,10 +872,11 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 					tup_is_valid = true;
 				else
 				{
-					tup_is_valid = is_tuple_valid(tup, indexDescr,
-												  &ostate->curKeyRange,
-												  so,
-												  ostate->numPrefixExactKeys);
+					tup_is_valid = !ostate->tupleValidNeeded ||
+						is_tuple_valid(tup, indexDescr,
+									   &ostate->curKeyRange,
+									   so,
+									   ostate->numPrefixExactKeys);
 					if (tup_is_valid && indexDescr->desc.type == oIndexExclusion)
 					{
 						TupleDesc	tupdesc;
@@ -1352,6 +1398,11 @@ o_exec_parallel_idx_scan(OScanState *ostate, ScanState *ss)
 			int			numPrefix = so->numArrayKeys > 0 ? 0 :
 				ostate->numPrefixExactKeys;
 
+			/*
+			 * No tupleValidNeeded shortcut here: this path publishes its key
+			 * range without going through switch_to_next_range(), so the flag
+			 * is not maintained for it.
+			 */
 			if (!is_tuple_valid(tuple, indexDescr, &ostate->curKeyRange,
 								so, numPrefix))
 				continue;
@@ -1397,6 +1448,76 @@ o_exec_parallel_idx_scan(OScanState *ostate, ScanState *ss)
 	}
 }
 
+/*
+ * Can rows of this scan be taken from a batch (o_btree_iterator_fetch_batch())
+ * straight into the slot?  Only for an index-only scan of a secondary index
+ * whose rows need nothing per row beyond what the batch has checked -- no
+ * array or skip keys, no key condition is_tuple_valid() would test -- and
+ * whose leaf values the slot takes one for one
+ * (tts_orioledb_store_index_values()).
+ */
+static bool
+o_scan_can_batch(OTableDescr *descr, OScanState *ostate, TupleTableSlot *slot)
+{
+	BTScanOpaque so = (BTScanOpaque) ostate->scandesc.opaque;
+	OIndexDescr *id;
+	int			i;
+
+	if (!ostate->onlyCurIx || ostate->ixNum == PrimaryIndexNumber ||
+		ostate->iterator == NULL || ostate->exact ||
+		ostate->curKeyRange.empty || !ostate->curKeyRangeIsLoaded ||
+		ostate->scanDir != ForwardScanDirection)
+		return false;
+#if PG_VERSION_NUM >= 180000
+	if (ostate->skipScanProbePending)
+		return false;
+#endif
+	if (tuple_valid_check_needed(&ostate->curKeyRange, so,
+								 ostate->numPrefixExactKeys))
+		return false;
+
+	id = descr->indices[ostate->ixNum];
+	if (id->desc.type == oIndexExclusion || id->bridging ||
+		GET_PRIMARY(descr)->primaryIsCtid || GET_PRIMARY(descr)->bridging ||
+		slot->tts_tupleDescriptor->natts != id->leafTupdesc->natts)
+		return false;
+
+	for (i = 0; i < id->leafTupdesc->natts; i++)
+		if (TupleDescAttr(id->leafTupdesc, i)->attlen <= 0)
+			return false;
+
+	return true;
+}
+
+/* Put the next row of the scan's batch into the slot; false when none */
+static bool
+o_exec_fetch_batch(OTableDescr *descr, OScanState *ostate, ScanState *ss)
+{
+	if (ostate->batch.count == 0)
+	{
+		bool		found;
+
+		if (!o_scan_can_batch(descr, ostate, ss->ss_ScanTupleSlot))
+			return false;
+
+		/* As o_index_scan_getnext(): the iterator may step pages */
+		descr->noInvalidation = true;
+		found = o_btree_iterator_fetch_batch(ostate->iterator,
+											 &ostate->curKeyRange.high,
+											 BTreeKeyBound, true,
+											 &ostate->batch);
+		descr->noInvalidation = false;
+		if (!found)
+			return false;
+	}
+
+	tts_orioledb_store_index_values(ss->ss_ScanTupleSlot,
+									o_btree_iterator_batch_tuple(&ostate->batch),
+									descr, ostate->batch.csn, ostate->ixNum);
+	o_btree_iterator_batch_next(&ostate->batch);
+	return true;
+}
+
 /* fetches next tuple for oIterateDirectModify */
 TupleTableSlot *
 o_exec_fetch(OScanState *ostate, ScanState *ss)
@@ -1415,6 +1536,12 @@ o_exec_fetch(OScanState *ostate, ScanState *ss)
 	{
 		BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
 		CommitSeqNo tupleCsn;
+
+		if (o_exec_fetch_batch(descr, ostate, ss))
+		{
+			slot = ss->ss_ScanTupleSlot;
+			continue;
+		}
 
 		if (!ostate->curKeyRangeIsLoaded)
 			ostate->curKeyRange.empty = true;

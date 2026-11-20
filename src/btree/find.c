@@ -252,11 +252,21 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 			{
 				loc->itemOffset = 0;
 			}
-			else
+			else if (level > 0 || !fastpath_search_leaf_items(meta, loc))
 			{
 				btree_page_search_items(desc, intCxt->pagePtr,
 										key, keyType, loc);
 			}
+#ifdef USE_ASSERT_CHECKING
+			else
+			{
+				BTreePageItemLocator check = *loc;
+
+				btree_page_search_items(desc, intCxt->pagePtr,
+										key, keyType, &check);
+				Assert(check.itemOffset == loc->itemOffset);
+			}
+#endif
 
 			if (page_locator_find_real_item(intCxt->pagePtr,
 											intCxt->partial,

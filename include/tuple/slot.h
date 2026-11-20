@@ -57,6 +57,9 @@ typedef struct OTableSlot
 extern PGDLLIMPORT const TupleTableSlotOps TTSOpsOrioleDB;
 
 extern void tts_orioledb_detoast(TupleTableSlot *slot);
+extern void tts_orioledb_store_index_values(TupleTableSlot *slot,
+											OTuple tuple, OTableDescr *descr,
+											CommitSeqNo csn, int ixnum);
 extern void tts_orioledb_store_tuple(TupleTableSlot *slot, OTuple tuple,
 									 OTableDescr *descr, CommitSeqNo csn,
 									 int ixnum, bool shouldfree,

@@ -310,6 +310,60 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		natts = oslot->state.desc->natts;
 	}
 
+	/*
+	 * Fast path for a fixed-format tuple read in index order.
+	 *
+	 * o_tuple_fill() clears O_TUPLE_FLAGS_FIXED_FORMAT as soon as one
+	 * attribute is NULL or falls outside the fixed prefix that
+	 * fillFixedFormatSpec() measured, and that prefix only admits an
+	 * attribute whose attlen is positive.  The flag therefore already means
+	 * the tuple holds every attribute of the descriptor, each fixed width and
+	 * non-NULL.  That leaves nothing for the NULL bitmap, the TOAST pointer
+	 * test or the isfilled array that feeds slot_getmissingattrs(), and
+	 * reduces the offsets to a running sum -- exactly what
+	 * o_tuple_next_field_offset() computes one out-of-line call at a time.
+	 * Doing it inline here is the same arithmetic without the per-attribute
+	 * call and branches.
+	 */
+	if ((oslot->tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT) &&
+		index_order &&
+		oslot->leafTuple &&
+		oslot->ixnum != PrimaryIndexNumber &&
+		oslot->ixnum != BridgeIndexNumber &&
+		slot->tts_nvalid == 0 &&
+		oslot->state.attnum == 0)
+	{
+		TupleDesc	leafTupdesc = idx->leafTupdesc;
+		char	   *tp = oslot->state.tp;
+		uint32		off = 0;
+		int			nvalues = natts;
+
+		/* The flag guarantees this; the loop below reads the whole prefix. */
+		Assert(natts == idx->leafSpec.natts);
+
+		/*
+		 * The trailing ctid is not a table column; the generic path reads it
+		 * only to assert it against tts_tid, which tts_orioledb_init_reader()
+		 * has already set from the same tuple.
+		 */
+		if (GET_PRIMARY(descr)->primaryIsCtid)
+			nvalues--;
+
+		for (attnum = 0; attnum < nvalues; attnum++)
+		{
+			OTupleAttrCompact *att = OTupleDescAttrFast(leafTupdesc, attnum);
+
+			Assert(att->attlen > 0);
+			off = o_att_align_nominal(att, off);
+			values[attnum] = fetchatt(att, tp + off);
+			isnull[attnum] = false;
+			off += att->attlen;
+		}
+
+		slot->tts_nvalid = nvalues;
+		return;
+	}
+
 	{
 		int			needed = Max(natts, __natts);
 
@@ -957,6 +1011,71 @@ tts_orioledb_store_tuple_internal(TupleTableSlot *slot, OTuple tuple,
 
 	if (shouldfree)
 		slot->tts_flags |= TTS_FLAG_SHOULDFREE;
+}
+
+/*
+ * Store a secondary index's leaf tuple as the slot's values, taken apart
+ * now, and without keeping the tuple: it may lie in a page image that is
+ * gone by the next fetch.  Only for an index-ordered slot whose values are
+ * the leaf's attributes one for one, each of fixed length -- no ctid to set
+ * aside, no TOAST pointer to resolve.  By-reference values point into the
+ * tuple, so they last as long as the tuple does.
+ */
+void
+tts_orioledb_store_index_values(TupleTableSlot *slot, OTuple tuple,
+								OTableDescr *descr, CommitSeqNo csn, int ixnum)
+{
+	OTableSlot *oslot = (OTableSlot *) slot;
+	OIndexDescr *idx = descr->indices[ixnum];
+	TupleDesc	leafTupdesc = idx->leafTupdesc;
+	int			natts = leafTupdesc->natts;
+	Datum	   *values = slot->tts_values;
+	bool	   *isnull = slot->tts_isnull;
+	int			attnum;
+
+	Assert(slot->tts_ops == &TTSOpsOrioleDB);
+	Assert(ixnum != PrimaryIndexNumber && ixnum != BridgeIndexNumber);
+	Assert(slot->tts_tupleDescriptor->natts == natts);
+
+	/* The previous row of a batch leaves nothing to release */
+	if (TTS_SHOULDFREE(slot) || oslot->to_toast || oslot->rowid ||
+		!O_TUPLE_IS_NULL(oslot->tuple))
+		tts_orioledb_clear(slot);
+
+	if (tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT)
+	{
+		/* Every attribute present and of fixed width: see getsomeattrs */
+		uint32		off = 0;
+
+		for (attnum = 0; attnum < natts; attnum++)
+		{
+			OTupleAttrCompact *att = OTupleDescAttrFast(leafTupdesc, attnum);
+
+			off = o_att_align_nominal(att, off);
+			values[attnum] = fetchatt(att, tuple.data + off);
+			isnull[attnum] = false;
+			off += att->attlen;
+		}
+	}
+	else
+	{
+		OTupleReaderState state;
+
+		o_tuple_init_reader(&state, tuple, leafTupdesc, &idx->leafSpec);
+		/* A leaf tuple of an index always carries all of its attributes */
+		Assert(state.natts == natts);
+		for (attnum = 0; attnum < natts; attnum++)
+			values[attnum] = o_tuple_read_next_field(&state, &isnull[attnum]);
+	}
+
+	slot->tts_flags &= ~TTS_FLAG_EMPTY;
+	slot->tts_nvalid = natts;
+	oslot->descr = descr;
+	oslot->csn = csn;
+	oslot->ixnum = ixnum;
+	oslot->leafTuple = true;
+	oslot->version = o_tuple_get_version(tuple);
+	slot->tts_tableOid = descr->oids.reloid;
 }
 
 void

@@ -19,6 +19,7 @@
 
 #include "access/nbtree.h"
 #include "access/sdir.h"
+#include "btree/iterator.h"
 #include "btree/scan.h"
 
 typedef struct OScanState
@@ -40,6 +41,14 @@ typedef struct OScanState
 	bool		onlyCurIx;
 	bool		returning;
 	bool		curKeyRangeIsLoaded;
+
+	/*
+	 * Can is_tuple_valid() reject anything for the current key range?  When
+	 * every trailing key column is unbounded at both ends and there are no
+	 * row keys or array keys it cannot, and calling it per row buys nothing
+	 * but its own prologue and epilogue.  Recomputed wherever the range is.
+	 */
+	bool		tupleValidNeeded;
 	int			numPrefixExactKeys;
 	bool		exact;
 #if PG_VERSION_NUM >= 180000
@@ -58,6 +67,8 @@ typedef struct OScanState
 #endif
 	OBTreeKeyRange curKeyRange;
 	BTreeIterator *iterator;
+	/* rows the iterator handed out in one go (o_exec_fetch()) */
+	BTreeIteratorBatch batch;
 	List	   *indexQuals;
 	/* used only by direct modify functions */
 	CmdType		cmd;
