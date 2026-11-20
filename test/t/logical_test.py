@@ -1597,7 +1597,7 @@ class LogicalTest(BaseTest):
 		symbol1 = 'A'
 		symbol2 = 'B'
 
-		# txn operates with two	iterationns of TOAST index descr & with two versions of relation
+		# txn operates with two	iterations of TOAST index descr & with two versions of relation
 		with node.connect() as con:
 			con.begin()
 			con.execute(
@@ -1690,7 +1690,7 @@ class LogicalTest(BaseTest):
 		symbol2 = 'B'
 		symbol3 = 'C'
 
-		# txn operates with two	iterationns of TOAST index descr & with two versions of relation
+		# txn operates with two	iterations of TOAST index descr & with two versions of relation
 		# update TOAST-relation is organized as INSERT+DELETE
 		with node.connect() as con:
 			con.begin()
