@@ -11,6 +11,9 @@ from testgres import NodeStatus
 
 from .base_test import BaseTest, ThreadQueryExecutor, wait_checkpointer_stopevent, wait_stopevent
 
+CHECKPOINT_REPLICA_ROW_COUNT = 2000
+CHECKPOINT_REPLICA_VALUE_LENGTH = 200
+
 
 class StandbyDiverged(Exception):
 	"""The old primary cannot follow the node that was promoted.
@@ -1752,6 +1755,76 @@ class ReplicationTest(BaseTest):
 
 				count = replica.execute("SELECT COUNT(*) FROM foo;")[0][0]
 				self.assertEqual(100, count)
+
+	def test_checkpoint_open_transaction_replica_recovery(self):
+		master = self.node
+		self.enableStreaming(master)
+		master.append_conf('checkpoint_timeout = 1h\nmax_wal_size = 10GB\n')
+		master.start()
+		master.safe_psql(f"""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_checkpoint_open (
+				id int PRIMARY KEY,
+				val text NOT NULL
+			) USING orioledb;
+			INSERT INTO o_checkpoint_open
+				SELECT g, repeat('x', {CHECKPOINT_REPLICA_VALUE_LENGTH})
+				FROM generate_series(1, {CHECKPOINT_REPLICA_ROW_COUNT}) g;
+		""")
+
+		with self.getReplica().start() as replica:
+			con = master.connect()
+			con.begin()
+			con.execute(
+			    f"UPDATE o_checkpoint_open"
+			    f" SET val = repeat('y', {CHECKPOINT_REPLICA_VALUE_LENGTH})")
+
+			master.safe_psql("SELECT pg_switch_wal();")
+			master_lsn = master.execute("SELECT pg_current_wal_lsn();")[0][0]
+			replica.poll_query_until(
+			    f"SELECT pg_last_wal_replay_lsn() >= "
+			    f"'{master_lsn}'::pg_lsn",
+			    expected=True,
+			    sleep_time=0.1,
+			    max_attempts=600)
+
+			master.safe_psql("CHECKPOINT;")
+			master.stop(['-m', 'immediate'])
+			try:
+				con.close()
+			except Exception:
+				pass
+
+			master.start()
+			rows_sql = 'SELECT id, val FROM o_checkpoint_open ORDER BY id'
+			baseline = [(key, 'x' * CHECKPOINT_REPLICA_VALUE_LENGTH)
+			            for key in range(1, CHECKPOINT_REPLICA_ROW_COUNT + 1)]
+			self.assertEqual(master.execute(rows_sql), baseline)
+
+			master_lsn = master.execute("SELECT pg_current_wal_lsn();")[0][0]
+			replica.poll_query_until(
+			    f"SELECT pg_last_wal_replay_lsn() >= "
+			    f"'{master_lsn}'::pg_lsn",
+			    expected=True,
+			    sleep_time=0.1,
+			    max_attempts=600)
+			self.assertEqual(replica.execute(rows_sql), baseline)
+
+			master.safe_psql(
+			    f"UPDATE o_checkpoint_open"
+			    f" SET val = repeat('z', {CHECKPOINT_REPLICA_VALUE_LENGTH})")
+			committed = [(key, 'z' * CHECKPOINT_REPLICA_VALUE_LENGTH)
+			             for key in range(1, CHECKPOINT_REPLICA_ROW_COUNT + 1)]
+			self.assertEqual(master.execute(rows_sql), committed)
+
+			master_lsn = master.execute("SELECT pg_current_wal_lsn();")[0][0]
+			replica.poll_query_until(
+			    f"SELECT pg_last_wal_replay_lsn() >= "
+			    f"'{master_lsn}'::pg_lsn",
+			    expected=True,
+			    sleep_time=0.1,
+			    max_attempts=600)
+			self.assertEqual(replica.execute(rows_sql), committed)
 
 	def test_recovery_finish_aborts_propagate_to_replica(self):
 		"""

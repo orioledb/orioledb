@@ -530,6 +530,8 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 {
 	WALRecXid  *rec;
 	TransactionId heapXid;
+	ODBProcData *procData = GET_CUR_PROCDATA();
+	XidVXidMapElement *vxidElem;
 
 	Assert(!local_wal.contains_xid);
 	local_wal.contains_xid = true;
@@ -538,6 +540,20 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 	Assert(local_wal.buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
 
 	heapXid = GetTopTransactionIdIfAny();
+
+	/*
+	 * Let a checkpoint record what recovery would have learned from this
+	 * record, had it started before it.
+	 */
+	vxidElem = &procData->vxids[procData->autonomousNestingLevel];
+	if (vxidElem->oxid == oxid)
+	{
+		if (!TransactionIdIsValid(vxidElem->heapXid))
+			vxidElem->heapXid = heapXid;
+		if (!TransactionIdIsValid(vxidElem->logicalXid))
+			vxidElem->logicalXid = logicalXid;
+		pg_write_barrier();
+	}
 
 	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_XID;

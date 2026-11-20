@@ -243,6 +243,9 @@ typedef struct
 {
 	OXid		oxid;
 	VirtualTransactionId vxid;
+	/* the first valid xids the oxid's WAL_REC_XID records named */
+	TransactionId heapXid;
+	TransactionId logicalXid;
 } XidVXidMapElement;
 
 typedef struct
