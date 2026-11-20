@@ -1449,12 +1449,13 @@ o_exec_parallel_idx_scan(OScanState *ostate, ScanState *ss)
 }
 
 /*
- * Can rows of this scan be taken from a batch (o_btree_iterator_fetch_batch())
- * straight into the slot?  Only for an index-only scan of a secondary index
- * whose rows need nothing per row beyond what the batch has checked -- no
- * array or skip keys, no key condition is_tuple_valid() would test -- and
- * whose leaf values the slot takes one for one
- * (tts_orioledb_store_index_values()).
+ * Can rows of this scan be taken from a batch (o_btree_iterator_fetch_batch())?
+ * Only for a scan of a secondary index whose rows need nothing per row
+ * beyond what the batch has checked -- no array or skip keys, no key
+ * condition is_tuple_valid() would test.  An index-only scan stores the leaf
+ * values in the slot one for one (tts_orioledb_store_index_values()), so it
+ * needs a leaf the slot takes that way; any other looks each row up in the
+ * primary index.
  */
 static bool
 o_scan_can_batch(OTableDescr *descr, OScanState *ostate, TupleTableSlot *slot)
@@ -1463,7 +1464,7 @@ o_scan_can_batch(OTableDescr *descr, OScanState *ostate, TupleTableSlot *slot)
 	OIndexDescr *id;
 	int			i;
 
-	if (!ostate->onlyCurIx || ostate->ixNum == PrimaryIndexNumber ||
+	if (ostate->ixNum == PrimaryIndexNumber ||
 		ostate->iterator == NULL || ostate->exact ||
 		ostate->curKeyRange.empty || !ostate->curKeyRangeIsLoaded ||
 		ostate->scanDir != ForwardScanDirection)
@@ -1478,7 +1479,12 @@ o_scan_can_batch(OTableDescr *descr, OScanState *ostate, TupleTableSlot *slot)
 
 	id = descr->indices[ostate->ixNum];
 	if (id->desc.type == oIndexExclusion || id->bridging ||
-		GET_PRIMARY(descr)->primaryIsCtid || GET_PRIMARY(descr)->bridging ||
+		GET_PRIMARY(descr)->bridging)
+		return false;
+	if (!ostate->onlyCurIx)
+		return true;
+
+	if (GET_PRIMARY(descr)->primaryIsCtid ||
 		slot->tts_tupleDescriptor->natts != id->leafTupdesc->natts)
 		return false;
 
@@ -1489,27 +1495,76 @@ o_scan_can_batch(OTableDescr *descr, OScanState *ostate, TupleTableSlot *slot)
 	return true;
 }
 
+/* Take the next batch from the iterator; false when none applies */
+static inline bool
+o_exec_fetch_next_batch(OTableDescr *descr, OScanState *ostate, ScanState *ss)
+{
+	bool		found;
+
+	if (!o_scan_can_batch(descr, ostate, ss->ss_ScanTupleSlot))
+		return false;
+
+	/* As o_index_scan_getnext(): the iterator may step pages */
+	descr->noInvalidation = true;
+	found = o_btree_iterator_fetch_batch(ostate->iterator,
+										 &ostate->curKeyRange.high,
+										 BTreeKeyBound, true, &ostate->batch);
+	descr->noInvalidation = false;
+	return found;
+}
+
+/*
+ * The next row of a batch of a scan that is not index-only: looked up in the
+ * primary index, as o_index_scan_getnext() looks a secondary row up.
+ */
+static pg_noinline bool
+o_exec_fetch_batch_primary(OTableDescr *descr, OScanState *ostate,
+						   ScanState *ss)
+{
+	OIndexDescr *primary = GET_PRIMARY(descr);
+
+	while (ostate->batch.count > 0 ||
+		   o_exec_fetch_next_batch(descr, ostate, ss))
+	{
+		OTuple		tuple;
+		OBTreeKeyBound bound;
+		CommitSeqNo tupleCsn;
+		BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
+
+		tuple = o_btree_iterator_batch_tuple(&ostate->batch);
+		o_btree_iterator_batch_next(&ostate->batch);
+
+		o_fill_pindex_tuple_key_bound(&descr->indices[ostate->ixNum]->desc,
+									  tuple, &bound);
+		descr->noInvalidation = true;
+		tuple = o_btree_find_tuple_by_key(&primary->desc, (Pointer) &bound,
+										  BTreeKeyBound, &ostate->oSnapshot,
+										  &tupleCsn,
+										  ss->ss_ScanTupleSlot->tts_mcxt,
+										  &hint);
+		descr->noInvalidation = false;
+
+		/* Deleted or updated concurrently: go on to the next one */
+		if (O_TUPLE_IS_NULL(tuple))
+			continue;
+
+		tts_orioledb_store_tuple(ss->ss_ScanTupleSlot, tuple, descr, tupleCsn,
+								 PrimaryIndexNumber, true, &hint);
+		return true;
+	}
+	return false;
+}
+
 /* Put the next row of the scan's batch into the slot; false when none */
 static bool
 o_exec_fetch_batch(OTableDescr *descr, OScanState *ostate, ScanState *ss)
 {
-	if (ostate->batch.count == 0)
-	{
-		bool		found;
+	if (!ostate->onlyCurIx)
+		return o_exec_fetch_batch_primary(descr, ostate, ss);
 
-		if (!o_scan_can_batch(descr, ostate, ss->ss_ScanTupleSlot))
-			return false;
-
-		/* As o_index_scan_getnext(): the iterator may step pages */
-		descr->noInvalidation = true;
-		found = o_btree_iterator_fetch_batch(ostate->iterator,
-											 &ostate->curKeyRange.high,
-											 BTreeKeyBound, true,
-											 &ostate->batch);
-		descr->noInvalidation = false;
-		if (!found)
-			return false;
-	}
+	if (ostate->batch.count == 0 &&
+		!o_exec_fetch_next_batch(descr, ostate, ss))
+		return false;
 
 	tts_orioledb_store_index_values(ss->ss_ScanTupleSlot,
 									o_btree_iterator_batch_tuple(&ostate->batch),

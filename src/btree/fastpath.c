@@ -354,26 +354,30 @@ find_downlink_get_keys(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 	{
 		OBTreeKeyBound *bound = (OBTreeKeyBound *) key;
 		int			num = Min(numValues, bound->nkeys);
+		uint8		exclusiveFence = 0;
 
 		for (i = 0; i < num; i++)
 		{
 			uint8		f = bound->keys[i].flags;
 
-			if (bound->keys[i].type != types[i])
-				return false;
-
-			if (f & O_VALUE_BOUND_UNBOUNDED)
+			if (exclusiveFence)
 			{
 				/*
-				 * An unbounded-below column is a -infinity value, unbounded-
-				 * above a +infinity value.  Map the value extreme to a
-				 * storage slot through the column's ASC/DESC ordering: -inf
-				 * sits at the first slot for ASC and the last for DESC, +inf
-				 * vice versa.
+				 * An exclusive value before this column has decided already:
+				 * o_idx_cmp_range_key_to_value() does not look further once a
+				 * value equals an exclusive bound.
 				 */
-				bool		valueMinusInf = (f & O_VALUE_BOUND_LOWER) != 0;
-
-				flags[i] = (valueMinusInf == id->fields[i].ascending) ?
+				flags[i] = exclusiveFence;
+				values[i] = (Datum) 0;
+			}
+			else if (f & O_VALUE_BOUND_UNBOUNDED)
+			{
+				/*
+				 * An unbounded column's direction is already a storage
+				 * direction: o_idx_cmp_key_bound_to_tuple() puts "lower"
+				 * before every entry whatever the column's ASC/DESC.
+				 */
+				flags[i] = (f & O_VALUE_BOUND_LOWER) ?
 					FASTPATH_FIND_DOWNLINK_FLAG_FIRST : FASTPATH_FIND_DOWNLINK_FLAG_LAST;
 				values[i] = (Datum) 0;
 			}
@@ -393,8 +397,27 @@ find_downlink_get_keys(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 			}
 			else
 			{
+				/*
+				 * Only a value has a type to check: an unbounded or NULL
+				 * bound carries none.
+				 */
+				if (bound->keys[i].type != types[i])
+					return false;
 				flags[i] = 0;
 				values[i] = bound->keys[i].value;
+
+				/*
+				 * Equal to this value, an exclusive bound lies after the run
+				 * of entries sharing it (lower) or before it (upper),
+				 * whatever the columns after say: pin them there.
+				 */
+				if (!(f & O_VALUE_BOUND_INCLUSIVE))
+				{
+					if (f & O_VALUE_BOUND_LOWER)
+						exclusiveFence = FASTPATH_FIND_DOWNLINK_FLAG_LAST;
+					else if (f & O_VALUE_BOUND_UPPER)
+						exclusiveFence = FASTPATH_FIND_DOWNLINK_FLAG_FIRST;
+				}
 			}
 		}
 
@@ -416,7 +439,9 @@ find_downlink_get_keys(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 			uint8		f = bound->keys[num - 1].flags;
 			uint8		fence;
 
-			if (((f & O_VALUE_BOUND_LOWER) != 0) == ((f & O_VALUE_BOUND_INCLUSIVE) != 0))
+			if (exclusiveFence)
+				fence = exclusiveFence;
+			else if (((f & O_VALUE_BOUND_LOWER) != 0) == ((f & O_VALUE_BOUND_INCLUSIVE) != 0))
 				fence = FASTPATH_FIND_DOWNLINK_FLAG_FIRST;
 			else
 				fence = FASTPATH_FIND_DOWNLINK_FLAG_LAST;

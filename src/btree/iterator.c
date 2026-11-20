@@ -1043,13 +1043,40 @@ advance_page_location_if_needed(BTreeIterator *it, void *key,
 	}
 }
 
+/*
+ * Find the leaf an iteration (re)starts at.
+ *
+ * Positioning a backward start reads the leaf's chunk descriptor array (in
+ * advance_page_location_if_needed), which a partial (FETCH) image read
+ * through the fastpath does not contain (loadHikeys = !fastpath).  Load the
+ * hikeys chunk so the descriptors are present; if the backing page changed,
+ * fall back to a whole-page image read.
+ */
+static void
+find_leaf(BTreeIterator *it, void *key, BTreeKeyType kind)
+{
+	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+
+	findResult = find_page(&it->context, key, kind, 0);
+	Assert(findResult == OFindPageResultSuccess);
+
+	if (key != NULL && IT_IS_BACKWARD(it) &&
+		BTREE_PAGE_FIND_IS(&it->context, FETCH) &&
+		!partial_load_hikeys_chunk(&it->context.partial, it->context.img))
+	{
+		BTREE_PAGE_FIND_UNSET(&it->context, FETCH);
+		BTREE_PAGE_FIND_SET(&it->context, IMAGE);
+		findResult = find_page(&it->context, key, kind, 0);
+		Assert(findResult == OFindPageResultSuccess);
+	}
+}
+
 BTreeIterator *
 o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 						OSnapshot *o_snapshot, ScanDirection scanDir)
 {
 	BTreeIterator *it;
 	uint16		findFlags;
-	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
 
@@ -1110,28 +1137,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	it->startKey = key;
 	it->startKind = kind;
 
-	findResult = find_page(&it->context, key, kind, 0);
-	Assert(findResult == OFindPageResultSuccess);
-
-	if (key != NULL && IT_IS_BACKWARD(it))
-	{
-		/*
-		 * Positioning the backward start reads the leaf's chunk descriptor
-		 * array (in advance_page_location_if_needed), which a partial (FETCH)
-		 * image read through the fastpath does not contain (loadHikeys =
-		 * !fastpath).  Load the hikeys chunk so the descriptors are present;
-		 * if the backing page changed, fall back to a whole-page image read
-		 * and re-position there.
-		 */
-		if (BTREE_PAGE_FIND_IS(&it->context, FETCH) &&
-			!partial_load_hikeys_chunk(&it->context.partial, it->context.img))
-		{
-			BTREE_PAGE_FIND_UNSET(&it->context, FETCH);
-			BTREE_PAGE_FIND_SET(&it->context, IMAGE);
-			findResult = find_page(&it->context, key, kind, 0);
-			Assert(findResult == OFindPageResultSuccess);
-		}
-	}
+	find_leaf(it, key, kind);
 
 	advance_page_location_if_needed(it, key, kind, it->context.img,
 									&it->context.items[it->context.index].locator);
@@ -1361,10 +1367,7 @@ o_btree_iterator_advance(BTreeIterator *it, void *key, BTreeKeyType kind)
 	else
 	{
 		/* Otherwise, re-find the leaf page if needed */
-		OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
-
-		findResult = find_page(&it->context, key, kind, 0);
-		Assert(findResult == OFindPageResultSuccess);
+		find_leaf(it, key, kind);
 
 		advance_page_location_if_needed(it, key, kind, it->context.img,
 										&it->context.items[it->context.index].locator);
@@ -1580,17 +1583,23 @@ o_btree_iterator_fetch_batch(BTreeIterator *it, void *endKey,
 	stop = loc->chunkItemsCount;
 	if (endPtr != NULL && iterator_end_may_be_on_page(it, endPtr))
 	{
+		OffsetNumber low = loc->itemOffset,
+					high = stop;
 		OTuple		tuple;
 
+		/* The first item past the bound; the chunk is sorted */
 		probe = *loc;
-		for (; probe.itemOffset < stop; probe.itemOffset++)
+		while (low < high)
 		{
+			probe.itemOffset = low + (high - low) / 2;
 			BTREE_PAGE_READ_LEAF_TUPLE(tuple, context->img, &probe);
 			if (o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple, endKey,
 							endKind) >= (endIsIncluded ? 1 : 0))
-				break;
+				high = probe.itemOffset;
+			else
+				low = probe.itemOffset + 1;
 		}
-		stop = probe.itemOffset;
+		stop = low;
 	}
 
 	/* And where the first row that needs a closer look is */
