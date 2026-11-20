@@ -284,7 +284,17 @@ class LogicalUndoRetainTest(BaseTest):
 		with node.connect(autocommit=True) as churn:
 			self.churn(churn, 'settle', 20)
 		self.decoded(node)
+
+		# The value only settles once restart_lsn has reached the position
+		# the slot noted when it caught up, which takes a running xacts
+		# record logged after that.  CHECKPOINT logs one.
+		for _ in range(5):
+			node.safe_psql('postgres', "CHECKPOINT;")
+			self.decoded(node)
+			if self.slot_retain(node) != 0:
+				break
 		held = self.slot_retain(node)
+		self.assertGreater(held, 0, "the slot never settled")
 
 		# More of the same: with the transaction still open, catching up
 		# again must not move the slot any further.
