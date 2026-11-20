@@ -1029,6 +1029,152 @@ class LogicalTest(BaseTest):
 		    "table public.o_data: INSERT: id[integer]:4 data[text]:'20'\n"
 		    "COMMIT\n")
 
+	def decode_o2h_xact(self, body):
+		"""Decode a transaction that writes OrioleDB first, heap later.
+
+		Savepoints taken before the first heap write are children of the
+		logical xid.  At commit the heap xid adopts the logical xid with
+		them.  Explicit ids: nextval() would assign a heap xid first.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id int primary key, data text) USING orioledb;\n"
+		    "CREATE TABLE h_data(id int primary key, data text);\n")
+		create_slot(node)
+
+		node.safe_psql('postgres', f"BEGIN;\n{body}\nCOMMIT;\n")
+		return self.retrieve_logical_changes()
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_o2h_released_savepoint(self):
+		result = self.decode_o2h_xact("""
+			INSERT INTO o_data VALUES (1, 'o1');
+			SAVEPOINT s1;
+			INSERT INTO o_data VALUES (2, 'o2');
+			RELEASE SAVEPOINT s1;
+			INSERT INTO h_data VALUES (1, 'h1');
+		""")
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.o_data: INSERT: id[integer]:1 data[text]:'o1'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data[text]:'o2'\n"
+		    "table public.h_data: INSERT: id[integer]:1 data[text]:'h1'\n"
+		    "COMMIT\n")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_o2h_open_savepoint(self):
+		result = self.decode_o2h_xact("""
+			INSERT INTO o_data VALUES (1, 'o1');
+			SAVEPOINT s1;
+			INSERT INTO o_data VALUES (2, 'o2');
+			INSERT INTO h_data VALUES (1, 'h1');
+		""")
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.o_data: INSERT: id[integer]:1 data[text]:'o1'\n"
+		    "table public.h_data: INSERT: id[integer]:1 data[text]:'h1'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data[text]:'o2'\n"
+		    "COMMIT\n")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_o2h_nested_savepoints(self):
+		result = self.decode_o2h_xact("""
+			INSERT INTO o_data VALUES (1, 'o1');
+			SAVEPOINT s1;
+			INSERT INTO o_data VALUES (2, 'o2');
+			SAVEPOINT s2;
+			INSERT INTO o_data VALUES (3, 'o3');
+			ROLLBACK TO SAVEPOINT s2;
+			INSERT INTO o_data VALUES (4, 'o4');
+			RELEASE SAVEPOINT s1;
+			INSERT INTO h_data VALUES (1, 'h1');
+		""")
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.o_data: INSERT: id[integer]:1 data[text]:'o1'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data[text]:'o2'\n"
+		    "table public.o_data: INSERT: id[integer]:4 data[text]:'o4'\n"
+		    "table public.h_data: INSERT: id[integer]:1 data[text]:'h1'\n"
+		    "COMMIT\n")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_o2h_heap_in_savepoint(self):
+		result = self.decode_o2h_xact("""
+			INSERT INTO o_data VALUES (1, 'o1');
+			SAVEPOINT s1;
+			INSERT INTO o_data VALUES (2, 'o2');
+			INSERT INTO h_data VALUES (1, 'h1');
+			RELEASE SAVEPOINT s1;
+		""")
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.o_data: INSERT: id[integer]:1 data[text]:'o1'\n"
+		    "table public.h_data: INSERT: id[integer]:1 data[text]:'h1'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data[text]:'o2'\n"
+		    "COMMIT\n")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_o2h_total_bytes(self):
+		"""
+		The slot statistics count the adopted OrioleDB changes.
+
+		The changes of the logical xid are accounted to it while it is a
+		top-level transaction.  At commit the heap xid adopts it, and the
+		reorder buffer reports the top-level total as
+		pg_stat_replication_slots.total_bytes: without the adopted changes
+		it is the size of the heap row alone.
+		"""
+		result = self.decode_o2h_xact("""
+			INSERT INTO o_data
+				SELECT a, repeat(md5(a::text), 20)
+					FROM generate_series(1, 2000) f(a);
+			INSERT INTO h_data VALUES (1, 'h1');
+		""")
+		self.assertEqual(result.count("INSERT"), 2001)
+		total_bytes = self.node.execute("""
+			SELECT total_bytes
+				FROM pg_stat_replication_slots
+				WHERE slot_name = 'regression_slot';
+		""")[0][0]
+		# 2000 rows of about 700 bytes: counted once, not twice
+		self.assertGreater(total_bytes, 1024 * 1024)
+		self.assertLess(total_bytes, 2 * 1024 * 1024,
+		                "the adopted changes were counted twice")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_o2h_spilled_savepoint(self):
+		"""
+		A spilled savepoint is replayed after the heap xid took it over.
+
+		The joint commit does not commit the moved savepoints.  Spilling
+		keeps their final_lsn current, so their changes are still restored.
+		"""
+		self.node.append_conf('postgresql.conf',
+		                      "logical_decoding_work_mem = 64kB\n")
+		result = self.decode_o2h_xact("""
+			INSERT INTO o_data VALUES (0, 'o0');
+			SAVEPOINT s1;
+			INSERT INTO o_data
+				SELECT a, repeat(md5(a::text), 20)
+					FROM generate_series(1, 2000) f(a);
+			INSERT INTO h_data VALUES (1, 'h1');
+		""")
+		self.assertEqual(result.count("INSERT"), 2002)
+		spill_txns = self.node.execute("""
+			SELECT spill_txns
+				FROM pg_stat_replication_slots
+				WHERE slot_name = 'regression_slot';
+		""")[0][0]
+		self.assertGreater(spill_txns, 0, "the savepoint was not spilled")
+
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_systrees_versions_simple(self):
