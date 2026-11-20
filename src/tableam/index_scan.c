@@ -120,6 +120,33 @@ row_key_tuple_is_valid(OBtreeRowKeyBound *row_key, OTuple tup, OIndexDescr *id,
 	return valid;
 }
 
+/*
+ * Is the key column driven by a skip array that has a NULL element?
+ *
+ * Such a column has no qual of its own: o_key_data_to_key_range() bounds it
+ * only to move the scan along, e.g. SK_BT_NEXT puts an exclusive bound just
+ * past the value the scan has finished with.  Where NULLs sort past every
+ * value, the NULL group lies within that bound, so a NULL must be judged by
+ * its position against the bound rather than rejected outright.
+ */
+static bool
+skip_array_has_null_elem(BTScanOpaque so, int keynum)
+{
+#if PG_VERSION_NUM >= 180000
+	int			i;
+
+	for (i = 0; i < so->numArrayKeys; i++)
+	{
+		BTArrayKeyInfo *array = &so->arrayKeys[i];
+		ScanKey		key = so->keyData + array->scan_key;
+
+		if ((key->sk_flags & SK_BT_SKIP) && key->sk_attno - 1 == keynum)
+			return array->null_elem;
+	}
+#endif
+	return false;
+}
+
 static bool
 is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 			   BTScanOpaque so, int numPrefixExactKeys)
@@ -143,7 +170,8 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 
 		if (!(low->keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
 		{
-			if (!(low->keys[i].flags & O_VALUE_BOUND_NULL) && isnull)
+			if (!(low->keys[i].flags & O_VALUE_BOUND_NULL) && isnull &&
+				!skip_array_has_null_elem(so, i))
 				valid = false;
 			if (valid &&
 				(o_idx_cmp_range_key_to_value(&low->keys[i], &id->fields[i],
@@ -153,7 +181,8 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 
 		if (valid && !(high->keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
 		{
-			if (!(high->keys[i].flags & O_VALUE_BOUND_NULL) && isnull)
+			if (!(high->keys[i].flags & O_VALUE_BOUND_NULL) && isnull &&
+				!skip_array_has_null_elem(so, i))
 				valid = false;
 			if (valid &&
 				(o_idx_cmp_range_key_to_value(&high->keys[i], &id->fields[i],
