@@ -388,6 +388,38 @@ class LogicalUndoRetainTest(BaseTest):
 		    "table public.o_decoded: INSERT: id[integer]:2 v[text]:'b' "
 		    "w[integer]:null", self.decoded(node, COPY))
 
+	def test_temporary_slot_drained_during_alter(self):
+		"""
+		What a polling consumer does: create a temporary slot, drain it with
+		a limit a few times, drop it, while another session adds and drops
+		columns.  Each drain decodes again from restart_lsn, at the CSN of
+		records older than the last ALTER.
+		"""
+		node = self.start_node()
+		dec = node.connect(autocommit=True)
+		ddl = node.connect(autocommit=True)
+
+		for round in range(10):
+			dec.execute(f"SELECT pg_create_logical_replication_slot("
+			            f"'{SLOT}', 'test_decoding', temporary => true);")
+			for i in range(2):
+				ddl.execute("ALTER TABLE o_decoded ADD COLUMN extra int;")
+				ddl.execute(f"INSERT INTO o_decoded VALUES "
+				            f"({round * 2 + i}, 'x');")
+				ddl.execute("ALTER TABLE o_decoded DROP COLUMN extra;")
+				# Concurrent sessions move the floor all the time; do it
+				# here, so the drain finds the ALTER's undo released.
+				self.system_undo(ddl)
+				dec.execute(
+				    f"SELECT count(*) FROM pg_logical_slot_get_changes("
+				    f"'{SLOT}', NULL, 1000);")
+			dec.execute(f"SELECT pg_drop_replication_slot('{SLOT}');")
+
+		self.assertEqual(node.status(), NodeStatus.Running)
+
+		dec.close()
+		ddl.close()
+
 	def test_standby_decodes_with_its_own_slot(self):
 		"""
 		Logical decoding on a standby reads the undo the standby built while
