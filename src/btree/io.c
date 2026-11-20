@@ -53,6 +53,11 @@
 #include "utils/syscache.h"
 #include "funcapi.h"
 
+#if defined(__x86_64__) && defined(HAVE__GET_CPUID) && defined(HAVE_AVX2_TARGET)
+#define USE_AVX2_CHECKSUM_WITH_RUNTIME_CHECK
+#include <cpuid.h>
+#endif
+
 static int	btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 							int amount, off_t offset);
 
@@ -1367,33 +1372,111 @@ oriole_checksum_block_len(uint32 blk_size)
  * Block checksum algorithm.  The page must be adequately aligned
  * (at least on 4-byte boundary).
  */
+#ifdef USE_AVX2_CHECKSUM_WITH_RUNTIME_CHECK
+static uint32
+oriole_checksum_block_fallback(const OrioleDBChecksummablePage *page, uint32 len)
+{
+#include "btree/checksum_block.inc.c"
+}
+
+/*
+ * The same algorithm compiled for AVX2, which adds 256-bit registers and a
+ * 32-bit vector multiply that SSE2 lacks.
+ */
+pg_attribute_target("avx2")
+static uint32
+oriole_checksum_block_avx2(const OrioleDBChecksummablePage *page, uint32 len)
+{
+#include "btree/checksum_block.inc.c"
+}
+
+/*
+ * Does the CPU support AVX2, and does the OS save the YMM registers?
+ */
+static bool
+avx2_available(void)
+{
+	unsigned int eax,
+				ebx,
+				ecx,
+				edx;
+
+	if (__get_cpuid_max(0, NULL) < 7)
+		return false;
+
+	__cpuid(1, eax, ebx, ecx, edx);
+	if ((ecx & bit_OSXSAVE) == 0)
+		return false;
+
+	/* XCR0 bits 1 and 2: the OS saves the XMM and YMM registers */
+	__asm__ __volatile__("xgetbv"
+:						 "=a"(eax), "=d"(edx)
+:						 "c"(0));
+	if ((eax & 0x6) != 0x6)
+		return false;
+
+	__cpuid_count(7, 0, eax, ebx, ecx, edx);
+	return (ebx & bit_AVX2) != 0;
+}
+
+static uint32 oriole_checksum_block_choose(const OrioleDBChecksummablePage *page,
+										   uint32 len);
+
+static uint32 (*oriole_checksum_block) (const OrioleDBChecksummablePage *page,
+										uint32 len) = oriole_checksum_block_choose;
+
+/*
+ * Choose the checksum implementation on first use.
+ */
+static uint32
+oriole_checksum_block_choose(const OrioleDBChecksummablePage *page, uint32 len)
+{
+	oriole_checksum_block = oriole_checksum_block_fallback;
+
+	if (avx2_available())
+		oriole_checksum_block = oriole_checksum_block_avx2;
+
+	return oriole_checksum_block(page, len);
+}
+#else
 static inline uint32
 oriole_checksum_block(const OrioleDBChecksummablePage *page, uint32 len)
 {
-	uint32		sums[N_SUMS];
-	uint32		result = 0;
-	uint32		i,
-				j;
-
-	/* initialize partial checksums to their corresponding offsets */
-	memcpy(sums, checksumBaseOffsets, sizeof(checksumBaseOffsets));
-
-	/* main checksum calculation */
-	for (i = 0; i < len; i++)
-		for (j = 0; j < N_SUMS; j++)
-			CHECKSUM_COMP(sums[j], page->data[i][j]);
-
-	/* finally add in two rounds of zeroes for additional mixing */
-	for (i = 0; i < 2; i++)
-		for (j = 0; j < N_SUMS; j++)
-			CHECKSUM_COMP(sums[j], 0);
-
-	/* xor fold partial checksums together */
-	for (i = 0; i < N_SUMS; i++)
-		result ^= sums[i];
-
-	return result;
+#include "btree/checksum_block.inc.c"
 }
+#endif
+
+#ifdef IS_DEV
+PG_FUNCTION_INFO_V1(orioledb_page_checksum);
+
+/*
+ * Checksum of the given page or compressed chunk, checking that both
+ * implementations agree where there are two.
+ */
+Datum
+orioledb_page_checksum(PG_FUNCTION_ARGS)
+{
+	bytea	   *data = PG_GETARG_BYTEA_PP(0);
+	uint32		size = VARSIZE_ANY_EXHDR(data);
+	uint32		len = oriole_checksum_block_len(size);
+	OrioleDBChecksummablePage cp;
+	uint32		result;
+
+	if (size > ORIOLEDB_BLCKSZ || size % (sizeof(uint32) * N_SUMS) != 0)
+		elog(ERROR, "unsupported page size %u", size);
+	memcpy(&cp, VARDATA_ANY(data), size);
+
+#ifdef USE_AVX2_CHECKSUM_WITH_RUNTIME_CHECK
+	result = oriole_checksum_block_fallback(&cp, len);
+	if (avx2_available() && oriole_checksum_block_avx2(&cp, len) != result)
+		elog(ERROR, "AVX2 and fallback page checksums differ");
+#else
+	result = oriole_checksum_block(&cp, len);
+#endif
+
+	PG_RETURN_INT64(result);
+}
+#endif
 
 static bool
 check_orioledb_page_checksum(OrioleDBOndiskPageHeader ondisk_page_header,
