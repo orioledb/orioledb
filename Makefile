@@ -301,6 +301,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/undo_cleanup_test.py \
 						test/t/undo_reserved_race_test.py \
 						test/t/undo_update_diff_test.py \
+						test/t/undo_numa_chunks_test.py \
 						test/t/unlogged_test.py \
 						test/t/vacuum_test.py \
 						test/t/transaction_test.py \

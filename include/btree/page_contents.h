@@ -491,6 +491,13 @@ typedef struct
 	 * GET_CUR_UNDO_STACK_LOCATIONS() would return for the waiter.
 	 */
 	int			autonomousNestingLevel;
+
+	/*
+	 * Where the inserter takes the waiter's undo record from: the node of the
+	 * waiter's transaction, past its last record (see undo_tx_node()).
+	 */
+	int			undoNode;
+	UndoLocation undoLastLocation;
 	uint8		tupleFlags;
 	bool		inserted;
 	Size		reservedUndoSize;
