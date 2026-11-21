@@ -1896,7 +1896,6 @@ class ReplicationTest(BaseTest):
 					if not alive:
 						break
 					time.sleep(0.05)
-				master.is_started = False
 				try:
 					con.close()
 				except Exception:
@@ -2047,7 +2046,6 @@ class ReplicationTest(BaseTest):
 					if not alive:
 						break
 					time.sleep(0.05)
-				master.is_started = False
 				try:
 					t_long.close()
 				except Exception:
@@ -2841,7 +2839,6 @@ class ReplicationTest(BaseTest):
 					if not alive:
 						break
 					time.sleep(0.05)
-				master.is_started = False
 				master.start()
 
 				# Drive enough WAL through the recovered master so any
@@ -3092,7 +3089,6 @@ class ReplicationTest(BaseTest):
 				if not alive:
 					break
 				time.sleep(0.05)
-			master.is_started = False
 			master.start()
 
 			# Drive a probe write so the standby has a concrete LSN

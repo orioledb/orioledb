@@ -21,9 +21,7 @@ import unittest
 
 from threading import Thread
 from testgres.enums import NodeStatus
-from testgres.exceptions import PortForException
-from testgres.exceptions import NodeException, QueryException
-from testgres.node import PostgresNode
+from testgres.exceptions import NodeConnectionException, PortForException
 from testgres.operations.exceptions import ExecUtilException
 from testgres.operations.local_ops import LocalOperations
 from testgres.port_manager import PortManager
@@ -475,9 +473,6 @@ class BaseTest(unittest.TestCase):
 		# 3. Replay the write log to the mark and remount.
 		self._dm_ctx.replay_to_mark(mark_name)
 
-		# 4. Let testgres know the node is no longer running so start() works.
-		self.node.is_started = False
-
 	def list2reason(self, exc_list):
 		if exc_list and exc_list[-1][0] is self:
 			return exc_list[-1][1]
@@ -559,6 +554,15 @@ class BaseTest(unittest.TestCase):
 			i = i + 1
 		return result[0:length].decode('ascii')
 
+	@staticmethod
+	def errorText(e: Exception) -> str:
+		# testgres wraps psql's ExecUtilException into QueryException, whose
+		# description carries the command and output too; unwrap to the plain text
+		inner = e.__cause__ or e.__context__
+		if isinstance(inner, ExecUtilException):
+			return inner.description
+		return e.description
+
 	def stripErrorMsg(self, msg):
 		prefix = r'^Utility exited with non-zero code \(\d+\). Error: `'
 		match = re.match(prefix, msg)
@@ -578,12 +582,11 @@ class BaseTest(unittest.TestCase):
 		if (hasattr(e, 'exception')):
 			e = e.exception
 
-		# Newer testgres wraps driver errors; the original keeps `pgerror`
-		cause = getattr(e, '__cause__', None)
-		if not hasattr(e, 'pgerror') and hasattr(cause, 'pgerror'):
-			e = cause
+		# testgres wraps driver errors (psycopg2 or pg8000) in its own type
+		if isinstance(e, NodeConnectionException) and e.__cause__ is not None:
+			e = e.__cause__
 
-		if (hasattr(e, 'pgerror')) or (hasattr(e, 'message')):
+		if (hasattr(e, 'pgerror')) or (hasattr(e, 'description')):
 			exp_msg = "ERROR:  %s\n" % (err_msg)
 			if (second_msg != None):
 				exp_msg += "%s:  %s\n" % (second_title, second_msg)
@@ -592,8 +595,8 @@ class BaseTest(unittest.TestCase):
 
 		if (hasattr(e, 'pgerror')):
 			msg = e.pgerror
-		elif (hasattr(e, 'message')):
-			msg = e.message
+		elif (hasattr(e, 'description')):
+			msg = self.errorText(e)
 		else:
 			exp_msg = err_msg
 			msg = e.args[0]['M']
@@ -649,7 +652,6 @@ class BaseTest(unittest.TestCase):
 	def wait_shutdown_and_start(self, node):
 		while node.status() == NodeStatus.Running:
 			time.sleep(0.1)
-		node.is_started = False
 		node.start()
 
 	def get_pg_start_time(self, node):
@@ -851,29 +853,3 @@ def tbl_structure_to_json(structure: str) -> dict[str, dict[int, Any]]:
 			cur_page["hikey"] = m.group(1)
 
 	return res
-
-
-# Newer testgres derives `is_started` from the postmaster pid and makes it
-# read-only, but tests tell it that a node was stopped/started behind its back.
-def _set_is_started(self, value):
-	if value:
-		self._manually_started_pm_pid = PostgresNode._C_PM_PID__IS_NOT_DETECTED
-	else:
-		self._manually_started_pm_pid = None
-
-
-_is_started = getattr(PostgresNode, 'is_started', None)
-if isinstance(_is_started, property) and _is_started.fset is None:
-	PostgresNode.is_started = _is_started.setter(_set_is_started)
-
-
-# Newer testgres makes `message` the full text (command, exit code, output)
-# and moves the original text to `description`.  Tests compare against the
-# original text, so keep `message` returning it.
-def _plain_message(self):
-	return self.description
-
-
-for _exc in (ExecUtilException, NodeException, QueryException):
-	if isinstance(getattr(_exc, 'description', None), property):
-		_exc.message = property(_plain_message)

@@ -34,7 +34,7 @@ class FileOperationsTest(BaseTest):
 			node.safe_psql("SELECT * FROM o_test;")
 			self.assertEqual("We should not be here", "")
 		except Exception as e:
-			message = re.sub('[0-9]+', 'x', e.message)
+			message = re.sub('[0-9]+', 'x', self.errorText(e))
 			self.assertTrue(
 			    "FATAL:  could not open data file orioledb_data/x/x: Permission denied"
 			    in message)

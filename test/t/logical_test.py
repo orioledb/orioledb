@@ -778,12 +778,14 @@ class LogicalTest(BaseTest):
 					subscriber.safe_psql('SELECT * FROM h_data')
 				self.assertIn(
 				    'ERROR:  relation "h_data" does not exist',
-				    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+				    self.stripErrorMsg(self.errorText(
+				        e.exception)).rstrip("\r\n"))
 				with self.assertRaises(QueryException) as e:
 					subscriber.safe_psql('SELECT * FROM o_data')
 				self.assertIn(
 				    'ERROR:  relation "o_data" does not exist',
-				    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+				    self.stripErrorMsg(self.errorText(
+				        e.exception)).rstrip("\r\n"))
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")

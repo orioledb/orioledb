@@ -220,7 +220,6 @@ class ParallelScanLoadErrorTest(BaseTest):
 		deadline = time.time() + 30
 		while node.status() == NodeStatus.Running and time.time() < deadline:
 			time.sleep(0.5)
-		node.is_started = False
 
 	def child_pids(self, pid):
 		out = subprocess.run(["ps", "-eo", "pid=,ppid="],

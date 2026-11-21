@@ -452,7 +452,6 @@ class TempLocalPoolTest(BaseTest):
 		# Rewind triggers a controlled shutdown; restart and verify state.
 		import time
 		time.sleep(1)
-		node.is_started = False
 		node.start()
 
 		# o_persist rewound to before INSERT (4),(5).

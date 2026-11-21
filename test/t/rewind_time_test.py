@@ -58,7 +58,6 @@ class RewindTest(BaseTest):
 		node.safe_psql('postgres', "select orioledb_rewind_by_time(9);\n")
 		time.sleep(1)
 
-		node.is_started = False
 		node.start()
 
 		self.assertEqual(
