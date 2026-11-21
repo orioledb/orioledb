@@ -22,6 +22,7 @@
 #include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
+#include "catalog/o_tablespaces.h"
 #include "catalog/pg_amop.h"
 #include "postgres_ext.h"
 #include "recovery/recovery.h"

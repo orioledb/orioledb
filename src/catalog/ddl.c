@@ -47,6 +47,7 @@
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
+#include "catalog/o_tablespaces.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_attrdef.h"
 #include "catalog/pg_authid.h"
@@ -3538,96 +3539,30 @@ rmdir_dropped_database_dir(const char *prefix, Oid dbOid)
 }
 
 static void
+cleanup_dropped_database_dir_cb(Oid tablespace,
+								const char *prefix,
+								void *arg)
+{
+	Oid			dbOid = *(Oid *) arg;
+
+	(void) tablespace;
+
+	rmdir_dropped_database_dir(prefix, dbOid);
+}
+
+
+static void
 cleanup_dropped_database_dirs(void)
 {
 	Oid			dbOid = dropped_database_oid;
-	DIR		   *dir;
-	struct dirent *file;
-	char		path[MAXPGPATH];
-	char		targetpath[MAXPGPATH];
-	int			saved_errno;
-
-#define PG_TBLSPC "pg_tblspc"
 
 	if (!OidIsValid(dbOid))
 		return;
 
 	dropped_database_oid = InvalidOid;
-	rmdir_dropped_database_dir(ORIOLEDB_DATA_DIR, dbOid);
 
-	dir = opendir(PG_TBLSPC);
-	if (dir == NULL)
-	{
-		ereport(WARNING,
-				(errcode_for_file_access(),
-				 errmsg("could not open directory \"%s\": %m", PG_TBLSPC)));
-		return;
-	}
-
-	while (errno = 0, (file = readdir(dir)) != NULL)
-	{
-		struct stat st;
-		int			rllen;
-
-		if (strcmp(file->d_name, ".") == 0 ||
-			strcmp(file->d_name, "..") == 0)
-			continue;
-
-		pg_snprintf(path, MAXPGPATH,
-					PG_TBLSPC "/%s/" TABLESPACE_VERSION_DIRECTORY,
-					file->d_name);
-		if (lstat(path, &st) < 0)
-		{
-			saved_errno = errno;
-			if (saved_errno == ENOENT)
-				continue;
-			errno = saved_errno;
-			ereport(WARNING,
-					(errcode_for_file_access(),
-					 errmsg("could not stat file \"%s\": %m", path)));
-			continue;
-		}
-
-		if (S_ISLNK(st.st_mode))
-		{
-			rllen = readlink(path, targetpath, sizeof(targetpath));
-			if (rllen < 0)
-			{
-				saved_errno = errno;
-				errno = saved_errno;
-				ereport(WARNING,
-						(errcode_for_file_access(),
-						 errmsg("could not read symbolic link \"%s\": %m",
-								path)));
-				continue;
-			}
-			if (rllen >= (int) sizeof(targetpath))
-			{
-				ereport(WARNING,
-						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-						 errmsg("symbolic link \"%s\" target is too long",
-								path)));
-				continue;
-			}
-			targetpath[rllen] = '\0';
-			pg_snprintf(path, MAXPGPATH, "%s/" ORIOLEDB_DATA_DIR,
-						targetpath);
-		}
-		else
-			strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
-
-		rmdir_dropped_database_dir(path, dbOid);
-	}
-	saved_errno = errno;
-	closedir(dir);
-	if (saved_errno != 0)
-	{
-		errno = saved_errno;
-		ereport(WARNING,
-				(errcode_for_file_access(),
-				 errmsg("could not read directory \"%s\": %m", PG_TBLSPC)));
-	}
-#undef PG_TBLSPC
+	o_tablespaces_foreach_prefix(cleanup_dropped_database_dir_cb, &dbOid,
+								 WARNING);
 }
 
 void
