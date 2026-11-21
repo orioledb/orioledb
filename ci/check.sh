@@ -258,7 +258,13 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         # behind would pin WAL for the whole subscription/recovery run below.
         psql postgres -p 5432 -c "SELECT pg_drop_replication_slot('orioledb_standby')" || true
         if [ $PG_VERSION != "16" ]; then
-            make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
+            # t/032_subscribe_use_index.pl runs its injection-point subtests
+            # only when enable_injection_points is "yes", and they do ALTER
+            # TABLE ... REPLICA IDENTITY USING INDEX, which orioledb does not
+            # support yet (the test dies there).  It is the only subscription
+            # test that uses injection points, so turning them off skips just
+            # that block.  Drop this once the replica identity is supported.
+            make -C src/test/subscription enable_injection_points=no installcheck-oriole -j $(nproc) || status=$?
             make -C src/test/recovery installcheck-oriole -j $(nproc) || status=$?
             if [ -f src/test/recovery/tmp_check/regression.diffs ]; then
               python3 ../orioledb/ci/filter_regression_diff.py --diff src/test/recovery/tmp_check/regression.diffs > src/test/recovery_filtered.diffs

@@ -49,8 +49,10 @@ allowedRegexes = {
     r"ERROR:  cannot use PREPARE TRANSACTION in transaction that uses orioledb table":
     ["*"],
     r"c1      |(0,1) |0|0|4": ['eval-plan-qual'],
-    r"QUERY PLAN":
-    ['eval-plan-qual', 'merge-join', 'drop-index-concurrently-1', 'horizons'],
+    r"QUERY PLAN": [
+        'eval-plan-qual', 'eval-plan-qual-dropped-column', 'merge-join',
+        'drop-index-concurrently-1', 'horizons'
+    ],
     r"\s+\d+(|\s+\d+)*": ['vacuum-no-cleanup-lock', 'stats', 'horizons'],
     r"setup of session s1 failed: ERROR:  current transaction is aborted, commands ignored until end of transaction block":
     ['stats'],

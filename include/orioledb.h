@@ -14,6 +14,7 @@
 #ifndef __ORIOLEDB_H__
 #define __ORIOLEDB_H__
 
+#include "access/htup_details.h"
 #include "access/nbtree.h"
 #include "access/reloptions.h"
 #include "access/xact.h"
@@ -356,6 +357,19 @@ typedef RelFileLocator RelFileNode;
 #define ORelOidsIsEqual(l, r) ((l).datoid == (r).datoid && (l).reloid == (r).reloid && (l).relnode == (r).relnode)
 #define ORelOidsSetInvalid(oids) \
 	((oids).datoid = (oids).reloid = (oids).relnode = (oids).spcoid = InvalidOid)
+
+/*
+ * 16.16, 17.12, 18.7 and later mark tuples from heap_form_tuple() as composite
+ * datums (HEAP_IS_DATUM) and version-check them on deforming.  We pass such
+ * tuples to the core as plain HeapTuples, so clear the marking.  Older
+ * releases have no HEAP_IS_DATUM, so this is a no-op there.
+ */
+#ifdef HEAP_IS_DATUM
+#define o_heap_tuple_clear_datum(tup) \
+	HeapTupleHeaderClearDatum((tup)->t_data)
+#else
+#define o_heap_tuple_clear_datum(tup) ((void) 0)
+#endif
 
 #if PG_VERSION_NUM >= 170000
 
