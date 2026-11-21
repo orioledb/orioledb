@@ -3,13 +3,22 @@
 
 import os
 import re
+import select
 import signal
 import subprocess
 import tempfile
 import time
+
+import psycopg2
 from testgres import NodeStatus
+from testgres.defaults import default_dbname, default_username
 
 from .base_test import BaseTest, ThreadQueryExecutor, wait_checkpointer_stopevent, wait_stopevent
+
+CHECKPOINT_REPLICA_TIMEOUT_SECONDS = 60
+CHECKPOINT_REPLICA_ROW_COUNT = 2000
+CHECKPOINT_REPLICA_VALUE_LENGTH = 200
+CHECKPOINT_REPLICA_POLL_SECONDS = 0.1
 
 
 class StandbyDiverged(Exception):
@@ -1752,6 +1761,232 @@ class ReplicationTest(BaseTest):
 
 				count = replica.execute("SELECT COUNT(*) FROM foo;")[0][0]
 				self.assertEqual(100, count)
+
+	def test_checkpoint_open_transaction_replica_recovery(self):
+		master = self.node
+		replica = None
+		connections = []
+		failure = None
+		phase = 'pre-crash WAL exposure'
+		deadline = time.monotonic() + CHECKPOINT_REPLICA_TIMEOUT_SECONDS
+
+		def remaining():
+			seconds = deadline - time.monotonic()
+			self.assertGreater(seconds, 0, f'{phase}: deadline expired')
+			return seconds
+
+		def wait(connection):
+			while True:
+				remaining()
+				state = connection.poll()
+				if state == psycopg2.extensions.POLL_OK:
+					remaining()
+					return
+				select.select([connection] if state
+				              == psycopg2.extensions.POLL_READ else [],
+				              [connection] if state
+				              == psycopg2.extensions.POLL_WRITE else [], [],
+				              remaining())
+
+		def connect(node):
+			remaining()
+			connection = psycopg2.connect(host=node.host,
+			                              port=node.port,
+			                              dbname=default_dbname(),
+			                              user=default_username(),
+			                              async_=True)
+			connections.append(connection)
+			wait(connection)
+			return connection
+
+		def execute(connection, query, parameters=None):
+			remaining()
+			try:
+				cursor = connection.cursor()
+				cursor.execute(query, parameters)
+				wait(connection)
+				rows = cursor.fetchall() if cursor.description else None
+				cursor.close()
+				return rows
+			except psycopg2.Error as error:
+				self.fail(f'{phase}: {error}')
+
+		def pg_ctl(node, action, *arguments, expected=(0, )):
+			try:
+				result = subprocess.run([
+				    node._get_bin_path('pg_ctl'), '-D', node.data_dir, '-w',
+				    action, *arguments
+				],
+				                        stdout=subprocess.PIPE,
+				                        stderr=subprocess.STDOUT,
+				                        text=True,
+				                        timeout=remaining())
+			except subprocess.TimeoutExpired as error:
+				output = error.stdout or b''
+				if isinstance(output, bytes):
+					output = output.decode(errors='replace')
+				self.fail(f'{phase}: pg_ctl {action} timed out\n{output}')
+			self.assertIn(result.returncode, expected,
+			              f'{phase}: pg_ctl {action}\n{result.stdout}')
+			if result.returncode == 0 and action in ('start', 'stop'):
+				node.is_started = action == 'start'
+			remaining()
+			return result
+
+		def replay_until(connection, target):
+			print(f'{phase}: target={target}', flush=True)
+			while True:
+				caught_up, replay = execute(
+				    connection,
+				    'SELECT pg_last_wal_replay_lsn() >= %s::pg_lsn, '
+				    'pg_last_wal_replay_lsn()::text', (target, ))[0]
+				if caught_up:
+					print(f'{phase}: effective_replay={replay}', flush=True)
+					return
+				time.sleep(min(CHECKPOINT_REPLICA_POLL_SECONDS, remaining()))
+
+		try:
+			self.enableStreaming(master)
+			master.append_conf(
+			    'checkpoint_timeout = 1h\nmax_wal_size = 10GB\n')
+			master.start()
+			master.safe_psql(f"""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_checkpoint_open (
+					id int PRIMARY KEY,
+					val text NOT NULL
+				) USING orioledb;
+				INSERT INTO o_checkpoint_open
+					SELECT g, repeat('x', {CHECKPOINT_REPLICA_VALUE_LENGTH})
+					FROM generate_series(1, {CHECKPOINT_REPLICA_ROW_COUNT}) g;
+			""")
+			replica = self.getReplica()
+			replica.start()
+			deadline = time.monotonic() + CHECKPOINT_REPLICA_TIMEOUT_SECONDS
+			control = connect(master)
+			writer = connect(master)
+			standby = connect(replica)
+			before = execute(control,
+			                 'SELECT pg_current_wal_insert_lsn()::text')[0][0]
+			execute(writer, 'BEGIN')
+			execute(writer,
+			        'UPDATE o_checkpoint_open SET val = repeat(\'y\', %s)',
+			        (CHECKPOINT_REPLICA_VALUE_LENGTH, ))
+			advanced, target = execute(
+			    control, 'SELECT pg_current_wal_insert_lsn() > %s::pg_lsn, '
+			    'pg_current_wal_insert_lsn()::text', (before, ))[0]
+			self.assertTrue(advanced, 'open UPDATE emitted no WAL')
+			execute(control, 'SELECT pg_switch_wal()')
+			replay_until(standby, target)
+			phase = 'checkpoint with open transaction'
+			execute(control, 'CHECKPOINT')
+
+			phase = 'unclean primary stop'
+			deadline = time.monotonic() + CHECKPOINT_REPLICA_TIMEOUT_SECONDS
+			pg_ctl(master, 'stop', '-m', 'immediate')
+			writer.close()
+			control.close()
+			phase = 'primary recovery'
+			pg_ctl(master, 'start', '-l', master.pg_log_file)
+			control = connect(master)
+			rows_sql = 'SELECT id, val FROM o_checkpoint_open ORDER BY id'
+			baseline = [(key, 'x' * CHECKPOINT_REPLICA_VALUE_LENGTH)
+			            for key in range(1, CHECKPOINT_REPLICA_ROW_COUNT + 1)]
+			phase = 'primary rollback contents'
+			self.assertEqual(execute(control, rows_sql), baseline)
+			target = execute(control,
+			                 'SELECT pg_current_wal_lsn()::text')[0][0]
+			phase = 'replica replay after primary recovery'
+			replay_until(standby, target)
+			phase = 'replica rollback contents'
+			self.assertEqual(execute(standby, rows_sql), baseline)
+
+			phase = 'conflicting committed update'
+			execute(control, 'BEGIN')
+			execute(control,
+			        'UPDATE o_checkpoint_open SET val = repeat(\'z\', %s)',
+			        (CHECKPOINT_REPLICA_VALUE_LENGTH, ))
+			execute(control, 'COMMIT')
+			committed = [(key, 'z' * CHECKPOINT_REPLICA_VALUE_LENGTH)
+			             for key in range(1, CHECKPOINT_REPLICA_ROW_COUNT + 1)]
+			self.assertEqual(execute(control, rows_sql), committed)
+			target = execute(control,
+			                 'SELECT pg_current_wal_lsn()::text')[0][0]
+			phase = 'replica replay after conflicting commit'
+			replay_until(standby, target)
+			phase = 'replica committed contents'
+			self.assertEqual(execute(standby, rows_sql), committed)
+			remaining()
+		except BaseException as error:
+			failure = error
+			raise
+		finally:
+			for connection in connections:
+				connection.close()
+			deadline = time.monotonic() + CHECKPOINT_REPLICA_TIMEOUT_SECONDS
+			CLEANUP_PHASE_COUNT = 2
+			# Reserve the second phase for bounded post-kill reaping.
+			stop_deadline = deadline - (CHECKPOINT_REPLICA_TIMEOUT_SECONDS /
+			                            CLEANUP_PHASE_COUNT)
+			cleanup_errors = []
+			stops = []
+			# Request both stops before a slow node can use the cleanup budget.
+			for node in (replica, master):
+				if node is None:
+					continue
+				if not os.path.exists(
+				    os.path.join(node.data_dir, 'postmaster.pid')):
+					node.is_started = False
+					continue
+				try:
+					process = subprocess.Popen([
+					    node._get_bin_path('pg_ctl'), '-D', node.data_dir,
+					    '-w', 'stop', '-m', 'immediate'
+					],
+					                           stdout=subprocess.PIPE,
+					                           stderr=subprocess.STDOUT,
+					                           text=True)
+					stops.append((node, process))
+				except Exception as error:
+					node.is_started = False
+					cleanup_errors.append(f'cleanup {node.base_dir}: {error}')
+			for node, process in stops:
+				phase = f'cleanup {node.base_dir}'
+				try:
+					output, _ = process.communicate(
+					    timeout=max(0, stop_deadline - time.monotonic()))
+					self.assertEqual(process.returncode, 0,
+					                 f'{phase}: {output}')
+				except subprocess.TimeoutExpired as error:
+					output = error.stdout or b''
+					if isinstance(output, bytes):
+						output = output.decode(errors='replace')
+					cleanup_errors.append(
+					    f'{phase}: stop-wait phase deadline expired\n{output}')
+				except Exception as error:
+					cleanup_errors.append(str(error))
+				finally:
+					try:
+						if process.poll() is None:
+							process.kill()
+						process.wait(timeout=max(0, deadline -
+						                         time.monotonic()))
+					except subprocess.TimeoutExpired:
+						cleanup_errors.append(
+						    f'{phase}: pg_ctl helper {process.pid} was not reaped '
+						    'before the cleanup deadline')
+					except Exception as error:
+						cleanup_errors.append(
+						    f'{phase}: helper cleanup: {error}')
+					process.stdout.close()
+					# Do not repeat a timed-out stop in BaseTest.tearDown().
+					node.is_started = False
+			if cleanup_errors:
+				message = 'cleanup failed; check retained nodes:\n' + '\n'.join(
+				    cleanup_errors)
+				print(message, flush=True)
+				if failure is None:
+					self.fail(message)
 
 	def test_recovery_finish_aborts_propagate_to_replica(self):
 		"""
