@@ -74,6 +74,76 @@ static ArraySearchDesc arraySearchDescs[] = {
  * Checks if the "fast path" the navigation can be applied to the given search
  * and fills *meta structure if so.
  */
+/*
+ * Build the part of a fast-path search that depends on the index alone.
+ */
+static void
+build_fastpath_index_meta(OIndexDescr *id, FastpathIndexMeta *im)
+{
+	int			natts = id->nonLeafTupdesc->natts;
+	int			offset = 0;
+	int			i = 0;
+
+	if (natts <= FASTPATH_FIND_DOWNLINK_MAX_KEYS &&
+		id->nonLeafSpec.natts == natts)
+	{
+		for (i = 0; i < natts; i++)
+		{
+			ArraySearchDesc *searchDesc =
+				find_array_search_desc_by_typeid(TupleDescAttr(id->nonLeafTupdesc, i)->atttypid);
+			OIndexField *field = &id->fields[i];
+
+			/*
+			 * The array-search routines compare raw datums, so they require
+			 * the field's btree opclass to match the default one they
+			 * implement. DESC ordering is supported: the routine gets an
+			 * "ascending" flag and find_downlink_get_keys() expresses bounds
+			 * as storage directions, so a DESC field is handled by mirroring
+			 * the comparison rather than bailing.
+			 */
+			if (!searchDesc || searchDesc->opcid != field->opclass)
+				break;
+
+			offset = TYPEALIGN(searchDesc->align, offset);
+			im->funcs[i] = searchDesc->func;
+			im->offsets[i] = offset;
+			im->ascending[i] = field->ascending;
+			im->types[i] = searchDesc->typeid;
+			offset += searchDesc->typlen;
+		}
+	}
+	im->natts = i;
+
+	/* The float searches do not order NaN as the opclass does */
+	for (i = 0; i < im->natts; i++)
+	{
+		if (im->types[i] == FLOAT4OID || im->types[i] == FLOAT8OID)
+			break;
+	}
+	im->firstInexact = i;
+
+	im->length = MAXALIGN(id->nonLeafSpec.len);
+
+	/*
+	 * A leaf item is fixed-format only when every attribute of the leaf tuple
+	 * is, and then the key columns sit at the offsets just computed if they
+	 * are its leading attributes.
+	 */
+	i = 0;
+	if (id->leafSpec.natts == id->leafTupdesc->natts && !id->bridging)
+	{
+		for (i = 0; i < im->natts; i++)
+		{
+			if (OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, id, i + 1) != i + 1 ||
+				TupleDescAttr(id->leafTupdesc, i)->atttypid != im->types[i])
+				break;
+		}
+	}
+	im->leafNatts = i;
+	im->leafStride = BTreeLeafTuphdrSize + MAXALIGN(id->leafSpec.len);
+	im->built = true;
+}
+
 void
 can_fastpath_find_downlink(OBTreeFindPageContext *context,
 						   void *key,
@@ -82,9 +152,8 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 {
 	BTreeDescr *desc = context->desc;
 	OIndexDescr *id;
-	Oid			types[FASTPATH_FIND_DOWNLINK_MAX_KEYS] = {InvalidOid};
+	FastpathIndexMeta *im;
 	int			i;
-	int			offset;
 	int			numKeys;
 
 	ASAN_UNPOISON_MEMORY_REGION(meta, sizeof(*meta));
@@ -97,13 +166,9 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 	}
 
 	id = (OIndexDescr *) desc->arg;
-
-	if (id->nonLeafTupdesc->natts > FASTPATH_FIND_DOWNLINK_MAX_KEYS ||
-		id->nonLeafSpec.natts != id->nonLeafTupdesc->natts)
-	{
-		meta->enabled = false;
-		return;
-	}
+	im = &id->fastpath;
+	if (!im->built)
+		build_fastpath_index_meta(id, im);
 
 	if (keyType == BTreeKeyUniqueLowerBound ||
 		keyType == BTreeKeyUniqueUpperBound)
@@ -121,55 +186,18 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 	else
 		numKeys = id->nonLeafSpec.natts;
 
-	/*
-	 * Can't happen: numKeys never exceeds nonLeafTupdesc->natts, checked
-	 * above. Compiler can't prove it, so after function-inline it may warn
-	 * about overflow.
-	 */
-	if (numKeys > FASTPATH_FIND_DOWNLINK_MAX_KEYS)
+	if (numKeys > im->natts)
 	{
-		/*
-		 * Trigger the Assert if it happens (it means the invariant is
-		 * broken). Just return from the function if it is a release version.
-		 */
-		Assert(false);
 		meta->enabled = false;
 		return;
 	}
 	meta->numKeys = numKeys;
-
-	offset = 0;
-	for (i = 0; i < numKeys; i++)
-	{
-		ArraySearchDesc *searchDesc = find_array_search_desc_by_typeid(
-																	   TupleDescAttr(id->nonLeafTupdesc, i)->atttypid);
-		OIndexField *field = &id->fields[i];
-
-		/*
-		 * The array-search routines compare raw datums, so they require the
-		 * field's btree opclass to match the default one they implement. DESC
-		 * ordering is supported: the routine gets an "ascending" flag and
-		 * find_downlink_get_keys() expresses bounds as storage directions, so
-		 * a DESC field is handled by mirroring the comparison rather than
-		 * bailing.
-		 */
-		if (!searchDesc || searchDesc->opcid != field->opclass)
-		{
-			meta->enabled = false;
-			return;
-		}
-
-		offset = TYPEALIGN(searchDesc->align, offset);
-		meta->funcs[i] = searchDesc->func;
-		meta->offsets[i] = offset;
-		meta->ascending[i] = field->ascending;
-		types[i] = searchDesc->typeid;
-
-		offset += searchDesc->typlen;
-	}
+	memcpy(meta->funcs, im->funcs, sizeof(meta->funcs));
+	memcpy(meta->offsets, im->offsets, sizeof(meta->offsets));
+	memcpy(meta->ascending, im->ascending, sizeof(meta->ascending));
 
 	if (!find_downlink_get_keys(context->desc, key, keyType,
-								&meta->inclusive, numKeys, types,
+								&meta->inclusive, numKeys, im->types,
 								meta->values, meta->flags))
 	{
 		meta->enabled = false;
@@ -177,24 +205,10 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 	}
 
 	meta->enabled = true;
-	meta->length = MAXALIGN(id->nonLeafSpec.len);
-
-	meta->rawOrderExact = true;
-	for (i = 0; i < numKeys; i++)
-	{
-		/* The float searches do not order NaN as the opclass does */
-		if (types[i] == FLOAT4OID || types[i] == FLOAT8OID)
-			meta->rawOrderExact = false;
-	}
-
-	/*
-	 * A leaf item is fixed-format only when every attribute of the leaf tuple
-	 * is, and then the key columns sit at the offsets just computed if they
-	 * are its leading attributes.
-	 */
+	meta->length = im->length;
+	meta->rawOrderExact = numKeys <= im->firstInexact;
 	meta->leafSearch = (meta->rawOrderExact && keyType == BTreeKeyBound &&
-						id->leafSpec.natts == id->leafTupdesc->natts &&
-						!id->bridging);
+						numKeys <= im->leafNatts);
 	if (meta->leafSearch)
 	{
 		OBTreeKeyBound *bound = (OBTreeKeyBound *) key;
@@ -222,13 +236,7 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 			}
 		}
 	}
-	for (i = 0; meta->leafSearch && i < numKeys; i++)
-	{
-		if (OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, id, i + 1) != i + 1 ||
-			TupleDescAttr(id->leafTupdesc, i)->atttypid != types[i])
-			meta->leafSearch = false;
-	}
-	meta->leafStride = BTreeLeafTuphdrSize + MAXALIGN(id->leafSpec.len);
+	meta->leafStride = im->leafStride;
 }
 
 /*

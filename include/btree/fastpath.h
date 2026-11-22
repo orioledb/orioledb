@@ -40,6 +40,28 @@ typedef void (*ArraySearchFunc) (Pointer p, int stride,
 								 int *lower, int *upper, Datum keyDatum,
 								 bool ascending);
 
+/*
+ * What of a fast-path search depends on the index alone, built on first use
+ * by can_fastpath_find_downlink().  Filling a descriptor zeroes it, which
+ * leaves it unbuilt.
+ */
+typedef struct
+{
+	bool		built;
+	/* leading key columns the array searches serve */
+	int			natts;
+	/* of those, the leading ones that are also the leaf tuple's */
+	int			leafNatts;
+	/* the first float column (raw order misplaces NaN), or natts */
+	int			firstInexact;
+	int			length;
+	int			leafStride;
+	Datum		offsets[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
+	ArraySearchFunc funcs[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
+	bool		ascending[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
+	Oid			types[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
+} FastpathIndexMeta;
+
 typedef struct
 {
 	bool		enabled;
