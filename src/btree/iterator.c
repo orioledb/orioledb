@@ -298,7 +298,14 @@ retry:
 
 	/* Use page location hint if provided */
 	if (!forceFind && hint && OInMemoryBlknoIsValid(hint->blkno))
-		findResult = refind_page(&context, key, kind, 0, hint->blkno, hint->pageChangeCount);
+	{
+		if (refind_leaf_for_item(&context, key, kind, hint->blkno,
+								 hint->pageChangeCount))
+			findResult = OFindPageResultSuccess;
+		else
+			findResult = refind_page(&context, key, kind, 0, hint->blkno,
+									 hint->pageChangeCount);
+	}
 	else
 		findResult = find_page(&context, key, kind, 0);
 

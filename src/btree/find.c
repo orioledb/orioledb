@@ -1645,6 +1645,86 @@ retry:
 }
 
 /*
+ * refind_page() for a BTREE_PAGE_FIND_SINGLE_ITEM fetch that knows the leaf
+ * of its key: read the leaf as find_page() reads it at the end of the descent,
+ * fast path included.  False whenever that is not plainly possible -- the
+ * page changed, it has to come from undo, or the key may lie past it -- and
+ * the caller then descends with find_page().
+ */
+bool
+refind_leaf_for_item(OBTreeFindPageContext *context, void *key,
+					 BTreeKeyType keyType, OInMemoryBlkno blkno,
+					 uint32 pageChangeCount)
+{
+	BTreeDescr *desc = context->desc;
+	FastpathFindDownlinkMeta meta;
+	BTreePageItemLocator loc;
+	OInMemoryBlkno rootBlkno = desc->rootInfo.rootPageBlkno;
+	uint32		rootPageChangeCount = desc->rootInfo.rootPageChangeCount;
+	Page		img;
+	int			chunkIndex;
+	OBTreeFastPathFindResult result;
+
+	Assert(BTREE_PAGE_FIND_IS(context, FETCH) &&
+		   BTREE_PAGE_FIND_IS(context, SINGLE_ITEM) &&
+		   !BTREE_PAGE_FIND_IS(context, KEEP_LOKEY));
+
+	if (O_PAGE_IS_LOCAL(blkno) || blkno >= orioledb_buffers_count ||
+		orioledb_debug_disable_downlink_fastpath)
+		return false;
+
+	/* As refind_page(): the hint names a page of the tree's incarnation */
+	o_btree_load_shmem(desc);
+	if (desc->rootInfo.rootPageBlkno != rootBlkno ||
+		desc->rootInfo.rootPageChangeCount != rootPageChangeCount)
+		return false;
+
+	can_fastpath_find_downlink(context, key, keyType, &meta);
+	if (!meta.enabled || !meta.leafSearch)
+		return false;
+
+	context->index = 0;
+	context->imgUndoLoc = InvalidUndoLocation;
+	context->parentImgDeferred = false;
+	context->partial.isPartial = false;
+	context->parentPartial.isPartial = false;
+	if (!btree_find_read_page(context, blkno, pageChangeCount, false, key,
+							  keyType, &context->partial, false))
+		return false;
+	img = context->img;
+	if (PAGE_GET_LEVEL(img) != 0 || !context->partial.isPartial)
+		return false;
+
+	if (fastpath_find_chunk(img, blkno, &meta, &chunkIndex) !=
+		OBTreeFastPathFindOK)
+		return false;
+
+	result = fastpath_load_leaf_item(&meta, &context->partial, img,
+									 chunkIndex, &loc);
+	if (result == OBTreeFastPathFindSlowpath)
+	{
+		if (!partial_load_chunk(&context->partial, img, chunkIndex, &loc))
+			return false;
+		btree_page_search_items(desc, img, key, keyType, &loc);
+	}
+	else if (result != OBTreeFastPathFindOK)
+		return false;
+#ifdef USE_ASSERT_CHECKING
+	else
+		check_leaf_item(desc, &meta, &context->partial, img, key, keyType,
+						&loc);
+#endif
+
+	if (!page_locator_find_real_item(img, &context->partial, &loc))
+		return false;
+
+	context->items[0].locator = loc;
+	context->items[0].blkno = blkno;
+	context->items[0].pageChangeCount = pageChangeCount;
+	return true;
+}
+
+/*
  * Find the right sibling of the current page.
  *
  * Old page hikey will be saved to hikey_buf.  It helps to avoid redundant

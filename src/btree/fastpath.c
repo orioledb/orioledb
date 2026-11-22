@@ -299,6 +299,157 @@ fastpath_search_leaf_items(FastpathFindDownlinkMeta *meta,
 }
 
 /*
+ * Prepare *meta for fastpath_prefetch_leaves(); false if the key cannot take
+ * the fast path.
+ */
+bool
+fastpath_prepare_prefetch(BTreeDescr *desc, void *key, BTreeKeyType keyType,
+						  FastpathFindDownlinkMeta *meta)
+{
+	OBTreeFindPageContext context;
+
+	if (orioledb_debug_disable_downlink_fastpath)
+		return false;
+	init_page_find_context(&context, desc, COMMITSEQNO_INPROGRESS,
+						   BTREE_PAGE_FIND_FETCH);
+	can_fastpath_find_downlink(&context, key, keyType, meta);
+	return meta->enabled;
+}
+
+static inline void
+prefetch_lines(Pointer p, int n)
+{
+	int			i;
+
+	for (i = 0; i < n; i++)
+		__builtin_prefetch(p + i * PG_CACHE_LINE_SIZE);
+}
+
+/*
+ * Find the leaves of several keys together and start loading them into
+ * cache, so that the lookups wait for their pages at once instead of one
+ * after another.  The keys go down level by level: each level's pages were
+ * prefetched while the level above was searched for every key.  Last, each
+ * leaf's high keys tell the chunk of its key, which gets prefetched too.
+ *
+ * Nothing read here is validated: it only decides what to prefetch, and the
+ * downlink to each leaf becomes the hint its lookup starts from, which the
+ * lookup validates.  A hint stays invalid where the fast path cannot tell the
+ * leaf.
+ */
+void
+fastpath_prefetch_leaves(BTreeDescr *desc, int n,
+						 FastpathFindDownlinkMeta *metas,
+						 BTreeLocationHint *hints)
+{
+	OInMemoryBlkno blknos[FASTPATH_PREFETCH_MAX];
+	bool		live[FASTPATH_PREFETCH_MAX];
+	OInMemoryBlkno root;
+	bool		any;
+	int			i,
+				depth;
+
+	Assert(n <= FASTPATH_PREFETCH_MAX);
+
+	o_btree_load_shmem(desc);
+	root = desc->rootInfo.rootPageBlkno;
+
+	any = false;
+	for (i = 0; i < n; i++)
+	{
+		hints[i].blkno = OInvalidInMemoryBlkno;
+		hints[i].pageChangeCount = InvalidOPageChangeCount;
+		blknos[i] = root;
+		live[i] = metas[i].enabled && !O_PAGE_IS_LOCAL(root);
+		any = any || live[i];
+	}
+
+	for (depth = 0; any && depth < ORIOLEDB_MAX_DEPTH; depth++)
+	{
+		any = false;
+		for (i = 0; i < n; i++)
+		{
+			BTreePageHeader hdr;
+			BTreePageItemLocator loc;
+			BTreeNonLeafTuphdr *tuphdr;
+			uint64		downlink;
+			OInMemoryBlkno child;
+			int			level;
+
+			if (!live[i])
+				continue;
+			live[i] = false;
+
+			/* The header copy fastpath_find_downlink() validates against */
+			memcpy(&hdr, O_GET_IN_MEMORY_PAGE(blknos[i]),
+				   offsetof(BTreePageHeader, chunkDesc));
+			pg_read_barrier();
+			level = PAGE_GET_LEVEL(&hdr);
+			if (level == 0 ||
+				fastpath_find_downlink((Pointer) &hdr, blknos[i], &metas[i],
+									   &loc, &tuphdr) != OBTreeFastPathFindOK)
+				continue;
+
+			downlink = tuphdr->downlink;
+			if (!DOWNLINK_IS_IN_MEMORY(downlink))
+				continue;
+			child = DOWNLINK_GET_IN_MEMORY_BLKNO(downlink);
+
+			/* Read unlocked, the downlink may come from a reused page */
+			if (O_PAGE_IS_LOCAL(child) || child >= orioledb_buffers_count)
+				continue;
+
+			/* The header and the high keys */
+			prefetch_lines(O_GET_IN_MEMORY_PAGE(child), 4);
+			blknos[i] = child;
+			if (level == 1)
+			{
+				hints[i].blkno = child;
+				hints[i].pageChangeCount =
+					DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(downlink);
+			}
+			else
+			{
+				live[i] = true;
+				any = true;
+			}
+		}
+	}
+
+	/* Each leaf's chunk of its key */
+	for (i = 0; i < n; i++)
+	{
+		BTreePageHeader hdr;
+		BTreePageHeader *leaf;
+		int			chunkIndex;
+		LocationIndex chunkBegin,
+					chunkEnd;
+
+		if (!OInMemoryBlknoIsValid(hints[i].blkno))
+			continue;
+		leaf = (BTreePageHeader *) O_GET_IN_MEMORY_PAGE(hints[i].blkno);
+		memcpy(&hdr, leaf, offsetof(BTreePageHeader, chunkDesc));
+		pg_read_barrier();
+		if (PAGE_GET_LEVEL(&hdr) != 0 ||
+			fastpath_find_chunk((Pointer) &hdr, hints[i].blkno, &metas[i],
+								&chunkIndex) != OBTreeFastPathFindOK ||
+			chunkIndex >= hdr.chunksCount ||
+			hdr.chunksCount > BTREE_PAGE_MAX_CHUNKS)
+			continue;
+
+		chunkBegin = SHORT_GET_LOCATION(leaf->chunkDesc[chunkIndex].shortLocation);
+		chunkEnd = chunkIndex + 1 < hdr.chunksCount ?
+			SHORT_GET_LOCATION(leaf->chunkDesc[chunkIndex + 1].shortLocation) :
+			hdr.dataSize;
+		if (chunkBegin >= chunkEnd || chunkEnd > ORIOLEDB_BLCKSZ)
+			continue;
+		prefetch_lines((Pointer) leaf + chunkBegin,
+					   Min((chunkEnd - chunkBegin + PG_CACHE_LINE_SIZE - 1) /
+						   PG_CACHE_LINE_SIZE, 16));
+	}
+}
+
+/*
  * Search a leaf chunk of a partially read page where it lies in shared
  * memory, and copy to the image only what a single-tuple fetch reads: the
  * item array and the item the bound lands on.  Copying the whole chunk costs

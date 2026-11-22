@@ -16,6 +16,7 @@
 #include "orioledb.h"
 
 #include "btree/io.h"
+#include "btree/fastpath.h"
 #include "btree/iterator.h"
 #include "tableam/bitmap_scan.h"
 #include "tableam/index_scan.h"
@@ -1514,6 +1515,38 @@ o_exec_fetch_next_batch(OTableDescr *descr, OScanState *ostate, ScanState *ss)
 }
 
 /*
+ * Find the primary leaves of the batch's next rows together, prefetching
+ * them, for o_exec_fetch_batch_primary() to start its lookups from.
+ */
+static void
+o_exec_prefetch_primary(OTableDescr *descr, OScanState *ostate)
+{
+	OIndexDescr *primary = GET_PRIMARY(descr);
+	BTreeIteratorBatch batch = ostate->batch;
+	FastpathFindDownlinkMeta metas[O_SCAN_PRIMARY_PREFETCH];
+	int			n = 0;
+
+	/*
+	 * A bound's by-reference values point into the batch's tuples, which stay
+	 * put until the batch is used up, so the metas may keep them.
+	 */
+	while (n < O_SCAN_PRIMARY_PREFETCH && batch.count > 0)
+	{
+		OBTreeKeyBound bound;
+
+		o_fill_pindex_tuple_key_bound(&descr->indices[ostate->ixNum]->desc,
+									  o_btree_iterator_batch_tuple(&batch),
+									  &bound);
+		(void) fastpath_prepare_prefetch(&primary->desc, (Pointer) &bound,
+										 BTreeKeyBound, &metas[n++]);
+		o_btree_iterator_batch_next(&batch);
+	}
+	fastpath_prefetch_leaves(&primary->desc, n, metas, ostate->primaryHints);
+	ostate->primaryHintsCount = n;
+	ostate->primaryHintsPos = 0;
+}
+
+/*
  * The next row of a batch of a scan that is not index-only: looked up in the
  * primary index, as o_index_scan_getnext() looks a secondary row up.
  */
@@ -1529,7 +1562,16 @@ o_exec_fetch_batch_primary(OTableDescr *descr, OScanState *ostate,
 		OTuple		tuple;
 		OBTreeKeyBound bound;
 		CommitSeqNo tupleCsn;
-		BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
+		BTreeLocationHint hint;
+
+		/*
+		 * Look the leaves of the next rows up together, so that waiting for
+		 * them overlaps.  A window never outlives its batch: a new batch
+		 * comes only once the old one is used up, and with it the window.
+		 */
+		if (ostate->primaryHintsPos >= ostate->primaryHintsCount)
+			o_exec_prefetch_primary(descr, ostate);
+		hint = ostate->primaryHints[ostate->primaryHintsPos++];
 
 		tuple = o_btree_iterator_batch_tuple(&ostate->batch);
 		o_btree_iterator_batch_next(&ostate->batch);

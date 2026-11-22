@@ -108,6 +108,13 @@ extern void can_fastpath_find_downlink(OBTreeFindPageContext *context,
 									   FastpathFindDownlinkMeta *meta);
 extern bool fastpath_search_leaf_items(FastpathFindDownlinkMeta *meta,
 									   BTreePageItemLocator *loc);
+#define FASTPATH_PREFETCH_MAX 16
+extern bool fastpath_prepare_prefetch(BTreeDescr *desc, void *key,
+									  BTreeKeyType keyType,
+									  FastpathFindDownlinkMeta *meta);
+extern void fastpath_prefetch_leaves(BTreeDescr *desc, int n,
+									 FastpathFindDownlinkMeta *metas,
+									 BTreeLocationHint *hints);
 extern OBTreeFastPathFindResult fastpath_load_leaf_item(FastpathFindDownlinkMeta *meta,
 														PartialPageState *partial,
 														Page img,
