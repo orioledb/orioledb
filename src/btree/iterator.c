@@ -258,14 +258,15 @@ iterator_materialize_cur_key(BTreeIterator *it)
  * in the given context.  Leaf page is found using the given hint (if provided).
  * Given hint is adjusted with relevant leaf page.
  */
-OTuple
-o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
-							 BTreeKeyType kind, OSnapshot *read_o_snapshot,
-							 CommitSeqNo *out_csn, MemoryContext mcxt,
-							 BTreeLocationHint *hint,
-							 bool *deleted,
-							 TupleFetchCallback cb,
-							 void *arg)
+static OTuple
+find_tuple_by_key(BTreeDescr *desc, void *key,
+				  BTreeKeyType kind, OSnapshot *read_o_snapshot,
+				  CommitSeqNo *out_csn, MemoryContext mcxt,
+				  BTreeLocationHint *hint,
+				  bool *deleted,
+				  TupleFetchCallback cb,
+				  void *arg,
+				  FastpathFindDownlinkMeta *meta)
 {
 	BTreePageItemLocator loc;
 	OBTreeFindPageContext context;
@@ -292,13 +293,20 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 	 */
 	init_page_find_context(&context, desc,
 						   combinedResult ? COMMITSEQNO_INPROGRESS : read_o_snapshot->csn,
-						   BTREE_PAGE_FIND_FETCH);
+						   BTREE_PAGE_FIND_FETCH | BTREE_PAGE_FIND_SINGLE_ITEM);
 
 retry:
 
 	/* Use page location hint if provided */
 	if (!forceFind && hint && OInMemoryBlknoIsValid(hint->blkno))
-		findResult = refind_page(&context, key, kind, 0, hint->blkno, hint->pageChangeCount);
+	{
+		if (refind_leaf_for_item(&context, key, kind, hint->blkno,
+								 hint->pageChangeCount, meta))
+			findResult = OFindPageResultSuccess;
+		else
+			findResult = refind_page(&context, key, kind, 0, hint->blkno,
+									 hint->pageChangeCount);
+	}
 	else
 		findResult = find_page(&context, key, kind, 0);
 
@@ -355,6 +363,35 @@ retry:
 	 */
 	return fetch_tuple_from_page(desc, img, &loc, key, kind, read_o_snapshot,
 								 mcxt, out_csn, deleted, cb, arg);
+}
+
+OTuple
+o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
+							 BTreeKeyType kind, OSnapshot *read_o_snapshot,
+							 CommitSeqNo *out_csn, MemoryContext mcxt,
+							 BTreeLocationHint *hint,
+							 bool *deleted,
+							 TupleFetchCallback cb,
+							 void *arg)
+{
+	return find_tuple_by_key(desc, key, kind, read_o_snapshot, out_csn, mcxt,
+							 hint, deleted, cb, arg, NULL);
+}
+
+/*
+ * o_btree_find_tuple_by_key() for a caller that already has the fast-path
+ * search of the key from fastpath_prepare_prefetch(), and a hint from
+ * fastpath_prefetch_leaves().
+ */
+OTuple
+o_btree_find_tuple_by_key_meta(BTreeDescr *desc, void *key, BTreeKeyType kind,
+							   OSnapshot *read_o_snapshot,
+							   CommitSeqNo *out_csn, MemoryContext mcxt,
+							   BTreeLocationHint *hint,
+							   FastpathFindDownlinkMeta *meta)
+{
+	return find_tuple_by_key(desc, key, kind, read_o_snapshot, out_csn, mcxt,
+							 hint, NULL, NULL, NULL, meta);
 }
 
 OTuple

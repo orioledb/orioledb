@@ -1563,7 +1563,13 @@ assert_partial_chunk_loaded(PartialPageState *partial, Page img,
 	 * to contain, so reading through such a locator is always wrong.
 	 */
 	Assert(locator->chunkOffset < BTREE_PAGE_MAX_CHUNKS);
-	Assert(partial->chunkIsLoaded[locator->chunkOffset]);
+	if (!partial->chunkIsLoaded[locator->chunkOffset])
+	{
+		/* Only the item array and this one item are there */
+		Assert(locator->chunkOffset == partial->itemOnlyChunk &&
+			   locator->itemOffset == partial->itemOnlyOffset);
+		return;
+	}
 
 	/*
 	 * The chunk descriptors live in the hikeys chunk.  The fastpath descent

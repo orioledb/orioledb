@@ -29,6 +29,13 @@ struct PartialPageState
 	Page		src;
 	bool		isPartial;
 	bool		hikeysChunkIsLoaded;
+
+	/*
+	 * A chunk of which the image holds only the item array and the item at
+	 * itemOnlyOffset (fastpath_load_leaf_item()), or -1.
+	 */
+	int16		itemOnlyChunk;
+	OffsetNumber itemOnlyOffset;
 	bool		chunkIsLoaded[BTREE_PAGE_MAX_CHUNKS];
 };
 
@@ -123,6 +130,11 @@ typedef struct
  * (convert_fastpath_parent_to_img() in find_right_page() / find_left_page()).
  */
 #define BTREE_PAGE_FIND_KEEP_PARENT		(0x1000)
+/*
+ * A FETCH that reads nothing of the leaf but the tuple its key lands on: the
+ * leaf chunk is searched where it lies, and only that item is copied.
+ */
+#define BTREE_PAGE_FIND_SINGLE_ITEM		(0x2000)
 
 #define BTREE_PAGE_FIND_SET(context, flag) ((context)->flags |= BTREE_PAGE_FIND_##flag)
 #define BTREE_PAGE_FIND_UNSET(context, flag) ((context)->flags &= ~(BTREE_PAGE_FIND_##flag))
@@ -147,6 +159,11 @@ extern OFindPageResult find_page(OBTreeFindPageContext *context, void *key,
 extern OFindPageResult refind_page(OBTreeFindPageContext *context, void *key,
 								   BTreeKeyType keyType, uint16 level,
 								   OInMemoryBlkno blkno, uint32 pageChangeCount);
+struct FastpathFindDownlinkMeta;
+extern bool refind_leaf_for_item(OBTreeFindPageContext *context, void *key,
+								 BTreeKeyType keyType, OInMemoryBlkno blkno,
+								 uint32 pageChangeCount,
+								 struct FastpathFindDownlinkMeta *meta);
 
 extern bool find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey);
 extern bool find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey);

@@ -69,6 +69,14 @@ typedef struct OScanState
 	BTreeIterator *iterator;
 	/* rows the iterator handed out in one go (o_exec_fetch()) */
 	BTreeIteratorBatch batch;
+	/* primary leaves of the batch's next rows, being loaded into cache */
+#define O_SCAN_PRIMARY_PREFETCH FASTPATH_PREFETCH_MAX
+	BTreeLocationHint primaryHints[O_SCAN_PRIMARY_PREFETCH];
+	/* their keys and fast-path searches, ready for the lookups */
+	OBTreeKeyBound primaryBounds[O_SCAN_PRIMARY_PREFETCH];
+	FastpathFindDownlinkMeta primaryMetas[O_SCAN_PRIMARY_PREFETCH];
+	int			primaryHintsCount;
+	int			primaryHintsPos;
 	List	   *indexQuals;
 	/* used only by direct modify functions */
 	CmdType		cmd;

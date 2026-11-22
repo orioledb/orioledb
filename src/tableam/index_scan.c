@@ -16,6 +16,7 @@
 #include "orioledb.h"
 
 #include "btree/io.h"
+#include "btree/fastpath.h"
 #include "btree/iterator.h"
 #include "tableam/bitmap_scan.h"
 #include "tableam/index_scan.h"
@@ -1514,6 +1515,40 @@ o_exec_fetch_next_batch(OTableDescr *descr, OScanState *ostate, ScanState *ss)
 }
 
 /*
+ * Find the primary leaves of the batch's next rows together, prefetching
+ * them, for o_exec_fetch_batch_primary() to start its lookups from.
+ */
+static void
+o_exec_prefetch_primary(OTableDescr *descr, OScanState *ostate)
+{
+	OIndexDescr *primary = GET_PRIMARY(descr);
+	BTreeIteratorBatch batch = ostate->batch;
+	int			n = 0;
+
+	/*
+	 * A bound's by-reference values point into the batch's tuples, which stay
+	 * put until the batch is used up, so the bounds and the metas may be kept
+	 * for the lookups.
+	 */
+	while (n < O_SCAN_PRIMARY_PREFETCH && batch.count > 0)
+	{
+		o_fill_pindex_tuple_key_bound(&descr->indices[ostate->ixNum]->desc,
+									  o_btree_iterator_batch_tuple(&batch),
+									  &ostate->primaryBounds[n]);
+		(void) fastpath_prepare_prefetch(&primary->desc,
+										 (Pointer) &ostate->primaryBounds[n],
+										 BTreeKeyBound,
+										 &ostate->primaryMetas[n]);
+		o_btree_iterator_batch_next(&batch);
+		n++;
+	}
+	fastpath_prefetch_leaves(&primary->desc, n, ostate->primaryMetas,
+							 ostate->primaryHints);
+	ostate->primaryHintsCount = n;
+	ostate->primaryHintsPos = 0;
+}
+
+/*
  * The next row of a batch of a scan that is not index-only: looked up in the
  * primary index, as o_index_scan_getnext() looks a secondary row up.
  */
@@ -1527,21 +1562,30 @@ o_exec_fetch_batch_primary(OTableDescr *descr, OScanState *ostate,
 		   o_exec_fetch_next_batch(descr, ostate, ss))
 	{
 		OTuple		tuple;
-		OBTreeKeyBound bound;
 		CommitSeqNo tupleCsn;
-		BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
+		BTreeLocationHint hint;
+		int			pos;
 
-		tuple = o_btree_iterator_batch_tuple(&ostate->batch);
+		/*
+		 * Look the leaves of the next rows up together, so that waiting for
+		 * them overlaps.  A window never outlives its batch: a new batch
+		 * comes only once the old one is used up, and with it the window.
+		 */
+		if (ostate->primaryHintsPos >= ostate->primaryHintsCount)
+			o_exec_prefetch_primary(descr, ostate);
+		pos = ostate->primaryHintsPos++;
+		hint = ostate->primaryHints[pos];
 		o_btree_iterator_batch_next(&ostate->batch);
 
-		o_fill_pindex_tuple_key_bound(&descr->indices[ostate->ixNum]->desc,
-									  tuple, &bound);
 		descr->noInvalidation = true;
-		tuple = o_btree_find_tuple_by_key(&primary->desc, (Pointer) &bound,
-										  BTreeKeyBound, &ostate->oSnapshot,
-										  &tupleCsn,
-										  ss->ss_ScanTupleSlot->tts_mcxt,
-										  &hint);
+		tuple = o_btree_find_tuple_by_key_meta(&primary->desc,
+											   (Pointer) &ostate->primaryBounds[pos],
+											   BTreeKeyBound, &ostate->oSnapshot,
+											   &tupleCsn,
+											   ss->ss_ScanTupleSlot->tts_mcxt,
+											   &hint,
+											   ostate->primaryMetas[pos].enabled ?
+											   &ostate->primaryMetas[pos] : NULL);
 		descr->noInvalidation = false;
 
 		/* Deleted or updated concurrently: go on to the next one */

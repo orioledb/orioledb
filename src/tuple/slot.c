@@ -364,6 +364,43 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		return;
 	}
 
+	/*
+	 * The same for a primary leaf tuple read in table order: its attributes
+	 * are the table's one for one when there is no ctid ahead of them.  All
+	 * of them are taken apart at once, as above, so that no later call needs
+	 * the reader this one leaves where it was; that takes a tuple holding
+	 * every column of the table.
+	 */
+	if ((oslot->tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT) &&
+		!index_order &&
+		oslot->leafTuple &&
+		oslot->ixnum == PrimaryIndexNumber &&
+		ctid_off == 0 &&
+		slot->tts_nvalid == 0 &&
+		oslot->state.attnum == 0 &&
+		descr->tupdesc->natts == idx->leafSpec.natts &&
+		slot->tts_tupleDescriptor->natts == idx->leafSpec.natts)
+	{
+		TupleDesc	leafTupdesc = idx->leafTupdesc;
+		char	   *tp = oslot->state.tp;
+		uint32		off = 0;
+
+		natts = idx->leafSpec.natts;
+		for (attnum = 0; attnum < natts; attnum++)
+		{
+			OTupleAttrCompact *att = OTupleDescAttrFast(leafTupdesc, attnum);
+
+			Assert(att->attlen > 0);
+			off = o_att_align_nominal(att, off);
+			values[attnum] = fetchatt(att, tp + off);
+			isnull[attnum] = false;
+			off += att->attlen;
+		}
+
+		slot->tts_nvalid = natts;
+		return;
+	}
+
 	{
 		int			needed = Max(natts, __natts);
 

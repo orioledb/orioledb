@@ -1218,6 +1218,8 @@ o_rescan_custom_scan(CustomScanState *node)
 			ix_plan_state->ostate.iterator = NULL;
 		}
 		ix_plan_state->ostate.batch.count = 0;
+		ix_plan_state->ostate.primaryHintsCount = 0;
+		ix_plan_state->ostate.primaryHintsPos = 0;
 		if (node->ss.ps.chgParam != NULL)
 		{
 			MemoryContextReset(ix_plan_state->ostate.cxt);

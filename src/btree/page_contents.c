@@ -158,6 +158,7 @@ try_copy_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeCount,
 		partial->isPartial = true;
 		partial->hikeysChunkIsLoaded = loadHikeysChunk;
 		partial->src = p;
+		partial->itemOnlyChunk = -1;
 		memset(&partial->chunkIsLoaded, 0, sizeof(bool) * BTREE_PAGE_MAX_CHUNKS);
 	}
 	else

@@ -15,6 +15,7 @@
 #define __TABLEAM_DESCR_H__
 
 #include "checkpoint/checkpoint.h"
+#include "btree/fastpath.h"
 #include "catalog/o_indices.h"
 #include "catalog/sys_trees.h"
 #include "utils/seq_buf.h"
@@ -241,6 +242,9 @@ struct OIndexDescr
 	TupleTableSlot *new_leaf_slot;
 	/* Copy of duplicates from OIndex */
 	List	   *duplicates;
+
+	/* What of a fast-path search depends on the index alone */
+	FastpathIndexMeta fastpath;
 };
 
 /*
