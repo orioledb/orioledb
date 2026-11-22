@@ -976,107 +976,51 @@ fastpath_find_chunk(Pointer pagePtr,
 }
 
 /*
- * Find the given value in the fixed-stride array of integers.  The functions
- * below do the same for other datatypes.
+ * Narrow [*lower, *upper) of a sorted fixed-stride array of integers to the
+ * run of items equal to the key.  The scan counts the items below the key
+ * and those not above it over the whole range instead of stopping at the
+ * first item above: no branch depends on the data, so there is no exit to
+ * mispredict, and the loads, independent of each other, overlap.  The float
+ * searches below keep their own scans for NaN ordering.
  */
-static void
-int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
-				  bool ascending)
-{
-	int			i;
-	bool		lowerSet = false;
-	int32		key = DatumGetInt32(keyDatum);
-
-	p += *lower * stride;
-
-	for (i = *lower; i < *upper; i++)
-	{
-		int32		value = *((int32 *) p);
-
-		if (value == key && !lowerSet)
-		{
-			*lower = i;
-			lowerSet = true;
-		}
-		else if (ascending ? value > key : value < key)
-		{
-			if (!lowerSet)
-				*lower = i;
-			*upper = i;
-			return;
-		}
-
-		p += stride;
-	}
-	if (!lowerSet)
-		*lower = *upper;
+#define ARRAY_COUNT_SEARCH_FUNC(fname, ctype, fromDatum) \
+static void \
+fname(Pointer p, int stride, int *lower, int *upper, Datum keyDatum, \
+	  bool ascending) \
+{ \
+	ctype		key = fromDatum(keyDatum); \
+	Pointer		q = p + (Size) *lower * stride; \
+	Pointer		end = p + (Size) *upper * stride; \
+	int			below = 0, \
+				notAbove = 0; \
+\
+	if (ascending) \
+	{ \
+		for (; q < end; q += stride) \
+		{ \
+			ctype		v = *(ctype *) q; \
+\
+			below += (v < key); \
+			notAbove += (v <= key); \
+		} \
+	} \
+	else \
+	{ \
+		for (; q < end; q += stride) \
+		{ \
+			ctype		v = *(ctype *) q; \
+\
+			below += (v > key); \
+			notAbove += (v >= key); \
+		} \
+	} \
+	*upper = *lower + notAbove; \
+	*lower += below; \
 }
 
-static void
-int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
-				  bool ascending)
-{
-	int			i;
-	bool		lowerSet = false;
-	int64		key = DatumGetInt64(keyDatum);
-
-	p += *lower * stride;
-
-	for (i = *lower; i < *upper; i++)
-	{
-		int64		value = *((int64 *) p);
-
-		if (value == key && !lowerSet)
-		{
-			*lower = i;
-			lowerSet = true;
-		}
-		else if (ascending ? value > key : value < key)
-		{
-			if (!lowerSet)
-				*lower = i;
-			*upper = i;
-			return;
-		}
-
-		p += stride;
-	}
-	if (!lowerSet)
-		*lower = *upper;
-}
-
-static void
-oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
-				 bool ascending)
-{
-	int			i;
-	bool		lowerSet = false;
-	Oid			key = DatumGetObjectId(keyDatum);
-
-	p += *lower * stride;
-
-	for (i = *lower; i < *upper; i++)
-	{
-		Oid			value = *((Oid *) p);
-
-		if (value == key && !lowerSet)
-		{
-			*lower = i;
-			lowerSet = true;
-		}
-		else if (ascending ? value > key : value < key)
-		{
-			if (!lowerSet)
-				*lower = i;
-			*upper = i;
-			return;
-		}
-
-		p += stride;
-	}
-	if (!lowerSet)
-		*lower = *upper;
-}
+ARRAY_COUNT_SEARCH_FUNC(int4_array_search, int32, DatumGetInt32)
+ARRAY_COUNT_SEARCH_FUNC(int8_array_search, int64, DatumGetInt64)
+ARRAY_COUNT_SEARCH_FUNC(oid_array_search, Oid, DatumGetObjectId)
 
 static void
 float4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
