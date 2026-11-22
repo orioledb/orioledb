@@ -1654,10 +1654,11 @@ retry:
 bool
 refind_leaf_for_item(OBTreeFindPageContext *context, void *key,
 					 BTreeKeyType keyType, OInMemoryBlkno blkno,
-					 uint32 pageChangeCount)
+					 uint32 pageChangeCount, FastpathFindDownlinkMeta *knownMeta)
 {
 	BTreeDescr *desc = context->desc;
-	FastpathFindDownlinkMeta meta;
+	FastpathFindDownlinkMeta localMeta;
+	FastpathFindDownlinkMeta *meta = knownMeta;
 	BTreePageItemLocator loc;
 	OInMemoryBlkno rootBlkno = desc->rootInfo.rootPageBlkno;
 	uint32		rootPageChangeCount = desc->rootInfo.rootPageChangeCount;
@@ -1679,8 +1680,12 @@ refind_leaf_for_item(OBTreeFindPageContext *context, void *key,
 		desc->rootInfo.rootPageChangeCount != rootPageChangeCount)
 		return false;
 
-	can_fastpath_find_downlink(context, key, keyType, &meta);
-	if (!meta.enabled || !meta.leafSearch)
+	if (meta == NULL)
+	{
+		meta = &localMeta;
+		can_fastpath_find_downlink(context, key, keyType, meta);
+	}
+	if (!meta->enabled || !meta->leafSearch)
 		return false;
 
 	context->index = 0;
@@ -1695,11 +1700,11 @@ refind_leaf_for_item(OBTreeFindPageContext *context, void *key,
 	if (PAGE_GET_LEVEL(img) != 0 || !context->partial.isPartial)
 		return false;
 
-	if (fastpath_find_chunk(img, blkno, &meta, &chunkIndex) !=
+	if (fastpath_find_chunk(img, blkno, meta, &chunkIndex) !=
 		OBTreeFastPathFindOK)
 		return false;
 
-	result = fastpath_load_leaf_item(&meta, &context->partial, img,
+	result = fastpath_load_leaf_item(meta, &context->partial, img,
 									 chunkIndex, &loc);
 	if (result == OBTreeFastPathFindSlowpath)
 	{
@@ -1711,7 +1716,7 @@ refind_leaf_for_item(OBTreeFindPageContext *context, void *key,
 		return false;
 #ifdef USE_ASSERT_CHECKING
 	else
-		check_leaf_item(desc, &meta, &context->partial, img, key, keyType,
+		check_leaf_item(desc, meta, &context->partial, img, key, keyType,
 						&loc);
 #endif
 

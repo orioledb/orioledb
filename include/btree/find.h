@@ -159,9 +159,11 @@ extern OFindPageResult find_page(OBTreeFindPageContext *context, void *key,
 extern OFindPageResult refind_page(OBTreeFindPageContext *context, void *key,
 								   BTreeKeyType keyType, uint16 level,
 								   OInMemoryBlkno blkno, uint32 pageChangeCount);
+struct FastpathFindDownlinkMeta;
 extern bool refind_leaf_for_item(OBTreeFindPageContext *context, void *key,
 								 BTreeKeyType keyType, OInMemoryBlkno blkno,
-								 uint32 pageChangeCount);
+								 uint32 pageChangeCount,
+								 struct FastpathFindDownlinkMeta *meta);
 
 extern bool find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey);
 extern bool find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey);

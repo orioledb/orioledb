@@ -62,7 +62,7 @@ typedef struct
 	Oid			types[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 } FastpathIndexMeta;
 
-typedef struct
+typedef struct FastpathFindDownlinkMeta
 {
 	bool		enabled;
 	bool		inclusive;

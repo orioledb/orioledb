@@ -134,6 +134,14 @@ extern OTuple btree_iterate_all(BTreeIterator *it, void *end,
 extern void btree_iterator_free(BTreeIterator *it);
 extern void btree_iterator_free_extended(BTreeIterator *it, bool fromResowner);
 
+struct FastpathFindDownlinkMeta;
+extern OTuple o_btree_find_tuple_by_key_meta(BTreeDescr *desc, void *key,
+											 BTreeKeyType kind,
+											 OSnapshot *read_o_snapshot,
+											 CommitSeqNo *out_csn,
+											 MemoryContext mcxt,
+											 BTreeLocationHint *hint,
+											 struct FastpathFindDownlinkMeta *meta);
 extern OTuple o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 										   BTreeKeyType kind,
 										   OSnapshot *read_o_snapshot,
