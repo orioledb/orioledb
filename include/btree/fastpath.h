@@ -86,6 +86,11 @@ extern void can_fastpath_find_downlink(OBTreeFindPageContext *context,
 									   FastpathFindDownlinkMeta *meta);
 extern bool fastpath_search_leaf_items(FastpathFindDownlinkMeta *meta,
 									   BTreePageItemLocator *loc);
+extern OBTreeFastPathFindResult fastpath_load_leaf_item(FastpathFindDownlinkMeta *meta,
+														PartialPageState *partial,
+														Page img,
+														OffsetNumber chunkOffset,
+														BTreePageItemLocator *loc);
 extern OBTreeFastPathFindResult fastpath_find_chunk(Pointer pagePtr,
 													OInMemoryBlkno blkno,
 													FastpathFindDownlinkMeta *meta,

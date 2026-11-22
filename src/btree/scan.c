@@ -2288,6 +2288,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 					 */
 					scan->leafPartial.isPartial = true;
 					scan->leafPartial.hikeysChunkIsLoaded = false;
+					scan->leafPartial.itemOnlyChunk = -1;
 					memset(scan->leafPartial.chunkIsLoaded, 0,
 						   sizeof(scan->leafPartial.chunkIsLoaded));
 					scan->leafPartialFailed = false;

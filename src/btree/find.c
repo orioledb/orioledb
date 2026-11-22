@@ -209,6 +209,47 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	return OBTreeFastPathFindOK;
 }
 
+#ifdef USE_ASSERT_CHECKING
+/*
+ * Check the item fastpath_load_leaf_item() found against the item-by-item
+ * search of the whole chunk, unless the page has changed since.
+ */
+static void
+check_leaf_item(BTreeDescr *desc, FastpathFindDownlinkMeta *meta,
+				PartialPageState *partial, Page img, void *key,
+				BTreeKeyType keyType, BTreePageItemLocator *loc)
+{
+	union
+	{
+		char		data[ORIOLEDB_BLCKSZ];
+		double		align;
+	}			scratch;
+	BTreePageItemLocator check = *loc;
+	Size		chunkBegin = (Pointer) loc->chunk - (Pointer) img;
+	uint64		imgState = pg_atomic_read_u64(&(O_PAGE_HEADER(img)->state)),
+				srcState;
+
+	memcpy(scratch.data + chunkBegin, (Pointer) partial->src + chunkBegin,
+		   loc->chunkSize);
+	pg_read_barrier();
+	srcState = pg_atomic_read_u64(&(O_PAGE_HEADER(partial->src)->state));
+	if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) !=
+		(srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
+		O_PAGE_STATE_READ_IS_BLOCKED(srcState))
+		return;
+
+	check.chunk = (BTreePageChunk *) (scratch.data + chunkBegin);
+	btree_page_search_items(desc, img, key, keyType, &check);
+	Assert(check.itemOffset == loc->itemOffset);
+	Assert(memcmp(check.chunk->items, loc->chunk->items,
+				  sizeof(LocationIndex) * loc->chunkItemsCount) == 0);
+	if (loc->itemOffset < loc->chunkItemsCount)
+		Assert(memcmp(BTREE_PAGE_LOCATOR_GET_ITEM(img, &check),
+					  BTREE_PAGE_LOCATOR_GET_ITEM(img, loc),
+					  meta->leafStride) == 0);
+}
+#endif
+
 static OBTreeFastPathFindResult
 page_find_item(OBTreeFindPageInternalContext *intCxt,
 			   FastpathFindDownlinkMeta *meta,
@@ -222,6 +263,7 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 	void	   *key = intCxt->key;
 	BTreeKeyType keyType = intCxt->keyType;
 	bool		itemFound = true;
+	bool		itemOnly = false;
 
 	if (fastpath && intCxt->partial->isPartial)
 	{
@@ -235,7 +277,20 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 									 meta,
 									 &chunkIndex);
 
-		if (result == OBTreeFastPathFindOK &&
+		if (result == OBTreeFastPathFindOK && level == 0 &&
+			BTREE_PAGE_FIND_IS(context, SINGLE_ITEM) && meta->leafSearch &&
+			!intCxt->partial->chunkIsLoaded[chunkIndex])
+		{
+			result = fastpath_load_leaf_item(meta, intCxt->partial,
+											 intCxt->pagePtr, chunkIndex,
+											 loc);
+			if (result == OBTreeFastPathFindOK)
+				itemOnly = true;
+			else if (result == OBTreeFastPathFindSlowpath)
+				result = OBTreeFastPathFindOK;
+		}
+
+		if (result == OBTreeFastPathFindOK && !itemOnly &&
 			!partial_load_chunk(intCxt->partial,
 								intCxt->pagePtr,
 								chunkIndex,
@@ -244,7 +299,14 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 
 		if (result == OBTreeFastPathFindOK)
 		{
-			if (keyType == BTreeKeyRightmost)
+			if (itemOnly)
+			{
+#ifdef USE_ASSERT_CHECKING
+				check_leaf_item(desc, meta, intCxt->partial, intCxt->pagePtr,
+								key, keyType, loc);
+#endif
+			}
+			else if (keyType == BTreeKeyRightmost)
 			{
 				loc->itemOffset = loc->chunkItemsCount - 1;
 			}
@@ -414,6 +476,7 @@ refresh_parent_img_chunk(OBTreeFindPageInternalContext *intCxt)
 	context->parentPartial.src = src;
 	context->parentPartial.isPartial = true;
 	context->parentPartial.hikeysChunkIsLoaded = true;
+	context->parentPartial.itemOnlyChunk = -1;
 	memset(context->parentPartial.chunkIsLoaded, 0,
 		   sizeof(context->parentPartial.chunkIsLoaded));
 	context->parentPartial.chunkIsLoaded[chunkOffset] = true;

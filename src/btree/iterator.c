@@ -292,7 +292,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 	 */
 	init_page_find_context(&context, desc,
 						   combinedResult ? COMMITSEQNO_INPROGRESS : read_o_snapshot->csn,
-						   BTREE_PAGE_FIND_FETCH);
+						   BTREE_PAGE_FIND_FETCH | BTREE_PAGE_FIND_SINGLE_ITEM);
 
 retry:
 

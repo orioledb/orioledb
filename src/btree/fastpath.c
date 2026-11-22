@@ -290,6 +290,88 @@ fastpath_search_leaf_items(FastpathFindDownlinkMeta *meta,
 	return true;
 }
 
+/*
+ * Search a leaf chunk of a partially read page where it lies in shared
+ * memory, and copy to the image only what a single-tuple fetch reads: the
+ * item array and the item the bound lands on.  Copying the whole chunk costs
+ * such a fetch more than its descent does.  Everything read is validated by
+ * the page state, as partial_load_chunk() validates its copy.
+ *
+ * Slowpath when the chunk is not a run of fixed-format items; the caller
+ * then loads it whole.
+ */
+OBTreeFastPathFindResult
+fastpath_load_leaf_item(FastpathFindDownlinkMeta *meta,
+						PartialPageState *partial, Page img,
+						OffsetNumber chunkOffset, BTreePageItemLocator *loc)
+{
+	BTreePageHeader *imgHdr = (BTreePageHeader *) img;
+	BTreePageHeader *srcHdr = (BTreePageHeader *) partial->src;
+	uint64		imgState = pg_atomic_read_u64(&imgHdr->o_header.state);
+	uint64		srcState;
+	LocationIndex chunkBegin,
+				chunkEnd;
+	int			count,
+				first;
+	BTreePageItemLocator live;
+
+	Assert(partial->isPartial && !partial->chunkIsLoaded[chunkOffset]);
+
+	if (chunkOffset >= imgHdr->chunksCount)
+		return OBTreeFastPathFindSlowpath;
+
+	chunkBegin = SHORT_GET_LOCATION(srcHdr->chunkDesc[chunkOffset].shortLocation);
+	if (chunkOffset + 1 < imgHdr->chunksCount)
+	{
+		chunkEnd = SHORT_GET_LOCATION(srcHdr->chunkDesc[chunkOffset + 1].shortLocation);
+		count = srcHdr->chunkDesc[chunkOffset + 1].offset -
+			srcHdr->chunkDesc[chunkOffset].offset;
+	}
+	else
+	{
+		chunkEnd = imgHdr->dataSize;
+		count = imgHdr->itemsCount - srcHdr->chunkDesc[chunkOffset].offset;
+	}
+
+	pg_read_barrier();
+
+	/* A descriptor torn by a concurrent change must not lead off the page */
+	if (chunkBegin > chunkEnd || chunkEnd > ORIOLEDB_BLCKSZ ||
+		count <= 0 || count > BTREE_PAGE_MAX_CHUNK_ITEMS)
+		return OBTreeFastPathFindSlowpath;
+
+	live.chunk = (BTreePageChunk *) ((Pointer) srcHdr + chunkBegin);
+	live.chunkOffset = chunkOffset;
+	live.chunkItemsCount = count;
+	live.chunkSize = chunkEnd - chunkBegin;
+	if (!fastpath_search_leaf_items(meta, &live))
+		return OBTreeFastPathFindSlowpath;
+
+	first = MAXALIGN(sizeof(LocationIndex) * count);
+	memcpy((Pointer) img + chunkBegin, live.chunk, first);
+	if (live.itemOffset < count)
+		memcpy((Pointer) img + chunkBegin + first +
+			   meta->leafStride * live.itemOffset,
+			   (Pointer) live.chunk + first +
+			   meta->leafStride * live.itemOffset,
+			   meta->leafStride);
+
+	pg_read_barrier();
+
+	srcState = pg_atomic_read_u64(&srcHdr->o_header.state);
+	if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) !=
+		(srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
+		O_PAGE_STATE_READ_IS_BLOCKED(srcState) ||
+		O_PAGE_GET_CHANGE_COUNT(img) != O_PAGE_GET_CHANGE_COUNT(srcHdr))
+		return OBTreeFastPathFindRetry;
+
+	*loc = live;
+	loc->chunk = (BTreePageChunk *) ((Pointer) img + chunkBegin);
+	partial->itemOnlyChunk = chunkOffset;
+	partial->itemOnlyOffset = live.itemOffset;
+	return OBTreeFastPathFindOK;
+}
+
 static ArraySearchDesc *
 find_array_search_desc_by_typeid(Oid typeid)
 {
