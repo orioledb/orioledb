@@ -32,6 +32,11 @@
 #include "catalog/pg_opclass_d.h"
 #include "commands/defrem.h"
 
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#define FASTPATH_USE_AVX2 1
+#include <immintrin.h>
+#endif
+
 typedef struct
 {
 	Oid			typeid;
@@ -74,6 +79,39 @@ static ArraySearchDesc arraySearchDescs[] = {
  * Checks if the "fast path" the navigation can be applied to the given search
  * and fills *meta structure if so.
  */
+#ifdef FASTPATH_USE_AVX2
+static void int4_array_search_avx2(Pointer p, int stride, int *lower,
+								   int *upper, Datum keyDatum, bool ascending);
+static void int8_array_search_avx2(Pointer p, int stride, int *lower,
+								   int *upper, Datum keyDatum, bool ascending);
+static void oid_array_search_avx2(Pointer p, int stride, int *lower,
+								  int *upper, Datum keyDatum, bool ascending);
+#endif
+
+/*
+ * The array search of a type, the vector one where the CPU has it.
+ */
+static ArraySearchFunc
+array_search_func(ArraySearchDesc *searchDesc)
+{
+#ifdef FASTPATH_USE_AVX2
+	static int	haveAvx2 = -1;
+
+	if (haveAvx2 < 0)
+		haveAvx2 = __builtin_cpu_supports("avx2") ? 1 : 0;
+	if (haveAvx2)
+	{
+		if (searchDesc->func == int4_array_search)
+			return int4_array_search_avx2;
+		if (searchDesc->func == int8_array_search)
+			return int8_array_search_avx2;
+		if (searchDesc->func == oid_array_search)
+			return oid_array_search_avx2;
+	}
+#endif
+	return searchDesc->func;
+}
+
 /*
  * Build the part of a fast-path search that depends on the index alone.
  */
@@ -105,7 +143,7 @@ build_fastpath_index_meta(OIndexDescr *id, FastpathIndexMeta *im)
 				break;
 
 			offset = TYPEALIGN(searchDesc->align, offset);
-			im->funcs[i] = searchDesc->func;
+			im->funcs[i] = array_search_func(searchDesc);
 			im->offsets[i] = offset;
 			im->ascending[i] = field->ascending;
 			im->types[i] = searchDesc->typeid;
@@ -1142,3 +1180,97 @@ tid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
 	if (!lowerSet)
 		*lower = *upper;
 }
+
+#ifdef FASTPATH_USE_AVX2
+
+/*
+ * The counting searches above, eight 32-bit items or four 64-bit ones at a
+ * time: a gather picks them from their stride, and lanes past the range are
+ * masked off, neither loaded nor counted.  Oids compare unsigned, which AVX2
+ * does not: flipping the sign bit of both sides turns it into a signed
+ * comparison.
+ */
+#define AVX2_COUNT32(fname, flip) \
+__attribute__((target("avx2"))) \
+static void \
+fname(Pointer p, int stride, int *lower, int *upper, Datum keyDatum, \
+	  bool ascending) \
+{ \
+	const __m256i lanes = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7); \
+	const __m256i offsets = _mm256_mullo_epi32(lanes, _mm256_set1_epi32(stride)); \
+	const __m256i bias = _mm256_set1_epi32((flip) ? (int32) 0x80000000 : 0); \
+	__m256i		key = _mm256_xor_si256(_mm256_set1_epi32((int32) DatumGetUInt32(keyDatum)), bias); \
+	int			lo = *lower, \
+				hi = *upper, \
+				i, \
+				below = 0, \
+				notAbove = 0; \
+\
+	for (i = lo; i < hi; i += 8) \
+	{ \
+		__m256i		valid = _mm256_cmpgt_epi32(_mm256_set1_epi32(hi - i), lanes); \
+		__m256i		v = _mm256_mask_i32gather_epi32(_mm256_setzero_si256(), \
+													(const int *) (p + (Size) i * stride), \
+													offsets, valid, 1); \
+		__m256i		lt, \
+					gt; \
+\
+		v = _mm256_xor_si256(v, bias); \
+		lt = _mm256_cmpgt_epi32(key, v); \
+		gt = _mm256_cmpgt_epi32(v, key); \
+		if (!ascending) \
+		{ \
+			__m256i		t = lt; \
+\
+			lt = gt; \
+			gt = t; \
+		} \
+		below += __builtin_popcount(_mm256_movemask_ps(_mm256_castsi256_ps(_mm256_and_si256(lt, valid)))); \
+		notAbove += __builtin_popcount(_mm256_movemask_ps(_mm256_castsi256_ps(_mm256_andnot_si256(gt, valid)))); \
+	} \
+	*upper = lo + notAbove; \
+	*lower = lo + below; \
+}
+
+AVX2_COUNT32(int4_array_search_avx2, false)
+AVX2_COUNT32(oid_array_search_avx2, true)
+
+__attribute__((target("avx2")))
+static void
+int8_array_search_avx2(Pointer p, int stride, int *lower, int *upper,
+					   Datum keyDatum, bool ascending)
+{
+	const		__m128i lanes = _mm_setr_epi32(0, 1, 2, 3);
+	const		__m128i offsets = _mm_mullo_epi32(lanes, _mm_set1_epi32(stride));
+	const		__m256i lanes64 = _mm256_setr_epi64x(0, 1, 2, 3);
+	__m256i		key = _mm256_set1_epi64x(DatumGetInt64(keyDatum));
+	int			lo = *lower,
+				hi = *upper,
+				i,
+				below = 0,
+				notAbove = 0;
+
+	for (i = lo; i < hi; i += 4)
+	{
+		__m256i		valid = _mm256_cmpgt_epi64(_mm256_set1_epi64x(hi - i), lanes64);
+		__m256i		v = _mm256_mask_i32gather_epi64(_mm256_setzero_si256(),
+													(const long long *) (p + (Size) i * stride),
+													offsets, valid, 1);
+		__m256i		lt = _mm256_cmpgt_epi64(key, v),
+					gt = _mm256_cmpgt_epi64(v, key);
+
+		if (!ascending)
+		{
+			__m256i		t = lt;
+
+			lt = gt;
+			gt = t;
+		}
+		below += __builtin_popcount(_mm256_movemask_pd(_mm256_castsi256_pd(_mm256_and_si256(lt, valid))));
+		notAbove += __builtin_popcount(_mm256_movemask_pd(_mm256_castsi256_pd(_mm256_andnot_si256(gt, valid))));
+	}
+	*upper = lo + notAbove;
+	*lower = lo + below;
+}
+
+#endif							/* FASTPATH_USE_AVX2 */

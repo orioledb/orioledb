@@ -1,0 +1,204 @@
+-- Exercises the fast path's array searches (fastpath.c) on int4, int8 and oid
+-- keys across their whole ranges -- negative values, the extremes, oids past
+-- 2^31, which compare unsigned -- through a primary key lookup and through a
+-- secondary index scan that fetches each row from the primary, which looks
+-- the rows of a batch up together.  Every result is checked against an
+-- identical heap table: a wrong search shows up as a non-zero symmetric
+-- difference.
+CREATE SCHEMA fastpath_types;
+SET SESSION search_path = 'fastpath_types';
+CREATE EXTENSION orioledb;
+CREATE TABLE o4 (k int4 PRIMARY KEY, c int4, amount int4) USING orioledb;
+CREATE TABLE h4 (k int4 PRIMARY KEY, c int4, amount int4);
+CREATE TABLE o8 (k int8 PRIMARY KEY, c int4, amount int4) USING orioledb;
+CREATE TABLE h8 (k int8 PRIMARY KEY, c int4, amount int4);
+CREATE TABLE oo (k oid PRIMARY KEY, c int4, amount int4) USING orioledb;
+CREATE TABLE ho (k oid PRIMARY KEY, c int4, amount int4);
+-- 100000 keys spread over each type's range, so the primary has internal
+-- pages above its leaves, plus the very last value of the range.
+INSERT INTO o4 SELECT (-2147483648 + g::int8 * 42947)::int4, g % 5000, g
+	FROM generate_series(0, 99999) g;
+INSERT INTO o4 VALUES (2147483647, 1, -1);
+INSERT INTO o8 SELECT (g::numeric * 184467440737095 - 9223372036854775808)::int8,
+					  g % 5000, g
+	FROM generate_series(0, 99999) g;
+INSERT INTO o8 VALUES (9223372036854775807, 1, -1);
+INSERT INTO oo SELECT (g::int8 * 42949)::oid, g % 5000, g
+	FROM generate_series(0, 99999) g;
+INSERT INTO oo VALUES (4294967295, 1, -1);
+INSERT INTO h4 SELECT * FROM o4;
+INSERT INTO h8 SELECT * FROM o8;
+INSERT INTO ho SELECT * FROM oo;
+CREATE INDEX o4_c ON o4 (c);
+CREATE INDEX o8_c ON o8 (c);
+CREATE INDEX oo_c ON oo (c);
+CREATE INDEX h4_c ON h4 (c);
+CREATE INDEX h8_c ON h8 (c);
+CREATE INDEX ho_c ON ho (c);
+-- Probes: every 37th key, the key after it (mostly absent), and the extremes.
+CREATE TABLE p4 AS
+	SELECT k FROM h4 WHERE amount % 37 = 0
+	UNION ALL SELECT k + 1 FROM h4 WHERE amount % 37 = 0 AND k < 2147483647
+	UNION ALL SELECT unnest(ARRAY[-2147483648, -2147483647, -1, 0, 1,
+								  2147483646, 2147483647]::int4[]);
+CREATE TABLE p8 AS
+	SELECT k FROM h8 WHERE amount % 37 = 0
+	UNION ALL SELECT k + 1 FROM h8 WHERE amount % 37 = 0 AND k < 9223372036854775807
+	UNION ALL SELECT unnest(ARRAY[-9223372036854775808, -9223372036854775807,
+								  -1, 0, 1, 9223372036854775806,
+								  9223372036854775807]::int8[]);
+CREATE TABLE po AS
+	SELECT k FROM ho WHERE amount % 37 = 0
+	UNION ALL SELECT (k::int8 + 1)::oid FROM ho WHERE amount % 37 = 0 AND k < 4294967295
+	UNION ALL SELECT unnest(ARRAY[0, 1, 2147483647, 2147483648, 2147483649,
+								  4294967294, 4294967295]::oid[]);
+CREATE TABLE pc AS SELECT g AS c FROM generate_series(-1, 5000, 7) g;
+ANALYZE;
+SET enable_bitmapscan = off;
+SET enable_hashjoin = off;
+SET enable_mergejoin = off;
+SET enable_material = off;
+-- Primary key lookups.
+EXPLAIN (COSTS OFF)
+	SELECT o.k, o.amount FROM p4 p JOIN o4 o ON o.k = p.k;
+               QUERY PLAN               
+----------------------------------------
+ Nested Loop
+   ->  Seq Scan on p4 p
+   ->  Custom Scan (o_scan) on o4 o
+         Forward index scan of: o4_pkey
+         Conds: (k = p.k)
+(5 rows)
+
+SELECT count(*) AS int4_pk_mismatch FROM (
+	(SELECT o.k, o.amount FROM p4 p JOIN o4 o ON o.k = p.k
+	 EXCEPT ALL SELECT h.k, h.amount FROM p4 p JOIN h4 h ON h.k = p.k)
+	UNION ALL
+	(SELECT h.k, h.amount FROM p4 p JOIN h4 h ON h.k = p.k
+	 EXCEPT ALL SELECT o.k, o.amount FROM p4 p JOIN o4 o ON o.k = p.k)
+) d;
+ int4_pk_mismatch 
+------------------
+                0
+(1 row)
+
+SELECT count(*) AS int8_pk_mismatch FROM (
+	(SELECT o.k, o.amount FROM p8 p JOIN o8 o ON o.k = p.k
+	 EXCEPT ALL SELECT h.k, h.amount FROM p8 p JOIN h8 h ON h.k = p.k)
+	UNION ALL
+	(SELECT h.k, h.amount FROM p8 p JOIN h8 h ON h.k = p.k
+	 EXCEPT ALL SELECT o.k, o.amount FROM p8 p JOIN o8 o ON o.k = p.k)
+) d;
+ int8_pk_mismatch 
+------------------
+                0
+(1 row)
+
+SELECT count(*) AS oid_pk_mismatch FROM (
+	(SELECT o.k, o.amount FROM po p JOIN oo o ON o.k = p.k
+	 EXCEPT ALL SELECT h.k, h.amount FROM po p JOIN ho h ON h.k = p.k)
+	UNION ALL
+	(SELECT h.k, h.amount FROM po p JOIN ho h ON h.k = p.k
+	 EXCEPT ALL SELECT o.k, o.amount FROM po p JOIN oo o ON o.k = p.k)
+) d;
+ oid_pk_mismatch 
+-----------------
+               0
+(1 row)
+
+-- Secondary lookups fetching each row from the primary.
+EXPLAIN (COSTS OFF)
+	SELECT o.k, o.amount FROM pc p JOIN o4 o ON o.c = p.c;
+             QUERY PLAN              
+-------------------------------------
+ Nested Loop
+   ->  Seq Scan on pc p
+   ->  Custom Scan (o_scan) on o4 o
+         Forward index scan of: o4_c
+         Conds: (c = p.c)
+(5 rows)
+
+SELECT count(*) AS int4_sk_mismatch FROM (
+	(SELECT o.k, o.amount FROM pc p JOIN o4 o ON o.c = p.c
+	 EXCEPT ALL SELECT h.k, h.amount FROM pc p JOIN h4 h ON h.c = p.c)
+	UNION ALL
+	(SELECT h.k, h.amount FROM pc p JOIN h4 h ON h.c = p.c
+	 EXCEPT ALL SELECT o.k, o.amount FROM pc p JOIN o4 o ON o.c = p.c)
+) d;
+ int4_sk_mismatch 
+------------------
+                0
+(1 row)
+
+SELECT count(*) AS int8_sk_mismatch FROM (
+	(SELECT o.k, o.amount FROM pc p JOIN o8 o ON o.c = p.c
+	 EXCEPT ALL SELECT h.k, h.amount FROM pc p JOIN h8 h ON h.c = p.c)
+	UNION ALL
+	(SELECT h.k, h.amount FROM pc p JOIN h8 h ON h.c = p.c
+	 EXCEPT ALL SELECT o.k, o.amount FROM pc p JOIN o8 o ON o.c = p.c)
+) d;
+ int8_sk_mismatch 
+------------------
+                0
+(1 row)
+
+SELECT count(*) AS oid_sk_mismatch FROM (
+	(SELECT o.k, o.amount FROM pc p JOIN oo o ON o.c = p.c
+	 EXCEPT ALL SELECT h.k, h.amount FROM pc p JOIN ho h ON h.c = p.c)
+	UNION ALL
+	(SELECT h.k, h.amount FROM pc p JOIN ho h ON h.c = p.c
+	 EXCEPT ALL SELECT o.k, o.amount FROM pc p JOIN oo o ON o.c = p.c)
+) d;
+ oid_sk_mismatch 
+-----------------
+               0
+(1 row)
+
+-- Ranges ending at the extremes.
+SELECT count(*) AS int4_range_mismatch FROM (
+	(SELECT k FROM o4 WHERE k >= 2147000000 EXCEPT ALL SELECT k FROM h4 WHERE k >= 2147000000)
+	UNION ALL
+	(SELECT k FROM o4 WHERE k <= -2147000000 EXCEPT ALL SELECT k FROM h4 WHERE k <= -2147000000)
+	UNION ALL
+	(SELECT k FROM h4 WHERE k >= 2147000000 EXCEPT ALL SELECT k FROM o4 WHERE k >= 2147000000)
+	UNION ALL
+	(SELECT k FROM h4 WHERE k <= -2147000000 EXCEPT ALL SELECT k FROM o4 WHERE k <= -2147000000)
+) d;
+ int4_range_mismatch 
+---------------------
+                   0
+(1 row)
+
+SELECT count(*) AS oid_range_mismatch FROM (
+	(SELECT k FROM oo WHERE k > 2147483000 AND k < 2147490000
+	 EXCEPT ALL SELECT k FROM ho WHERE k > 2147483000 AND k < 2147490000)
+	UNION ALL
+	(SELECT k FROM ho WHERE k > 2147483000 AND k < 2147490000
+	 EXCEPT ALL SELECT k FROM oo WHERE k > 2147483000 AND k < 2147490000)
+	UNION ALL
+	(SELECT k FROM oo WHERE k >= 4294900000 EXCEPT ALL SELECT k FROM ho WHERE k >= 4294900000)
+	UNION ALL
+	(SELECT k FROM ho WHERE k >= 4294900000 EXCEPT ALL SELECT k FROM oo WHERE k >= 4294900000)
+) d;
+ oid_range_mismatch 
+--------------------
+                  0
+(1 row)
+
+RESET enable_bitmapscan;
+RESET enable_hashjoin;
+RESET enable_mergejoin;
+RESET enable_material;
+DROP SCHEMA fastpath_types CASCADE;
+NOTICE:  drop cascades to 11 other objects
+DETAIL:  drop cascades to extension orioledb
+drop cascades to table o4
+drop cascades to table h4
+drop cascades to table o8
+drop cascades to table h8
+drop cascades to table oo
+drop cascades to table ho
+drop cascades to table p4
+drop cascades to table p8
+drop cascades to table po
+drop cascades to table pc
