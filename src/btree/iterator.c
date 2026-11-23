@@ -1193,17 +1193,15 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	{
 		BTreePageItemLocator *loc = &it->context.items[it->context.index].locator;
 
+		/* Built on demand, as the fetch loop's key is (see curKeyLoc) */
 		if (BTREE_PAGE_LOCATOR_IS_VALID(it->context.img, loc) &&
 			partial_load_chunk(&it->context.partial, it->context.img,
 							   loc->chunkOffset, NULL))
 		{
-			OTuple		tup;
-
-			BTREE_PAGE_READ_LEAF_TUPLE(tup, it->context.img, loc);
-			copy_fixed_leaf_key(desc, &it->curKey, tup);
+			it->curKeyLoc = *loc;
 			it->curKeySet = true;
 			it->curKeyReturned = false;
-			it->curKeyLazy = false;
+			it->curKeyLazy = true;
 		}
 	}
 
