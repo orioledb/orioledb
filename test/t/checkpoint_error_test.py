@@ -57,7 +57,6 @@ class CheckpointErrorTest(BaseTest):
 		while node.status() == NodeStatus.Running and time.time() < deadline:
 			time.sleep(0.1)
 		self.assertNotEqual(node.status(), NodeStatus.Running)
-		node.is_started = False
 
 		with open(node.pg_log_file) as f:
 			log = f.read()

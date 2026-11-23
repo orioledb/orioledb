@@ -15,7 +15,7 @@ import time
 
 import testgres
 from testgres.node import PostgresNode
-from testgres.operations.os_ops import ConnectionParams
+from testgres.operations.local_ops import LocalOperations
 
 from test.t.base_test import BaseTest, TestPortManager
 
@@ -35,10 +35,10 @@ class BaseBackupTest(BaseTest):
 			shutil.rmtree(baseDir)
 
 		port = self.getBasePort() + 1
-		pm = TestPortManager(PostgresNode._get_os_ops(ConnectionParams()),
-		                     port)
+		pm = TestPortManager(port)
 		standby = testgres.get_new_node('standby',
 		                                base_dir=baseDir,
+		                                os_ops=LocalOperations(),
 		                                port_manager=pm)
 		os.makedirs(standby.data_dir, exist_ok=True)
 
@@ -59,10 +59,10 @@ class BaseBackupTest(BaseTest):
 			shutil.rmtree(baseDir)
 
 		port = self._next_scratch_port()
-		pm = TestPortManager(PostgresNode._get_os_ops(ConnectionParams()),
-		                     port)
+		pm = TestPortManager(port)
 		scratch = testgres.get_new_node(nodeName,
 		                                base_dir=baseDir,
+		                                os_ops=LocalOperations(),
 		                                port_manager=pm)
 		os.makedirs(scratch.data_dir, exist_ok=True)
 		return scratch

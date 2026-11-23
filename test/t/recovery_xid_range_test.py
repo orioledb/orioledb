@@ -96,7 +96,6 @@ class RecoveryXidRangeTest(BaseTest):
 		except Exception:
 			pass
 		elapsed = time.time() - started
-		node.is_started = False
 
 		with open(node.pg_log_file) as f:
 			log = f.read()
@@ -107,7 +106,6 @@ class RecoveryXidRangeTest(BaseTest):
 			# them apart, and take the cluster down either way so tearDown()
 			# is not left with a half-known state (a fast shutdown does not
 			# complete while recovery is spinning).
-			node.is_started = True
 			try:
 				node.execute("SELECT 1;")
 				reason = "recovery accepted a corrupt transaction id"

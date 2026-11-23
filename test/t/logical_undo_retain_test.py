@@ -88,7 +88,6 @@ class LogicalUndoRetainTest(BaseTest):
 		deadline = time.time() + timeout
 		while time.time() < deadline:
 			if node.status() != NodeStatus.Running:
-				node.is_started = False
 				return
 			time.sleep(0.1)
 

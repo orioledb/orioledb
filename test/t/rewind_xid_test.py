@@ -83,7 +83,6 @@ class RewindXidTest(BaseTest):
 		    (invalidxid, oxid))
 		time.sleep(1)
 
-		node.is_started = False
 		node.start()
 
 		self.assertEqual(
@@ -568,13 +567,15 @@ class RewindXidTest(BaseTest):
 
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql('postgres', 'SELECT * FROM o_test_ddl ORDER BY id;')
-		self.assertIn('ERROR:  relation "o_test_ddl" does not exist',
-		              self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+		self.assertIn(
+		    'ERROR:  relation "o_test_ddl" does not exist',
+		    self.stripErrorMsg(self.errorText(e.exception)).rstrip("\r\n"))
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql('postgres',
 			               'SELECT * FROM o_test_heap_ddl ORDER BY id;')
-		self.assertIn('ERROR:  relation "o_test_heap_ddl" does not exist',
-		              self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+		self.assertIn(
+		    'ERROR:  relation "o_test_heap_ddl" does not exist',
+		    self.stripErrorMsg(self.errorText(e.exception)).rstrip("\r\n"))
 		node.stop()
 
 	def test_rewind_xid_ddl_drop(self):

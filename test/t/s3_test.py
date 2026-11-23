@@ -88,7 +88,7 @@ class S3Test(S3BaseTest):
 		""")
 		with self.assertRaises(StartNodeException) as e:
 			node.start()
-		self.assertEqual(e.exception.message, "Cannot start node")
+		self.assertEqual(e.exception.description, "Cannot start node")
 		with open(node.pg_log_file) as f:
 			log = f.readlines()
 		message = log[0].split('] ')[-1].strip()
@@ -276,10 +276,10 @@ class S3Test(S3BaseTest):
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql("CHECKPOINT")
 
-		assert e.exception.message is not None
+		assert e.exception.description is not None
 		self.assertTrue(
-		    self.stripErrorMsg(e.exception.message).startswith(
-		        "ERROR:  checkpoint request failed"))
+		    self.stripErrorMsg(self.errorText(
+		        e.exception)).startswith("ERROR:  checkpoint request failed"))
 
 		with open(node.pg_log_file) as f:
 			self.assertIn(
@@ -307,10 +307,10 @@ class S3Test(S3BaseTest):
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql("CHECKPOINT")
 
-		assert e.exception.message is not None
+		assert e.exception.description is not None
 		self.assertTrue(
-		    self.stripErrorMsg(e.exception.message).startswith(
-		        "ERROR:  checkpoint request failed"))
+		    self.stripErrorMsg(self.errorText(
+		        e.exception)).startswith("ERROR:  checkpoint request failed"))
 
 		with open(node.pg_log_file) as f:
 			self.assertIn(
@@ -328,10 +328,10 @@ class S3Test(S3BaseTest):
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql("CHECKPOINT")
 
-		assert e.exception.message is not None
+		assert e.exception.description is not None
 		self.assertTrue(
-		    self.stripErrorMsg(e.exception.message).startswith(
-		        "ERROR:  checkpoint request failed"))
+		    self.stripErrorMsg(self.errorText(
+		        e.exception)).startswith("ERROR:  checkpoint request failed"))
 
 		with open(node.pg_log_file) as f:
 			self.assertIn(
@@ -351,10 +351,10 @@ class S3Test(S3BaseTest):
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql("CHECKPOINT")
 
-		assert e.exception.message is not None
+		assert e.exception.description is not None
 		self.assertTrue(
-		    self.stripErrorMsg(e.exception.message).startswith(
-		        "ERROR:  checkpoint request failed"))
+		    self.stripErrorMsg(self.errorText(
+		        e.exception)).startswith("ERROR:  checkpoint request failed"))
 
 		with open(node.pg_log_file) as f:
 			self.assertIn('ERROR:  invalid line format of the checksum file',
@@ -570,7 +570,6 @@ class S3Test(S3BaseTest):
 			                 new_node.execute("SELECT * FROM o_test_1"))
 			new_node.stop()
 			new_node.cleanup()
-		node.stop()
 
 	@s3_test_attrs(host=f'{S3BaseTest.bucket_name}.{S3BaseTest.host}',
 	               prefix=S3BaseTest.optional_prefix)
@@ -626,7 +625,6 @@ class S3Test(S3BaseTest):
 			                 new_node.execute("SELECT * FROM o_test_1"))
 			new_node.stop()
 			new_node.cleanup()
-		node.stop()
 
 	@s3_test_attrs(http=True,
 	               host=f'{S3BaseTest.bucket_name}.{S3BaseTest.host}')
@@ -679,7 +677,6 @@ class S3Test(S3BaseTest):
 			                 new_node.execute("SELECT * FROM o_test_1"))
 			new_node.stop()
 			new_node.cleanup()
-		node.stop()
 
 	@s3_test_attrs(host=f'{S3BaseTest.bucket_name}.{S3BaseTest.host}')
 	def test_s3_https_virtual_host(self):
@@ -731,7 +728,6 @@ class S3Test(S3BaseTest):
 			                 new_node.execute("SELECT * FROM o_test_1"))
 			new_node.stop()
 			new_node.cleanup()
-		node.stop()
 
 	def test_s3_check_control(self):
 		node = self.node
@@ -772,7 +768,7 @@ class S3Test(S3BaseTest):
 
 			with self.assertRaises(StartNodeException) as e:
 				new_node.start()
-			self.assertEqual(e.exception.message, "Cannot start node")
+			self.assertEqual(e.exception.description, "Cannot start node")
 
 			with open(new_node.pg_log_file) as f:
 				self.assertIn(
@@ -789,7 +785,7 @@ class S3Test(S3BaseTest):
 
 			with self.assertRaises(StartNodeException) as e:
 				new_node.start()
-			self.assertEqual(e.exception.message, "Cannot start node")
+			self.assertEqual(e.exception.description, "Cannot start node")
 
 			with open(new_node.pg_log_file) as f:
 				self.assertIn('differs from the S3 bucket identifier',
@@ -801,7 +797,7 @@ class S3Test(S3BaseTest):
 
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
-			self.assertEqual(e.exception.message, "Cannot start node")
+			self.assertEqual(e.exception.description, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
 				self.assertIn('FATAL:  Wrong CRC in control file', f.read())
@@ -812,7 +808,7 @@ class S3Test(S3BaseTest):
 
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
-			self.assertEqual(e.exception.message, "Cannot start node")
+			self.assertEqual(e.exception.description, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
 				self.assertIn(
@@ -823,7 +819,7 @@ class S3Test(S3BaseTest):
 			shutil.copy(f"{control_filename}.copy", control_filename)
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
-			self.assertEqual(e.exception.message, "Cannot start node")
+			self.assertEqual(e.exception.description, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
 				self.assertIn(
@@ -834,7 +830,7 @@ class S3Test(S3BaseTest):
 			os.chmod(control_filename, 0)
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
-			self.assertEqual(e.exception.message, "Cannot start node")
+			self.assertEqual(e.exception.description, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
 				self.assertIn(
@@ -847,7 +843,7 @@ class S3Test(S3BaseTest):
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
 
-			self.assertEqual(e.exception.message, "Cannot start node")
+			self.assertEqual(e.exception.description, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
 				self.assertIn(
@@ -860,7 +856,7 @@ class S3Test(S3BaseTest):
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
 
-			self.assertEqual(e.exception.message, "Cannot start node")
+			self.assertEqual(e.exception.description, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
 				self.assertIn('FATAL:  could not put object to S3', f.read())
@@ -897,7 +893,7 @@ class S3Test(S3BaseTest):
 
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
-			self.assertEqual(e.exception.message, "Cannot start node")
+			self.assertEqual(e.exception.description, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
 				self.assertIn('FATAL:  incorrect value of lock identifier 0',
@@ -909,7 +905,7 @@ class S3Test(S3BaseTest):
 
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
-			self.assertEqual(e.exception.message, "Cannot start node")
+			self.assertEqual(e.exception.description, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
 				self.assertIn(
@@ -922,7 +918,7 @@ class S3Test(S3BaseTest):
 
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
-			self.assertEqual(e.exception.message, "Cannot start node")
+			self.assertEqual(e.exception.description, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
 				self.assertIn(
@@ -963,7 +959,7 @@ class S3Test(S3BaseTest):
 
 				with self.assertRaises(StartNodeException) as e:
 					new_node.start()
-				self.assertEqual(e.exception.message, "Cannot start node")
+				self.assertEqual(e.exception.description, "Cannot start node")
 				with open(new_node.pg_log_file) as f:
 					log = f.readlines()
 				message = log[0].split('] ')[-1].strip()
@@ -1069,7 +1065,7 @@ class S3Test(S3BaseTest):
 
 				with self.assertRaises(StartNodeException) as e:
 					new_node.start()
-				self.assertEqual(e.exception.message, "Cannot start node")
+				self.assertEqual(e.exception.description, "Cannot start node")
 				with open(new_node.pg_log_file) as f:
 					log = f.readlines()
 				message = log[0].split('] ')[-1].strip()

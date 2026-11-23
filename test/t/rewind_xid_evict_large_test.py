@@ -677,7 +677,7 @@ class RewindXidTest(BaseTest):
 		self.assertIn(
 		    'ERROR:  Requested rewind to XID %d which is in the past from the earliest retained'
 		    % (xid1),
-		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+		    self.stripErrorMsg(self.errorText(e.exception)).rstrip("\r\n"))
 
 		node.stop()
 
@@ -866,7 +866,7 @@ class RewindXidTest(BaseTest):
 		self.assertIn(
 		    'ERROR:  Requested rewind to XID %d which is in the past from the earliest retained'
 		    % (xid1),
-		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+		    self.stripErrorMsg(self.errorText(e.exception)).rstrip("\r\n"))
 
 		node.stop()
 
@@ -1070,7 +1070,7 @@ class RewindXidTest(BaseTest):
 		self.assertIn(
 		    'ERROR:  Requested rewind to XID %d which is in the past from the earliest retained'
 		    % (xid1),
-		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+		    self.stripErrorMsg(self.errorText(e.exception)).rstrip("\r\n"))
 
 		node.stop()
 
@@ -1540,6 +1540,6 @@ class RewindXidTest(BaseTest):
 		self.assertIn(
 		    'ERROR:  Requested rewind to XID %d which is in the past from the earliest retained'
 		    % (xid1),
-		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+		    self.stripErrorMsg(self.errorText(e.exception)).rstrip("\r\n"))
 
 		node.stop()

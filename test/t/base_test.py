@@ -14,16 +14,17 @@ import string
 import subprocess
 import sys
 import testgres
+import threading
 import time
 import typing
 import unittest
 
 from threading import Thread
 from testgres.enums import NodeStatus
-from testgres.exceptions import PortForException
-from testgres.node import PostgresNode
-from testgres.operations.os_ops import OsOperations, ConnectionParams
-from testgres.port_manager import PortManager__Generic
+from testgres.exceptions import NodeConnectionException, PortForException
+from testgres.operations.exceptions import ExecUtilException
+from testgres.operations.local_ops import LocalOperations
+from testgres.port_manager import PortManager
 from testgres.utils import get_pg_version, get_pg_config
 from typing import Any, List, Optional
 
@@ -207,12 +208,15 @@ class DmLogWritesContext:
 		self._tmpdir = None
 
 
-class TestPortManager(PortManager__Generic):
+class TestPortManager(PortManager):
+	"""Hands out only base_port and base_port + 1, so tests get fixed ports."""
 
-	def __init__(self, os_ops: OsOperations, base_port: int):
-		super().__init__(os_ops)
+	def __init__(self, base_port: int):
+		super().__init__()
+		self._guard = threading.Lock()
 		self._available_ports: typing.Set[int] = set(
 		    [base_port, base_port + 1])
+		self._reserved_ports: typing.Set[int] = set()
 
 	def is_port_free(self, port: int):
 		port_free = port in self._available_ports
@@ -228,30 +232,22 @@ class TestPortManager(PortManager__Generic):
 		return False
 
 	def reserve_port(self) -> int:
-		assert self._guard is not None
-		assert type(self._available_ports) == set  # noqa: E721t
-		assert type(self._reserved_ports) == set  # noqa: E721
-
 		with self._guard:
-			t = tuple(self._available_ports)
-			assert len(t) == len(self._available_ports)
-			t = None
-
-			for port in self._available_ports:
-				assert not (port in self._reserved_ports)
-
-				port_free = self.is_port_free(port)
-
-				if not port_free:
+			for port in sorted(self._available_ports):
+				if not self.is_port_free(port):
 					continue
 
 				self._reserved_ports.add(port)
 				self._available_ports.discard(port)
-				assert port in self._reserved_ports
-				assert not (port in self._available_ports)
 				return port
 
 		raise PortForException("Can't select a port.")
+
+	def release_port(self, number: int) -> None:
+		with self._guard:
+			assert number in self._reserved_ports
+			self._reserved_ports.discard(number)
+			self._available_ports.add(number)
 
 
 class BaseTest(unittest.TestCase):
@@ -346,10 +342,10 @@ class BaseTest(unittest.TestCase):
 			                       self.myName + '_' + suffix)
 			if os.path.exists(baseDir):
 				shutil.rmtree(baseDir)
-		port_manager = TestPortManager(
-		    PostgresNode._get_os_ops(ConnectionParams()), base_port)
+		port_manager = TestPortManager(base_port)
 		node = testgres.get_new_node('test',
 		                             base_dir=baseDir,
+		                             os_ops=LocalOperations(),
 		                             port_manager=port_manager)
 		node.init(initdb_args if initdb_args is not None else
 		          ["--no-locale", "--encoding=UTF8"])
@@ -477,9 +473,6 @@ class BaseTest(unittest.TestCase):
 		# 3. Replay the write log to the mark and remount.
 		self._dm_ctx.replay_to_mark(mark_name)
 
-		# 4. Let testgres know the node is no longer running so start() works.
-		self.node.is_started = False
-
 	def list2reason(self, exc_list):
 		if exc_list and exc_list[-1][0] is self:
 			return exc_list[-1][1]
@@ -561,6 +554,15 @@ class BaseTest(unittest.TestCase):
 			i = i + 1
 		return result[0:length].decode('ascii')
 
+	@staticmethod
+	def errorText(e: Exception) -> str:
+		# testgres wraps psql's ExecUtilException into QueryException, whose
+		# description carries the command and output too; unwrap to the plain text
+		inner = e.__cause__ or e.__context__
+		if isinstance(inner, ExecUtilException):
+			return inner.description
+		return e.description
+
 	def stripErrorMsg(self, msg):
 		prefix = r'^Utility exited with non-zero code \(\d+\). Error: `'
 		match = re.match(prefix, msg)
@@ -580,7 +582,11 @@ class BaseTest(unittest.TestCase):
 		if (hasattr(e, 'exception')):
 			e = e.exception
 
-		if (hasattr(e, 'pgerror')) or (hasattr(e, 'message')):
+		# testgres wraps driver errors (psycopg2 or pg8000) in its own type
+		if isinstance(e, NodeConnectionException) and e.__cause__ is not None:
+			e = e.__cause__
+
+		if (hasattr(e, 'pgerror')) or (hasattr(e, 'description')):
 			exp_msg = "ERROR:  %s\n" % (err_msg)
 			if (second_msg != None):
 				exp_msg += "%s:  %s\n" % (second_title, second_msg)
@@ -589,8 +595,8 @@ class BaseTest(unittest.TestCase):
 
 		if (hasattr(e, 'pgerror')):
 			msg = e.pgerror
-		elif (hasattr(e, 'message')):
-			msg = e.message
+		elif (hasattr(e, 'description')):
+			msg = self.errorText(e)
 		else:
 			exp_msg = err_msg
 			msg = e.args[0]['M']
@@ -646,7 +652,6 @@ class BaseTest(unittest.TestCase):
 	def wait_shutdown_and_start(self, node):
 		while node.status() == NodeStatus.Running:
 			time.sleep(0.1)
-		node.is_started = False
 		node.start()
 
 	def get_pg_start_time(self, node):
@@ -784,20 +789,6 @@ def release_parked_flush_on_lock(node,
 	t.join()
 
 
-# workaround for testgres error messages on empty results
-def new_execute(self, query, *args):
-	self.cursor.execute(query, args)
-	try:
-		res = self.cursor.fetchall()
-		# pg8000 might return tuples
-		if isinstance(res, tuple):
-			res = [tuple(t) for t in res]
-
-		return res
-	except Exception as e:
-		return None
-
-
 # Convert output of orioledb_tbl_structure/orioledb_idx_structure to json
 def tbl_structure_to_json(structure: str) -> dict[str, dict[int, Any]]:
 	res = dict()
@@ -862,6 +853,3 @@ def tbl_structure_to_json(structure: str) -> dict[str, dict[int, Any]]:
 			cur_page["hikey"] = m.group(1)
 
 	return res
-
-
-testgres.NodeConnection.execute = new_execute

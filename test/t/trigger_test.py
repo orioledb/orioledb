@@ -372,8 +372,8 @@ class TriggerTest(BaseTest):
 			""")
 
 		m = [
-		    x.group(0)
-		    for x in list(re.finditer(r'.*\n', e.exception.message))[0:3]
+		    x.group(0) for x in list(
+		        re.finditer(r'.*\n', self.errorText(e.exception)))[0:3]
 		]
 		self.assertEqual(
 		    self.stripErrorMsg("".join(m)).rstrip("\r\n"),
