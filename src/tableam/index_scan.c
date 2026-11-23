@@ -809,6 +809,19 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 			O_TUPLE_SET_NULL(tup);
 			return tup;
 		}
+
+		/* The caller takes the range's rows from here, as a batch if it can */
+		if (ostate->rangeStartOnly && !ostate->exact &&
+			!ostate->curKeyRange.empty && ostate->iterator != NULL
+#if PG_VERSION_NUM >= 180000
+			&& !ostate->skipScanProbePending
+#endif
+			)
+		{
+			ostate->rangeStarted = true;
+			O_TUPLE_SET_NULL(tup);
+			return tup;
+		}
 	}
 
 	do
@@ -1502,6 +1515,18 @@ o_exec_fetch_next_batch(OTableDescr *descr, OScanState *ostate, ScanState *ss)
 {
 	bool		found;
 
+	/*
+	 * The last batch ended where the range's end bound falls, so its iterator
+	 * has nothing more to give: go on to the next range as when it returns
+	 * nothing.
+	 */
+	if (ostate->rangeEndsWithBatch)
+	{
+		ostate->rangeEndsWithBatch = false;
+		ostate->curKeyRange.empty = true;
+		return false;
+	}
+
 	if (!o_scan_can_batch(descr, ostate, ss->ss_ScanTupleSlot))
 		return false;
 
@@ -1511,39 +1536,52 @@ o_exec_fetch_next_batch(OTableDescr *descr, OScanState *ostate, ScanState *ss)
 										 &ostate->curKeyRange.high,
 										 BTreeKeyBound, true, &ostate->batch);
 	descr->noInvalidation = false;
+	ostate->rangeEndsWithBatch = found && ostate->batch.endReached &&
+		ostate->scanDir == ForwardScanDirection
+#if PG_VERSION_NUM >= 180000
+		&& !ostate->skipScanProbePending
+#endif
+		;
 	return found;
 }
 
 /*
- * Find the primary leaves of the batch's next rows together, prefetching
- * them, for o_exec_fetch_batch_primary() to start its lookups from.
+ * Take the batch's next rows into a window, their primary leaves found
+ * together and prefetched, for o_exec_fetch_batch_primary() to look them up
+ * from.
  */
 static void
 o_exec_prefetch_primary(OTableDescr *descr, OScanState *ostate)
 {
 	OIndexDescr *primary = GET_PRIMARY(descr);
-	BTreeIteratorBatch batch = ostate->batch;
+	BTreeIteratorBatch *batch = &ostate->batch;
 	int			n = 0;
 
 	/*
 	 * A bound's by-reference values point into the batch's tuples, which stay
-	 * put until the batch is used up, so the bounds and the metas may be kept
-	 * for the lookups.
+	 * put until the next batch is fetched, so the bounds and the metas may be
+	 * kept for the lookups: that waits for the window to be used up.
 	 */
-	while (n < O_SCAN_PRIMARY_PREFETCH && batch.count > 0)
+	while (n < O_SCAN_PRIMARY_PREFETCH && batch->count > 0)
 	{
 		o_fill_pindex_tuple_key_bound(&descr->indices[ostate->ixNum]->desc,
-									  o_btree_iterator_batch_tuple(&batch),
+									  o_btree_iterator_batch_tuple(batch),
 									  &ostate->primaryBounds[n]);
-		(void) fastpath_prepare_prefetch(&primary->desc,
-										 (Pointer) &ostate->primaryBounds[n],
-										 BTreeKeyBound,
-										 &ostate->primaryMetas[n]);
-		o_btree_iterator_batch_next(&batch);
+		/* The bounds of a batch differ in their values only, mostly */
+		if (n == 0 ||
+			!fastpath_rebind_meta(&ostate->primaryMetas[0],
+								  &ostate->primaryBounds[0],
+								  &ostate->primaryBounds[n],
+								  &ostate->primaryMetas[n]))
+			(void) fastpath_prepare_prefetch(&primary->desc,
+											 (Pointer) &ostate->primaryBounds[n],
+											 BTreeKeyBound,
+											 &ostate->primaryMetas[n]);
+		o_btree_iterator_batch_next(batch);
 		n++;
 	}
 	fastpath_prefetch_leaves(&primary->desc, n, ostate->primaryMetas,
-							 ostate->primaryHints);
+							 ostate->primaryHints, ostate->primaryChunks);
 	ostate->primaryHintsCount = n;
 	ostate->primaryHintsPos = 0;
 }
@@ -1558,7 +1596,8 @@ o_exec_fetch_batch_primary(OTableDescr *descr, OScanState *ostate,
 {
 	OIndexDescr *primary = GET_PRIMARY(descr);
 
-	while (ostate->batch.count > 0 ||
+	while (ostate->primaryHintsPos < ostate->primaryHintsCount ||
+		   ostate->batch.count > 0 ||
 		   o_exec_fetch_next_batch(descr, ostate, ss))
 	{
 		OTuple		tuple;
@@ -1569,23 +1608,29 @@ o_exec_fetch_batch_primary(OTableDescr *descr, OScanState *ostate,
 		/*
 		 * Look the leaves of the next rows up together, so that waiting for
 		 * them overlaps.  A window never outlives its batch: a new batch
-		 * comes only once the old one is used up, and with it the window.
+		 * comes only once the window is used up.
 		 */
 		if (ostate->primaryHintsPos >= ostate->primaryHintsCount)
 			o_exec_prefetch_primary(descr, ostate);
 		pos = ostate->primaryHintsPos++;
 		hint = ostate->primaryHints[pos];
-		o_btree_iterator_batch_next(&ostate->batch);
 
 		descr->noInvalidation = true;
-		tuple = o_btree_find_tuple_by_key_meta(&primary->desc,
-											   (Pointer) &ostate->primaryBounds[pos],
-											   BTreeKeyBound, &ostate->oSnapshot,
-											   &tupleCsn,
-											   ss->ss_ScanTupleSlot->tts_mcxt,
-											   &hint,
-											   ostate->primaryMetas[pos].enabled ?
-											   &ostate->primaryMetas[pos] : NULL);
+		if (!ostate->primaryMetas[pos].enabled ||
+			!fastpath_fetch_leaf_tuple(&primary->desc,
+									   &ostate->primaryMetas[pos], &hint,
+									   &ostate->primaryChunks[pos],
+									   &ostate->oSnapshot,
+									   ss->ss_ScanTupleSlot->tts_mcxt,
+									   &tuple, &tupleCsn))
+			tuple = o_btree_find_tuple_by_key_meta(&primary->desc,
+												   (Pointer) &ostate->primaryBounds[pos],
+												   BTreeKeyBound, &ostate->oSnapshot,
+												   &tupleCsn,
+												   ss->ss_ScanTupleSlot->tts_mcxt,
+												   &hint,
+												   ostate->primaryMetas[pos].enabled ?
+												   &ostate->primaryMetas[pos] : NULL);
 		descr->noInvalidation = false;
 
 		/* Deleted or updated concurrently: go on to the next one */
@@ -1645,7 +1690,25 @@ o_exec_fetch(OScanState *ostate, ScanState *ss)
 		if (!ostate->curKeyRangeIsLoaded)
 			ostate->curKeyRange.empty = true;
 
+		/*
+		 * A range about to start is started first, without a row fetched from
+		 * it, so that its first rows can come as a batch too.
+		 */
+		ostate->rangeStartOnly = ostate->curKeyRange.empty;
+		ostate->rangeStarted = false;
 		tuple = o_index_scan_getnext(descr, ostate, &tupleCsn, scan_primary, tupleCxt, &hint);
+		ostate->rangeStartOnly = false;
+		if (ostate->rangeStarted)
+		{
+			ostate->rangeStarted = false;
+			if (o_exec_fetch_batch(descr, ostate, ss))
+			{
+				slot = ss->ss_ScanTupleSlot;
+				continue;
+			}
+			tuple = o_index_scan_getnext(descr, ostate, &tupleCsn, scan_primary,
+										 tupleCxt, &hint);
+		}
 
 		if (O_TUPLE_IS_NULL(tuple))
 		{

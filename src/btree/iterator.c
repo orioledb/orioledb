@@ -1193,17 +1193,15 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	{
 		BTreePageItemLocator *loc = &it->context.items[it->context.index].locator;
 
+		/* Built on demand, as the fetch loop's key is (see curKeyLoc) */
 		if (BTREE_PAGE_LOCATOR_IS_VALID(it->context.img, loc) &&
 			partial_load_chunk(&it->context.partial, it->context.img,
 							   loc->chunkOffset, NULL))
 		{
-			OTuple		tup;
-
-			BTREE_PAGE_READ_LEAF_TUPLE(tup, it->context.img, loc);
-			copy_fixed_leaf_key(desc, &it->curKey, tup);
+			it->curKeyLoc = *loc;
 			it->curKeySet = true;
 			it->curKeyReturned = false;
-			it->curKeyLazy = false;
+			it->curKeyLazy = true;
 		}
 	}
 
@@ -1580,7 +1578,8 @@ o_btree_iterator_fetch_batch(BTreeIterator *it, void *endKey,
 	BtreeIterationEnd *endPtr = NULL;
 	BTreePageItemLocator *loc;
 	BTreePageItemLocator probe;
-	OffsetNumber stop;
+	OffsetNumber stop,
+				boundStop;
 	bool		partial;
 
 	if (!IT_IS_FORWARD(it) || it->fetchCallback != NULL ||
@@ -1618,6 +1617,7 @@ o_btree_iterator_fetch_batch(BTreeIterator *it, void *endKey,
 
 	/* Where the end bound cuts the chunk, when it may be on this leaf */
 	stop = loc->chunkItemsCount;
+	boundStop = loc->chunkItemsCount;
 	if (endPtr != NULL && iterator_end_may_be_on_page(it, endPtr))
 	{
 		OffsetNumber low = loc->itemOffset,
@@ -1637,6 +1637,7 @@ o_btree_iterator_fetch_batch(BTreeIterator *it, void *endKey,
 				low = probe.itemOffset + 1;
 		}
 		stop = low;
+		boundStop = stop;
 	}
 
 	/* And where the first row that needs a closer look is */
@@ -1666,6 +1667,7 @@ o_btree_iterator_fetch_batch(BTreeIterator *it, void *endKey,
 	batch->img = context->img;
 	batch->loc = *loc;
 	batch->count = stop - loc->itemOffset;
+	batch->endReached = (stop == boundStop && boundStop < loc->chunkItemsCount);
 	batch->csn = it->oSnapshot.csn;
 
 	/* As if each row had been fetched: a re-find resumes after the last */

@@ -109,17 +109,36 @@ extern void can_fastpath_find_downlink(OBTreeFindPageContext *context,
 extern bool fastpath_search_leaf_items(FastpathFindDownlinkMeta *meta,
 									   BTreePageItemLocator *loc);
 #define FASTPATH_PREFETCH_MAX 16
+
+/* A leaf's chunk of a key as the prefetch found it: index -1 if it did not */
+typedef struct FastpathLeafChunk
+{
+	int			index;
+	uint64		state;
+} FastpathLeafChunk;
+
+extern bool fastpath_rebind_meta(const FastpathFindDownlinkMeta *base,
+								 const void *baseKey, const void *key,
+								 FastpathFindDownlinkMeta *meta);
 extern bool fastpath_prepare_prefetch(BTreeDescr *desc, void *key,
 									  BTreeKeyType keyType,
 									  FastpathFindDownlinkMeta *meta);
 extern void fastpath_prefetch_leaves(BTreeDescr *desc, int n,
 									 FastpathFindDownlinkMeta *metas,
-									 BTreeLocationHint *hints);
+									 BTreeLocationHint *hints,
+									 FastpathLeafChunk *chunks);
 extern OBTreeFastPathFindResult fastpath_load_leaf_item(FastpathFindDownlinkMeta *meta,
 														PartialPageState *partial,
 														Page img,
 														OffsetNumber chunkOffset,
 														BTreePageItemLocator *loc);
+extern bool fastpath_fetch_leaf_tuple(BTreeDescr *desc,
+									  FastpathFindDownlinkMeta *meta,
+									  BTreeLocationHint *hint,
+									  FastpathLeafChunk *known,
+									  OSnapshot *snapshot,
+									  MemoryContext mcxt, OTuple *result,
+									  CommitSeqNo *tupleCsn);
 extern OBTreeFastPathFindResult fastpath_find_chunk(Pointer pagePtr,
 													OInMemoryBlkno blkno,
 													FastpathFindDownlinkMeta *meta,
