@@ -100,6 +100,11 @@ record_buffer_tuple(ReorderBuffer *reorder, HeapTuple htup, bool freeHtup)
 	changeTup->t_len = htup->t_len;
 	changeTup->t_self = htup->t_self;
 	memcpy(changeTup->t_data, htup->t_data, htup->t_len);
+#ifdef HEAP_IS_DATUM
+	/* The reorder buffer contains table rows, not composite datums. */
+	if (HeapTupleHeaderIsDatum(changeTup->t_data))
+		HeapTupleHeaderClearDatum(changeTup->t_data);
+#endif
 	if (freeHtup)
 		heap_freetuple(htup);
 

@@ -2684,12 +2684,9 @@ o_load_typcache_tupdesc_hook(TypeCacheEntry *typentry)
 	typentry->tupDesc = o_class_cache_search_tupdesc(typentry->typrelid);
 
 	/*
-	 * o_class_cache_search_tupdesc() builds the tupdesc via
-	 * CreateTemplateTupleDesc(), which initializes tdtypeid to RECORDOID. The
-	 * real composite type OID must be set here so that datums built from this
-	 * tupdesc carry the correct type id — record_cmp() and
-	 * lookup_rowtype_tupdesc() rely on it to avoid "record type has not been
-	 * registered" errors during recovery.
+	 * Older PostgreSQL versions leave the descriptor's type as RECORDOID.
+	 * With attribute versioning, o_class_cache_search_tupdesc() also restores
+	 * the named type identity and its attribute versions.
 	 */
 	typentry->tupDesc->tdtypeid = typentry->type_id;
 	typentry->tupDesc->tdrefcount++;

@@ -257,6 +257,7 @@ SELECT regexp_replace(regexp_replace(
    Chunk 0: offset = 0, location = 512, hikey location = 64                                     +
      Item 0: offset = 520, downlink = 1                                                         +
      Item 1: offset = 528, downlink = 2, key = ((NNN, (NNN), X/X, N), 0)                        +
+     Item 2: offset = 576, downlink = 3, key = ((NNN, (NNN), X/X, N), 0)                        +
                                                                                                 +
  Page 1: level = 0, maxKeyLen = 40, nVacatedBytes = 0                                           +
  state = free, datoid equal, relnode equal, ix_type = primary, clean                            +
@@ -265,26 +266,31 @@ SELECT regexp_replace(regexp_replace(
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ((NNN, (NNN), X/X, N), 1)  +
      Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 2628)                            +
    Chunk 1: offset = 1, location = 2952, hikey location = 112, hikey = ((NNN, (NNN), X/X, N), 1)+
-     Item 1: offset = 2960, tuple = (((NNN, (NNN), X/X, N), 1), 620)                            +
-     Item 2: offset = 3640, tuple = (((NNN, (NNN), X/X, N), 0), 2628)                           +
-   Chunk 2: offset = 3, location = 6328, hikey location = 152, hikey = ((NNN, (NNN), X/X, N), 0)+
-     Item 3: offset = 6336, tuple = (((NNN, (NNN), X/X, N), 1), 420)                            +
-     Item 4: offset = 6816, tuple = (((NNN, (NNN), X/X, N), 0), 1248)                           +
+     Item 1: offset = 2960, tuple = (((NNN, (NNN), X/X, N), 1), 876)                            +
+     Item 2: offset = 3896, tuple = (((NNN, (NNN), X/X, N), 0), 2628)                           +
+   Chunk 2: offset = 3, location = 6584, hikey location = 152, hikey = ((NNN, (NNN), X/X, N), 0)+
+     Item 3: offset = 6592, tuple = (((NNN, (NNN), X/X, N), 1), 660)                            +
                                                                                                 +
- Page 2: level = 0, maxKeyLen = 40, nVacatedBytes = 312                                         +
+ Page 2: level = 0, maxKeyLen = 40, nVacatedBytes = 0                                           +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                            +
+     Rightlink is invalid                                                                       +
+     Hikey: offset = 104, key = ((NNN, (NNN), X/X, N), 0)                                       +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ((NNN, (NNN), X/X, N), 0)  +
+     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 1344)                            +
+   Chunk 1: offset = 1, location = 1672, hikey location = 104, hikey = ((NNN, (NNN), X/X, N), 0)+
+     Item 1: offset = 1680, tuple = (((NNN, (NNN), X/X, N), 0), 1020)                           +
+     Item 2: offset = 2760, tuple = (((NNN, (NNN), X/X, N), 0), 696)                            +
+                                                                                                +
+ Page 3: level = 0, maxKeyLen = 40, nVacatedBytes = 328                                         +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                            +
      Rightmost                                                                                  +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ((NNN, (NNN), X/X, N), 0)  +
-     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 948)                             +
-     Item 1: offset = 1272, tuple = (((NNN, (NNN), X/X, N), 0), 648)                            +
-   Chunk 1: offset = 2, location = 1984, hikey location = 112, hikey = ((NNN, (NNN), X/X, N), 0)+
-     Item 2: offset = 1992, tuple = (((NNN, (NNN), X/X, N), 0), 948)                            +
-     Item 3: offset = 3000, tuple = (((NNN, (NNN), X/X, N), 0), 1248)                           +
-   Chunk 2: offset = 4, location = 4312, hikey location = 152, hikey = ((NNN, (NNN), X/X, Y), 0)+
-     Item 4: offset = 4320, tuple = (((NNN, (NNN), X/X, N), 0), 448)                            +
-     Item 5: offset = 4832, tuple = (((NNN, (NNN), X/X, N), 0), 748)                            +
-   Chunk 3: offset = 6, location = 5640, hikey location = 192                                   +
-     Item 6: deleted, offset = 5648, tuple = (((NNN, (NNN), X/X, Y), 0), 248)                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ((NNN, (NNN), X/X, N), 0)  +
+     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 1020)                            +
+   Chunk 1: offset = 1, location = 1344, hikey location = 104                                   +
+     Item 1: offset = 1352, tuple = (((NNN, (NNN), X/X, N), 0), 1344)                           +
+     Item 2: offset = 2760, tuple = (((NNN, (NNN), X/X, N), 0), 480)                            +
+     Item 3: offset = 3304, tuple = (((NNN, (NNN), X/X, N), 0), 804)                            +
+     Item 4: deleted, offset = 4168, tuple = (((NNN, (NNN), X/X, Y), 0), 264)                   +
                                                                                                 +
  
 (1 row)

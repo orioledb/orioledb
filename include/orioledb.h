@@ -109,6 +109,11 @@
  * these values makes sense only within one ORIOLEDB_BINARY_VERSION value.
  */
 #define ORIOLEDB_VERSION "OrioleDB beta 19"
+/*
+ * TODO: the OClass sys tree entry gained the trailing attribute versions
+ * (o_class_cache.c), so ORIOLEDB_BINARY_VERSION must be bumped before the
+ * next release (it is still equal to the last release's value).
+ */
 #define ORIOLEDB_BINARY_VERSION 10
 #define ORIOLEDB_CHECKPOINT_VERSION	1	/* Version of checkpoint format; bump
 										 * on any checkpoint on-disk change */
