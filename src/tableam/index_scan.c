@@ -1548,15 +1548,21 @@ o_exec_prefetch_primary(OTableDescr *descr, OScanState *ostate)
 		o_fill_pindex_tuple_key_bound(&descr->indices[ostate->ixNum]->desc,
 									  o_btree_iterator_batch_tuple(&batch),
 									  &ostate->primaryBounds[n]);
-		(void) fastpath_prepare_prefetch(&primary->desc,
-										 (Pointer) &ostate->primaryBounds[n],
-										 BTreeKeyBound,
-										 &ostate->primaryMetas[n]);
+		/* The bounds of a batch differ in their values only, mostly */
+		if (n == 0 ||
+			!fastpath_rebind_meta(&ostate->primaryMetas[0],
+								  &ostate->primaryBounds[0],
+								  &ostate->primaryBounds[n],
+								  &ostate->primaryMetas[n]))
+			(void) fastpath_prepare_prefetch(&primary->desc,
+											 (Pointer) &ostate->primaryBounds[n],
+											 BTreeKeyBound,
+											 &ostate->primaryMetas[n]);
 		o_btree_iterator_batch_next(&batch);
 		n++;
 	}
 	fastpath_prefetch_leaves(&primary->desc, n, ostate->primaryMetas,
-							 ostate->primaryHints);
+							 ostate->primaryHints, ostate->primaryChunks);
 	ostate->primaryHintsCount = n;
 	ostate->primaryHintsPos = 0;
 }
@@ -1591,14 +1597,21 @@ o_exec_fetch_batch_primary(OTableDescr *descr, OScanState *ostate,
 		o_btree_iterator_batch_next(&ostate->batch);
 
 		descr->noInvalidation = true;
-		tuple = o_btree_find_tuple_by_key_meta(&primary->desc,
-											   (Pointer) &ostate->primaryBounds[pos],
-											   BTreeKeyBound, &ostate->oSnapshot,
-											   &tupleCsn,
-											   ss->ss_ScanTupleSlot->tts_mcxt,
-											   &hint,
-											   ostate->primaryMetas[pos].enabled ?
-											   &ostate->primaryMetas[pos] : NULL);
+		if (!ostate->primaryMetas[pos].enabled ||
+			!fastpath_fetch_leaf_tuple(&primary->desc,
+									   &ostate->primaryMetas[pos], &hint,
+									   &ostate->primaryChunks[pos],
+									   &ostate->oSnapshot,
+									   ss->ss_ScanTupleSlot->tts_mcxt,
+									   &tuple, &tupleCsn))
+			tuple = o_btree_find_tuple_by_key_meta(&primary->desc,
+												   (Pointer) &ostate->primaryBounds[pos],
+												   BTreeKeyBound, &ostate->oSnapshot,
+												   &tupleCsn,
+												   ss->ss_ScanTupleSlot->tts_mcxt,
+												   &hint,
+												   ostate->primaryMetas[pos].enabled ?
+												   &ostate->primaryMetas[pos] : NULL);
 		descr->noInvalidation = false;
 
 		/* Deleted or updated concurrently: go on to the next one */

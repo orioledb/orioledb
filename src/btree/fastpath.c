@@ -27,7 +27,10 @@
 #include "btree/find.h"
 #include "postgres_ext.h"
 #include "storage/itemptr.h"
+#include "tableam/handler.h"
 #include "tableam/key_range.h"
+#include "transam/oxid.h"
+#include "utils/page_pool.h"
 
 #include "catalog/pg_opclass_d.h"
 #include "commands/defrem.h"
@@ -47,6 +50,8 @@ typedef struct
 } ArraySearchDesc;
 
 static ArraySearchDesc *find_array_search_desc_by_typeid(Oid typeid);
+static bool search_leaf_items(FastpathFindDownlinkMeta *meta,
+							  BTreePageItemLocator *loc, int *upperOut);
 
 static bool find_downlink_get_keys(BTreeDescr *desc,
 								   void *key, BTreeKeyType keyType,
@@ -289,6 +294,19 @@ bool
 fastpath_search_leaf_items(FastpathFindDownlinkMeta *meta,
 						   BTreePageItemLocator *loc)
 {
+	int			upper;
+
+	return search_leaf_items(meta, loc, &upper);
+}
+
+/*
+ * fastpath_search_leaf_items(), telling also where the items equal to the
+ * bound end: *upper.
+ */
+static bool
+search_leaf_items(FastpathFindDownlinkMeta *meta, BTreePageItemLocator *loc,
+				  int *upperOut)
+{
 	BTreePageChunk *chunk = loc->chunk;
 	int			count = loc->chunkItemsCount;
 	int			first;
@@ -333,6 +351,41 @@ fastpath_search_leaf_items(FastpathFindDownlinkMeta *meta,
 
 	/* Items equal to every value of an inclusive bound do not sort below it */
 	loc->itemOffset = lower;
+	*upperOut = upper;
+	return true;
+}
+
+/*
+ * Make *meta the search of bound `key` out of `base`, the search of
+ * `baseKey`, which works when the bounds differ in their values only.  False
+ * otherwise.
+ */
+bool
+fastpath_rebind_meta(const FastpathFindDownlinkMeta *base,
+					 const void *baseKey, const void *key,
+					 FastpathFindDownlinkMeta *meta)
+{
+	const OBTreeKeyBound *baseBound = (const OBTreeKeyBound *) baseKey;
+	const OBTreeKeyBound *bound = (const OBTreeKeyBound *) key;
+	int			i;
+
+	if (!base->enabled || bound->nkeys != baseBound->nkeys ||
+		bound->n_row_keys != 0 || baseBound->n_row_keys != 0)
+		return false;
+	for (i = 0; i < bound->nkeys; i++)
+	{
+		if (bound->keys[i].flags != baseBound->keys[i].flags ||
+			bound->keys[i].type != baseBound->keys[i].type ||
+			bound->keys[i].exclusion_fn != baseBound->keys[i].exclusion_fn)
+			return false;
+	}
+
+	*meta = *base;
+	for (i = 0; i < Min(meta->numKeys, bound->nkeys); i++)
+	{
+		if (meta->flags[i] == 0)
+			meta->values[i] = bound->keys[i].value;
+	}
 	return true;
 }
 
@@ -378,7 +431,8 @@ prefetch_lines(Pointer p, int n)
 void
 fastpath_prefetch_leaves(BTreeDescr *desc, int n,
 						 FastpathFindDownlinkMeta *metas,
-						 BTreeLocationHint *hints)
+						 BTreeLocationHint *hints,
+						 FastpathLeafChunk *chunks)
 {
 	OInMemoryBlkno blknos[FASTPATH_PREFETCH_MAX];
 	bool		live[FASTPATH_PREFETCH_MAX];
@@ -463,6 +517,7 @@ fastpath_prefetch_leaves(BTreeDescr *desc, int n,
 		LocationIndex chunkBegin,
 					chunkEnd;
 
+		chunks[i].index = -1;
 		if (!OInMemoryBlknoIsValid(hints[i].blkno))
 			continue;
 		leaf = (BTreePageHeader *) O_GET_IN_MEMORY_PAGE(hints[i].blkno);
@@ -481,6 +536,8 @@ fastpath_prefetch_leaves(BTreeDescr *desc, int n,
 			hdr.dataSize;
 		if (chunkBegin >= chunkEnd || chunkEnd > ORIOLEDB_BLCKSZ)
 			continue;
+		chunks[i].index = chunkIndex;
+		chunks[i].state = pg_atomic_read_u64(&hdr.o_header.state);
 		prefetch_lines((Pointer) leaf + chunkBegin,
 					   Min((chunkEnd - chunkBegin + PG_CACHE_LINE_SIZE - 1) /
 						   PG_CACHE_LINE_SIZE, 16));
@@ -567,6 +624,167 @@ fastpath_load_leaf_item(FastpathFindDownlinkMeta *meta,
 	partial->itemOnlyChunk = chunkOffset;
 	partial->itemOnlyOffset = live.itemOffset;
 	return OBTreeFastPathFindOK;
+}
+
+/*
+ * Fetch the row a primary key names from the hinted leaf, as
+ * find_tuple_by_key() does, where that comes down to a copy: the leaf is the
+ * hinted page and no newer than the snapshot, the key's chunk is a run of
+ * fixed-format items, and the row's version is committed before the snapshot
+ * and neither deleted nor locked.  The copy is taken from shared memory and
+ * validated by the page state, so no page image is built and nothing is
+ * searched twice.  False leaves the lookup to find_tuple_by_key(), which also
+ * covers a row this cannot find.
+ */
+bool
+fastpath_fetch_leaf_tuple(BTreeDescr *desc, FastpathFindDownlinkMeta *meta,
+						  BTreeLocationHint *hint, FastpathLeafChunk *known,
+						  OSnapshot *snapshot, MemoryContext mcxt,
+						  OTuple *result, CommitSeqNo *tupleCsn)
+{
+	OInMemoryBlkno blkno = hint->blkno;
+	OInMemoryBlkno rootBlkno = desc->rootInfo.rootPageBlkno;
+	uint32		rootPageChangeCount = desc->rootInfo.rootPageChangeCount;
+	Page		page;
+	BTreePageHeader *src;
+	BTreePageHeader hdr;
+	uint64		state1,
+				state2;
+	int			chunkIndex,
+				count,
+				first,
+				upper,
+				len;
+	LocationIndex chunkBegin,
+				chunkEnd;
+	BTreePageItemLocator live;
+	BTreeLeafTuphdr tupHdr;
+	Pointer		item;
+	Pointer		data;
+	uint8		formatFlags;
+	CommitSeqNo tupcsn;
+
+	if (!meta->enabled || !meta->leafSearch ||
+		orioledb_debug_disable_downlink_fastpath ||
+		!OInMemoryBlknoIsValid(blkno) || O_PAGE_IS_LOCAL(blkno) ||
+		blkno >= orioledb_buffers_count ||
+		!COMMITSEQNO_IS_NORMAL(snapshot->csn) ||
+		!XLogRecPtrIsInvalid(snapshot->xlogptr))
+		return false;
+
+	/* As refind_page(): the hint names a page of the tree's incarnation */
+	o_btree_load_shmem(desc);
+	if (desc->rootInfo.rootPageBlkno != rootBlkno ||
+		desc->rootInfo.rootPageChangeCount != rootPageChangeCount)
+		return false;
+
+	page = O_GET_IN_MEMORY_PAGE(blkno);
+	src = (BTreePageHeader *) page;
+	state1 = pg_atomic_read_u64(&src->o_header.state);
+	if (O_PAGE_STATE_READ_IS_BLOCKED(state1))
+		return false;
+	pg_read_barrier();
+
+	memcpy(&hdr, page, offsetof(BTreePageHeader, chunkDesc));
+	pg_read_barrier();
+
+	/* A page changed since the snapshot is read from the undo log */
+	if (O_PAGE_GET_CHANGE_COUNT(&hdr) != hint->pageChangeCount ||
+		PAGE_GET_LEVEL(&hdr) != 0 || hdr.csn >= snapshot->csn ||
+		hdr.chunksCount > BTREE_PAGE_MAX_CHUNKS)
+		return false;
+
+	/*
+	 * The prefetch found the key's chunk already, which holds while the page
+	 * has not changed since.
+	 */
+	if (known && known->index >= 0 &&
+		(known->state & PAGE_STATE_CHANGE_COUNT_MASK) ==
+		(state1 & PAGE_STATE_CHANGE_COUNT_MASK))
+		chunkIndex = known->index;
+	else if (fastpath_find_chunk((Pointer) &hdr, blkno, meta, &chunkIndex) !=
+			 OBTreeFastPathFindOK)
+		return false;
+
+	if (chunkIndex >= hdr.chunksCount)
+		return false;
+
+	chunkBegin = SHORT_GET_LOCATION(src->chunkDesc[chunkIndex].shortLocation);
+	if (chunkIndex + 1 < hdr.chunksCount)
+	{
+		chunkEnd = SHORT_GET_LOCATION(src->chunkDesc[chunkIndex + 1].shortLocation);
+		count = src->chunkDesc[chunkIndex + 1].offset -
+			src->chunkDesc[chunkIndex].offset;
+	}
+	else
+	{
+		chunkEnd = hdr.dataSize;
+		count = hdr.itemsCount - src->chunkDesc[chunkIndex].offset;
+	}
+	pg_read_barrier();
+
+	/* A descriptor torn by a concurrent change must not lead off the page */
+	if (chunkBegin > chunkEnd || chunkEnd > ORIOLEDB_BLCKSZ ||
+		count <= 0 || count > BTREE_PAGE_MAX_ITEMS)
+		return false;
+
+	memset(&live, 0, sizeof(live));
+	live.chunk = (BTreePageChunk *) ((Pointer) page + chunkBegin);
+	live.chunkOffset = chunkIndex;
+	live.chunkItemsCount = count;
+	live.chunkSize = chunkEnd - chunkBegin;
+	if (!search_leaf_items(meta, &live, &upper) ||
+		upper != live.itemOffset + 1)
+		return false;
+
+	/*
+	 * The item and its header are copied before anything is concluded from
+	 * them: only the page state check below makes them consistent.
+	 */
+	first = MAXALIGN(sizeof(LocationIndex) * count);
+	item = (Pointer) live.chunk + first + meta->leafStride * live.itemOffset;
+	formatFlags = ITEM_GET_FLAGS(live.chunk->items[live.itemOffset]);
+	len = meta->leafStride - BTreeLeafTuphdrSize;
+	data = (Pointer) MemoryContextAlloc(mcxt, len);
+	memcpy(&tupHdr, item, BTreeLeafTuphdrSize);
+	memcpy(data, item + BTreeLeafTuphdrSize, len);
+
+	pg_read_barrier();
+	state2 = pg_atomic_read_u64(&src->o_header.state);
+	if ((state1 & PAGE_STATE_CHANGE_COUNT_MASK) !=
+		(state2 & PAGE_STATE_CHANGE_COUNT_MASK) ||
+		O_PAGE_STATE_READ_IS_BLOCKED(state2) ||
+		O_PAGE_GET_CHANGE_COUNT(page) != hint->pageChangeCount)
+	{
+		pfree(data);
+		return false;
+	}
+
+	EA_READ_INC(blkno);
+	ppool_ucm_inc_usage(get_ppool_by_blkno(blkno), blkno);
+
+	/* The version o_find_tuple_version() stops at first */
+	if (XACT_INFO_IS_LOCK_ONLY(tupHdr.xactInfo) ||
+		tupHdr.deleted != BTreeLeafTupleNonDeleted)
+	{
+		pfree(data);
+		return false;
+	}
+	oxid_match_snapshot(XACT_INFO_GET_OXID(tupHdr.xactInfo), snapshot,
+						&tupcsn, NULL);
+	if (!COMMITSEQNO_IS_FROZEN(tupcsn) &&
+		!(COMMITSEQNO_IS_NORMAL(tupcsn) && tupcsn < snapshot->csn))
+	{
+		pfree(data);
+		return false;
+	}
+	if (tupleCsn)
+		*tupleCsn = COMMITSEQNO_IS_NORMAL(tupcsn) ?
+			Max(snapshot->csn, tupcsn + 1) : snapshot->csn;
+
+	result->data = data;
+	result->formatFlags = formatFlags;
+	return true;
 }
 
 static ArraySearchDesc *
