@@ -54,6 +54,7 @@ struct OClass
 	Oid			reltype;
 	int			natts;
 	FormData_pg_attribute *attrs;
+	XLogRecPtr *attr_versions;
 };
 
 O_SYS_CACHE_FUNCS(class_cache, OClass, 1);
@@ -92,7 +93,7 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	rel = relation_open(classoid, AccessShareLock);
 
 	prev_context = MemoryContextSwitchTo(class_cache->mcxt);
-	len = rel->rd_att->natts * sizeof(FormData_pg_attribute);
+	len = MAXALIGN(rel->rd_att->natts * (sizeof(FormData_pg_attribute) + sizeof(XLogRecPtr)));
 	if (o_class != NULL)		/* Existed o_class updated */
 	{
 		o_class->attrs = (FormData_pg_attribute *) repalloc(o_class->attrs,
@@ -106,6 +107,9 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 		*entry_ptr = (Pointer) o_class;
 		o_class->attrs = (FormData_pg_attribute *) palloc0(len);
 	}
+	/* The versions follow the attributes at an aligned offset. */
+	o_class->attr_versions = (XLogRecPtr *) ((char *) o_class->attrs +
+											 MAXALIGN(rel->rd_att->natts * sizeof(FormData_pg_attribute)));
 	o_class->data_version = ORIOLEDB_SYS_TREE_VERSION;
 	o_class->reltype = rel->rd_rel->reltype;
 	o_class->natts = rel->rd_att->natts;
@@ -116,6 +120,13 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 
 		class_attr = &o_class->attrs[i];
 		typcache_attr = TupleDescAttr(rel->rd_att, i);
+
+		/* Versions are not part of FormData_pg_attribute in back branches. */
+#ifdef HEAP_IS_DATUM
+		o_class->attr_versions[i] = TupleDescGetAttrVersion(rel->rd_att, i + 1);
+#else
+		o_class->attr_versions[i] = InvalidXLogRecPtr;
+#endif
 
 		class_attr->attrelid = typcache_attr->attrelid;
 		class_attr->attname = typcache_attr->attname;
@@ -175,6 +186,9 @@ o_class_cache_serialize_entry(Pointer entry, int *len)
 						   offsetof(OClass, attrs));
 	appendBinaryStringInfo(&str, (Pointer) o_class->attrs,
 						   o_class->natts * sizeof(FormData_pg_attribute));
+	/* Layout change: see the ORIOLEDB_BINARY_VERSION note in orioledb.h */
+	appendBinaryStringInfo(&str, (Pointer) o_class->attr_versions,
+						   o_class->natts * sizeof(XLogRecPtr));
 
 	*len = str.len;
 	return str.data;
@@ -198,11 +212,25 @@ o_class_cache_deserialize_entry(MemoryContext mcxt, Pointer data, Size length)
 			 "ORIOLEDB_SYS_TREE_VERSION %u of OrioleDB cluster is not among supported for conversion to %u",
 			 o_class->data_version, ORIOLEDB_SYS_TREE_VERSION);
 
-	len = o_class->natts * sizeof(FormData_pg_attribute);
+	len = MAXALIGN(o_class->natts * (sizeof(FormData_pg_attribute) + sizeof(XLogRecPtr)));
 	o_class->attrs = MemoryContextAlloc(mcxt, len);
-	Assert((ptr - data) + len == length);
+	len = o_class->natts * sizeof(FormData_pg_attribute);
+	o_class->attr_versions = (XLogRecPtr *) ((char *) o_class->attrs + MAXALIGN(len));
+	Assert((ptr - data) + len <= length);
 	memcpy(o_class->attrs, ptr, len);
 	ptr += len;
+	len = o_class->natts * sizeof(XLogRecPtr);
+	if ((ptr - data) + len == length)
+	{
+		memcpy(o_class->attr_versions, ptr, len);
+		ptr += len;
+	}
+	else
+	{
+		/* entry written before attribute versions were stored */
+		Assert((ptr - data) == length);
+		memset(o_class->attr_versions, 0, len);
+	}
 
 	return (Pointer) o_class;
 }
@@ -259,6 +287,18 @@ o_class_cache_search_tupdesc(Oid cc_reloid)
 
 		memcpy(&result->attrs, o_class->attrs,
 			   o_class->natts * sizeof(FormData_pg_attribute));
+#endif
+
+#ifdef HEAP_IS_DATUM
+		/* Restore the identity and versions used to form stored composites. */
+		if (OidIsValid(o_class->reltype))
+		{
+			result->tdtypeid = o_class->reltype;
+			for (int i = 0; i < o_class->natts; i++)
+				TupleDescSetAttrVersion(result, i + 1, o_class->attr_versions[i]);
+			TupleDescSetVersion(result, o_class->natts > 0 ?
+								o_class->attr_versions[o_class->natts - 1] : InvalidXLogRecPtr);
+		}
 #endif
 
 		result->tdrefcount = 0;

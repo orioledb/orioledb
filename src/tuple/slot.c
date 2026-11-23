@@ -840,6 +840,7 @@ tts_orioledb_copy_heap_tuple(TupleTableSlot *slot)
 	result = heap_form_tuple(slot->tts_tupleDescriptor,
 							 slot->tts_values,
 							 slot->tts_isnull);
+	o_heap_tuple_clear_datum(result);
 
 	ItemPointerCopy(&slot->tts_tid, &result->t_self);
 
