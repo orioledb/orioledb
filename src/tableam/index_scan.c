@@ -1515,6 +1515,18 @@ o_exec_fetch_next_batch(OTableDescr *descr, OScanState *ostate, ScanState *ss)
 {
 	bool		found;
 
+	/*
+	 * The last batch ended where the range's end bound falls, so its iterator
+	 * has nothing more to give: go on to the next range as when it returns
+	 * nothing.
+	 */
+	if (ostate->rangeEndsWithBatch)
+	{
+		ostate->rangeEndsWithBatch = false;
+		ostate->curKeyRange.empty = true;
+		return false;
+	}
+
 	if (!o_scan_can_batch(descr, ostate, ss->ss_ScanTupleSlot))
 		return false;
 
@@ -1524,6 +1536,12 @@ o_exec_fetch_next_batch(OTableDescr *descr, OScanState *ostate, ScanState *ss)
 										 &ostate->curKeyRange.high,
 										 BTreeKeyBound, true, &ostate->batch);
 	descr->noInvalidation = false;
+	ostate->rangeEndsWithBatch = found && ostate->batch.endReached &&
+		ostate->scanDir == ForwardScanDirection
+#if PG_VERSION_NUM >= 180000
+		&& !ostate->skipScanProbePending
+#endif
+		;
 	return found;
 }
 

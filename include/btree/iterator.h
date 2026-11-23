@@ -97,6 +97,8 @@ typedef struct BTreeIteratorBatch
 	BTreePageItemLocator loc;
 	OffsetNumber count;
 	CommitSeqNo csn;
+	/* The end bound falls right after the batch: nothing follows it */
+	bool		endReached;
 } BTreeIteratorBatch;
 
 extern bool o_btree_iterator_fetch_batch(BTreeIterator *it,

@@ -86,6 +86,8 @@ typedef struct OScanState
 	 */
 	bool		rangeStartOnly;
 	bool		rangeStarted;
+	/* The rows of the current key range end with the batch */
+	bool		rangeEndsWithBatch;
 	List	   *indexQuals;
 	/* used only by direct modify functions */
 	CmdType		cmd;
