@@ -321,7 +321,38 @@ search_leaf_items(FastpathFindDownlinkMeta *meta, BTreePageItemLocator *loc,
 	first = MAXALIGN(sizeof(LocationIndex) * count);
 	if (loc->chunkSize != first + meta->leafStride * count)
 		return false;
-	for (i = 0; i < count; i++)
+	i = 0;
+#ifndef WORDS_BIGENDIAN
+
+	/*
+	 * Four items to a word: each lane is to be its offset with the
+	 * fixed-format flag, the offsets advancing by four strides a word.  No
+	 * lane carries into the next, an offset being below the flag bit.
+	 */
+	{
+		const uint64 laneMask = UINT64CONST(0x7FFF7FFF7FFF7FFF);
+		uint64		expected = 0,
+					step = 0;
+		int			k;
+
+		for (k = 0; k < 4; k++)
+		{
+			expected |= (uint64) ((O_TUPLE_FLAGS_FIXED_FORMAT << 14) |
+								  (first + meta->leafStride * k)) << (16 * k);
+			step |= (uint64) (4 * meta->leafStride) << (16 * k);
+		}
+		for (; i + 4 <= count; i += 4)
+		{
+			uint64		w;
+
+			memcpy(&w, &chunk->items[i], sizeof(w));
+			if ((w & laneMask) != expected)
+				return false;
+			expected += step;
+		}
+	}
+#endif
+	for (; i < count; i++)
 	{
 		if (ITEM_GET_OFFSET(chunk->items[i]) != first + meta->leafStride * i ||
 			!(ITEM_GET_FLAGS(chunk->items[i]) & O_TUPLE_FLAGS_FIXED_FORMAT))
