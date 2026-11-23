@@ -1546,25 +1546,26 @@ o_exec_fetch_next_batch(OTableDescr *descr, OScanState *ostate, ScanState *ss)
 }
 
 /*
- * Find the primary leaves of the batch's next rows together, prefetching
- * them, for o_exec_fetch_batch_primary() to start its lookups from.
+ * Take the batch's next rows into a window, their primary leaves found
+ * together and prefetched, for o_exec_fetch_batch_primary() to look them up
+ * from.
  */
 static void
 o_exec_prefetch_primary(OTableDescr *descr, OScanState *ostate)
 {
 	OIndexDescr *primary = GET_PRIMARY(descr);
-	BTreeIteratorBatch batch = ostate->batch;
+	BTreeIteratorBatch *batch = &ostate->batch;
 	int			n = 0;
 
 	/*
 	 * A bound's by-reference values point into the batch's tuples, which stay
-	 * put until the batch is used up, so the bounds and the metas may be kept
-	 * for the lookups.
+	 * put until the next batch is fetched, so the bounds and the metas may be
+	 * kept for the lookups: that waits for the window to be used up.
 	 */
-	while (n < O_SCAN_PRIMARY_PREFETCH && batch.count > 0)
+	while (n < O_SCAN_PRIMARY_PREFETCH && batch->count > 0)
 	{
 		o_fill_pindex_tuple_key_bound(&descr->indices[ostate->ixNum]->desc,
-									  o_btree_iterator_batch_tuple(&batch),
+									  o_btree_iterator_batch_tuple(batch),
 									  &ostate->primaryBounds[n]);
 		/* The bounds of a batch differ in their values only, mostly */
 		if (n == 0 ||
@@ -1576,7 +1577,7 @@ o_exec_prefetch_primary(OTableDescr *descr, OScanState *ostate)
 											 (Pointer) &ostate->primaryBounds[n],
 											 BTreeKeyBound,
 											 &ostate->primaryMetas[n]);
-		o_btree_iterator_batch_next(&batch);
+		o_btree_iterator_batch_next(batch);
 		n++;
 	}
 	fastpath_prefetch_leaves(&primary->desc, n, ostate->primaryMetas,
@@ -1595,7 +1596,8 @@ o_exec_fetch_batch_primary(OTableDescr *descr, OScanState *ostate,
 {
 	OIndexDescr *primary = GET_PRIMARY(descr);
 
-	while (ostate->batch.count > 0 ||
+	while (ostate->primaryHintsPos < ostate->primaryHintsCount ||
+		   ostate->batch.count > 0 ||
 		   o_exec_fetch_next_batch(descr, ostate, ss))
 	{
 		OTuple		tuple;
@@ -1606,13 +1608,12 @@ o_exec_fetch_batch_primary(OTableDescr *descr, OScanState *ostate,
 		/*
 		 * Look the leaves of the next rows up together, so that waiting for
 		 * them overlaps.  A window never outlives its batch: a new batch
-		 * comes only once the old one is used up, and with it the window.
+		 * comes only once the window is used up.
 		 */
 		if (ostate->primaryHintsPos >= ostate->primaryHintsCount)
 			o_exec_prefetch_primary(descr, ostate);
 		pos = ostate->primaryHintsPos++;
 		hint = ostate->primaryHints[pos];
-		o_btree_iterator_batch_next(&ostate->batch);
 
 		descr->noInvalidation = true;
 		if (!ostate->primaryMetas[pos].enabled ||
