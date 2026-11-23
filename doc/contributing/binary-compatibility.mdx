@@ -11,15 +11,15 @@ The file `include/orioledb.h` contains several OrioleDB binary-compatibility
 related version variables. Currently it contains the following version variables:
 
 - `ORIOLEDB_BINARY_VERSION` - version of a database instance
-- `ORIOLEDB_CHECKPOINT_VERSION` - version of checkpoint on-disk format (undo log, xid files, etc.)
 - `ORIOLEDB_SYS_TREE_VERSION` - version of system trees format
 - `ORIOLEDB_PAGE_VERSION` - version of OrioleDB pages format
 - `ORIOLEDB_COMPRESS_VERSION` - version of OrioleDB pages compression format
 
-Two more version variables are defined in other files:
+Three more version variables are defined in other files or have special semantics:
 
 - `ORIOLEDB_WAL_VERSION` (`include/recovery/wal.h`) - version of OrioleDB WAL format
 - `ORIOLEDB_CHECKPOINT_CONTROL_VERSION` (`include/checkpoint/control.h`) - version of OrioleDB control file format
+- `ORIOLEDB_CHECKPOINT_VERSION` (`include/orioledb.h`) - version of checkpoint on-disk format (undo log, xid files, etc.)
 
 Bump `ORIOLEDB_CHECKPOINT_VERSION` every time the checkpoint on-disk format
 changes (e.g. undo log layout, xid file format). The version is stored in
@@ -38,10 +38,11 @@ compare these files against the last release tag, e.g.
 
 A cluster with a different `ORIOLEDB_BINARY_VERSION` refuses to start, and the
 following version checks are skipped. Therefore `ORIOLEDB_SYS_TREE_VERSION`,
-`ORIOLEDB_PAGE_VERSION` and `ORIOLEDB_COMPRESS_VERSION` are only meaningful
-within one `ORIOLEDB_BINARY_VERSION` value: when you bump
-`ORIOLEDB_BINARY_VERSION`, reset these three to `1`, since no conversion from
-the previous binary version is ever attempted.
+`ORIOLEDB_PAGE_VERSION`, `ORIOLEDB_COMPRESS_VERSION` and
+`ORIOLEDB_CHECKPOINT_VERSION` are only meaningful within one
+`ORIOLEDB_BINARY_VERSION` value: when you bump `ORIOLEDB_BINARY_VERSION`,
+reset these four to `1`, since no conversion from the previous binary version
+is ever attempted.
 
 `ORIOLEDB_WAL_VERSION` and `ORIOLEDB_CHECKPOINT_CONTROL_VERSION` are not reset.
 WAL can be transferred between clusters of different binary versions, and the
