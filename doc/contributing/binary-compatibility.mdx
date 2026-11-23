@@ -34,6 +34,19 @@ release, you need to increment it. To check whether it was already bumped,
 compare these files against the last release tag, e.g.
 `git diff <last-tag> -- include/orioledb.h include/recovery/wal.h include/checkpoint/control.h`.
 
+### Bumping `ORIOLEDB_BINARY_VERSION`
+
+A cluster with a different `ORIOLEDB_BINARY_VERSION` refuses to start, and the
+following version checks are skipped. Therefore `ORIOLEDB_SYS_TREE_VERSION`,
+`ORIOLEDB_PAGE_VERSION` and `ORIOLEDB_COMPRESS_VERSION` are only meaningful
+within one `ORIOLEDB_BINARY_VERSION` value: when you bump
+`ORIOLEDB_BINARY_VERSION`, reset these three to `1`, since no conversion from
+the previous binary version is ever attempted.
+
+`ORIOLEDB_WAL_VERSION` and `ORIOLEDB_CHECKPOINT_CONTROL_VERSION` are not reset.
+WAL can be transferred between clusters of different binary versions, and the
+control file has to stay readable to find out the cluster's binary version.
+
 ## ORIOLEDB_VERSION file
 
 OrioleDB writes a text version file at
