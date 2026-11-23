@@ -77,6 +77,14 @@ typedef struct OScanState
 	FastpathFindDownlinkMeta primaryMetas[O_SCAN_PRIMARY_PREFETCH];
 	int			primaryHintsCount;
 	int			primaryHintsPos;
+
+	/*
+	 * Set by o_exec_fetch() to have o_iterate_index() stop once it starts a
+	 * new key range, before fetching from it, so that the range's rows can
+	 * come as a batch; rangeStarted says it did.
+	 */
+	bool		rangeStartOnly;
+	bool		rangeStarted;
 	List	   *indexQuals;
 	/* used only by direct modify functions */
 	CmdType		cmd;

@@ -809,6 +809,19 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 			O_TUPLE_SET_NULL(tup);
 			return tup;
 		}
+
+		/* The caller takes the range's rows from here, as a batch if it can */
+		if (ostate->rangeStartOnly && !ostate->exact &&
+			!ostate->curKeyRange.empty && ostate->iterator != NULL
+#if PG_VERSION_NUM >= 180000
+			&& !ostate->skipScanProbePending
+#endif
+			)
+		{
+			ostate->rangeStarted = true;
+			O_TUPLE_SET_NULL(tup);
+			return tup;
+		}
 	}
 
 	do
@@ -1645,7 +1658,25 @@ o_exec_fetch(OScanState *ostate, ScanState *ss)
 		if (!ostate->curKeyRangeIsLoaded)
 			ostate->curKeyRange.empty = true;
 
+		/*
+		 * A range about to start is started first, without a row fetched from
+		 * it, so that its first rows can come as a batch too.
+		 */
+		ostate->rangeStartOnly = ostate->curKeyRange.empty;
+		ostate->rangeStarted = false;
 		tuple = o_index_scan_getnext(descr, ostate, &tupleCsn, scan_primary, tupleCxt, &hint);
+		ostate->rangeStartOnly = false;
+		if (ostate->rangeStarted)
+		{
+			ostate->rangeStarted = false;
+			if (o_exec_fetch_batch(descr, ostate, ss))
+			{
+				slot = ss->ss_ScanTupleSlot;
+				continue;
+			}
+			tuple = o_index_scan_getnext(descr, ostate, &tupleCsn, scan_primary,
+										 tupleCxt, &hint);
+		}
 
 		if (O_TUPLE_IS_NULL(tuple))
 		{
