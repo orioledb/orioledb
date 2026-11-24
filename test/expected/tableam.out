@@ -4452,8 +4452,23 @@ ERROR:  "o_heap_test" is not a orioledb table
 SELECT orioledb_evict_pages('o_heap_test'::regclass, 1);
 ERROR:  "o_heap_test" is not a orioledb table
 SELECT orioledb_write_pages('o_heap_test'::regclass);
+<<<<<<< HEAD
 ERROR:  "o_heap_test" is not a orioledb table
+=======
+ERROR:  "o_heap_test" is not an orioledb table
+SELECT * FROM orioledb_tree_stat('o_heap_test'::regclass);
+ERROR:  "o_heap_test" is not an orioledb table
+SELECT * FROM orioledb_tree_stat('o_heap_test_pkey'::regclass);
+ERROR:  "o_heap_test" is not an orioledb table
+>>>>>>> 8cb350ed (Reject unsupported relations in orioledb_tree_stat())
 DROP TABLE o_heap_test;
+CREATE TABLE o_tree_stat_gin (id int PRIMARY KEY, a int[]) USING orioledb;
+CREATE INDEX o_tree_stat_gin_idx ON o_tree_stat_gin USING gin (a);
+NOTICE:  index bridging is enabled for orioledb table 'o_tree_stat_gin'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+SELECT * FROM orioledb_tree_stat('o_tree_stat_gin_idx'::regclass);
+ERROR:  "o_tree_stat_gin_idx" is not an orioledb B-tree index
+DROP TABLE o_tree_stat_gin;
 CREATE TABLE o_ctid_test (val_1 int) USING orioledb;
 INSERT INTO o_ctid_test VALUES (1);
 INSERT INTO o_ctid_test SELECT * FROM o_ctid_test;
