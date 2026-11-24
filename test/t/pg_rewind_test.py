@@ -2,6 +2,7 @@ import copy
 from itertools import chain
 from collections import Counter
 import os
+import re
 from shutil import rmtree
 import socket
 import subprocess
@@ -1833,6 +1834,85 @@ class PgRewindTest(BaseTest):
 				self.assert_same_tables(master, replica)
 				master.safe_psql("CHECKPOINT")
 				self.check_undo_order(master)
+				self.exercise_rewound(master, replica)
+
+	def test_pg_rewind_stale_undo_is_reclaimed(self):
+		"""
+        The rewind leaves the target's own undo files and undo locations as
+        they are, and the undo the rewound node writes next goes after them,
+        not over them.  The undo of the target's divergent history is of no
+        use to the rewound node: the files holding it must go away through
+        the usual cleanup once the node has moved on.
+        """
+		undo_file_size = 0x4000000
+
+		def undo_files(node):
+			undo_dir = os.path.join(node.data_dir, 'orioledb_undo')
+			files = {}
+			for name in os.listdir(undo_dir):
+				match = re.fullmatch(r'[0-9A-F]{2}([0-9A-F]{8})row', name)
+				if match:
+					files[name] = int(match.group(1), 16)
+			return files
+
+		with self.node as master:
+			self.enable_archive(master)
+			master.append_conf("orioledb.undo_buffers = 2MB")
+			master.start()
+			with self.getReplica() as replica:
+				state = {}
+
+				def diverge():
+					# More than a few undo files of the target's own undo
+					for _ in range(7):
+						self.big_undo_trx(master, 8, 'master')
+					self.big_undo_trx(replica, 8, 'replica')
+					master.safe_psql("CHECKPOINT")
+					state['files'] = undo_files(master)
+					state['last_used'] = master.execute("""
+                        SELECT lastusedlocation FROM orioledb_get_undo_meta()
+                         WHERE undo_type = 'row'
+                    """)[0][0]
+
+				self.rewind_in_progress_trx(
+				    master, replica,
+				    "CREATE TABLE o_test (id integer NOT NULL PRIMARY KEY, "
+				    "val text, pad text) USING orioledb;"
+				    "INSERT INTO o_test SELECT id, 'orig', repeat('x', 500) "
+				    "FROM generate_series(1, 3000) id;",
+				    "UPDATE o_test SET val = 'trx' WHERE mod(id, 10) = 1;",
+				    before_rewind=diverge)
+
+				# The rewound node moves past the undo it kept
+				for _ in range(9):
+					self.big_undo_trx(replica, 8, 'late')
+					self.catchup_orioledb(master)
+					master.safe_psql("CHECKPOINT")
+				last_used = state['last_used']
+				master.poll_query_until(
+				    f"""
+                    SELECT cleanedlocation > {last_used}
+                      FROM orioledb_get_undo_meta()
+                     WHERE undo_type = 'row'
+                """,
+				    expected=True)
+				cleaned = master.execute("""
+                    SELECT cleanedlocation FROM orioledb_get_undo_meta()
+                     WHERE undo_type = 'row'
+                """)[0][0]
+
+				# The files of the divergent history that are behind the
+				# cleaned location are gone
+				stale = [
+				    name for name, number in state['files'].items()
+				    if (number + 1) * undo_file_size <= cleaned
+				]
+				self.assertTrue(stale, f"{state['files']} cleaned {cleaned}")
+				remaining = undo_files(master)
+				self.assertEqual([name for name in stale if name in remaining],
+				                 [], f"{remaining}")
+				self.check_undo_order(master)
+				self.assert_same_tables(master, replica)
 				self.exercise_rewound(master, replica)
 
 	def test_pg_rewind_parallel_recovery_workers(self):
