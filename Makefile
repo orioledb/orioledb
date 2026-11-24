@@ -216,6 +216,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/functions_test.py \
 						test/t/index_bridging_test.py \
 						test/t/incomplete_split_test.py \
+						test/t/split_fix_race_test.py \
 						test/t/merge_test.py \
 						test/t/o_tables_test.py \
 						test/t/o_tables_2_test.py \
