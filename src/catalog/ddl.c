@@ -2628,6 +2628,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	EState	   *check_estate = NULL;
 	ExprState **check_exprs = NULL;
 	ExprContext *check_econtext = NULL;
+	MemoryContext pertuple_ctx;
+	MemoryContext old_ctx;
 	bool		toast_marked;
 
 	if (!old_o_table->has_primary)
@@ -2719,6 +2721,12 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	}
 
 	toast_marked = rewrite_copy_set(rel, true, false);
+
+	/* Reclaim expression and datum allocations after each rewritten tuple. */
+	pertuple_ctx = AllocSetContextCreate(CurrentMemoryContext,
+										 "rewrite_table per-tuple context",
+										 ALLOCSET_DEFAULT_SIZES);
+	old_ctx = MemoryContextSwitchTo(pertuple_ctx);
 
 	while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(sscan, old_slot->tts_mcxt, &tupleCsn, &hint)))
 	{
@@ -2963,7 +2971,13 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 
 		ExecClearTuple(old_slot);
 		ExecClearTuple(new_slot);
+		if (check_econtext)
+			ResetExprContext(check_econtext);
+		MemoryContextReset(pertuple_ctx);
 	}
+
+	MemoryContextSwitchTo(old_ctx);
+	MemoryContextDelete(pertuple_ctx);
 
 	if (check_estate)
 	{
