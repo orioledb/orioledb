@@ -1440,8 +1440,8 @@ orioledb_tbl_compression_check(PG_FUNCTION_ARGS)
 	StringInfoData result;
 	ArrayType  *array;
 	int32	   *values;
-	int			compression_lvl = PG_GETARG_INT16(0),
-				i,
+	int64		compression_lvl = PG_GETARG_INT64(0);
+	int			i,
 				j,
 				narray,
 				next_from;

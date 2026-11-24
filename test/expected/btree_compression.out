@@ -3372,6 +3372,11 @@ SELECT orioledb_tbl_compression_check(10, 'o_test1'::regclass, array[200, 100]);
 ERROR:  range array must be sorted ascending
 SELECT orioledb_tbl_compression_check(10, 'o_test1'::regclass, array[8192]);
 ERROR:  range value must be between 0 and 8192
+-- with a level outside the int16 range
+SELECT orioledb_tbl_compression_check(65537, 'o_test1'::regclass);
+ERROR:  Compression level must be between 0 and 22
+SELECT orioledb_tbl_compression_check(-65535, 'o_test1'::regclass);
+ERROR:  Compression level must be between 0 and 22
 -- with valid the ranges array
 SELECT regexp_replace
 (
