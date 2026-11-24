@@ -127,14 +127,6 @@ knownErrors = {
     # error names either the table or one of its indexes — match both.
     r"ERROR:  cannot refresh collation \"en-x-icu\" because orioledb (table|index) \"[a-z0-9_]+\" uses it":
     ["collate.icu.utf8"],
-
-    # generated_stored and generated_virtual run in the same parallel
-    # group and both CREATE/DROP regress_user11.  The role-collision
-    # cascade is dropped wholesale via skip_hunk_errors below; only the
-    # psql \dp privilege-listing diff remains as a line-level filter
-    # (it appears outside the cascade hunk).
-    r"privileges for (column \w+ of table|table) generated_stored_tests\.\w+":
-    ["generated_virtual"],
 }
 
 # Regexps that allow us to completely skip comparison of hunks containing these regexps
@@ -160,31 +152,6 @@ skip_hunk_errors = {
     # UPDATE/DELETE fail and the rest of the cursor block aborts.  Drop the
     # whole hunk so the cascaded "transaction is aborted" lines disappear.
     r"ERROR:  orioledb does not support TID scan": ["generated_virtual"],
-    # generated_stored and generated_virtual both CREATE/DROP the shared
-    # role regress_user11.  Depending on which test the parallel scheduler
-    # starts first the other can hit CREATE USER ("already exists"),
-    # SET ROLE / GRANT ("does not exist"), or DROP USER ("cannot be
-    # dropped because some objects depend on it" / "does not exist").
-    # Each of those errors cascades: SELECT/CALL statements gated by
-    # SET ROLE return real rows instead of "permission denied", which
-    # leaves a multi-line table-vs-error diff -- sometimes in the same
-    # hunk as the role error, sometimes in a separate hunk further down
-    # whose only marker is the missing "permission denied" line.  Drop
-    # both shapes.
-    r"ERROR:  role \"regress_user11\" (already exists|does not exist|cannot be dropped because some objects depend on it)":
-    ["generated_stored", "generated_virtual"],
-    # Same race, constraint-level variant: both CREATE USER statements
-    # pass the existence check, then the second hits the unique index.
-    r"ERROR:  duplicate key value violates unique constraint \"pg_authid_rolname_index\"":
-    ["generated_stored", "generated_virtual"],
-    # Same regress_user11 race, OID-based variant: when the other test's
-    # concurrent DROP USER removes the role's pg_authid tuple between this
-    # DROP USER's catalog lookup and its delete, the error names the role by
-    # OID ("could not find tuple for role <oid>") instead of by name.
-    r"ERROR:  could not find tuple for role \d+":
-    ["generated_stored", "generated_virtual"],
-    r"ERROR:  permission denied for (table gtest\w+|function gf\w+)":
-    ["generated_stored", "generated_virtual"],
     # Upstream anomaly 9a3ddeb519e8 is not reproduced on Oriole as it
     # doesn't do IOS for bridged indices.
     r"ERROR:  lossy distance functions are not supported in index-only scans":
