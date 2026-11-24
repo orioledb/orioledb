@@ -5,6 +5,7 @@ import os
 import re
 from shutil import rmtree
 import socket
+import struct
 import subprocess
 import time
 from tempfile import mkdtemp
@@ -1913,6 +1914,69 @@ class PgRewindTest(BaseTest):
 				                 [], f"{remaining}")
 				self.check_undo_order(master)
 				self.assert_same_tables(master, replica)
+				self.exercise_rewound(master, replica)
+
+	def test_pg_rewind_xids_file_of_target(self):
+		"""
+        The rewind keeps the target's own checkpoint xids file, which names
+        the transactions in progress at the target's last checkpoint, and the
+        rewound node reads it at start.  A transaction still open when the
+        target is shut down for the rewind must not be in it: it would be
+        aborted at the promotion of the rewound node with undo from the
+        target's history.  Its changes reached WAL before the shutdown.
+        """
+		with self.node as master:
+			self.enable_archive(master)
+			master.start()
+			with self.getReplica() as replica:
+				state = {}
+
+				def diverge():
+					self.horizon_workload(master, 60, 'master')
+					self.horizon_workload(replica, 60, 'replica')
+					# The source changes a row the target's open transaction
+					# changes too
+					replica.safe_psql(
+					    "UPDATE o_test SET val = 'source' WHERE id = 7")
+					state['open'] = master.connect()
+					state['open'].begin()
+					state['open'].execute(
+					    "UPDATE o_test SET val = 'open' WHERE id = 7; "
+					    "INSERT INTO o_test VALUES (6000, 'open', 'x')")
+					state['open'].execute("SELECT orioledb_flush_local_wal()")
+					def last_xids_count():
+						data_dir = os.path.join(master.data_dir,
+						                        'orioledb_data')
+						numbers = [
+						    int(name.split('.')[0], 10)
+						    for name in os.listdir(data_dir)
+						    if re.fullmatch(r'[0-9]+\.xid', name)
+						]
+						self.assertTrue(numbers, os.listdir(data_dir))
+						with open(os.path.join(data_dir, f'{max(numbers)}.xid'),
+						          'rb') as xid_file:
+							return struct.unpack('=I', xid_file.read(4))[0]
+
+					# A checkpoint with the transaction open names it ...
+					master.safe_psql("CHECKPOINT")
+					self.assertGreaterEqual(last_xids_count(), 1)
+					# ... the shutdown one aborts it first
+					master.stop()
+					self.assertEqual(last_xids_count(), 0)
+
+				self.rewind_in_progress_trx(
+				    master, replica,
+				    self.create_table_sql('o_test', 1000) +
+				    "CREATE INDEX o_test_val_idx ON o_test (val);",
+				    "UPDATE o_test SET val = 'trx' WHERE mod(id, 10) = 1;",
+				    before_rewind=diverge)
+				try:
+					state['open'].close()
+				except Exception:
+					pass
+				self.assertEqual(
+				    master.execute("SELECT val FROM o_test WHERE id = 7"),
+				    [('source', )])
 				self.exercise_rewound(master, replica)
 
 	def test_pg_rewind_parallel_recovery_workers(self):
