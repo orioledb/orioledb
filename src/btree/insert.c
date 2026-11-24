@@ -26,10 +26,13 @@
 #include "recovery/recovery.h"
 #include "transam/undo.h"
 #include "tuple/format.h"
+#include "tableam/operations.h"
 #include "utils/page_pool.h"
 #include "utils/stopevent.h"
 
+#include "catalog/index.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "utils/memutils.h"
 
 /* In order to avoid use of the recursion in o_btree_insert_item() we use context. */
@@ -1177,6 +1180,158 @@ multi_insert_prepare_batch(UndoLogType undoType,
 	}
 	reserve_undo_size(undoType, need + maxrow);
 	return batch_size;
+}
+
+/*
+ * Sort items by key, then drain them into leaves in undo-sized batches.
+ * Items that cannot be batched (page full, duplicate) fall back to per-row
+ * insert.  Used by both PK and SK multi-insert; sk_ctx is NULL for PK.
+ */
+void
+o_btree_multi_insert_loop(OTuple *tuples,
+						  LocationIndex *tuplens,
+						  Pointer *keyptrs,
+						  int nitems,
+						  OIndexDescr *id,
+						  TupleTableSlot **slots,
+						  OTableDescr *descr,
+						  Relation relation,
+						  BTreeModifyCallbackInfo *callbackInfo,
+						  OXid oxid, CommitSeqNo csn,
+						  OMultiInsertSKContext *sk_ctx)
+{
+	BTreeDescr *bd = &id->desc;
+	bool		primary_key = (sk_ctx == NULL);
+	void	  **cb_args;
+	OTuple	   *use_tuples = tuples;
+	LocationIndex *use_tuplens = tuplens;
+	Pointer    *use_keyptrs = keyptrs;
+	void	  **use_cb_args;
+	int		   *idx = NULL;
+	bool		non_sorted;
+	OBTreeFindPageContext ctx;
+	int			i;
+
+	Assert(!primary_key || slots != NULL);
+	cb_args = primary_key ? (void **) slots : NULL;
+	use_cb_args = cb_args;
+
+	/* Sort by key and rearrange arrays to sorted order if needed. */
+	non_sorted = multi_insert_prepare_sort_if_needed(bd, keyptrs, nitems, &idx);
+	if (non_sorted)
+	{
+		use_tuples = (OTuple *) palloc(sizeof(OTuple) * nitems);
+		use_tuplens = (LocationIndex *) palloc(sizeof(LocationIndex) * nitems);
+		use_keyptrs = (Pointer *) palloc(sizeof(Pointer) * nitems);
+		if (cb_args)
+			use_cb_args = (void **) palloc(sizeof(void *) * nitems);
+		for (i = 0; i < nitems; i++)
+		{
+			use_tuples[i] = tuples[idx[i]];
+			use_tuplens[i] = tuplens[idx[i]];
+			use_keyptrs[i] = keyptrs[idx[i]];
+			if (cb_args)
+				use_cb_args[i] = cb_args[idx[i]];
+		}
+	}
+
+	init_page_find_context(&ctx, bd, COMMITSEQNO_INPROGRESS,
+						   BTREE_PAGE_FIND_MODIFY | BTREE_PAGE_FIND_FIX_LEAF_SPLIT);
+
+	/*
+	 * Drain sorted items into leaves in undo-sized batches.  Each iteration
+	 * finds the target leaf, inserts as many items as fit, then either
+	 * continues to the next leaf (HikeyCrossed) or falls back to per-row
+	 * insert for items that cannot be batched (NoFit/Duplicate).
+	 */
+	i = 0;
+	while (i < nitems)
+	{
+		OFindPageResult fr PG_USED_FOR_ASSERTS_ONLY;
+		BTreeLeafProbeResult result;
+		int			n;
+		int			batch_size;
+
+		batch_size = multi_insert_prepare_batch(bd->undoType,
+												use_tuplens + i,
+												nitems - i);
+		ppool_reserve_pages(bd->ppool, PPOOL_RESERVE_INSERT, 2);
+
+		fr = find_page(&ctx, use_keyptrs[i], BTreeKeyBound, 0);
+		Assert(fr == OFindPageResultSuccess);
+
+		n = o_btree_multi_insert_item(&ctx,
+									  use_tuples + i, use_tuplens + i,
+									  use_keyptrs + i, BTreeKeyBound,
+									  batch_size,
+									  oxid, RowLockUpdate,
+									  callbackInfo,
+									  use_cb_args ? use_cb_args + i : NULL,
+									  &result);
+
+		if (primary_key)
+		{
+			for (int k = 0; k < n; k++)
+			{
+				int			orig = non_sorted ? idx[i + k] : i + k;
+
+				((OTableSlot *) slots[orig])->version =
+					o_tuple_get_version(use_tuples[i + k]);
+				pgstat_count_heap_insert(relation, 1);
+				fire_sk_modify_pending_stopevent(descr, i + k + 1, false);
+			}
+		}
+		i += n;
+
+		if (i >= nitems)
+			break;
+
+		if (result == BTreeLeafProbeHikeyCrossed ||
+			result == BTreeLeafProbeFits)
+			continue;
+
+		/* NoFit or Duplicate: fall back to per-row insert for this item. */
+		{
+			int			orig = non_sorted ? idx[i] : i;
+
+			if (primary_key)
+				multi_insert_pk_slow(slots[orig], &use_tuples[i],
+									 descr, id, relation,
+									 callbackInfo, oxid, csn,
+									 i + 1);
+			else
+			{
+				Datum		values[INDEX_MAX_KEYS];
+				bool		isnull[INDEX_MAX_KEYS];
+
+				if (sk_ctx->estate)
+					GetPerTupleExprContext(sk_ctx->estate)->ecxt_scantuple = slots[orig];
+				FormIndexDatum(sk_ctx->indexInfo, slots[orig], sk_ctx->estate, values, isnull);
+				sk_ctx->indexRel->rd_indam->aminsertextended(sk_ctx->indexRel,
+															 values, isnull,
+															 sk_ctx->tupleidsDatum[orig],
+															 relation,
+															 sk_ctx->checkUnique,
+															 false,
+															 sk_ctx->indexInfo);
+			}
+		}
+		i++;
+	}
+
+	if (bd->undoType != UndoLogNone)
+		release_undo_size(bd->undoType);
+	ppool_release_reserved(bd->ppool, PPOOL_RESERVE_INSERT_MASK);
+
+	if (non_sorted)
+	{
+		pfree(use_tuples);
+		pfree(use_tuplens);
+		pfree(use_keyptrs);
+		if (use_cb_args)
+			pfree(use_cb_args);
+		pfree(idx);
+	}
 }
 
 /*

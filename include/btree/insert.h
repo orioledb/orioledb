@@ -72,4 +72,25 @@ extern int	multi_insert_prepare_batch(UndoLogType undoType,
 extern bool multi_insert_prepare_sort_if_needed(BTreeDescr *desc, Pointer *keyptrs,
 												int n, int **out_idx);
 
+typedef struct OMultiInsertSKContext
+{
+	Datum	   *tupleidsDatum;
+	IndexInfo  *indexInfo;
+	Relation	indexRel;
+	IndexUniqueCheck checkUnique;
+	EState	   *estate;
+} OMultiInsertSKContext;
+
+extern void o_btree_multi_insert_loop(OTuple *tuples,
+									  LocationIndex *tuplens,
+									  Pointer *keyptrs,
+									  int nitems,
+									  OIndexDescr *id,
+									  TupleTableSlot **slots,
+									  OTableDescr *descr,
+									  Relation relation,
+									  BTreeModifyCallbackInfo *callbackInfo,
+									  OXid oxid, CommitSeqNo csn,
+									  OMultiInsertSKContext *sk_ctx);
+
 #endif							/* __BTREE_INSERT_H__ */

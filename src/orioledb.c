@@ -110,6 +110,7 @@ OrioleDBPageDesc *local_ppool_page_descs = NULL;
 int			orioledb_serializable_mode = O_SERIALIZABLE_TABLE_LOCK;
 bool		orioledb_debug_disable_multi_insert = false;
 bool		orioledb_debug_disable_toast_multi_insert = false;
+bool		orioledb_debug_disable_sk_multi_insert = false;
 bool		orioledb_debug_disable_downlink_fastpath = false;
 
 static const struct config_enum_entry serializable_mode_options[] = {
@@ -118,7 +119,6 @@ static const struct config_enum_entry serializable_mode_options[] = {
 	{"repeatable_read", O_SERIALIZABLE_REPEATABLE_READ, false},
 	{NULL, 0, false}
 };
-
 
 static int	main_buffers_guc;
 static int	undo_buffers_guc;
@@ -730,6 +730,17 @@ _PG_init(void)
 							 "Disable the batched TOAST insert path.",
 							 NULL,
 							 &orioledb_debug_disable_toast_multi_insert,
+							 false,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomBoolVariable("orioledb.debug_disable_sk_multi_insert",
+							 "Disable the batched secondary-index insert path.",
+							 NULL,
+							 &orioledb_debug_disable_sk_multi_insert,
 							 false,
 							 PGC_USERSET,
 							 0,

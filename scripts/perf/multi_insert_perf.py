@@ -1,26 +1,21 @@
 #!/usr/bin/env python3
 """
-Compare COPY throughput across four configurations of the orioledb
-multi-insert path, for three row shapes.
+Compare COPY throughput across all eight configurations of the orioledb
+multi-insert GUCs, for five row shapes.
 
-Two independent boolean GUCs control the batching:
-  debug_disable_multi_insert        -- PK batching
-  debug_disable_toast_multi_insert  -- TOAST batching
+Three independent boolean GUCs control the batching:
+  debug_disable_multi_insert          -- PK batching
+  debug_disable_toast_multi_insert    -- TOAST batching
+  debug_disable_sk_multi_insert       -- secondary-index batching
 
 Only the executor's MultiInsert path (COPY FROM, INSERT ... SELECT into
 partitioned tables, etc.) routes through orioledb_multi_insert; plain
 INSERT ... SELECT into a non-partitioned table goes row-by-row and
 never exercises o_tbl_multi_insert.  This benchmark uses COPY FROM.
 
-  off          both GUCs = true; per-row PK + per-row TOAST.
-  multi        PK batching on, TOAST batching off.
-  toast        PK batching off, TOAST batching on.
-  multi+toast  both GUCs = false (default); full batching.
-
-Each iteration COPYs the same in-memory TSV payload once per config, and
-iterations are interleaved across configs so all four modes see identical
-cache warmness / steady state -- running all iterations of one mode first
-biases the next mode with a fully warm node.
+Each iteration COPYs the same in-memory TSV payload once per config.
+By default iterations are interleaved across configs so all modes see
+identical cache warmness; --random fully shuffles the schedule instead.
 
 TOAST payloads are hex-encoded random bytes rotated per row, so pglz can't
 shrink them below the inline threshold and the value actually goes into the
@@ -33,6 +28,7 @@ below --min-ratio on any shape (default 0.85 -- comfortable at --iterations
 import argparse
 import io
 import os
+import random
 import statistics
 import subprocess
 import sys
@@ -44,16 +40,21 @@ sys.path.insert(0, os.path.join(_REPO, "test"))
 import testgres  # noqa: E402
 
 CONFIGS = [
-    ("off", True, True),
-    ("multi", False, True),
-    ("toast", True, False),
-    ("multi+toast", False, False),
+    ("off", True, True, True),
+    ("pk", False, True, True),
+    ("toast", True, False, True),
+    ("sk", True, True, False),
+    ("pk+toast", False, False, True),
+    ("pk+sk", False, True, False),
+    ("toast+sk", True, False, False),
+    ("all", False, False, False),
 ]
 
 # Non-compressible seeds; each row rotates the seed by (i % 10) chars so
 # rows don't share content and pglz has nothing to grab onto.
-_SEED_SMALL = os.urandom(1_500).hex()  # 3000 hex chars
-_SEED_MED = os.urandom(6_000).hex()  # 12000 hex chars
+_SEED_TINY = os.urandom(150).hex()  # 300 hex chars
+_SEED_SMALL = os.urandom(1_400).hex()  # 2800 hex chars, ~1 TOAST chunk
+_SEED_MED = os.urandom(3_000).hex()  # 6000 hex chars, ~3 TOAST chunks
 
 
 def _rot(seed, i):
@@ -61,23 +62,58 @@ def _rot(seed, i):
 
 
 SHAPES = {
-    # No TOAST at all -- exercises only Phase 1-3 primary batching.
     "short": {
         "columns": "id int PRIMARY KEY, k int NOT NULL, "
         "c varchar(40) NOT NULL",
-        "row": lambda i: f"{i}\t{i}\t{'a' * 40}\n",
+        "rows": 1_000_000,
+        "row": lambda i, k: f"{i}\t{k}\t{'a' * 40}\n",
     },
-    # ~3 KB non-compressible -> 1-2 TOAST chunks per row.
+    "short_sk": {
+        "columns": "id int PRIMARY KEY, k int NOT NULL, "
+        "c varchar(40) NOT NULL",
+        "rows": 1_000_000,
+        "indexes": ["CREATE INDEX ON t (k)", "CREATE INDEX ON t (c)"],
+        "row": lambda i, k: f"{i}\t{k}\t{'a' * 40}\n",
+    },
     "toast_small": {
         "columns": "id int PRIMARY KEY, k int NOT NULL, "
         "big text NOT NULL",
-        "row": lambda i: f"{i}\t{i}\t{_rot(_SEED_SMALL, i)}\n",
+        "rows": 30_000,
+        "row": lambda i, k: f"{i}\t{k}\t{_rot(_SEED_SMALL, i)}\n",
     },
-    # ~12 KB non-compressible -> ~6 TOAST chunks per row.
     "toast": {
         "columns": "id int PRIMARY KEY, k int NOT NULL, "
         "big text NOT NULL",
-        "row": lambda i: f"{i}\t{i}\t{_rot(_SEED_MED, i)}\n",
+        "rows": 10_000,
+        "row": lambda i, k: f"{i}\t{k}\t{_rot(_SEED_MED, i)}\n",
+    },
+    "toast_sk": {
+        "columns": "id int PRIMARY KEY, k int NOT NULL, "
+        "big text NOT NULL",
+        "rows": 10_000,
+        "indexes": ["CREATE INDEX ON t (k)"],
+        "row": lambda i, k: f"{i}\t{k}\t{_rot(_SEED_MED, i)}\n",
+    },
+    "toast_20col": {
+        "columns":
+        "id int PRIMARY KEY, " + ", ".join(f"c{i} text NOT NULL"
+                                           for i in range(20)),
+        "rows":
+        10_000,
+        "row":
+        lambda i, k: (f"{i}\t" + "\t".join(
+            _rot(_SEED_TINY, (i + j) % 10) for j in range(20)) + "\n"),
+    },
+    "toast_sk_20col": {
+        "columns":
+        "id int PRIMARY KEY, k int NOT NULL, " +
+        ", ".join(f"c{i} text NOT NULL" for i in range(19)),
+        "rows":
+        10_000,
+        "indexes": ["CREATE INDEX ON t (k)"],
+        "row":
+        lambda i, k: (f"{i}\t{k}\t" + "\t".join(
+            _rot(_SEED_TINY, (i + j) % 10) for j in range(19)) + "\n"),
     },
 }
 
@@ -91,13 +127,13 @@ def detect_commit():
 		return "<unknown>"
 
 
-def make_node():
+def make_node(main_buffers="1GB"):
 	node = testgres.get_new_node(name="multi_insert_perf")
 	node.init(["--no-locale", "--encoding=UTF8"])
 	node.append_conf(
 	    "postgresql.conf", "shared_preload_libraries = 'orioledb'\n"
 	    "shared_buffers = '1GB'\n"
-	    "orioledb.main_buffers = '1GB'\n"
+	    f"orioledb.main_buffers = '{main_buffers}'\n"
 	    "fsync = off\n"
 	    "synchronous_commit = off\n"
 	    "checkpoint_timeout = '30min'\n"
@@ -107,25 +143,33 @@ def make_node():
 	return node
 
 
-def build_payload(shape, n_rows):
+def build_payload(shape, n_rows, shuffle_sk=False):
 	row = SHAPES[shape]["row"]
+	if shuffle_sk:
+		ks = list(range(1, n_rows + 1))
+		random.shuffle(ks)
 	buf = io.StringIO()
 	for i in range(1, n_rows + 1):
-		buf.write(row(i))
+		k = ks[i - 1] if shuffle_sk else i
+		buf.write(row(i, k))
 	return buf.getvalue()
 
 
-def run_one(node, shape, disable_pk, disable_toast, payload):
+def run_one(node, shape, disable_pk, disable_toast, disable_sk, payload):
 	spec = SHAPES[shape]
 	conn = node.connect()
 	try:
 		c = conn.cursor
 		c.execute("DROP TABLE IF EXISTS t")
 		c.execute("CREATE TABLE t (%s) USING orioledb" % spec["columns"])
+		for idx in spec.get("indexes", []):
+			c.execute(idx)
 		c.execute("SET orioledb.debug_disable_multi_insert = %s",
 		          (disable_pk, ))
 		c.execute("SET orioledb.debug_disable_toast_multi_insert = %s",
 		          (disable_toast, ))
+		c.execute("SET orioledb.debug_disable_sk_multi_insert = %s",
+		          (disable_sk, ))
 		t0 = time.perf_counter()
 		c.copy_expert("COPY t FROM STDIN", io.StringIO(payload))
 		conn.connection.commit()
@@ -137,21 +181,31 @@ def run_one(node, shape, disable_pk, disable_toast, payload):
 
 def main():
 	ap = argparse.ArgumentParser()
-	ap.add_argument("--rows",
-	                type=int,
-	                default=30_000,
-	                help="rows per iteration (default: 30000, sized so a full "
-	                "perfcheck run of all shapes completes in ~2-3 min)")
+	ap.add_argument(
+	    "--rows",
+	    type=int,
+	    default=0,
+	    help="override per-shape row count (0 = use shape default)")
 	ap.add_argument("--iterations",
 	                type=int,
 	                default=5,
 	                help="repetitions per (config, shape) cell "
-	                "(default: 5, median reported; iterations interleaved "
-	                "across configs to keep cache warmness identical)")
+	                "(default: 5, median reported)")
+	ap.add_argument("--random",
+	                action="store_true",
+	                help="fully randomize the measurement order instead "
+	                "of interleaving by config")
 	ap.add_argument("--shapes",
-	                default="short,toast_small,toast",
-	                help="comma-separated subset of: short,toast_small,toast "
-	                "(default: all)")
+	                default="short,short_sk,toast_small,toast,toast_sk,"
+	                "toast_20col,toast_sk_20col",
+	                help="comma-separated subset of shapes (default: all)")
+	ap.add_argument("--main-buffers",
+	                default="1GB",
+	                help="orioledb.main_buffers setting (default: 1GB)")
+	ap.add_argument("--shuffle-sk",
+	                action="store_true",
+	                help="randomize the SK column (k) values so "
+	                "secondary-index inserts are unsorted")
 	ap.add_argument("--min-ratio",
 	                type=float,
 	                default=0.85,
@@ -165,36 +219,47 @@ def main():
 		if s not in SHAPES:
 			sys.exit("Unknown shape: %s (choices: %s)" % (s, ",".join(SHAPES)))
 
-	print(f"# commit     = {detect_commit()}")
-	print(f"# rows       = {args.rows}")
-	print(f"# iterations = {args.iterations} (interleaved)")
+	order = "random" if args.random else "interleaved"
+	print(f"# commit       = {detect_commit()}")
+	print(f"# iterations   = {args.iterations} ({order})")
+	print(f"# shuffle_sk   = {args.shuffle_sk}")
+	print(f"# main_buffers = {args.main_buffers}")
 	print()
 	baseline = CONFIGS[0][0]  # "off"
-	print(f"{'shape':<12} {'config':<12} "
+	print(f"{'shape':<12} {'rows':>8} {'config':<12} "
 	      f"{'median_s':>10} {'stdev_s':>10} {'rows/s':>12} "
 	      f"{'vs_' + baseline:>10}")
 
 	regressions = []
-	node = make_node()
+	node = make_node(args.main_buffers)
 	try:
 		for shape in shapes:
-			payload = build_payload(shape, args.rows)
+			n_rows = args.rows if args.rows else SHAPES[shape]["rows"]
+			payload = build_payload(shape, n_rows, args.shuffle_sk)
 			# Warmup one iteration per config so the first measurement round
 			# already runs against a warm node.
-			for _, dpk, dt in CONFIGS:
-				run_one(node, shape, dpk, dt, payload)
-			# Interleaved measurements: rotate through configs per iteration
-			# so all modes see the same steady state.
-			runs = {name: [] for name, _, _ in CONFIGS}
-			for _ in range(args.iterations):
-				for name, dpk, dt in CONFIGS:
-					runs[name].append(run_one(node, shape, dpk, dt, payload))
+			for _, dpk, dt, dsk in CONFIGS:
+				run_one(node, shape, dpk, dt, dsk, payload)
+			runs = {name: [] for name, _, _, _ in CONFIGS}
+			if args.random:
+				schedule = [(name, dpk, dt, dsk)
+				            for _ in range(args.iterations)
+				            for name, dpk, dt, dsk in CONFIGS]
+				random.shuffle(schedule)
+				for name, dpk, dt, dsk in schedule:
+					runs[name].append(
+					    run_one(node, shape, dpk, dt, dsk, payload))
+			else:
+				for _ in range(args.iterations):
+					for name, dpk, dt, dsk in CONFIGS:
+						runs[name].append(
+						    run_one(node, shape, dpk, dt, dsk, payload))
 			baseline_median = statistics.median(runs[baseline])
-			for name, _, _ in CONFIGS:
+			for name, _, _, _ in CONFIGS:
 				vs = runs[name]
 				med = statistics.median(vs)
 				std = statistics.stdev(vs) if len(vs) > 1 else 0.0
-				rps = args.rows / med
+				rps = n_rows / med
 				if name == baseline:
 					speedup = ""
 				else:
@@ -203,7 +268,7 @@ def main():
 					if ratio < args.min_ratio:
 						regressions.append((shape, name, ratio))
 				print(
-				    f"{shape:<12} {name:<12} "
+				    f"{shape:<12} {n_rows:>8} {name:<12} "
 				    f"{med:>10.3f} {std:>10.3f} {rps:>12.0f} "
 				    f"{speedup:>10}",
 				    flush=True)

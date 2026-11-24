@@ -17,6 +17,7 @@
 
 #include "orioledb.h"
 
+#include "btree/insert.h"
 #include "btree/iterator.h"
 #include "btree/modify.h"
 #include "catalog/cic_spool.h"
@@ -36,6 +37,7 @@
 #include "utils/stopevent.h"
 
 #include "access/amapi.h"
+#include "catalog/index.h"
 #include "access/multixact.h"
 #include "access/relation.h"
 #include "commands/progress.h"
@@ -63,6 +65,13 @@ static bool orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 							  IndexUniqueCheck checkUnique,
 							  bool indexUnchanged,
 							  IndexInfo *indexInfo);
+static void orioledb_aminsertmulti(Relation rel,
+								   TupleTableSlot **slots, int nslots,
+								   Datum *tupleidsDatum,
+								   Relation heapRel,
+								   IndexUniqueCheck checkUnique,
+								   IndexInfo *indexInfo,
+								   EState *estate);
 static bool orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 							  Datum *values, bool *isnull, Datum tupleid,
 							  Datum *valuesOld, bool *isnullOld,
@@ -163,6 +172,7 @@ orioledb_btree_handler(void)
 	amroutine->ambuildempty = orioledb_ambuildempty;
 	amroutine->aminsert = NULL;
 	amroutine->aminsertextended = orioledb_aminsert;
+	amroutine->aminsertmulti = orioledb_aminsertmulti;
 	amroutine->amupdate = orioledb_amupdate;
 	amroutine->amdelete = orioledb_amdelete;
 	amroutine->ambulkdelete = orioledb_ambulkdelete;
@@ -639,6 +649,61 @@ detoast_passed_values(OIndexDescr *index_descr, Datum *values, bool *isnull, boo
 	}
 }
 
+/*
+ * Form an SK leaf tuple from pre-extracted values/isnull: remove duplicate
+ * columns, append the rowid, build the OTuple, and store it in the index
+ * descriptor's reusable slot.  Returns the formed tuple; caller owns it.
+ */
+static OTuple
+form_sk_leaf_tuple(OIndexDescr *index_descr, OTableDescr *descr,
+				   int natts, Datum tupleid,
+				   Datum *values, bool *isnull,
+				   OIndexNumber ix_num,
+				   CommitSeqNo *csn, uint32 *version)
+{
+	OTuple		tuple;
+
+	/*
+	 * An SK index may reference the same table column in multiple index
+	 * positions.  Compact the values/isnull arrays by skipping duplicates so
+	 * the leaf tuple contains each column value only once.
+	 */
+	if (index_descr->duplicates != NIL)
+	{
+		ListCell   *lc = list_head(index_descr->duplicates);
+		List	   *duplicate = lc ? (List *) lfirst(lc) : NIL;
+		int			cur_attr = 0;
+
+		for (int i = 0; i < natts; i++)
+		{
+			if (duplicate != NIL && linitial_int(duplicate) == cur_attr)
+			{
+				lc = lnext(index_descr->duplicates, lc);
+				duplicate = lc ? (List *) lfirst(lc) : NIL;
+			}
+			else
+			{
+				values[cur_attr] = values[i];
+				isnull[cur_attr] = isnull[i];
+				cur_attr++;
+			}
+		}
+	}
+
+	append_rowid_values(index_descr,
+						GET_PRIMARY(descr)->nonLeafTupdesc,
+						&GET_PRIMARY(descr)->nonLeafSpec,
+						tupleid, values, isnull,
+						csn, version);
+
+	tuple = o_form_tuple(index_descr->leafTupdesc,
+						 &index_descr->leafSpec,
+						 *version, values, isnull, NULL);
+	tts_orioledb_store_tuple(index_descr->old_leaf_slot, tuple,
+							 descr, *csn, ix_num, false, NULL);
+	return tuple;
+}
+
 static bool
 orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 				  Datum tupleid, Relation heapRel,
@@ -736,47 +801,10 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	ASAN_UNPOISON_MEMORY_REGION(values, rel->rd_att->natts * sizeof(Datum));
 	ASAN_UNPOISON_MEMORY_REGION(isnull, rel->rd_att->natts * sizeof(bool));
 
-	if (index_descr->duplicates != NIL)
-	{
-		ListCell   *lc = NULL;
-		List	   *duplicate = NIL;
-		int			cur_attr;
-		int			i;
-
-		/* Remove duplicate column values to store in our index */
-
-		if (index_descr->duplicates != NIL)
-			lc = list_head(index_descr->duplicates);
-		if (lc != NULL)
-			duplicate = (List *) lfirst(lc);
-
-		cur_attr = 0;
-		for (i = 0; i < rel->rd_att->natts; i++)
-		{
-			if (duplicate != NIL && linitial_int(duplicate) == cur_attr)
-			{
-				lc = lnext(index_descr->duplicates, lc);
-				if (lc != NULL)
-					duplicate = (List *) lfirst(lc);
-				else
-					duplicate = NIL;
-			}
-			else
-			{
-				values[cur_attr] = values[i];
-				cur_attr++;
-			}
-		}
-	}
-	append_rowid_values(index_descr,
-						GET_PRIMARY(descr)->nonLeafTupdesc,
-						&GET_PRIMARY(descr)->nonLeafSpec,
-						tupleid, values, isnull,
-						&csn, &version);
-
-	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull, NULL);
+	tuple = form_sk_leaf_tuple(index_descr, descr, rel->rd_att->natts,
+							   tupleid, values, isnull, ix_num,
+							   &csn, &version);
 	slot = index_descr->old_leaf_slot;
-	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, false, NULL);
 	callbackInfo.arg = slot;
 
 	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
@@ -800,6 +828,165 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 		pfree(tuple.data);
 
 	return success;
+}
+
+/*
+ * Batched secondary-index insert during COPY.  Builds SK leaf tuples and
+ * key bounds for the whole batch, sorts by key, and drains into SK leaves.
+ * Falls back to per-row aminsert for non-orioledb indexes or when disabled.
+ */
+static void
+orioledb_aminsertmulti(Relation rel,
+					   TupleTableSlot **slots, int nslots,
+					   Datum *tupleidsDatum,
+					   Relation heapRel,
+					   IndexUniqueCheck checkUnique,
+					   IndexInfo *indexInfo,
+					   EState *estate)
+{
+	ORelOids	oids;
+	OIndexType	ix_type;
+	OIndexDescr *index_descr;
+	OTableDescr *descr;
+	OIndexNumber ix_num;
+	OSnapshot	o_snapshot;
+	OXid		oxid;
+	OTuple	   *tuples;
+	LocationIndex *tuplens;
+	OBTreeKeyBound *keys;
+	Pointer    *keyptrs;
+	BTreeModifyCallbackInfo callbackInfo =
+	{
+		.waitCallback = NULL,
+		.modifyDeletedCallback = o_insert_callback,
+		.modifyCallback = NULL,
+		.needsUndoForSelfCreated = true
+	};
+	int			i;
+	Datum		per_slot_values[INDEX_MAX_KEYS];
+	bool		per_slot_isnull[INDEX_MAX_KEYS];
+	ItemPointerData *tids = NULL;
+
+	OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+	if (nslots <= 0)
+		return;
+
+	if (options && !options->orioledb_index)
+		goto fallback;
+
+	if (orioledb_debug_disable_sk_multi_insert)
+		goto fallback;
+
+	if (OidIsValid(rel->rd_rel->relrewrite))
+		return;
+
+	if (rel->rd_index->indisprimary)
+		return;
+
+	ORelOidsSetFromRel(oids, rel);
+	ix_type = o_index_rel_get_ix_type(rel);
+	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	Assert(index_descr != NULL);
+	descr = o_fetch_table_descr(index_descr->tableOids);
+	Assert(descr != NULL);
+
+	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
+	{
+		if (descr->indices[ix_num]->oids.reloid == rel->rd_rel->oid)
+			break;
+	}
+	Assert(ix_num < descr->nIndices);
+
+	o_btree_load_shmem(&index_descr->desc);
+
+	tuples = (OTuple *) palloc(sizeof(OTuple) * nslots);
+	tuplens = (LocationIndex *) palloc(sizeof(LocationIndex) * nslots);
+	keys = (OBTreeKeyBound *) palloc(sizeof(OBTreeKeyBound) * nslots);
+	keyptrs = (Pointer *) palloc(sizeof(Pointer) * nslots);
+	if (index_descr->primaryIsCtid)
+		tids = (ItemPointerData *) palloc(sizeof(ItemPointerData) * nslots);
+
+	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
+
+	/* Phase 1: per-slot prep (extract values, form leaf tuple, key bound). */
+	for (i = 0; i < nslots; i++)
+	{
+		CommitSeqNo csn;
+		uint32		version;
+
+		if (estate)
+			GetPerTupleExprContext(estate)->ecxt_scantuple = slots[i];
+		FormIndexDatum(indexInfo, slots[i], estate, per_slot_values, per_slot_isnull);
+
+		tuples[i] = form_sk_leaf_tuple(index_descr, descr,
+									   rel->rd_att->natts,
+									   tupleidsDatum[i],
+									   per_slot_values, per_slot_isnull,
+									   ix_num, &csn, &version);
+		tuplens[i] = o_tuple_size(tuples[i], &index_descr->leafSpec);
+		o_btree_check_size_of_tuple(tuplens[i], index_descr->name.data, true);
+
+		fill_key_bound(index_descr->old_leaf_slot, index_descr, &keys[i]);
+
+		/*
+		 * fill_key_bound stores PointerGetDatum(&slot->tts_tid) for TIDOID
+		 * columns, i.e. all key bounds share the same pointer.  Copy each
+		 * ctid into per-tuple storage so the sort sees distinct values.
+		 */
+		if (tids)
+		{
+			int			j;
+
+			tids[i] = index_descr->old_leaf_slot->tts_tid;
+			for (j = 0; j < keys[i].nkeys; j++)
+			{
+				if (keys[i].keys[j].type == TIDOID)
+					keys[i].keys[j].value = PointerGetDatum(&tids[i]);
+			}
+		}
+
+		keyptrs[i] = (Pointer) &keys[i];
+	}
+
+	/* Phase 2+3: sort and drain into SK leaves. */
+	{
+		OMultiInsertSKContext sk_ctx = {
+			.tupleidsDatum = tupleidsDatum,
+			.indexInfo = indexInfo,
+			.indexRel = rel,
+			.checkUnique = checkUnique,
+			.estate = estate,
+		};
+
+		o_btree_multi_insert_loop(tuples, tuplens, keyptrs,
+								  nslots,
+								  index_descr, slots, descr, heapRel,
+								  &callbackInfo, oxid, o_snapshot.csn,
+								  &sk_ctx);
+	}
+
+	pfree(tuples);
+	pfree(tuplens);
+	pfree(keys);
+	pfree(keyptrs);
+	if (tids)
+		pfree(tids);
+	return;
+
+	/* Non-orioledb index or GUC-disabled: insert one at a time. */
+fallback:
+	for (i = 0; i < nslots; i++)
+	{
+		Datum		values[INDEX_MAX_KEYS];
+		bool		isnull[INDEX_MAX_KEYS];
+
+		if (estate)
+			GetPerTupleExprContext(estate)->ecxt_scantuple = slots[i];
+		FormIndexDatum(indexInfo, slots[i], estate, values, isnull);
+		orioledb_aminsert(rel, values, isnull, tupleidsDatum[i],
+						  heapRel, checkUnique, false, indexInfo);
+	}
 }
 
 static bool

@@ -563,6 +563,1218 @@ SELECT orioledb_tbl_check('t_indep_none'::regclass);
  t
 (1 row)
 
+-- S) Secondary index multi-insert via COPY.  Exercises the batched
+-- aminsertmulti path for non-unique and unique secondary indexes.
+CREATE TABLE t_sk (
+    id integer PRIMARY KEY,
+    a  int NOT NULL,
+    b  int NOT NULL,
+    c  text NOT NULL
+) USING orioledb;
+CREATE INDEX t_sk_a_idx ON t_sk (a);
+CREATE INDEX t_sk_b_idx ON t_sk (b);
+\set copyfile :abs_builddir '/results/sk.data'
+COPY (SELECT i, i * 3, i % 100, 'val_' || i FROM generate_series(1, 3000) i) TO :'copyfile';
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_sk FROM :'copyfile';
+SELECT count(*) FROM t_sk;
+ count 
+-------
+  3000
+(1 row)
+
+SELECT count(*) FROM t_sk WHERE a BETWEEN 300 AND 600;
+ count 
+-------
+   101
+(1 row)
+
+SELECT count(*) FROM t_sk WHERE b = 42;
+ count 
+-------
+    30
+(1 row)
+
+SELECT orioledb_tbl_check('t_sk'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- T) SK multi-insert with unsorted PK.  Both PK and SK paths
+-- must sort independently and produce correct trees.
+CREATE TABLE t_sk_unsorted (
+    id integer PRIMARY KEY,
+    v  int NOT NULL
+) USING orioledb;
+CREATE INDEX t_sk_unsorted_v_idx ON t_sk_unsorted (v);
+INSERT INTO t_sk_unsorted SELECT i * 10, i FROM generate_series(1, 2000) i;
+\set copyfile :abs_builddir '/results/sk_unsorted.data'
+COPY (SELECT 20001 + i, 999 - i FROM generate_series(1, 500, 2) i) TO :'copyfile';
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_sk_unsorted FROM :'copyfile';
+SELECT count(*) FROM t_sk_unsorted;
+ count 
+-------
+  2250
+(1 row)
+
+SELECT count(*) FROM t_sk_unsorted WHERE v BETWEEN 500 AND 800;
+ count 
+-------
+   452
+(1 row)
+
+SELECT orioledb_tbl_check('t_sk_unsorted'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- U) Unique SK: duplicate on SK must raise unique_violation.
+CREATE TABLE t_sk_uniq (
+    id integer PRIMARY KEY,
+    code int NOT NULL UNIQUE
+) USING orioledb;
+INSERT INTO t_sk_uniq VALUES (1, 100);
+SET orioledb.debug_disable_sk_multi_insert = false;
+DO $$
+BEGIN
+    INSERT INTO t_sk_uniq VALUES (2, 100), (3, 200);
+    RAISE EXCEPTION 'duplicate accepted';
+EXCEPTION WHEN unique_violation THEN
+    NULL;
+END$$;
+SELECT count(*) FROM t_sk_uniq;
+ count 
+-------
+     1
+(1 row)
+
+SELECT orioledb_tbl_check('t_sk_uniq'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- V) SK multi-insert parity: batched vs per-row must produce identical
+-- index content.
+CREATE TABLE t_sk_par_a (
+    id integer PRIMARY KEY,
+    v  int NOT NULL
+) USING orioledb;
+CREATE INDEX ON t_sk_par_a (v);
+CREATE TABLE t_sk_par_b (
+    id integer PRIMARY KEY,
+    v  int NOT NULL
+) USING orioledb;
+CREATE INDEX ON t_sk_par_b (v);
+\set copyfile :abs_builddir '/results/sk_par.data'
+COPY (SELECT i, i * 7 % 500 FROM generate_series(1, 2000) i) TO :'copyfile';
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_sk_par_a FROM :'copyfile';
+SET orioledb.debug_disable_sk_multi_insert = true;
+COPY t_sk_par_b FROM :'copyfile';
+SELECT (SELECT count(*) FROM t_sk_par_a) = (SELECT count(*) FROM t_sk_par_b) AS same_count,
+       (SELECT sum(v) FROM t_sk_par_a) = (SELECT sum(v) FROM t_sk_par_b) AS same_sum;
+ same_count | same_sum 
+------------+----------
+ t          | t
+(1 row)
+
+-- Both must be usable via the SK index.
+SET enable_seqscan = off;
+SELECT count(*) FROM t_sk_par_a WHERE v BETWEEN 100 AND 200;
+ count 
+-------
+   404
+(1 row)
+
+SELECT count(*) FROM t_sk_par_b WHERE v BETWEEN 100 AND 200;
+ count 
+-------
+   404
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_sk_par_a'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_sk_par_b'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- W) Expression index: batched SK path evaluates index expressions via
+-- EState threaded through aminsertmulti.
+CREATE TABLE t_sk_expr (
+    id integer PRIMARY KEY,
+    v  int NOT NULL
+) USING orioledb;
+CREATE INDEX t_sk_expr_idx ON t_sk_expr ((v * 2 + 1));
+\set copyfile :abs_builddir '/results/sk_expr.data'
+COPY (SELECT i, i * 3 FROM generate_series(1, 2000) i) TO :'copyfile';
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_sk_expr FROM :'copyfile';
+SELECT count(*) FROM t_sk_expr;
+ count 
+-------
+  2000
+(1 row)
+
+SET enable_seqscan = off;
+SELECT count(*) FROM t_sk_expr WHERE (v * 2 + 1) BETWEEN 601 AND 1201;
+ count 
+-------
+   101
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_sk_expr'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- W2) Multi-column expression index with unsorted COPY data.
+CREATE TABLE t_sk_expr2 (
+    id integer PRIMARY KEY,
+    a  int NOT NULL,
+    b  int NOT NULL
+) USING orioledb;
+CREATE INDEX t_sk_expr2_idx ON t_sk_expr2 ((a + b));
+\set copyfile :abs_builddir '/results/sk_expr2.data'
+COPY (SELECT i, (i * 7) % 500, (i * 13) % 300
+      FROM generate_series(1, 3000) i ORDER BY (i * 31) % 3000) TO :'copyfile';
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_sk_expr2 FROM :'copyfile';
+SELECT count(*) FROM t_sk_expr2;
+ count 
+-------
+  3000
+(1 row)
+
+SET enable_seqscan = off;
+SELECT count(*) FROM t_sk_expr2 WHERE (a + b) BETWEEN 100 AND 300;
+ count 
+-------
+   884
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_sk_expr2'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- X) INCLUDE index: batched SK path must handle non-key included columns.
+CREATE TABLE t_sk_include (
+    id integer PRIMARY KEY,
+    a  int NOT NULL,
+    b  int NOT NULL
+) USING orioledb;
+CREATE INDEX t_sk_include_idx ON t_sk_include (a) INCLUDE (b);
+\set copyfile :abs_builddir '/results/sk_include.data'
+COPY (SELECT i, i * 3, i * 7 FROM generate_series(1, 2000) i) TO :'copyfile';
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_sk_include FROM :'copyfile';
+SELECT count(*) FROM t_sk_include;
+ count 
+-------
+  2000
+(1 row)
+
+SET enable_seqscan = off;
+SELECT count(*) FROM t_sk_include WHERE a BETWEEN 300 AND 600;
+ count 
+-------
+   101
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_sk_include'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- Y) SK + TOAST: table with both secondary indexes and TOASTable columns.
+CREATE TABLE t_sk_toast (
+    id   integer PRIMARY KEY,
+    v    int NOT NULL,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+CREATE INDEX t_sk_toast_v_idx ON t_sk_toast (v);
+\set copyfile :abs_builddir '/results/sk_toast.data'
+COPY (SELECT i, i * 7 FROM generate_series(1, 500) i) TO :'copyfile';
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_sk_toast (id, v) FROM :'copyfile';
+SELECT count(*) FROM t_sk_toast;
+ count 
+-------
+   500
+(1 row)
+
+SELECT count(*) FROM t_sk_toast WHERE v BETWEEN 700 AND 1400;
+ count 
+-------
+   101
+(1 row)
+
+SELECT count(*) FROM t_sk_toast WHERE length(body) = 6000;
+ count 
+-------
+   500
+(1 row)
+
+SELECT orioledb_tbl_check('t_sk_toast'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- Z) SK mode parity: debug_disable_sk_multi_insert on vs off must
+-- produce identical index content.
+CREATE TABLE t_sk_mode_a (
+    id integer PRIMARY KEY,
+    v  int NOT NULL
+) USING orioledb;
+CREATE INDEX ON t_sk_mode_a (v);
+CREATE TABLE t_sk_mode_b (
+    id integer PRIMARY KEY,
+    v  int NOT NULL
+) USING orioledb;
+CREATE INDEX ON t_sk_mode_b (v);
+\set copyfile :abs_builddir '/results/sk_mode.data'
+COPY (SELECT i, i * 7 % 500 FROM generate_series(1, 2000) i) TO :'copyfile';
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_sk_mode_a FROM :'copyfile';
+SET orioledb.debug_disable_sk_multi_insert = true;
+COPY t_sk_mode_b FROM :'copyfile';
+SELECT (SELECT count(*) FROM t_sk_mode_a) = (SELECT count(*) FROM t_sk_mode_b) AS same_count,
+       (SELECT sum(v) FROM t_sk_mode_a) = (SELECT sum(v) FROM t_sk_mode_b) AS same_sum;
+ same_count | same_sum 
+------------+----------
+ t          | t
+(1 row)
+
+SET enable_seqscan = off;
+SELECT count(*) FROM t_sk_mode_a WHERE v BETWEEN 100 AND 200;
+ count 
+-------
+   404
+(1 row)
+
+SELECT count(*) FROM t_sk_mode_b WHERE v BETWEEN 100 AND 200;
+ count 
+-------
+   404
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_sk_mode_a'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_sk_mode_b'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AA) Full 8-way GUC independence: all combinations of the three
+-- multi-insert booleans on a table with PK, secondary index, and
+-- TOASTable column.  Every combination must produce identical data.
+CREATE TABLE t_indep8_000 (
+    id integer PRIMARY KEY, v int NOT NULL,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+CREATE INDEX ON t_indep8_000 (v);
+CREATE TABLE t_indep8_001 (
+    id integer PRIMARY KEY, v int NOT NULL,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+CREATE INDEX ON t_indep8_001 (v);
+CREATE TABLE t_indep8_010 (
+    id integer PRIMARY KEY, v int NOT NULL,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+CREATE INDEX ON t_indep8_010 (v);
+CREATE TABLE t_indep8_011 (
+    id integer PRIMARY KEY, v int NOT NULL,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+CREATE INDEX ON t_indep8_011 (v);
+CREATE TABLE t_indep8_100 (
+    id integer PRIMARY KEY, v int NOT NULL,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+CREATE INDEX ON t_indep8_100 (v);
+CREATE TABLE t_indep8_101 (
+    id integer PRIMARY KEY, v int NOT NULL,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+CREATE INDEX ON t_indep8_101 (v);
+CREATE TABLE t_indep8_110 (
+    id integer PRIMARY KEY, v int NOT NULL,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+CREATE INDEX ON t_indep8_110 (v);
+CREATE TABLE t_indep8_111 (
+    id integer PRIMARY KEY, v int NOT NULL,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+CREATE INDEX ON t_indep8_111 (v);
+\set copyfile :abs_builddir '/results/indep8.data'
+COPY (SELECT i, i * 7 % 500 FROM generate_series(1, 200) i) TO :'copyfile';
+-- pk=off  toast=off  sk=off  (all batched)
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_toast_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_indep8_000 (id, v) FROM :'copyfile';
+-- pk=off  toast=off  sk=on
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_toast_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = true;
+COPY t_indep8_001 (id, v) FROM :'copyfile';
+-- pk=off  toast=on  sk=off
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_toast_multi_insert = true;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_indep8_010 (id, v) FROM :'copyfile';
+-- pk=off  toast=on  sk=on
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_toast_multi_insert = true;
+SET orioledb.debug_disable_sk_multi_insert = true;
+COPY t_indep8_011 (id, v) FROM :'copyfile';
+-- pk=on  toast=off  sk=off
+SET orioledb.debug_disable_multi_insert = true;
+SET orioledb.debug_disable_toast_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_indep8_100 (id, v) FROM :'copyfile';
+-- pk=on  toast=off  sk=on
+SET orioledb.debug_disable_multi_insert = true;
+SET orioledb.debug_disable_toast_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = true;
+COPY t_indep8_101 (id, v) FROM :'copyfile';
+-- pk=on  toast=on  sk=off
+SET orioledb.debug_disable_multi_insert = true;
+SET orioledb.debug_disable_toast_multi_insert = true;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_indep8_110 (id, v) FROM :'copyfile';
+-- pk=on  toast=on  sk=on  (all per-row)
+SET orioledb.debug_disable_multi_insert = true;
+SET orioledb.debug_disable_toast_multi_insert = true;
+SET orioledb.debug_disable_sk_multi_insert = true;
+COPY t_indep8_111 (id, v) FROM :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_toast_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = false;
+-- Row counts must match
+SELECT (SELECT count(*) FROM t_indep8_000) AS ref,
+       (SELECT count(*) FROM t_indep8_001) = (SELECT count(*) FROM t_indep8_000) AS c001,
+       (SELECT count(*) FROM t_indep8_010) = (SELECT count(*) FROM t_indep8_000) AS c010,
+       (SELECT count(*) FROM t_indep8_011) = (SELECT count(*) FROM t_indep8_000) AS c011,
+       (SELECT count(*) FROM t_indep8_100) = (SELECT count(*) FROM t_indep8_000) AS c100,
+       (SELECT count(*) FROM t_indep8_101) = (SELECT count(*) FROM t_indep8_000) AS c101,
+       (SELECT count(*) FROM t_indep8_110) = (SELECT count(*) FROM t_indep8_000) AS c110,
+       (SELECT count(*) FROM t_indep8_111) = (SELECT count(*) FROM t_indep8_000) AS c111;
+ ref | c001 | c010 | c011 | c100 | c101 | c110 | c111 
+-----+------+------+------+------+------+------+------
+ 200 | t    | t    | t    | t    | t    | t    | t
+(1 row)
+
+-- TOAST content must match
+SELECT (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_001)
+     = (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_000) AS md5_001,
+       (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_010)
+     = (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_000) AS md5_010,
+       (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_011)
+     = (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_000) AS md5_011,
+       (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_100)
+     = (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_000) AS md5_100,
+       (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_101)
+     = (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_000) AS md5_101,
+       (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_110)
+     = (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_000) AS md5_110,
+       (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_111)
+     = (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_indep8_000) AS md5_111;
+ md5_001 | md5_010 | md5_011 | md5_100 | md5_101 | md5_110 | md5_111 
+---------+---------+---------+---------+---------+---------+---------
+ t       | t       | t       | t       | t       | t       | t
+(1 row)
+
+-- SK index must be usable and return the same count
+SET enable_seqscan = off;
+SELECT (SELECT count(*) FROM t_indep8_000 WHERE v BETWEEN 100 AND 200) AS ref,
+       (SELECT count(*) FROM t_indep8_001 WHERE v BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_000 WHERE v BETWEEN 100 AND 200) AS sk001,
+       (SELECT count(*) FROM t_indep8_010 WHERE v BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_000 WHERE v BETWEEN 100 AND 200) AS sk010,
+       (SELECT count(*) FROM t_indep8_011 WHERE v BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_000 WHERE v BETWEEN 100 AND 200) AS sk011,
+       (SELECT count(*) FROM t_indep8_100 WHERE v BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_000 WHERE v BETWEEN 100 AND 200) AS sk100,
+       (SELECT count(*) FROM t_indep8_101 WHERE v BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_000 WHERE v BETWEEN 100 AND 200) AS sk101,
+       (SELECT count(*) FROM t_indep8_110 WHERE v BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_000 WHERE v BETWEEN 100 AND 200) AS sk110,
+       (SELECT count(*) FROM t_indep8_111 WHERE v BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_000 WHERE v BETWEEN 100 AND 200) AS sk111;
+ ref | sk001 | sk010 | sk011 | sk100 | sk101 | sk110 | sk111 
+-----+-------+-------+-------+-------+-------+-------+-------
+  43 | t     | t     | t     | t     | t     | t     | t
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_indep8_000'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_001'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_010'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_011'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_100'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_101'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_110'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_111'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AB) 8-way GUC independence on a non-TOAST table with multiple
+-- secondary indexes.  Verifies SK batching is independent of PK and
+-- TOAST GUCs when no TOAST is involved.
+CREATE TABLE t_indep8_nt_000 (
+    id integer PRIMARY KEY, a int NOT NULL, b int NOT NULL, c int NOT NULL
+) USING orioledb;
+CREATE INDEX ON t_indep8_nt_000 (a);
+CREATE INDEX ON t_indep8_nt_000 (b, c);
+CREATE TABLE t_indep8_nt_001 (
+    id integer PRIMARY KEY, a int NOT NULL, b int NOT NULL, c int NOT NULL
+) USING orioledb;
+CREATE INDEX ON t_indep8_nt_001 (a);
+CREATE INDEX ON t_indep8_nt_001 (b, c);
+CREATE TABLE t_indep8_nt_010 (
+    id integer PRIMARY KEY, a int NOT NULL, b int NOT NULL, c int NOT NULL
+) USING orioledb;
+CREATE INDEX ON t_indep8_nt_010 (a);
+CREATE INDEX ON t_indep8_nt_010 (b, c);
+CREATE TABLE t_indep8_nt_011 (
+    id integer PRIMARY KEY, a int NOT NULL, b int NOT NULL, c int NOT NULL
+) USING orioledb;
+CREATE INDEX ON t_indep8_nt_011 (a);
+CREATE INDEX ON t_indep8_nt_011 (b, c);
+CREATE TABLE t_indep8_nt_100 (
+    id integer PRIMARY KEY, a int NOT NULL, b int NOT NULL, c int NOT NULL
+) USING orioledb;
+CREATE INDEX ON t_indep8_nt_100 (a);
+CREATE INDEX ON t_indep8_nt_100 (b, c);
+CREATE TABLE t_indep8_nt_101 (
+    id integer PRIMARY KEY, a int NOT NULL, b int NOT NULL, c int NOT NULL
+) USING orioledb;
+CREATE INDEX ON t_indep8_nt_101 (a);
+CREATE INDEX ON t_indep8_nt_101 (b, c);
+CREATE TABLE t_indep8_nt_110 (
+    id integer PRIMARY KEY, a int NOT NULL, b int NOT NULL, c int NOT NULL
+) USING orioledb;
+CREATE INDEX ON t_indep8_nt_110 (a);
+CREATE INDEX ON t_indep8_nt_110 (b, c);
+CREATE TABLE t_indep8_nt_111 (
+    id integer PRIMARY KEY, a int NOT NULL, b int NOT NULL, c int NOT NULL
+) USING orioledb;
+CREATE INDEX ON t_indep8_nt_111 (a);
+CREATE INDEX ON t_indep8_nt_111 (b, c);
+\set copyfile :abs_builddir '/results/indep8_nt.data'
+COPY (SELECT i, i * 3 % 500, i * 7 % 300, i * 11 % 200 FROM generate_series(1, 2000) i) TO :'copyfile';
+-- pk=off  toast=off  sk=off
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_toast_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_indep8_nt_000 FROM :'copyfile';
+-- pk=off  toast=off  sk=on
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_toast_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = true;
+COPY t_indep8_nt_001 FROM :'copyfile';
+-- pk=off  toast=on  sk=off
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_toast_multi_insert = true;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_indep8_nt_010 FROM :'copyfile';
+-- pk=off  toast=on  sk=on
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_toast_multi_insert = true;
+SET orioledb.debug_disable_sk_multi_insert = true;
+COPY t_indep8_nt_011 FROM :'copyfile';
+-- pk=on  toast=off  sk=off
+SET orioledb.debug_disable_multi_insert = true;
+SET orioledb.debug_disable_toast_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_indep8_nt_100 FROM :'copyfile';
+-- pk=on  toast=off  sk=on
+SET orioledb.debug_disable_multi_insert = true;
+SET orioledb.debug_disable_toast_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = true;
+COPY t_indep8_nt_101 FROM :'copyfile';
+-- pk=on  toast=on  sk=off
+SET orioledb.debug_disable_multi_insert = true;
+SET orioledb.debug_disable_toast_multi_insert = true;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_indep8_nt_110 FROM :'copyfile';
+-- pk=on  toast=on  sk=on
+SET orioledb.debug_disable_multi_insert = true;
+SET orioledb.debug_disable_toast_multi_insert = true;
+SET orioledb.debug_disable_sk_multi_insert = true;
+COPY t_indep8_nt_111 FROM :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_toast_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = false;
+-- Row counts and column sums must match
+SELECT (SELECT count(*) FROM t_indep8_nt_000) AS ref,
+       (SELECT count(*) FROM t_indep8_nt_001) = (SELECT count(*) FROM t_indep8_nt_000) AS c001,
+       (SELECT count(*) FROM t_indep8_nt_010) = (SELECT count(*) FROM t_indep8_nt_000) AS c010,
+       (SELECT count(*) FROM t_indep8_nt_011) = (SELECT count(*) FROM t_indep8_nt_000) AS c011,
+       (SELECT count(*) FROM t_indep8_nt_100) = (SELECT count(*) FROM t_indep8_nt_000) AS c100,
+       (SELECT count(*) FROM t_indep8_nt_101) = (SELECT count(*) FROM t_indep8_nt_000) AS c101,
+       (SELECT count(*) FROM t_indep8_nt_110) = (SELECT count(*) FROM t_indep8_nt_000) AS c110,
+       (SELECT count(*) FROM t_indep8_nt_111) = (SELECT count(*) FROM t_indep8_nt_000) AS c111;
+ ref  | c001 | c010 | c011 | c100 | c101 | c110 | c111 
+------+------+------+------+------+------+------+------
+ 2000 | t    | t    | t    | t    | t    | t    | t
+(1 row)
+
+SELECT (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_001)
+     = (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_000) AS sum_001,
+       (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_010)
+     = (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_000) AS sum_010,
+       (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_011)
+     = (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_000) AS sum_011,
+       (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_100)
+     = (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_000) AS sum_100,
+       (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_101)
+     = (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_000) AS sum_101,
+       (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_110)
+     = (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_000) AS sum_110,
+       (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_111)
+     = (SELECT sum(a) + sum(b) + sum(c) FROM t_indep8_nt_000) AS sum_111;
+ sum_001 | sum_010 | sum_011 | sum_100 | sum_101 | sum_110 | sum_111 
+---------+---------+---------+---------+---------+---------+---------
+ t       | t       | t       | t       | t       | t       | t
+(1 row)
+
+-- Both SK indexes must be usable and return the same counts
+SET enable_seqscan = off;
+SELECT (SELECT count(*) FROM t_indep8_nt_000 WHERE a BETWEEN 100 AND 200) AS ref_a,
+       (SELECT count(*) FROM t_indep8_nt_001 WHERE a BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE a BETWEEN 100 AND 200) AS a001,
+       (SELECT count(*) FROM t_indep8_nt_010 WHERE a BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE a BETWEEN 100 AND 200) AS a010,
+       (SELECT count(*) FROM t_indep8_nt_011 WHERE a BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE a BETWEEN 100 AND 200) AS a011,
+       (SELECT count(*) FROM t_indep8_nt_100 WHERE a BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE a BETWEEN 100 AND 200) AS a100,
+       (SELECT count(*) FROM t_indep8_nt_101 WHERE a BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE a BETWEEN 100 AND 200) AS a101,
+       (SELECT count(*) FROM t_indep8_nt_110 WHERE a BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE a BETWEEN 100 AND 200) AS a110,
+       (SELECT count(*) FROM t_indep8_nt_111 WHERE a BETWEEN 100 AND 200)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE a BETWEEN 100 AND 200) AS a111;
+ ref_a | a001 | a010 | a011 | a100 | a101 | a110 | a111 
+-------+------+------+------+------+------+------+------
+   404 | t    | t    | t    | t    | t    | t    | t
+(1 row)
+
+SELECT (SELECT count(*) FROM t_indep8_nt_000 WHERE b BETWEEN 50 AND 150 AND c < 100) AS ref_bc,
+       (SELECT count(*) FROM t_indep8_nt_001 WHERE b BETWEEN 50 AND 150 AND c < 100)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE b BETWEEN 50 AND 150 AND c < 100) AS bc001,
+       (SELECT count(*) FROM t_indep8_nt_010 WHERE b BETWEEN 50 AND 150 AND c < 100)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE b BETWEEN 50 AND 150 AND c < 100) AS bc010,
+       (SELECT count(*) FROM t_indep8_nt_011 WHERE b BETWEEN 50 AND 150 AND c < 100)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE b BETWEEN 50 AND 150 AND c < 100) AS bc011,
+       (SELECT count(*) FROM t_indep8_nt_100 WHERE b BETWEEN 50 AND 150 AND c < 100)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE b BETWEEN 50 AND 150 AND c < 100) AS bc100,
+       (SELECT count(*) FROM t_indep8_nt_101 WHERE b BETWEEN 50 AND 150 AND c < 100)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE b BETWEEN 50 AND 150 AND c < 100) AS bc101,
+       (SELECT count(*) FROM t_indep8_nt_110 WHERE b BETWEEN 50 AND 150 AND c < 100)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE b BETWEEN 50 AND 150 AND c < 100) AS bc110,
+       (SELECT count(*) FROM t_indep8_nt_111 WHERE b BETWEEN 50 AND 150 AND c < 100)
+     = (SELECT count(*) FROM t_indep8_nt_000 WHERE b BETWEEN 50 AND 150 AND c < 100) AS bc111;
+ ref_bc | bc001 | bc010 | bc011 | bc100 | bc101 | bc110 | bc111 
+--------+-------+-------+-------+-------+-------+-------+-------
+    339 | t     | t     | t     | t     | t     | t     | t
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_indep8_nt_000'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_nt_001'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_nt_010'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_nt_011'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_nt_100'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_nt_101'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_nt_110'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_indep8_nt_111'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AC) CTID-PK + SK + TOAST: exercises all three multi-insert paths
+-- together on a table with no explicit PK.
+CREATE TABLE t_ctid_sk_toast (
+    v    int NOT NULL,
+    body text GENERATED ALWAYS AS (generate_string(v, 6000)) STORED
+) USING orioledb;
+CREATE INDEX t_ctid_sk_toast_v_idx ON t_ctid_sk_toast (v);
+\set copyfile :abs_builddir '/results/ctid_sk_toast.data'
+COPY (SELECT i FROM generate_series(1, 500) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_ctid_sk_toast (v) FROM :'copyfile';
+SELECT count(*) FROM t_ctid_sk_toast;
+ count 
+-------
+   500
+(1 row)
+
+SELECT count(*) FROM t_ctid_sk_toast WHERE v BETWEEN 100 AND 200;
+ count 
+-------
+   101
+(1 row)
+
+SELECT count(*) FROM t_ctid_sk_toast WHERE length(body) = 6000;
+ count 
+-------
+   500
+(1 row)
+
+SELECT orioledb_tbl_check('t_ctid_sk_toast'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AD) CTID-PK plain: no SK, no TOAST, just the implicit ctid primary key.
+CREATE TABLE t_ctid_plain (val int) USING orioledb;
+\set copyfile :abs_builddir '/results/ctid_plain.data'
+COPY (SELECT i FROM generate_series(1, 3000) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+COPY t_ctid_plain FROM :'copyfile';
+SELECT count(*), min(val), max(val) FROM t_ctid_plain;
+ count | min | max  
+-------+-----+------
+  3000 |   1 | 3000
+(1 row)
+
+SELECT orioledb_tbl_check('t_ctid_plain'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AE) Partial (WHERE) index: CopyTryMultiInsertIndexes returns false
+-- because ii_Predicate != NIL, so COPY falls back to per-tuple insertion.
+CREATE TABLE t_partial (
+    id integer PRIMARY KEY,
+    v  int NOT NULL
+) USING orioledb;
+CREATE INDEX t_partial_v_idx ON t_partial (v) WHERE v > 100;
+\set copyfile :abs_builddir '/results/partial.data'
+COPY (SELECT i, i * 3 FROM generate_series(1, 2000) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+COPY t_partial FROM :'copyfile';
+SELECT count(*) FROM t_partial;
+ count 
+-------
+  2000
+(1 row)
+
+SET enable_seqscan = off;
+SELECT count(*) FROM t_partial WHERE v > 100 AND v < 1000;
+ count 
+-------
+   300
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_partial'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AF) Deferred unique SK: CopyTryMultiInsertIndexes returns false because
+-- indisunique && !indimmediate.
+CREATE TABLE t_deferred (
+    id   integer PRIMARY KEY,
+    code int NOT NULL,
+    UNIQUE (code) DEFERRABLE INITIALLY DEFERRED
+) USING orioledb;
+\set copyfile :abs_builddir '/results/deferred.data'
+COPY (SELECT i, i * 7 FROM generate_series(1, 2000) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+COPY t_deferred FROM :'copyfile';
+SELECT count(*) FROM t_deferred;
+ count 
+-------
+  2000
+(1 row)
+
+SELECT count(*) FROM t_deferred WHERE code BETWEEN 700 AND 2100;
+ count 
+-------
+   201
+(1 row)
+
+SELECT orioledb_tbl_check('t_deferred'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AG) Exclusion constraint: CopyTryMultiInsertIndexes returns false because
+-- ii_ExclusionOps != NULL.
+CREATE TABLE t_excl (
+    id  integer PRIMARY KEY,
+    v   int NOT NULL,
+    EXCLUDE USING btree (v WITH =)
+) USING orioledb;
+\set copyfile :abs_builddir '/results/excl.data'
+COPY (SELECT i, i * 3 FROM generate_series(1, 2000) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+COPY t_excl FROM :'copyfile';
+SELECT count(*) FROM t_excl;
+ count 
+-------
+  2000
+(1 row)
+
+SELECT count(*) FROM t_excl WHERE v BETWEEN 300 AND 600;
+ count 
+-------
+   101
+(1 row)
+
+SELECT orioledb_tbl_check('t_excl'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AH) Unique SK + TOAST: exercises SK dedup together with TOAST
+-- multi-insert on a table with an explicit PK.
+CREATE TABLE t_sk_uniq_toast (
+    id   integer PRIMARY KEY,
+    code int NOT NULL UNIQUE,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+\set copyfile :abs_builddir '/results/sk_uniq_toast.data'
+COPY (SELECT i, i * 11 FROM generate_series(1, 300) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_sk_uniq_toast (id, code) FROM :'copyfile';
+SELECT count(*) FROM t_sk_uniq_toast;
+ count 
+-------
+   300
+(1 row)
+
+SELECT count(*) FROM t_sk_uniq_toast WHERE code BETWEEN 1000 AND 2000;
+ count 
+-------
+    91
+(1 row)
+
+SELECT count(*) FROM t_sk_uniq_toast WHERE length(body) = 6000;
+ count 
+-------
+   300
+(1 row)
+
+SELECT orioledb_tbl_check('t_sk_uniq_toast'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AI) Expression SK + TOAST: exercises expression index evaluation
+-- in the batched SK path together with TOAST values.
+CREATE TABLE t_sk_expr_toast (
+    id   integer PRIMARY KEY,
+    v    int NOT NULL,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+CREATE INDEX t_sk_expr_toast_idx ON t_sk_expr_toast ((v * 2 + 1));
+\set copyfile :abs_builddir '/results/sk_expr_toast.data'
+COPY (SELECT i, i * 5 FROM generate_series(1, 300) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_sk_expr_toast (id, v) FROM :'copyfile';
+SELECT count(*) FROM t_sk_expr_toast;
+ count 
+-------
+   300
+(1 row)
+
+SET enable_seqscan = off;
+SELECT count(*) FROM t_sk_expr_toast WHERE (v * 2 + 1) BETWEEN 100 AND 500;
+ count 
+-------
+    40
+(1 row)
+
+SET enable_seqscan = on;
+SELECT count(*) FROM t_sk_expr_toast WHERE length(body) = 6000;
+ count 
+-------
+   300
+(1 row)
+
+SELECT orioledb_tbl_check('t_sk_expr_toast'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AJ) Batchable + non-batchable indexes on the same table: one normal SK
+-- plus one partial SK.  CopyTryMultiInsertIndexes returns false for all
+-- indexes, so even the normal SK goes per-tuple via ExecInsertIndexTuples.
+CREATE TABLE t_mixed_idx (
+    id integer PRIMARY KEY,
+    a  int NOT NULL,
+    b  int NOT NULL
+) USING orioledb;
+CREATE INDEX t_mixed_idx_a ON t_mixed_idx (a);
+CREATE INDEX t_mixed_idx_b ON t_mixed_idx (b) WHERE b > 500;
+\set copyfile :abs_builddir '/results/mixed_idx.data'
+COPY (SELECT i, i * 3, i * 7 % 1000 FROM generate_series(1, 2000) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+COPY t_mixed_idx FROM :'copyfile';
+SELECT count(*) FROM t_mixed_idx;
+ count 
+-------
+  2000
+(1 row)
+
+SET enable_seqscan = off;
+SELECT count(*) FROM t_mixed_idx WHERE a BETWEEN 300 AND 600;
+ count 
+-------
+   101
+(1 row)
+
+SELECT count(*) FROM t_mixed_idx WHERE b > 500 AND b < 800;
+ count 
+-------
+   598
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_mixed_idx'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AK) Fallback + TOAST: partial index forces SK fallback to per-tuple,
+-- but PK and TOAST batching still work.
+CREATE TABLE t_fallback_toast (
+    id   integer PRIMARY KEY,
+    v    int NOT NULL,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+CREATE INDEX t_fallback_toast_v ON t_fallback_toast (v) WHERE v > 100;
+\set copyfile :abs_builddir '/results/fallback_toast.data'
+COPY (SELECT i, i * 5 FROM generate_series(1, 300) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+COPY t_fallback_toast (id, v) FROM :'copyfile';
+SELECT count(*) FROM t_fallback_toast;
+ count 
+-------
+   300
+(1 row)
+
+SET enable_seqscan = off;
+SELECT count(*) FROM t_fallback_toast WHERE v > 100 AND v < 500;
+ count 
+-------
+    79
+(1 row)
+
+SET enable_seqscan = on;
+SELECT count(*) FROM t_fallback_toast WHERE length(body) = 6000;
+ count 
+-------
+   300
+(1 row)
+
+SELECT orioledb_tbl_check('t_fallback_toast'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AL) Fallback + ctid-PK: partial index on a table with no explicit PK.
+CREATE TABLE t_fallback_ctid (
+    v int NOT NULL
+) USING orioledb;
+CREATE INDEX t_fallback_ctid_v ON t_fallback_ctid (v) WHERE v > 100;
+\set copyfile :abs_builddir '/results/fallback_ctid.data'
+COPY (SELECT i FROM generate_series(1, 3000) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+COPY t_fallback_ctid FROM :'copyfile';
+SELECT count(*) FROM t_fallback_ctid;
+ count 
+-------
+  3000
+(1 row)
+
+SET enable_seqscan = off;
+SELECT count(*) FROM t_fallback_ctid WHERE v > 100 AND v < 1000;
+ count 
+-------
+   899
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_fallback_ctid'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AM) Multiple SK indexes (3+): each index gets its own aminsertmulti call.
+CREATE TABLE t_multi_sk (
+    id integer PRIMARY KEY,
+    a  int NOT NULL,
+    b  int NOT NULL,
+    c  int NOT NULL
+) USING orioledb;
+CREATE INDEX t_multi_sk_a ON t_multi_sk (a);
+CREATE INDEX t_multi_sk_b ON t_multi_sk (b);
+CREATE INDEX t_multi_sk_c ON t_multi_sk (c);
+\set copyfile :abs_builddir '/results/multi_sk.data'
+COPY (SELECT i, i * 3, i * 7 % 500, i * 11 % 200 FROM generate_series(1, 3000) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_multi_sk FROM :'copyfile';
+SELECT count(*) FROM t_multi_sk;
+ count 
+-------
+  3000
+(1 row)
+
+SET enable_seqscan = off;
+SELECT count(*) FROM t_multi_sk WHERE a BETWEEN 300 AND 600;
+ count 
+-------
+   101
+(1 row)
+
+SELECT count(*) FROM t_multi_sk WHERE b = 42;
+ count 
+-------
+     6
+(1 row)
+
+SELECT count(*) FROM t_multi_sk WHERE c BETWEEN 50 AND 100;
+ count 
+-------
+   765
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_multi_sk'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AN) Dense duplicate SK values: many rows sharing the same SK key value
+-- hammer the same SK leaf, stressing page splits in the SK tree.
+CREATE TABLE t_dense_sk (
+    id integer PRIMARY KEY,
+    grp int NOT NULL
+) USING orioledb;
+CREATE INDEX t_dense_sk_grp ON t_dense_sk (grp);
+\set copyfile :abs_builddir '/results/dense_sk.data'
+COPY (SELECT i, i % 5 FROM generate_series(1, 5000) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_dense_sk FROM :'copyfile';
+SELECT count(*) FROM t_dense_sk;
+ count 
+-------
+  5000
+(1 row)
+
+SET enable_seqscan = off;
+SELECT count(*) FROM t_dense_sk WHERE grp = 0;
+ count 
+-------
+  1000
+(1 row)
+
+SELECT count(*) FROM t_dense_sk WHERE grp = 4;
+ count 
+-------
+  1000
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_dense_sk'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- AO) Nullable SK: SK column allows NULLs, some rows have NULL values.
+CREATE TABLE t_null_sk (
+    id  integer PRIMARY KEY,
+    val int
+) USING orioledb;
+CREATE INDEX t_null_sk_val ON t_null_sk (val);
+\set copyfile :abs_builddir '/results/null_sk.data'
+COPY (SELECT i, CASE WHEN i % 3 = 0 THEN NULL ELSE i * 7 END
+      FROM generate_series(1, 3000) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = false;
+SET orioledb.debug_disable_sk_multi_insert = false;
+COPY t_null_sk FROM :'copyfile';
+SELECT count(*) FROM t_null_sk;
+ count 
+-------
+  3000
+(1 row)
+
+SELECT count(*) FROM t_null_sk WHERE val IS NULL;
+ count 
+-------
+  1000
+(1 row)
+
+SET enable_seqscan = off;
+SELECT count(*) FROM t_null_sk WHERE val BETWEEN 500 AND 1000;
+ count 
+-------
+    47
+(1 row)
+
+SELECT count(*) FROM t_null_sk WHERE val IS NULL;
+ count 
+-------
+  1000
+(1 row)
+
+SET enable_seqscan = on;
+SELECT orioledb_tbl_check('t_null_sk'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+DROP TABLE t_sk;
+DROP TABLE t_sk_unsorted;
+DROP TABLE t_sk_uniq;
+DROP TABLE t_sk_par_a;
+DROP TABLE t_sk_par_b;
+DROP TABLE t_sk_expr;
+DROP TABLE t_sk_expr2;
+DROP TABLE t_sk_include;
+DROP TABLE t_sk_toast;
+DROP TABLE t_sk_mode_a;
+DROP TABLE t_sk_mode_b;
+DROP TABLE t_indep8_000;
+DROP TABLE t_indep8_001;
+DROP TABLE t_indep8_010;
+DROP TABLE t_indep8_011;
+DROP TABLE t_indep8_100;
+DROP TABLE t_indep8_101;
+DROP TABLE t_indep8_110;
+DROP TABLE t_indep8_111;
+DROP TABLE t_indep8_nt_000;
+DROP TABLE t_indep8_nt_001;
+DROP TABLE t_indep8_nt_010;
+DROP TABLE t_indep8_nt_011;
+DROP TABLE t_indep8_nt_100;
+DROP TABLE t_indep8_nt_101;
+DROP TABLE t_indep8_nt_110;
+DROP TABLE t_indep8_nt_111;
 DROP TABLE t_ord;
 DROP TABLE t_rev;
 DROP TABLE t_copy_unsorted;
@@ -583,6 +1795,19 @@ DROP TABLE t_indep_both;
 DROP TABLE t_indep_pk;
 DROP TABLE t_indep_toast;
 DROP TABLE t_indep_none;
+DROP TABLE t_ctid_sk_toast;
+DROP TABLE t_ctid_plain;
+DROP TABLE t_partial;
+DROP TABLE t_deferred;
+DROP TABLE t_excl;
+DROP TABLE t_sk_uniq_toast;
+DROP TABLE t_sk_expr_toast;
+DROP TABLE t_mixed_idx;
+DROP TABLE t_fallback_toast;
+DROP TABLE t_fallback_ctid;
+DROP TABLE t_multi_sk;
+DROP TABLE t_dense_sk;
+DROP TABLE t_null_sk;
 DROP FUNCTION generate_string(integer, integer);
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA multi_insert CASCADE;

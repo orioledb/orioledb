@@ -323,6 +323,558 @@ class MultiInsertTest(BaseTest):
 		finally:
 			node.stop()
 
+	def test_concurrent_sk(self):
+		"""Two sessions COPY disjoint keys into a table with secondary indexes."""
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE t_sk_conc (
+				id  bigint PRIMARY KEY,
+				val int NOT NULL
+			) USING orioledb;
+			CREATE INDEX ON t_sk_conc (val);
+		""")
+		try:
+			a = [(i, i * 3) for i in range(1, ROWS_PER_SESSION + 1)]
+			b = [(i, i * 3)
+			     for i in range(ROWS_PER_SESSION + 1, 2 * ROWS_PER_SESSION + 1)
+			     ]
+			errors = []
+			ta = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_sk_conc", a, ["id",
+			                                                   "val"], errors))
+			tb = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_sk_conc", b, ["id",
+			                                                   "val"], errors))
+			ta.start()
+			tb.start()
+			ta.join()
+			tb.join()
+			self.assertEqual(errors, [],
+			                 f"unexpected errors: {[str(e) for e in errors]}")
+			con = node.connect()
+			try:
+				c = con.cursor
+				c.execute("SELECT count(*) FROM t_sk_conc")
+				(n, ) = c.fetchone()
+				self.assertEqual(n, 2 * ROWS_PER_SESSION)
+				c.execute("SELECT orioledb_tbl_check('t_sk_conc'::regclass)")
+				(ok, ) = c.fetchone()
+				self.assertTrue(ok)
+				c.execute("SET enable_seqscan = off")
+				c.execute(
+				    "SELECT count(*) FROM t_sk_conc WHERE val BETWEEN 1000 AND 5000"
+				)
+				(n, ) = c.fetchone()
+				self.assertGreater(n, 0)
+			finally:
+				con.close()
+		finally:
+			node.stop()
+
+	def test_concurrent_sk_toast(self):
+		"""Two sessions COPY into a table with PK, SK, and TOAST columns."""
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE t_sk_toast_conc (
+				id   bigint PRIMARY KEY,
+				val  int NOT NULL,
+				body text
+			) USING orioledb;
+			CREATE INDEX ON t_sk_toast_conc (val);
+		""")
+		try:
+			body_len = 6000
+			n = TOAST_ROWS_PER_SESSION
+			a = [(i, i * 3, 'A' * body_len) for i in range(1, n + 1)]
+			b = [(i, i * 3, 'B' * body_len) for i in range(n + 1, 2 * n + 1)]
+			errors = []
+			cols = ["id", "val", "body"]
+			ta = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_sk_toast_conc", a, cols,
+			                            errors))
+			tb = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_sk_toast_conc", b, cols,
+			                            errors))
+			ta.start()
+			tb.start()
+			ta.join()
+			tb.join()
+			self.assertEqual(errors, [],
+			                 f"unexpected errors: {[str(e) for e in errors]}")
+			con = node.connect()
+			try:
+				c = con.cursor
+				c.execute("SELECT count(*) FROM t_sk_toast_conc")
+				(cnt, ) = c.fetchone()
+				self.assertEqual(cnt, 2 * n)
+				c.execute(
+				    "SELECT orioledb_tbl_check('t_sk_toast_conc'::regclass)")
+				(ok, ) = c.fetchone()
+				self.assertTrue(ok)
+				c.execute("SET enable_seqscan = off")
+				c.execute(
+				    "SELECT count(*) FROM t_sk_toast_conc WHERE val BETWEEN 100 AND 500"
+				)
+				(cnt, ) = c.fetchone()
+				self.assertGreater(cnt, 0)
+				c.execute("SET enable_seqscan = on")
+				c.execute(
+				    f"SELECT count(*) FROM t_sk_toast_conc WHERE length(body) = {body_len}"
+				)
+				(cnt, ) = c.fetchone()
+				self.assertEqual(cnt, 2 * n)
+			finally:
+				con.close()
+		finally:
+			node.stop()
+
+	def test_concurrent_ctid_pk(self):
+		"""Two sessions COPY into a ctid-PK table (no explicit PK)."""
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE t_ctid_conc (val int NOT NULL) USING orioledb;
+		""")
+		try:
+			a = [(i, ) for i in range(1, ROWS_PER_SESSION + 1)]
+			b = [(i, )
+			     for i in range(ROWS_PER_SESSION + 1, 2 * ROWS_PER_SESSION + 1)
+			     ]
+			errors = []
+			ta = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_ctid_conc", a, ["val"],
+			                            errors))
+			tb = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_ctid_conc", b, ["val"],
+			                            errors))
+			ta.start()
+			tb.start()
+			ta.join()
+			tb.join()
+			self.assertEqual(errors, [],
+			                 f"unexpected errors: {[str(e) for e in errors]}")
+			con = node.connect()
+			try:
+				c = con.cursor
+				c.execute("SELECT count(*) FROM t_ctid_conc")
+				(cnt, ) = c.fetchone()
+				self.assertEqual(cnt, 2 * ROWS_PER_SESSION)
+				c.execute("SELECT orioledb_tbl_check('t_ctid_conc'::regclass)")
+				(ok, ) = c.fetchone()
+				self.assertTrue(ok)
+			finally:
+				con.close()
+		finally:
+			node.stop()
+
+	def test_concurrent_ctid_sk(self):
+		"""Two sessions COPY into a ctid-PK table with a secondary index."""
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE t_ctid_sk_conc (val int NOT NULL) USING orioledb;
+			CREATE INDEX ON t_ctid_sk_conc (val);
+		""")
+		try:
+			a = [(i, ) for i in range(1, ROWS_PER_SESSION + 1)]
+			b = [(i, )
+			     for i in range(ROWS_PER_SESSION + 1, 2 * ROWS_PER_SESSION + 1)
+			     ]
+			errors = []
+			ta = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_ctid_sk_conc", a, ["val"],
+			                            errors))
+			tb = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_ctid_sk_conc", b, ["val"],
+			                            errors))
+			ta.start()
+			tb.start()
+			ta.join()
+			tb.join()
+			self.assertEqual(errors, [],
+			                 f"unexpected errors: {[str(e) for e in errors]}")
+			con = node.connect()
+			try:
+				c = con.cursor
+				c.execute("SELECT count(*) FROM t_ctid_sk_conc")
+				(cnt, ) = c.fetchone()
+				self.assertEqual(cnt, 2 * ROWS_PER_SESSION)
+				c.execute(
+				    "SELECT orioledb_tbl_check('t_ctid_sk_conc'::regclass)")
+				(ok, ) = c.fetchone()
+				self.assertTrue(ok)
+				c.execute("SET enable_seqscan = off")
+				c.execute(
+				    "SELECT count(*) FROM t_ctid_sk_conc WHERE val BETWEEN 1000 AND 5000"
+				)
+				(cnt, ) = c.fetchone()
+				self.assertGreater(cnt, 0)
+			finally:
+				con.close()
+		finally:
+			node.stop()
+
+	def test_concurrent_sk_overlapping(self):
+		"""Two sessions with interleaved SK values contending on the same SK leaves."""
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE t_sk_overlap (
+				id  bigint PRIMARY KEY,
+				val int NOT NULL
+			) USING orioledb;
+			CREATE INDEX ON t_sk_overlap (val);
+		""")
+		try:
+			a = [(2 * i, i % 100) for i in range(1, ROWS_PER_SESSION + 1)]
+			b = [(2 * i - 1, i % 100) for i in range(1, ROWS_PER_SESSION + 1)]
+			errors = []
+			ta = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_sk_overlap", a, ["id", "val"],
+			                            errors))
+			tb = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_sk_overlap", b, ["id", "val"],
+			                            errors))
+			ta.start()
+			tb.start()
+			ta.join()
+			tb.join()
+			self.assertEqual(errors, [],
+			                 f"unexpected errors: {[str(e) for e in errors]}")
+			con = node.connect()
+			try:
+				c = con.cursor
+				c.execute("SELECT count(*) FROM t_sk_overlap")
+				(cnt, ) = c.fetchone()
+				self.assertEqual(cnt, 2 * ROWS_PER_SESSION)
+				c.execute(
+				    "SELECT orioledb_tbl_check('t_sk_overlap'::regclass)")
+				(ok, ) = c.fetchone()
+				self.assertTrue(ok)
+				c.execute("SET enable_seqscan = off")
+				c.execute("SELECT count(*) FROM t_sk_overlap WHERE val = 42")
+				(cnt, ) = c.fetchone()
+				self.assertEqual(cnt, 2 * (ROWS_PER_SESSION // 100))
+			finally:
+				con.close()
+		finally:
+			node.stop()
+
+	def test_concurrent_unique_sk_conflict(self):
+		"""Two sessions racing on overlapping unique SK values."""
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE t_sk_uniq_conc (
+				id   bigint PRIMARY KEY,
+				code int NOT NULL UNIQUE
+			) USING orioledb;
+		""")
+		try:
+			a = [(i, i) for i in range(1, ROWS_PER_SESSION + 1)]
+			b = [(ROWS_PER_SESSION + i, i)
+			     for i in range(1, ROWS_PER_SESSION + 1)]
+			errors = []
+			ta = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_sk_uniq_conc", a,
+			                            ["id", "code"], errors))
+			tb = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_sk_uniq_conc", b,
+			                            ["id", "code"], errors))
+			ta.start()
+			tb.start()
+			ta.join()
+			tb.join()
+			self.assertEqual(
+			    len(errors), 1, f"expected exactly one unique_violation, "
+			    f"got {len(errors)}: {[str(e) for e in errors]}")
+			self.assertIn("duplicate key", str(errors[0]).lower())
+			con = node.connect()
+			try:
+				c = con.cursor
+				c.execute("SELECT count(*) FROM t_sk_uniq_conc")
+				(cnt, ) = c.fetchone()
+				self.assertEqual(cnt, ROWS_PER_SESSION)
+				c.execute(
+				    "SELECT orioledb_tbl_check('t_sk_uniq_conc'::regclass)")
+				(ok, ) = c.fetchone()
+				self.assertTrue(ok)
+			finally:
+				con.close()
+		finally:
+			node.stop()
+
+	def test_concurrent_expr_sk(self):
+		"""Two sessions COPY into a table with an expression SK index."""
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE t_expr_conc (
+				id  bigint PRIMARY KEY,
+				val int NOT NULL
+			) USING orioledb;
+			CREATE INDEX ON t_expr_conc ((val * 2 + 1));
+		""")
+		try:
+			a = [(i, i * 3) for i in range(1, ROWS_PER_SESSION + 1)]
+			b = [(i, i * 3)
+			     for i in range(ROWS_PER_SESSION + 1, 2 * ROWS_PER_SESSION + 1)
+			     ]
+			errors = []
+			ta = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_expr_conc", a, ["id", "val"],
+			                            errors))
+			tb = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_expr_conc", b, ["id", "val"],
+			                            errors))
+			ta.start()
+			tb.start()
+			ta.join()
+			tb.join()
+			self.assertEqual(errors, [],
+			                 f"unexpected errors: {[str(e) for e in errors]}")
+			con = node.connect()
+			try:
+				c = con.cursor
+				c.execute("SELECT count(*) FROM t_expr_conc")
+				(cnt, ) = c.fetchone()
+				self.assertEqual(cnt, 2 * ROWS_PER_SESSION)
+				c.execute("SELECT orioledb_tbl_check('t_expr_conc'::regclass)")
+				(ok, ) = c.fetchone()
+				self.assertTrue(ok)
+				c.execute("SET enable_seqscan = off")
+				c.execute(
+				    "SELECT count(*) FROM t_expr_conc WHERE (val * 2 + 1) BETWEEN 1000 AND 5000"
+				)
+				(cnt, ) = c.fetchone()
+				self.assertGreater(cnt, 0)
+			finally:
+				con.close()
+		finally:
+			node.stop()
+
+	def test_concurrent_fallback_partial(self):
+		"""Two sessions COPY into a table with a partial index (per-tuple fallback)."""
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE t_partial_conc (
+				id  bigint PRIMARY KEY,
+				val int NOT NULL
+			) USING orioledb;
+			CREATE INDEX ON t_partial_conc (val) WHERE val > 100;
+		""")
+		try:
+			a = [(i, i * 3) for i in range(1, ROWS_PER_SESSION + 1)]
+			b = [(i, i * 3)
+			     for i in range(ROWS_PER_SESSION + 1, 2 * ROWS_PER_SESSION + 1)
+			     ]
+			errors = []
+			ta = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_partial_conc", a,
+			                            ["id", "val"], errors))
+			tb = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_partial_conc", b,
+			                            ["id", "val"], errors))
+			ta.start()
+			tb.start()
+			ta.join()
+			tb.join()
+			self.assertEqual(errors, [],
+			                 f"unexpected errors: {[str(e) for e in errors]}")
+			con = node.connect()
+			try:
+				c = con.cursor
+				c.execute("SELECT count(*) FROM t_partial_conc")
+				(cnt, ) = c.fetchone()
+				self.assertEqual(cnt, 2 * ROWS_PER_SESSION)
+				c.execute(
+				    "SELECT orioledb_tbl_check('t_partial_conc'::regclass)")
+				(ok, ) = c.fetchone()
+				self.assertTrue(ok)
+				c.execute("SET enable_seqscan = off")
+				c.execute(
+				    "SELECT count(*) FROM t_partial_conc WHERE val > 100 AND val < 5000"
+				)
+				(cnt, ) = c.fetchone()
+				self.assertGreater(cnt, 0)
+			finally:
+				con.close()
+		finally:
+			node.stop()
+
+	def test_concurrent_mixed_idx(self):
+		"""Two sessions COPY into a table with both batchable and non-batchable indexes."""
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE t_mixed_conc (
+				id  bigint PRIMARY KEY,
+				a   int NOT NULL,
+				b   int NOT NULL
+			) USING orioledb;
+			CREATE INDEX ON t_mixed_conc (a);
+			CREATE INDEX ON t_mixed_conc (b) WHERE b > 500;
+		""")
+		try:
+			a = [(i, i * 3, i * 7 % 1000)
+			     for i in range(1, ROWS_PER_SESSION + 1)]
+			b = [(i, i * 3, i * 7 % 1000)
+			     for i in range(ROWS_PER_SESSION + 1, 2 * ROWS_PER_SESSION + 1)
+			     ]
+			errors = []
+			ta = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_mixed_conc", a,
+			                            ["id", "a", "b"], errors))
+			tb = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_mixed_conc", b,
+			                            ["id", "a", "b"], errors))
+			ta.start()
+			tb.start()
+			ta.join()
+			tb.join()
+			self.assertEqual(errors, [],
+			                 f"unexpected errors: {[str(e) for e in errors]}")
+			con = node.connect()
+			try:
+				c = con.cursor
+				c.execute("SELECT count(*) FROM t_mixed_conc")
+				(cnt, ) = c.fetchone()
+				self.assertEqual(cnt, 2 * ROWS_PER_SESSION)
+				c.execute(
+				    "SELECT orioledb_tbl_check('t_mixed_conc'::regclass)")
+				(ok, ) = c.fetchone()
+				self.assertTrue(ok)
+				c.execute("SET enable_seqscan = off")
+				c.execute(
+				    "SELECT count(*) FROM t_mixed_conc WHERE a BETWEEN 1000 AND 5000"
+				)
+				(cnt, ) = c.fetchone()
+				self.assertGreater(cnt, 0)
+				c.execute(
+				    "SELECT count(*) FROM t_mixed_conc WHERE b > 500 AND b < 800"
+				)
+				(cnt, ) = c.fetchone()
+				self.assertGreater(cnt, 0)
+			finally:
+				con.close()
+		finally:
+			node.stop()
+
+	def test_concurrent_ctid_sk_key_aliasing(self):
+		"""Reproducer for ctid-PK key-bound aliasing in SK multi-insert.
+
+		orioledb_aminsertmulti uses a single index leaf slot for all tuples.
+		fill_key_bound stores PointerGetDatum(&slot->tts_tid) for the TIDOID
+		ctid suffix, a pointer, not a copy.  After the loop every key bound
+		points to the SAME address (the last tuple's ctid).  Concurrent COPY
+		interleaves ctids across backends; the aliased ctid causes
+		btree_page_search to find a wrong insertion position, placing a tuple
+		after entries with smaller ctids, corrupting the SK btree.
+
+		The test COPYs from several threads into a ctid-PK table with an SK
+		index, then compares seqscan vs indexscan counts per val group.
+		Corruption makes some entries invisible to index scans."""
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE t_ctid_alias (val int NOT NULL) USING orioledb;
+			CREATE INDEX ON t_ctid_alias (val);
+		""")
+		try:
+			n_threads = 4
+			rows_per = 20000 if not VALGRIND else 2000
+			val_mod = 50
+			errors = []
+			threads = []
+			for w in range(n_threads):
+
+				def worker(wid=w):
+					try:
+						con = node.connect()
+						try:
+							c = con.cursor
+							c.execute(
+							    "SET orioledb.debug_disable_multi_insert = false"
+							)
+							c.execute(
+							    "SET orioledb.debug_disable_sk_multi_insert = false"
+							)
+							buf = io.StringIO()
+							for i in range(rows_per):
+								val = (wid * rows_per + i) % val_mod
+								buf.write(f"{val}\n")
+							buf.seek(0)
+							c.copy_expert("COPY t_ctid_alias FROM STDIN", buf)
+							con.connection.commit()
+						finally:
+							con.close()
+					except Exception as e:
+						errors.append(e)
+
+				t = threading.Thread(target=worker)
+				threads.append(t)
+			for t in threads:
+				t.start()
+			for t in threads:
+				t.join()
+			self.assertEqual(errors, [],
+			                 f"unexpected errors: {[str(e) for e in errors]}")
+
+			con = node.connect()
+			try:
+				c = con.cursor
+				total = rows_per * n_threads
+
+				c.execute("SELECT count(*) FROM t_ctid_alias")
+				(cnt, ) = c.fetchone()
+				self.assertEqual(cnt, total)
+
+				# Seqscan counts
+				c.execute("""
+					SELECT val, count(*) FROM t_ctid_alias
+					GROUP BY val ORDER BY val
+				""")
+				seq_counts = dict(c.fetchall())
+
+				# Index-only scan counts
+				c.execute("SET enable_seqscan = off")
+				c.execute(
+				    """
+					SELECT val, count(*) FROM t_ctid_alias
+					WHERE val BETWEEN 0 AND %s
+					GROUP BY val ORDER BY val
+				""", (val_mod - 1, ))
+				idx_counts = dict(c.fetchall())
+				c.execute("SET enable_seqscan = on")
+
+				for v in sorted(seq_counts.keys()):
+					self.assertEqual(
+					    seq_counts[v], idx_counts.get(v, 0),
+					    f"val={v}: seqscan={seq_counts[v]} vs "
+					    f"indexscan={idx_counts.get(v, 0)}")
+
+				c.execute(
+				    "SELECT orioledb_tbl_check('t_ctid_alias'::regclass)")
+				(ok, ) = c.fetchone()
+				self.assertTrue(ok)
+			finally:
+				con.close()
+		finally:
+			node.stop()
+
 
 if __name__ == "__main__":
 	unittest.main()
