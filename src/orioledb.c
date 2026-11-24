@@ -481,7 +481,8 @@ orioledb_test_wal_parse_relation(PG_FUNCTION_ARGS)
 static void
 orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 {
-	if ((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_KEYS)
+	if ((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_KEYS ||
+		(XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_IMAGES)
 		rewind_keys_desc(buf, record);
 #ifdef IS_DEV
 	else
@@ -517,6 +518,8 @@ orioledb_rm_identify(uint8 info)
 {
 	if ((info & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_KEYS)
 		return "OrioleDB rewind keys";
+	if ((info & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_IMAGES)
+		return "OrioleDB rewind images";
 	return "OrioleDB WAL container";
 }
 

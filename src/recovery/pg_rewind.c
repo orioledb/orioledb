@@ -615,6 +615,7 @@ orioledb_pg_rewind_new_row_versions(PG_FUNCTION_ARGS)
 
 #define REWIND_OXID 0
 
+
 static void
 start_rewind_oxid(void)
 {
@@ -665,8 +666,41 @@ apply_rewind_row(OTableDescr *descr, OIndexDescr *indexDescr,
 	}
 }
 
+/*
+ * Reads the rewind rows in order: from the rewind file, or from memory when
+ * the promoted node logged them (see rewind_images_redo()).
+ */
+typedef struct RewindReader
+{
+	File		file;			/* -1 to read from memory */
+	const char *name;
+	const char *buf;
+	uint64		len;
+	off_t		offset;
+} RewindReader;
+
+static void replay_rewind_trees(RewindReader *r);
+
+static int
+rewind_read(RewindReader *r, void *dst, int len)
+{
+	int			readed;
+
+	if (r->file >= 0)
+		readed = OFileRead(r->file, (Pointer) dst, len, r->offset,
+						   WAIT_EVENT_DATA_FILE_READ);
+	else
+	{
+		readed = (int) Min((uint64) len, r->len - r->offset);
+		memcpy(dst, r->buf + r->offset, readed);
+	}
+	if (readed > 0)
+		r->offset += readed;
+	return readed;
+}
+
 static void
-ereport_rewind_error(File rewind_file, OIndexDescr *indexDescr,
+ereport_rewind_error(RewindReader *r, OIndexDescr *indexDescr,
 					 int sys_tree_num, char *name)
 {
 	OIndexType	err_ix_type;
@@ -688,17 +722,17 @@ ereport_rewind_error(File rewind_file, OIndexDescr *indexDescr,
 					errmsg("could not read "
 						   "%s for "
 						   "tree (%u %u %u %u) "
-						   "from rewind file %s",
+						   "from rewind rows %s",
 						   name,
 						   err_ix_type,
 						   err_oids.datoid,
 						   err_oids.reloid,
 						   err_oids.relnode,
-						   FilePathName(rewind_file))));
+						   r->name)));
 }
 
 static OTuple
-replay_rewind_row(File rewind_file, char *read_buf, off_t *offset,
+replay_rewind_row(RewindReader *r, char *read_buf,
 				  OTableDescr *descr, OIndexDescr *indexDescr,
 				  int sys_tree_num, bool add_new)
 {
@@ -710,13 +744,8 @@ replay_rewind_row(File rewind_file, char *read_buf, off_t *offset,
 	uint32		u32data;
 
 	Assert(item_header_size < O_BTREE_MAX_TUPLE_SIZE * 2);
-	if (OFileRead(rewind_file, (Pointer) read_buf,
-				  item_header_size, *offset,
-				  WAIT_EVENT_DATA_FILE_READ) !=
-		item_header_size)
-		ereport_rewind_error(rewind_file, indexDescr, sys_tree_num,
-							 "item header");
-	(*offset) += item_header_size;
+	if (rewind_read(r, read_buf, item_header_size) != item_header_size)
+		ereport_rewind_error(r, indexDescr, sys_tree_num, "item header");
 
 	deleted = *(uint8 *) (read_buf);
 	rewind_row.formatFlags = *(uint8 *) (read_buf +
@@ -725,13 +754,8 @@ replay_rewind_row(File rewind_file, char *read_buf, off_t *offset,
 	item_len = pg_ntoh32(u32data);
 
 	Assert(item_len < O_BTREE_MAX_TUPLE_SIZE * 2);
-	if (OFileRead(rewind_file, (Pointer) read_buf,
-				  item_len, *offset,
-				  WAIT_EVENT_DATA_FILE_READ) !=
-		item_len)
-		ereport_rewind_error(rewind_file, indexDescr, sys_tree_num,
-							 "item data");
-	(*offset) += item_len;
+	if (rewind_read(r, read_buf, item_len) != item_len)
+		ereport_rewind_error(r, indexDescr, sys_tree_num, "item data");
 	rewind_row.data = read_buf;
 
 	if (indexDescr || (sys_tree_num > 0))
@@ -790,6 +814,9 @@ replay_rewind_row(File rewind_file, char *read_buf, off_t *offset,
  * point, see add_divergence_rewind_keys().
  */
 bool		rewind_keys_capturing = false;
+
+/* The node replays WAL after a rewind: see rewind_images_redo() */
+static bool rewind_replaying = false;
 static StringInfo rewind_keys = NULL;
 static bool rewind_keys_collected = false;
 
@@ -1004,7 +1031,7 @@ rewind_keys_finish_process(int worker_id)
  * merge their keys and keep them durably until they are logged.  The
  * switchpoint is the end of recovery.
  */
-void
+static void
 rewind_keys_collect(XLogRecPtr switchpoint)
 {
 	DIR		   *dir;
@@ -1053,13 +1080,15 @@ rewind_keys_collect(XLogRecPtr switchpoint)
 }
 
 /*
- * Log the entries of the keys file as ORIOLEDB_XLOG_REWIND_KEYS records, and
- * flush them.  The keys are split by whole entries.  There is at least one
- * record, even for no keys, so pg_rewind can tell this promotion from the
+ * Log data as records of the given kind (ORIOLEDB_XLOG_REWIND_KEYS or
+ * ORIOLEDB_XLOG_REWIND_IMAGES), and flush them.  The keys are split by whole
+ * entries, the images by bytes: redo gathers them up.  There is at least one
+ * record, even for no data, so pg_rewind can tell this promotion from the
  * one without the keys.
  */
 static void
-log_rewind_keys(XLogRecPtr switchpoint, const char *data, uint64 len)
+log_rewind_payload(uint8 info, XLogRecPtr switchpoint, const char *data,
+				   uint64 len)
 {
 	XLogRecPtr	lsn = InvalidXLogRecPtr;
 	uint64		offset = 0;
@@ -1070,23 +1099,28 @@ log_rewind_keys(XLogRecPtr switchpoint, const char *data, uint64 len)
 		uint64		chunk = 0;
 		uint16		flags;
 
-		/* Take the entries up to the chunk size.  */
-		while (offset + chunk < len && chunk < REWIND_KEYS_WAL_CHUNK)
+		if (info == ORIOLEDB_XLOG_REWIND_KEYS)
 		{
-			uint32		key_len;
+			/* Take the entries up to the chunk size.  */
+			while (offset + chunk < len && chunk < REWIND_KEYS_WAL_CHUNK)
+			{
+				uint32		key_len;
 
-			if (len - offset - chunk < REWIND_KEY_ENTRY_HEADER_SIZE)
-				ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
-								errmsg("truncated entry in rewind keys")));
-			memcpy(&key_len,
-				   data + offset + chunk + REWIND_KEY_ENTRY_HEADER_SIZE -
-				   sizeof(uint32), sizeof(key_len));
-			key_len = pg_ntoh32(key_len);
-			if (len - offset - chunk - REWIND_KEY_ENTRY_HEADER_SIZE < key_len)
-				ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
-								errmsg("truncated entry in rewind keys")));
-			chunk += REWIND_KEY_ENTRY_HEADER_SIZE + key_len;
+				if (len - offset - chunk < REWIND_KEY_ENTRY_HEADER_SIZE)
+					ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+									errmsg("truncated entry in rewind keys")));
+				memcpy(&key_len,
+					   data + offset + chunk + REWIND_KEY_ENTRY_HEADER_SIZE -
+					   sizeof(uint32), sizeof(key_len));
+				key_len = pg_ntoh32(key_len);
+				if (len - offset - chunk - REWIND_KEY_ENTRY_HEADER_SIZE < key_len)
+					ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+									errmsg("truncated entry in rewind keys")));
+				chunk += REWIND_KEY_ENTRY_HEADER_SIZE + key_len;
+			}
 		}
+		else
+			chunk = Min(len - offset, REWIND_KEYS_WAL_CHUNK);
 
 		flags = (offset == 0 ? REWIND_KEYS_FIRST : 0) |
 			(offset + chunk == len ? REWIND_KEYS_LAST : 0);
@@ -1100,12 +1134,259 @@ log_rewind_keys(XLogRecPtr switchpoint, const char *data, uint64 len)
 		XLogBeginInsert();
 		XLogRegisterData(header.data, header.len);
 		XLogRegisterData((char *) data + offset, chunk);
-		lsn = XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_REWIND_KEYS);
+		lsn = XLogInsert(ORIOLEDB_RMGR_ID, info);
 		pfree(header.data);
 		offset += chunk;
 	} while (offset < len);
 
 	XLogFlush(lsn);
+}
+
+/*
+ * The rows of the captured keys as the promotion left them, in the format of
+ * the rewind file: what the old primary has to take instead of its own
+ * version.  They come from the trees right after the undo ran, so it is
+ * the state the transaction's rollback produced.
+ */
+typedef struct RewindTreeKeys
+{
+	OIndexType	type;
+	ORelOids	oids;
+	uint32		nkeys;
+	StringInfo	keys;			/* flags, length and bytes of each key */
+} RewindTreeKeys;
+
+typedef struct RewindImages
+{
+	XLogRecPtr	switchpoint;
+	StringInfo	images;
+} RewindImages;
+
+/* Of RewindImages, until rewind_keys_save() logs them */
+static List *rewind_images = NIL;
+
+static int
+rewind_tree_keys_cmp(const ListCell *a, const ListCell *b)
+{
+	RewindTreeKeys *t1 = (RewindTreeKeys *) lfirst(a);
+	RewindTreeKeys *t2 = (RewindTreeKeys *) lfirst(b);
+
+	/* System trees first, like pg_rewind sorts the trees it takes */
+	if (t1->oids.datoid <= SYS_TREES_DATOID && t2->oids.datoid > SYS_TREES_DATOID)
+		return -1;
+	if (t1->oids.datoid > SYS_TREES_DATOID && t2->oids.datoid <= SYS_TREES_DATOID)
+		return 1;
+	if (t1->type != t2->type)
+		return t1->type < t2->type ? -1 : 1;
+	if (t1->oids.datoid != t2->oids.datoid)
+		return t1->oids.datoid < t2->oids.datoid ? -1 : 1;
+	if (t1->oids.reloid != t2->oids.reloid)
+		return t1->oids.reloid < t2->oids.reloid ? -1 : 1;
+	if (t1->oids.relnode != t2->oids.relnode)
+		return t1->oids.relnode < t2->oids.relnode ? -1 : 1;
+	if (t1->oids.spcoid != t2->oids.spcoid)
+		return t1->oids.spcoid < t2->oids.spcoid ? -1 : 1;
+	return 0;
+}
+
+/* Group the keys of rewind_keys_capture() by tree.  */
+static List *
+rewind_keys_by_tree(const char *data, uint64 len)
+{
+	List	   *trees = NIL;
+	uint64		offset = 0;
+
+	while (offset < len)
+	{
+		uint32		u32;
+		OIndexType	type;
+		ORelOids	oids;
+		uint8		flags;
+		uint32		key_len;
+		ListCell   *lc;
+		RewindTreeKeys *tree = NULL;
+
+		if (len - offset < REWIND_KEY_ENTRY_HEADER_SIZE)
+			ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("truncated entry in rewind keys")));
+		memcpy(&u32, data + offset, sizeof(u32));
+		type = (OIndexType) pg_ntoh32(u32);
+		memcpy(&u32, data + offset + 4, sizeof(u32));
+		oids.datoid = pg_ntoh32(u32);
+		memcpy(&u32, data + offset + 8, sizeof(u32));
+		oids.reloid = pg_ntoh32(u32);
+		memcpy(&u32, data + offset + 12, sizeof(u32));
+		oids.relnode = pg_ntoh32(u32);
+		memcpy(&u32, data + offset + 16, sizeof(u32));
+		oids.spcoid = pg_ntoh32(u32);
+		flags = *(uint8 *) (data + offset + 20);
+		memcpy(&u32, data + offset + 21, sizeof(u32));
+		key_len = pg_ntoh32(u32);
+		offset += REWIND_KEY_ENTRY_HEADER_SIZE;
+		if (len - offset < key_len)
+			ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("truncated entry in rewind keys")));
+
+		foreach(lc, trees)
+		{
+			RewindTreeKeys *t = (RewindTreeKeys *) lfirst(lc);
+
+			if (t->type == type && ORelOidsIsEqual(t->oids, oids))
+			{
+				tree = t;
+				break;
+			}
+		}
+		if (tree == NULL)
+		{
+			tree = palloc0(sizeof(RewindTreeKeys));
+			tree->type = type;
+			tree->oids = oids;
+			tree->keys = makeStringInfo();
+			trees = lappend(trees, tree);
+		}
+		appendStringInfoChar(tree->keys, (char) flags);
+		appendHton32StringInfo(tree->keys, key_len);
+		appendBinaryStringInfoNT(tree->keys, data + offset, key_len);
+		tree->nkeys++;
+		offset += key_len;
+	}
+	return trees;
+}
+
+/*
+ * Append the rows of the tree's keys: what orioledb_pg_rewind_sorted_keys()
+ * and orioledb_pg_rewind_new_row_versions() make of them for pg_rewind.
+ * The node does not know what the old primary has, so a tree of the system
+ * catalog that is there is taken whole.
+ */
+static void
+rewind_tree_images(StringInfo out, RewindTreeKeys *tree)
+{
+	OTableDescr *descr = NULL;
+	OIndexDescr *indexDescr = NULL;
+	int			sys_tree_num;
+	KeyArrayElement **key_array;
+	char	   *ptr = tree->keys->data;
+	StringInfo	keys_str;
+	uint32		new_nkeys;
+	uint32		i;
+	TableRow	row;
+
+	sys_tree_num = fill_descrs(tree->oids, tree->type, &descr, &indexDescr);
+	if (!indexDescr && sys_tree_num <= 0)
+		return;
+
+	key_array = create_key_array(tree->nkeys, 0, &ptr);
+	if (sys_tree_num > 0)
+		cmp_tree_desc = get_sys_tree(sys_tree_num);
+	else
+		cmp_tree_desc = &indexDescr->desc;
+	new_nkeys = sort_key_array(key_array, tree->nkeys);
+
+	keys_str = makeStringInfo();
+	for (i = 0; i < new_nkeys; i++)
+	{
+		append_tuple(keys_str, key_array[i]->tupleFormatFlags,
+					 key_array[i]->data, key_array[i]->dataLength, NULL);
+		if (sys_tree_num == SYS_TREES_O_INDICES)
+		{
+			uint8		index_exist = false;
+
+			appendBinaryStringInfoNT(keys_str, (Pointer) &index_exist,
+									 sizeof(uint8));
+		}
+		pfree(key_array[i]);
+	}
+	pfree(key_array);
+
+	row.ix_type = tree->type;
+	row.oids = tree->oids;
+	row.nkeys = new_nkeys;
+	row.keys = (bytea *) palloc(VARHDRSZ + keys_str->len);
+	SET_VARSIZE(row.keys, VARHDRSZ + keys_str->len);
+	memcpy(VARDATA(row.keys), keys_str->data, keys_str->len);
+
+	appendHton32StringInfo(out, row.ix_type);
+	appendHton32StringInfo(out, row.oids.datoid);
+	appendHton32StringInfo(out, row.oids.reloid);
+	appendHton32StringInfo(out, row.oids.relnode);
+	appendHton32StringInfo(out, row.oids.spcoid);
+	process_tree(out, &row);
+
+	pfree(row.keys);
+	pfree(keys_str->data);
+	pfree(keys_str);
+}
+
+/*
+ * Called by the startup process when every recovery process has rolled
+ * its transactions back.  The keys of the rows that went through it are
+ * merged and kept durably, and the rows as they are now are put
+ * aside to be logged after the end of recovery, with the keys.  They are
+ * made from the pending keys files, so a crash before the logging gets them
+ * again at the next start: the rollback is repeated then.
+ */
+void
+rewind_images_prepare(void)
+{
+	XLogRecPtr	switchpoint = pg_atomic_read_u64(recovery_rewind_keys_switchpoint);
+	DIR		   *dir;
+	struct dirent *de;
+	List	   *pending = NIL;
+	ListCell   *lc;
+	MemoryContext oldcxt;
+
+	if (XLogRecPtrIsValid(switchpoint))
+		rewind_keys_collect(switchpoint);
+
+	dir = AllocateDir(ORIOLEDB_DATA_DIR);
+	while ((de = ReadDir(dir, ORIOLEDB_DATA_DIR)) != NULL)
+	{
+		uint32		hi;
+		uint32		lo;
+		char		stop;
+
+		if (sscanf(de->d_name, "pg_rewind_keys.%08X%08X.pending%c",
+				   &hi, &lo, &stop) != 2)
+			continue;
+		pending = lappend(pending, pstrdup(de->d_name));
+	}
+	FreeDir(dir);
+
+	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+	foreach(lc, pending)
+	{
+		const char *name = (const char *) lfirst(lc);
+		uint32		hi;
+		uint32		lo;
+		char		path[MAXPGPATH];
+		char	   *data;
+		uint64		len;
+		List	   *trees;
+		ListCell   *tc;
+		RewindImages *images;
+
+		sscanf(name, "pg_rewind_keys.%08X%08X.pending", &hi, &lo);
+		snprintf(path, sizeof(path), ORIOLEDB_DATA_DIR "/%s", name);
+		data = rewind_keys_read_file(path, &len);
+		Assert(data != NULL);
+
+		images = palloc0(sizeof(RewindImages));
+		images->switchpoint = ((uint64) hi << 32) | lo;
+		images->images = makeStringInfo();
+
+		trees = rewind_keys_by_tree(data, len);
+		list_sort(trees, rewind_tree_keys_cmp);
+		foreach(tc, trees)
+			rewind_tree_images(images->images, (RewindTreeKeys *) lfirst(tc));
+		list_free_deep(trees);
+		pfree(data);
+
+		rewind_images = lappend(rewind_images, images);
+	}
+	MemoryContextSwitchTo(oldcxt);
+	list_free_deep(pending);
 }
 
 /*
@@ -1120,6 +1401,7 @@ rewind_keys_save(XLogRecPtr switchpoint)
 	struct dirent *de;
 	List	   *pending = NIL;
 	ListCell   *lc;
+	ListCell   *ic;
 	bool		logged_current = false;
 
 	/* Collect the names first: the files are removed below.  */
@@ -1153,7 +1435,19 @@ rewind_keys_save(XLogRecPtr switchpoint)
 		data = rewind_keys_read_file(path, &len);
 		Assert(data != NULL);
 
-		log_rewind_keys(pending_switchpoint, data, len);
+		log_rewind_payload(ORIOLEDB_XLOG_REWIND_KEYS, pending_switchpoint, data,
+						   len);
+		foreach(ic, rewind_images)
+		{
+			RewindImages *images = (RewindImages *) lfirst(ic);
+
+			if (images->switchpoint == pending_switchpoint)
+			{
+				log_rewind_payload(ORIOLEDB_XLOG_REWIND_IMAGES,
+								   pending_switchpoint, images->images->data,
+								   images->images->len);
+			}
+		}
 		STOPEVENT(STOPEVENT_PG_REWIND_KEYS_AFTER_WAL_FLUSH, NULL);
 		pfree(data);
 		if (durable_unlink(path, ERROR) != 0)
@@ -1169,7 +1463,7 @@ rewind_keys_save(XLogRecPtr switchpoint)
 	 */
 	if (ArchiveRecoveryRequested && !rewind_keys_collected && !logged_current)
 	{
-		log_rewind_keys(switchpoint, "", 0);
+		log_rewind_payload(ORIOLEDB_XLOG_REWIND_KEYS, switchpoint, "", 0);
 		STOPEVENT(STOPEVENT_PG_REWIND_KEYS_AFTER_WAL_FLUSH, NULL);
 	}
 	if (rewind_keys_collected && !logged_current)
@@ -1177,6 +1471,8 @@ rewind_keys_save(XLogRecPtr switchpoint)
 						errmsg("rewind keys switchpoint differs from the end of recovery %X/%X",
 							   LSN_FORMAT_ARGS(switchpoint))));
 	rewind_keys_collected = false;
+	list_free_deep(rewind_images);
+	rewind_images = NIL;
 
 	/* Parts left by a start that crashed before collecting them */
 	rewind_keys_remove_parts();
@@ -1290,6 +1586,83 @@ orioledb_pg_rewind_divergence_keys(PG_FUNCTION_ARGS)
 	PG_RETURN_BYTEA_P(result);
 }
 
+/*
+ * Redo of ORIOLEDB_XLOG_REWIND_IMAGES.  A node that replays WAL after a
+ * rewind takes the rows of the first complete set after the common
+ * checkpoint, which is the promotion at its divergence point: its own
+ * version of them is the old primary's, and the rows the promotion left are
+ * what everything the source did afterwards builds on.  The others have
+ * undone the transaction from their own undo, and ignore the records.
+ */
+static StringInfo rewind_images_redo_buf = NULL;
+static bool rewind_images_applied = false;
+
+void
+rewind_images_redo(XLogReaderState *record)
+{
+	const char *rec = XLogRecGetData(record);
+	uint16		flags;
+	uint32		payload_len;
+
+	if (!rewind_replaying || rewind_images_applied)
+		return;
+
+	if (XLogRecGetDataLen(record) < REWIND_KEYS_WAL_HEADER_SIZE)
+		ereport(PANIC,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("truncated OrioleDB rewind images WAL record")));
+	memcpy(&flags, rec + 2, sizeof(flags));
+	memcpy(&payload_len, rec + 12, sizeof(payload_len));
+	flags = pg_ntoh16(flags);
+	payload_len = pg_ntoh32(payload_len);
+	if (XLogRecGetDataLen(record) != REWIND_KEYS_WAL_HEADER_SIZE + payload_len)
+		ereport(PANIC,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("invalid OrioleDB rewind images WAL record")));
+
+	if (rewind_images_redo_buf == NULL)
+	{
+		MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+
+		rewind_images_redo_buf = makeStringInfo();
+		MemoryContextSwitchTo(oldcxt);
+	}
+	if (flags & REWIND_KEYS_FIRST)
+		resetStringInfo(rewind_images_redo_buf);
+	appendBinaryStringInfo(rewind_images_redo_buf,
+						   rec + REWIND_KEYS_WAL_HEADER_SIZE, payload_len);
+
+	if (flags & REWIND_KEYS_LAST)
+	{
+		RewindReader reader;
+
+		/* Everything before the images is applied under them */
+		if (!*recovery_single_process)
+			workers_synchronize(record->ReadRecPtr, true);
+
+		reader.file = -1;
+		reader.name = "logged by the promotion";
+		reader.buf = rewind_images_redo_buf->data;
+		reader.len = rewind_images_redo_buf->len;
+		reader.offset = 0;
+#ifdef REWIND_IMAGES_APPLY
+		replay_rewind_trees(&reader);
+#else
+
+		/*
+		 * Writing the rows mid-stream does not work yet: the rewind rows are
+		 * written under oxid 0, which is below the xid horizons that
+		 * replay_rewind() has seeded by now (update_run_xmin() asserts xmin
+		 * >= globalXmin), and an oxid just below the seed trips the FROZEN
+		 * check of set_oxid_xlog_ptr().  See the plan, 7.6.
+		 */
+		(void) reader;
+#endif
+		rewind_images_applied = true;
+		resetStringInfo(rewind_images_redo_buf);
+	}
+}
+
 void
 rewind_keys_desc(StringInfo buf, XLogReaderState *record)
 {
@@ -1314,60 +1687,27 @@ rewind_keys_desc(StringInfo buf, XLogReaderState *record)
 }
 
 /*
- * Replays rewind file.
+ * Replays the trees of the rewind rows: the rewind file, or the images the
+ * promoted node logged.
  */
-void
-replay_rewind(void)
+static void
+replay_rewind_trees(RewindReader *r)
 {
-	File		rewind_file;
 	char		read_buf[O_BTREE_MAX_TUPLE_SIZE * 2];
 	OIndexType	ix_type = oIndexInvalid;
 	ORelOids	cur_oids = {0, 0, 0};
-	off_t		offset = 0;
 	int			readed;
 	const int	tree_header_size = sizeof(OIndexType) + 4 * sizeof(Oid) +
 		sizeof(uint8);
 	uint32		nkeys;
 	uint8		found;
-	XLogRecPtr	startpoint;
-	OXid		lastXid;
-
-	rewind_file = PathNameOpenFile(ORIOLEDB_DATA_DIR "/rewind",
-								   O_RDONLY | PG_BINARY);
-
-	if (rewind_file < 0)
-		return;
-
-	elog(LOG, "orioledb rewind started");
 
 	Assert(tree_header_size < O_BTREE_MAX_TUPLE_SIZE * 2);
 
-	readed = OFileRead(rewind_file, (Pointer) &read_buf, sizeof(XLogRecPtr),
-					   offset, WAIT_EVENT_DATA_FILE_READ);
-	offset += sizeof(XLogRecPtr);
-	if (readed != sizeof(XLogRecPtr))
-		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not read startpoint from rewind file %s",
-							   FilePathName(rewind_file))));
-
-	startpoint = *((XLogRecPtr *) (read_buf));
-
-	readed = OFileRead(rewind_file, (Pointer) &read_buf, sizeof(OXid),
-					   offset, WAIT_EVENT_DATA_FILE_READ);
-	offset += sizeof(OXid);
-	if (readed != sizeof(OXid))
-		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not read lastXid from rewind file %s",
-							   FilePathName(rewind_file))));
-	lastXid = *((OXid *) (read_buf));
-
-	readed = OFileRead(rewind_file, (Pointer) &read_buf, tree_header_size,
-					   offset, WAIT_EVENT_DATA_FILE_READ);
+	readed = rewind_read(r, read_buf, tree_header_size);
 	while (readed == tree_header_size)
 	{
 		int			sys_tree_num = -1;
-
-		offset += tree_header_size;
 
 		ix_type = pg_ntoh32(*((uint32 *) (read_buf)));
 		cur_oids.datoid = pg_ntoh32(*((Oid *) (read_buf + sizeof(uint32))));
@@ -1394,18 +1734,16 @@ replay_rewind(void)
 			OIndexDescr *indexDescr = NULL;
 			int			i;
 
-			if (OFileRead(rewind_file, (Pointer) &read_buf, sizeof(uint32),
-						  offset, WAIT_EVENT_DATA_FILE_READ) != sizeof(uint32))
+			if (rewind_read(r, read_buf, sizeof(uint32)) != sizeof(uint32))
 				ereport(FATAL, (errcode_for_file_access(),
 								errmsg("could not read keys amount for "
 									   "tree (%u %u %u %u) "
-									   "from rewind file %s",
+									   "from rewind rows %s",
 									   ix_type,
 									   cur_oids.datoid,
 									   cur_oids.reloid,
 									   cur_oids.relnode,
-									   FilePathName(rewind_file))));
-			offset += sizeof(uint32);
+									   r->name)));
 			nkeys = pg_ntoh32(*((uint32 *) (read_buf)));
 
 			sys_tree_num = fill_descrs(cur_oids, ix_type, &descr, &indexDescr);
@@ -1416,24 +1754,21 @@ replay_rewind(void)
 				int			row_header_size = sizeof(uint8);
 				OTuple		rewind_row = {0};
 
-				if (OFileRead(rewind_file, (Pointer) &read_buf,
-							  row_header_size, offset,
-							  WAIT_EVENT_DATA_FILE_READ) != row_header_size)
+				if (rewind_read(r, read_buf, row_header_size) !=
+					row_header_size)
 					ereport(FATAL, (errcode_for_file_access(),
 									errmsg("could not read row header for "
 										   "tree (%u %u %u %u) "
-										   "from rewind file %s",
+										   "from rewind rows %s",
 										   ix_type,
 										   cur_oids.datoid,
 										   cur_oids.reloid,
 										   cur_oids.relnode,
-										   FilePathName(rewind_file))));
-				offset += row_header_size;
+										   r->name)));
 
 				found = *((uint8 *) (read_buf));
 
-				rewind_row = replay_rewind_row(rewind_file, read_buf, &offset,
-											   descr, indexDescr,
+				rewind_row = replay_rewind_row(r, read_buf, descr, indexDescr,
 											   sys_tree_num, found);
 
 				if (sys_tree_num == SYS_TREES_O_INDICES && found)
@@ -1449,39 +1784,73 @@ replay_rewind(void)
 													 false, NULL);
 					Assert(indexDescr);
 
-					if (OFileRead(rewind_file, (Pointer) &read_buf,
-								  sizeof(uint32), offset,
-								  WAIT_EVENT_DATA_FILE_READ) !=
+					if (rewind_read(r, read_buf, sizeof(uint32)) !=
 						sizeof(uint32))
 						ereport(FATAL, (errcode_for_file_access(),
 										errmsg("could not read keys amount for "
 											   "removed tree (%u %u %u %u) "
-											   "from rewind file %s",
+											   "from rewind rows %s",
 											   ix_key->type,
 											   ix_key->oids.datoid,
 											   ix_key->oids.reloid,
 											   ix_key->oids.relnode,
-											   FilePathName(rewind_file))));
-					offset += sizeof(uint32);
+											   r->name)));
 					ix_nitems = pg_ntoh32(*(uint32 *) read_buf);
 
 					for (j = 0; j < ix_nitems; j++)
-						replay_rewind_row(rewind_file, read_buf, &offset,
-										  NULL, indexDescr, -1, true);
+						replay_rewind_row(r, read_buf, NULL, indexDescr, -1,
+										  true);
 					pfree(ix_key);
 				}
 			}
 		}
-		readed = OFileRead(rewind_file, (Pointer) &read_buf, tree_header_size,
-						   offset, WAIT_EVENT_DATA_FILE_READ);
+		readed = rewind_read(r, read_buf, tree_header_size);
 	}
 
 	if (readed > 0)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not read tree header from rewind "
-							   "file %s: expected %d bytes, got %d",
-							   FilePathName(rewind_file),
-							   tree_header_size, readed)));
+							   "rows %s: expected %d bytes, got %d",
+							   r->name, tree_header_size, readed)));
+}
+
+/*
+ * Replays rewind file.
+ */
+void
+replay_rewind(void)
+{
+	File		rewind_file;
+	RewindReader reader;
+	XLogRecPtr	startpoint;
+	OXid		lastXid;
+
+	rewind_file = PathNameOpenFile(ORIOLEDB_DATA_DIR "/rewind",
+								   O_RDONLY | PG_BINARY);
+
+	if (rewind_file < 0)
+		return;
+
+	elog(LOG, "orioledb rewind started");
+
+	reader.file = rewind_file;
+	reader.name = FilePathName(rewind_file);
+	reader.buf = NULL;
+	reader.len = 0;
+	reader.offset = 0;
+
+	if (rewind_read(&reader, &startpoint, sizeof(XLogRecPtr)) !=
+		sizeof(XLogRecPtr))
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not read startpoint from rewind file %s",
+							   reader.name)));
+	if (rewind_read(&reader, &lastXid, sizeof(OXid)) != sizeof(OXid))
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not read lastXid from rewind file %s",
+							   reader.name)));
+
+	replay_rewind_trees(&reader);
+	rewind_replaying = true;
 
 	/* TODO: Basically mimic checkpoint_shmem_init */
 	checkpoint_state->controlToastConsistentPtr = startpoint;

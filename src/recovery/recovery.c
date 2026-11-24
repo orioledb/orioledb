@@ -842,6 +842,9 @@ pg_atomic_uint64 *recovery_ptr;
 static pg_atomic_uint64 *recovery_main_retain_ptr;
 pg_atomic_uint64 *recovery_finished_list_ptr;
 pg_atomic_uint64 *recovery_rewind_keys_switchpoint;
+
+/* recovery_finish() ends the recovery, not a standby's shutdown */
+static bool recovery_finish_is_end = false;
 bool	   *recovery_single_process;
 bool	   *was_in_recovery;
 pg_atomic_uint32 *after_recovery_cleaned;
@@ -1348,7 +1351,8 @@ orioledb_redo(XLogReaderState *record)
 	bool		recovery_single;
 
 	Assert((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_CONTAINER ||
-		   (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_KEYS);
+		   (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_KEYS ||
+		   (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_IMAGES);
 	recovery_single = *recovery_single_process;
 
 	/*
@@ -1468,6 +1472,8 @@ orioledb_redo(XLogReaderState *record)
 	{
 		/* Read by pg_rewind from WAL, nothing to replay */
 	}
+	else if ((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_IMAGES)
+		rewind_images_redo(record);
 	else if (record->ReadRecPtr >= checkpoint_state->controlSysTreesStartPtr)
 	{
 		if (!replay_container(msg_start, msg_start + msg_len, recovery_single,
@@ -1495,7 +1501,13 @@ o_recovery_finish_hook(bool cleanup)
 	XLogRecPtr	rewind_switchpoint = InvalidXLogRecPtr;
 
 	recovery_single = *recovery_single_process;
-	if (ArchiveRecoveryRequested)
+
+	/*
+	 * Only the end of recovery is a promotion; a standby that is shut down
+	 * rolls transactions back in memory too, but nothing is forked then.
+	 */
+	recovery_finish_is_end = cleanup;
+	if (ArchiveRecoveryRequested && cleanup)
 	{
 		rewind_switchpoint = GetXLogReplayRecPtr(NULL);
 		rewind_keys_remove_parts();
@@ -1513,8 +1525,6 @@ o_recovery_finish_hook(bool cleanup)
 
 	update_proc_retain_undo_location(-1);
 	recovery_finish(-1);
-	if (ArchiveRecoveryRequested)
-		rewind_keys_collect(rewind_switchpoint);
 
 	if (!recovery_single)
 	{
@@ -2258,6 +2268,13 @@ recovery_finish(int worker_id)
 	/* Index-build children have no state independent of their leader. */
 	if (worker_id <= index_build_leader)
 		rewind_keys_finish_process(worker_id);
+
+	/*
+	 * Every recovery process has rolled its transactions back: the rows the
+	 * promotion changed are now as the node continues from.
+	 */
+	if (worker_id < 0 && recovery_finish_is_end)
+		rewind_images_prepare();
 	HandleStartupProcInterrupts_hook = NULL;
 	hash_destroy(recovery_xid_state_hash);
 	recovery_xid_state_hash = NULL;

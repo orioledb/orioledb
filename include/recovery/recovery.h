@@ -29,7 +29,8 @@ extern bool rewind_keys_capturing;
 extern void rewind_keys_capture(BTreeDescr *desc, BTreeOperationType action, OTuple tuple);
 extern void rewind_keys_remove_parts(void);
 extern void rewind_keys_finish_process(int worker_id);
-extern void rewind_keys_collect(XLogRecPtr switchpoint);
+extern void rewind_images_prepare(void);
+extern void rewind_images_redo(XLogReaderState *record);
 extern void rewind_keys_save(XLogRecPtr switchpoint);
 extern void rewind_keys_desc(StringInfo buf, XLogReaderState *record);
 

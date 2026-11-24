@@ -120,6 +120,8 @@
 #define ORIOLEDB_XLOG_CONTAINER (0x00)
 /* Keys of the rows a promotion rolled back, see rewind_keys_save() */
 #define ORIOLEDB_XLOG_REWIND_KEYS (0x10)
+/* The rows of those keys as the promotion left them, see rewind_images_prepare() */
+#define ORIOLEDB_XLOG_REWIND_IMAGES (0x20)
 
 /*
  * perform_page_split() removes a key data from first right page downlink.
