@@ -1714,7 +1714,6 @@ static OIndexDescr *
 fetch_index_descr_by_oid(Oid relid)
 {
 	Relation	rel;
-	ORelOids	tblOids;
 	ORelOids	idxOids;
 	OTableDescr *descr;
 	OIndexNumber ixnum;
@@ -1737,15 +1736,17 @@ fetch_index_descr_by_oid(Oid relid)
 		index = true;
 	}
 
-	tblOids.datoid = MyDatabaseId;
-	tblOids.reloid = rel->rd_rel->oid;
-	tblOids.relnode = rel->rd_rel->relfilenode;
-	tblOids.spcoid = InvalidOid;	/* looked up by reloid */
-
-	descr = o_fetch_table_descr(tblOids);
+	descr = relation_get_descr(rel);
 
 	if (index)
+	{
 		ixnum = find_tree_in_descr(descr, idxOids);
+		if (ixnum == InvalidIndexNumber)
+			ereport(ERROR,
+					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+					 errmsg("\"%s\" is not an orioledb B-tree index",
+							get_rel_name(relid))));
+	}
 	else
 		ixnum = PrimaryIndexNumber;
 

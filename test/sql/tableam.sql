@@ -874,8 +874,15 @@ SELECT orioledb_table_description('o_heap_test'::regclass);
 SELECT orioledb_relation_size('o_heap_test'::regclass);
 SELECT orioledb_evict_pages('o_heap_test'::regclass, 1);
 SELECT orioledb_write_pages('o_heap_test'::regclass);
+SELECT * FROM orioledb_tree_stat('o_heap_test'::regclass);
+SELECT * FROM orioledb_tree_stat('o_heap_test_pkey'::regclass);
 
 DROP TABLE o_heap_test;
+
+CREATE TABLE o_tree_stat_gin (id int PRIMARY KEY, a int[]) USING orioledb;
+CREATE INDEX o_tree_stat_gin_idx ON o_tree_stat_gin USING gin (a);
+SELECT * FROM orioledb_tree_stat('o_tree_stat_gin_idx'::regclass);
+DROP TABLE o_tree_stat_gin;
 
 CREATE TABLE o_ctid_test (val_1 int) USING orioledb;
 INSERT INTO o_ctid_test VALUES (1);
