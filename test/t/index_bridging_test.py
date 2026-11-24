@@ -1319,6 +1319,33 @@ class IndexBridgingTest(BaseTest):
 		self.assertEqual(0, node.execute("SELECT count(*) FROM o_test;")[0][0])
 		node.stop()
 
+	def test_bridge_vacuum_keeps_reltuples(self):
+		"""
+		VACUUM of the bridged indexes must not reset the table's
+		pg_class.reltuples: it used to store 0, and the planner then
+		believed the table to be empty.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION orioledb;")
+		node.safe_psql("""
+			CREATE TABLE o_test (
+				id int primary key,
+				p point
+			) USING orioledb;
+			ALTER TABLE o_test SET (autovacuum_enabled = off);
+			CREATE INDEX o_test_gist ON o_test USING gist (p);
+			INSERT INTO o_test
+				SELECT i, point(i, i) FROM generate_series(1, 2000) i;
+			ANALYZE o_test;
+		""")
+		reltuples = "SELECT reltuples::int FROM pg_class WHERE relname = 'o_test'"
+		self.assertEqual(2000, node.execute(reltuples)[0][0])
+
+		node.safe_psql("VACUUM o_test;")
+		self.assertEqual(2000, node.execute(reltuples)[0][0])
+		node.stop()
+
 	def test_bridge_tree_split(self):
 		"""
 		Insert enough rows that the bridge btree splits into multiple
