@@ -39,6 +39,10 @@ SELECT orioledb_tbl_compression_check(10, 'o_test1'::regclass, array[0]);
 SELECT orioledb_tbl_compression_check(10, 'o_test1'::regclass, array[200, 100]);
 SELECT orioledb_tbl_compression_check(10, 'o_test1'::regclass, array[8192]);
 
+-- with a level outside the int16 range
+SELECT orioledb_tbl_compression_check(65537, 'o_test1'::regclass);
+SELECT orioledb_tbl_compression_check(-65535, 'o_test1'::regclass);
+
 -- with valid the ranges array
 SELECT regexp_replace
 (
