@@ -241,7 +241,8 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/proc_cache_guard_test.py \
 						test/t/sys_tree_guard_test.py \
 						test/t/move_database_test.py \
-						test/t/database_template_test.py
+						test/t/database_template_test.py \
+						test/t/unique_root_split_test.py
 TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/checkpoint_error_test.py \
 						test/t/truncate_under_checkpoint_test.py \

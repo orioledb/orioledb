@@ -2152,7 +2152,8 @@ btree_find_context_from_modify_to_read(OBTreeFindPageContext *context,
 								   NULL,
 								   true);
 
-	if (!success)
+	/* A root split can change the level without changing pageChangeCount. */
+	if (!success || PAGE_GET_LEVEL(context->img) != level)
 	{
 		(void) find_page(context, key, keyType, level);
 		return;
