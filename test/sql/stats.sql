@@ -297,5 +297,5 @@ DROP TABLE stats_test_tab1;
 SET enable_seqscan TO on;
 
 DROP EXTENSION orioledb CASCADE;
-DROP SCHEMA opclass CASCADE;
+DROP SCHEMA stats CASCADE;
 RESET search_path;
