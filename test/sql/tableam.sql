@@ -494,7 +494,7 @@ SELECT * FROM o_tableam7 ORDER BY id;
 SELECT * FROM o_tableam7 ORDER BY id DESC;
 
 UPDATE o_tableam7 SET id = 150 WHERE id = 50;
-SELECT key, value FROM o_tableam7 WHERE id IN (50, 150);
+SELECT id, value FROM o_tableam7 WHERE id IN (50, 150);
 SELECT value FROM o_tableam7 WHERE id = 10;
 BEGIN;
 UPDATE o_tableam7 SET value = value + 10 WHERE id = 10;

@@ -24455,8 +24455,7 @@ SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
 
 ALTER TABLE o_test_include_box_with_pkey_build ADD PRIMARY KEY (val_1);
 CREATE UNIQUE INDEX o_test_include_box_with_pkey_build_ix1
-	ON o_test_include_box_with_pkey (val_2) INCLUDE (val_4);
-ERROR:  relation "o_test_include_box_with_pkey" does not exist
+	ON o_test_include_box_with_pkey_build (val_2) INCLUDE (val_4);
 CREATE UNIQUE INDEX o_test_include_box_with_pkey_build_ix2
 	ON o_test_include_box_with_pkey_build (val_3);
 \d+ o_test_include_box_with_pkey_build
@@ -24469,6 +24468,7 @@ CREATE UNIQUE INDEX o_test_include_box_with_pkey_build_ix2
  val_4  | box     |           |          |         | plain   |              | 
 Indexes:
     "o_test_include_box_with_pkey_build_pkey" PRIMARY KEY, btree (val_1)
+    "o_test_include_box_with_pkey_build_ix1" UNIQUE, btree (val_2) INCLUDE (val_4)
     "o_test_include_box_with_pkey_build_ix2" UNIQUE, btree (val_3)
 
 SELECT orioledb_tbl_indices('o_test_include_box_with_pkey_build'::regclass);
@@ -24479,6 +24479,11 @@ SELECT orioledb_tbl_indices('o_test_include_box_with_pkey_build'::regclass);
      Leaf tuple size: 4, non-leaf tuple size: 1   +
      Non-leaf tuple fields: val_1                 +
      Leaf tuple fields: val_1, val_2, val_3, val_4+
+ Index o_test_include_box_with_pkey_build_ix1     +
+     Index type: secondary, unique                +
+     Leaf tuple size: 3, non-leaf tuple size: 3   +
+     Non-leaf tuple fields: val_2, val_4, val_1   +
+     Leaf tuple fields: val_2, val_4, val_1       +
  Index o_test_include_box_with_pkey_build_ix2     +
      Index type: secondary, unique                +
      Leaf tuple size: 2, non-leaf tuple size: 2   +
@@ -24506,12 +24511,11 @@ SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_1;
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_2;
-                      QUERY PLAN                      
-------------------------------------------------------
- Sort
-   Sort Key: val_2
-   ->  Seq Scan on o_test_include_box_with_pkey_build
-(3 rows)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_include_box_with_pkey_build
+   Forward index scan of: o_test_include_box_with_pkey_build_ix1
+(2 rows)
 
 SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_2;
  val_1 | val_2 | val_3 |        val_4        
@@ -24540,31 +24544,42 @@ SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_3;
 RESET enable_seqscan;
 SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
 							  'nue');
-                               orioledb_tbl_structure                               
-------------------------------------------------------------------------------------
- Index o_test_include_box_with_pkey_build_pkey contents                            +
- Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                               +
- state = free, datoid equal, relnode equal, ix_type = primary, clean               +
-     Leftmost, Rightmost                                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('10')        +
-     Item 0: offset = 264, tuple = ('1', '2', '3', '(6,7),(4,5)')                  +
-   Chunk 1: offset = 1, location = 328, hikey location = 80, hikey = ('100')       +
-     Item 1: offset = 336, tuple = ('10', '20', '30', '(60,70),(40,50)')           +
-   Chunk 2: offset = 2, location = 400, hikey location = 88                        +
-     Item 2: offset = 408, tuple = ('100', '200', '300', '(600,700),(400,500)')    +
-                                                                                   +
- Index o_test_include_box_with_pkey_build_ix2 contents                             +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                               +
- state = free, datoid equal, relnode equal, ix_type = unique, clean                +
-     Leftmost, Rightmost                                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('30', '10')  +
-     Item 0: offset = 264, tuple = ('3', '1')                                      +
-   Chunk 1: offset = 1, location = 288, hikey location = 80, hikey = ('300', '100')+
-     Item 1: offset = 296, tuple = ('30', '10')                                    +
-   Chunk 2: offset = 2, location = 320, hikey location = 88                        +
-     Item 2: offset = 328, tuple = ('300', '100')                                  +
-                                                                                   +
- Index toast: not loaded                                                           +
+                                           orioledb_tbl_structure                                           
+------------------------------------------------------------------------------------------------------------
+ Index o_test_include_box_with_pkey_build_pkey contents                                                    +
+ Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                                                       +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                       +
+     Leftmost, Rightmost                                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('10')                                +
+     Item 0: offset = 264, tuple = ('1', '2', '3', '(6,7),(4,5)')                                          +
+   Chunk 1: offset = 1, location = 328, hikey location = 80, hikey = ('100')                               +
+     Item 1: offset = 336, tuple = ('10', '20', '30', '(60,70),(40,50)')                                   +
+   Chunk 2: offset = 2, location = 400, hikey location = 88                                                +
+     Item 2: offset = 408, tuple = ('100', '200', '300', '(600,700),(400,500)')                            +
+                                                                                                           +
+ Index o_test_include_box_with_pkey_build_ix1 contents                                                     +
+ Page 0: level = 0, maxKeyLen = 44, nVacatedBytes = 0                                                      +
+ state = free, datoid equal, relnode equal, ix_type = unique, clean                                        +
+     Leftmost, Rightmost                                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('20', '(60,70),(40,50)', '10')       +
+     Item 0: offset = 264, tuple = ('2', '(6,7),(4,5)', '1')                                               +
+   Chunk 1: offset = 1, location = 328, hikey location = 120, hikey = ('200', '(600,700),(400,500)', '100')+
+     Item 1: offset = 336, tuple = ('20', '(60,70),(40,50)', '10')                                         +
+   Chunk 2: offset = 2, location = 400, hikey location = 168                                               +
+     Item 2: offset = 408, tuple = ('200', '(600,700),(400,500)', '100')                                   +
+                                                                                                           +
+ Index o_test_include_box_with_pkey_build_ix2 contents                                                     +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                       +
+ state = free, datoid equal, relnode equal, ix_type = unique, clean                                        +
+     Leftmost, Rightmost                                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('30', '10')                          +
+     Item 0: offset = 264, tuple = ('3', '1')                                                              +
+   Chunk 1: offset = 1, location = 288, hikey location = 80, hikey = ('300', '100')                        +
+     Item 1: offset = 296, tuple = ('30', '10')                                                            +
+   Chunk 2: offset = 2, location = 320, hikey location = 88                                                +
+     Item 2: offset = 328, tuple = ('300', '100')                                                          +
+                                                                                                           +
+ Index toast: not loaded                                                                                   +
  
 (1 row)
 

@@ -2955,10 +2955,12 @@ SELECT * FROM o_tableam7 ORDER BY id DESC;
 (100 rows)
 
 UPDATE o_tableam7 SET id = 150 WHERE id = 50;
-SELECT key, value FROM o_tableam7 WHERE id IN (50, 150);
-ERROR:  column "key" does not exist
-LINE 1: SELECT key, value FROM o_tableam7 WHERE id IN (50, 150);
-               ^
+SELECT id, value FROM o_tableam7 WHERE id IN (50, 150);
+ id  | value 
+-----+-------
+ 150 |    50
+(1 row)
+
 SELECT value FROM o_tableam7 WHERE id = 10;
  value 
 -------

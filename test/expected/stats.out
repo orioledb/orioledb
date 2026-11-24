@@ -610,6 +610,5 @@ DROP TABLE stats_test_tab1;
 SET enable_seqscan TO on;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to table test_last_scan
-DROP SCHEMA opclass CASCADE;
-ERROR:  schema "opclass" does not exist
+DROP SCHEMA stats CASCADE;
 RESET search_path;
