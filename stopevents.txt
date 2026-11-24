@@ -35,8 +35,7 @@ sk_modify_pending
 after_find_downlink
 before_abort_vxids_clear
 replay_on_record
-pg_rewind_keys_before_ready
-pg_rewind_keys_after_ready
+pg_rewind_keys_after_pending
 pg_rewind_keys_after_wal_flush
 undo_flush
 before_o_tables_meta_unlock

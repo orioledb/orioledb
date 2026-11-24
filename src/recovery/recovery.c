@@ -841,8 +841,7 @@ RecoveryWorkerPtrs *worker_ptrs;
 pg_atomic_uint64 *recovery_ptr;
 static pg_atomic_uint64 *recovery_main_retain_ptr;
 pg_atomic_uint64 *recovery_finished_list_ptr;
-pg_atomic_uint64 *recovery_rewind_keys_generation;
-pg_atomic_uint32 *recovery_rewind_keys_participants;
+pg_atomic_uint64 *recovery_rewind_keys_switchpoint;
 bool	   *recovery_single_process;
 bool	   *was_in_recovery;
 pg_atomic_uint32 *after_recovery_cleaned;
@@ -908,7 +907,6 @@ recovery_shmem_needs(void)
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint64)));
 	size = add_size(size, CACHELINEALIGN(sizeof(ConditionVariable)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint64)));
-	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 
 	return size;
 }
@@ -967,11 +965,8 @@ recovery_shmem_init(Pointer ptr, bool found)
 	recovery_index_cv = (ConditionVariable *) ptr;
 	ptr += CACHELINEALIGN(sizeof(ConditionVariable));
 
-	recovery_rewind_keys_generation = (pg_atomic_uint64 *) ptr;
+	recovery_rewind_keys_switchpoint = (pg_atomic_uint64 *) ptr;
 	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint64));
-
-	recovery_rewind_keys_participants = (pg_atomic_uint32 *) ptr;
-	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint32));
 
 	if (!found)
 	{
@@ -1005,8 +1000,7 @@ recovery_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(recovery_index_next_pos, 0);
 		pg_atomic_init_u64(recovery_index_completed_pos, 0);
 		ConditionVariableInit(recovery_index_cv);
-		pg_atomic_init_u64(recovery_rewind_keys_generation, InvalidXLogRecPtr);
-		pg_atomic_init_u32(recovery_rewind_keys_participants, 0);
+		pg_atomic_init_u64(recovery_rewind_keys_switchpoint, InvalidXLogRecPtr);
 	}
 }
 
@@ -1471,7 +1465,9 @@ orioledb_redo(XLogReaderState *record)
 	}
 
 	if ((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_KEYS)
-		rewind_keys_redo(record);
+	{
+		/* Read by pg_rewind from WAL, nothing to replay */
+	}
 	else if (record->ReadRecPtr >= checkpoint_state->controlSysTreesStartPtr)
 	{
 		if (!replay_container(msg_start, msg_start + msg_len, recovery_single,
@@ -1496,25 +1492,15 @@ o_recovery_finish_hook(bool cleanup)
 	int			i,
 				num_workers = recovery_idx_pool_size_guc ? recovery_pool_size_guc + 1 : recovery_pool_size_guc;
 	bool		recovery_single;
-	XLogRecPtr	rewind_generation = InvalidXLogRecPtr;
-	int			rewind_participants = 0;
+	XLogRecPtr	rewind_switchpoint = InvalidXLogRecPtr;
 
 	recovery_single = *recovery_single_process;
 	if (ArchiveRecoveryRequested)
 	{
-		rewind_generation = GetXLogReplayRecPtr(NULL);
-		rewind_participants = (recovery_single ? 0 : num_workers) + 1;
-		pg_atomic_write_u64(recovery_rewind_keys_generation,
-							rewind_generation);
-		pg_atomic_write_u32(recovery_rewind_keys_participants,
-							rewind_participants);
+		rewind_switchpoint = GetXLogReplayRecPtr(NULL);
+		rewind_keys_remove_parts();
 	}
-	else
-	{
-		pg_atomic_write_u64(recovery_rewind_keys_generation,
-							InvalidXLogRecPtr);
-		pg_atomic_write_u32(recovery_rewind_keys_participants, 0);
-	}
+	pg_atomic_write_u64(recovery_rewind_keys_switchpoint, rewind_switchpoint);
 
 	if (!recovery_single)
 	{
@@ -1528,9 +1514,7 @@ o_recovery_finish_hook(bool cleanup)
 	update_proc_retain_undo_location(-1);
 	recovery_finish(-1);
 	if (ArchiveRecoveryRequested)
-		rewind_keys_prepare(rewind_generation, rewind_participants);
-	else
-		rewind_keys_resume_prepare();
+		rewind_keys_collect(rewind_switchpoint);
 
 	if (!recovery_single)
 	{
@@ -2134,7 +2118,7 @@ recovery_finish(int worker_id)
 	 * pg_rewind of the old primary (see rewind_keys_capture()).
 	 */
 	rewind_keys_capturing =
-		XLogRecPtrIsValid(pg_atomic_read_u64(recovery_rewind_keys_generation));
+		XLogRecPtrIsValid(pg_atomic_read_u64(recovery_rewind_keys_switchpoint));
 
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
 	while ((cur_state = (RecoveryXidState *) hash_seq_search(&hash_seq)) != NULL)

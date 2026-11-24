@@ -27,27 +27,10 @@ extern void o_emit_recovery_finish_rollbacks(void);
 /* Keys of the rows recovery_finish() rolls back, for pg_rewind */
 extern bool rewind_keys_capturing;
 extern void rewind_keys_capture(BTreeDescr *desc, BTreeOperationType action, OTuple tuple);
+extern void rewind_keys_remove_parts(void);
 extern void rewind_keys_finish_process(int worker_id);
-extern void rewind_keys_prepare(XLogRecPtr generation, int participants);
-extern void rewind_keys_resume_prepare(void);
+extern void rewind_keys_collect(XLogRecPtr switchpoint);
 extern void rewind_keys_save(XLogRecPtr switchpoint);
-extern void rewind_keys_cleanup(void);
-
-/*
- * ORIOLEDB_XLOG_REWIND_KEYS' entry: a chunk of the rewind keys file saved at
- * the promotion ending at switchpoint.
- */
-typedef struct
-{
-	uint8		data[36];
-} WALRecRewindKeys;
-
-#define REWIND_KEYS_WAL_HEADER_SIZE	36
-
-#define REWIND_KEYS_FIRST	(1 << 0)	/* The first chunk.  */
-#define REWIND_KEYS_LAST	(1 << 1)	/* The last chunk.  */
-
-extern void rewind_keys_redo(XLogReaderState *record);
 extern void rewind_keys_desc(StringInfo buf, XLogReaderState *record);
 
 extern Size recovery_shmem_needs(void);
@@ -80,8 +63,7 @@ extern int	recovery_idx_pool_size_guc;
 extern OXid recovery_oxid;
 extern TransactionId recoveryHeapTransactionId;
 extern pg_atomic_uint64 *recovery_finished_list_ptr;
-extern pg_atomic_uint64 *recovery_rewind_keys_generation;
-extern pg_atomic_uint32 *recovery_rewind_keys_participants;
+extern pg_atomic_uint64 *recovery_rewind_keys_switchpoint;
 
 typedef struct BTreeDescr BTreeDescr;
 

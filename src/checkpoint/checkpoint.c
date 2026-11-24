@@ -1731,7 +1731,6 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	}
 	PG_END_TRY();
 
-	rewind_keys_cleanup();
 
 	if (next_CheckPoint_hook)
 		next_CheckPoint_hook(redo_pos, flags);

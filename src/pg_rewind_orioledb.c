@@ -27,7 +27,7 @@ typedef struct OrioledbKey
 	uint8		tupleFormatFlags;
 	uint32		dataLength;
 	char		data[FLEXIBLE_ARRAY_MEMBER];
-} OrioledbKey;
+}			OrioledbKey;
 
 typedef struct
 {
@@ -36,7 +36,7 @@ typedef struct
 	Oid			reloid;
 	Oid			relnode;
 	Oid			spcoid;
-} OrioledbTreeKey;
+}			OrioledbTreeKey;
 
 typedef struct OrioledbTree
 {
@@ -44,7 +44,7 @@ typedef struct OrioledbTree
 	uint32		nkeys;
 	int			allocated;
 	OrioledbKey **keys;
-} OrioledbTree;
+}			OrioledbTree;
 
 typedef struct OrioledbKeyMap
 {
@@ -63,9 +63,19 @@ typedef struct OrioledbKeyMap
 	OrioledbTree *trees;
 	bool		fill_map;
 	OrioledbTreeKey tree_key;
-} OrioledbKeyMap;
 
-static void orioledb_tree_add(OrioledbTree *tree, OrioledbKey *key);
+	/*
+	 * The keys the promotion at the divergence point rolled back.  They are
+	 * logged on the promoted node's timeline: the target's WAL scan finds
+	 * them there if the target is the promoted node.  'rewind_keys' holds the
+	 * records of the attempt being read.
+	 */
+	XLogRecPtr	divergerec;
+	StringInfo	rewind_keys;
+	bool		rewind_keys_found;
+}			OrioledbKeyMap;
+
+static void orioledb_tree_add(OrioledbTree * tree, OrioledbKey * key);
 
 static char copy_header[11] = "PGCOPY\n\377\r\n\0";
 
@@ -87,12 +97,15 @@ create_orioledb_key_map(void)
 	result->divXid = InvalidOXid;
 	result->minReplayXid = InvalidOXid;
 	result->fill_map = false;
+	result->divergerec = InvalidXLogRecPtr;
+	result->rewind_keys = NULL;
+	result->rewind_keys_found = false;
 	result->trees = palloc0(sizeof(OrioledbTree) * result->allocated);
 	return result;
 }
 
 static void
-fill_orioledb_tree(OrioledbTree *tree, OrioledbTreeKey tree_key)
+fill_orioledb_tree(OrioledbTree * tree, OrioledbTreeKey tree_key)
 {
 	tree->tree_key = tree_key;
 	tree->allocated = 8;
@@ -112,7 +125,7 @@ create_orioledb_key(size_t dataLength, char data[], uint8 tupleFormatFlags)
 }
 
 static void
-free_orioledb_key_map(OrioledbKeyMap *map)
+free_orioledb_key_map(OrioledbKeyMap * map)
 {
 	int			i;
 
@@ -165,7 +178,7 @@ typedef struct
 	int			(*const compar) (const void *, const void *);
 	void	   *last_visited;
 	int			last_compar_result;
-} bsearch_insertion_state;
+}			bsearch_insertion_state;
 
 static int
 bsearch_insertion_compare(const void *a, const void *b)
@@ -178,7 +191,7 @@ bsearch_insertion_compare(const void *a, const void *b)
 }
 
 static void
-orioledb_key_map_add_tree(OrioledbKeyMap *map, OrioledbTreeKey tree_key)
+orioledb_key_map_add_tree(OrioledbKeyMap * map, OrioledbTreeKey tree_key)
 {
 	int			insert_index = 0;
 
@@ -211,7 +224,7 @@ orioledb_key_map_add_tree(OrioledbKeyMap *map, OrioledbTreeKey tree_key)
 }
 
 static void
-orioledb_key_map_add_key(OrioledbKeyMap *map, OrioledbKey *key)
+orioledb_key_map_add_key(OrioledbKeyMap * map, OrioledbKey * key)
 {
 	void	   *result = bsearch(&map->tree_key, map->trees, map->ntrees,
 								 sizeof(OrioledbTree), orioledb_key_cmp);
@@ -221,7 +234,7 @@ orioledb_key_map_add_key(OrioledbKeyMap *map, OrioledbKey *key)
 }
 
 static void
-orioledb_key_map_print(OrioledbKeyMap *map)
+orioledb_key_map_print(OrioledbKeyMap * map)
 {
 	int			i;
 
@@ -236,7 +249,7 @@ orioledb_key_map_print(OrioledbKeyMap *map)
 }
 
 static void
-orioledb_tree_add(OrioledbTree *tree, OrioledbKey *key)
+orioledb_tree_add(OrioledbTree * tree, OrioledbKey * key)
 {
 	tree->keys[tree->nkeys] = key;
 	tree->nkeys++;
@@ -272,7 +285,7 @@ appendOidStringInfo(StringInfo str, Oid oid)
 }
 
 static void
-serialize_tree(StringInfo str, OrioledbTree *tree)
+serialize_tree(StringInfo str, OrioledbTree * tree)
 {
 	int			j;
 	StringInfo	keys_str;
@@ -312,7 +325,7 @@ serialize_tree(StringInfo str, OrioledbTree *tree)
 }
 
 static void
-serialize_key_map(StringInfo str, OrioledbKeyMap *map)
+serialize_key_map(StringInfo str, OrioledbKeyMap * map)
 {
 	int			i;
 
@@ -402,7 +415,7 @@ stop_target_postgres(const char *argv0, const char *datadir)
  * In the event of a failure, exit immediately.
  */
 static void
-run_simple_command(PGconn *connection, const char *sql, bool target)
+run_simple_command(PGconn * connection, const char *sql, bool target)
 {
 	PGresult   *res;
 
@@ -417,7 +430,7 @@ run_simple_command(PGconn *connection, const char *sql, bool target)
 }
 
 static void
-libpq_create_table_and_copy_data(PGconn *connection,
+libpq_create_table_and_copy_data(PGconn * connection,
 								 StringInfo str,
 								 bool target)
 {
@@ -475,7 +488,7 @@ libpq_create_table_and_copy_data(PGconn *connection,
 }
 
 static void
-libpq_function_copy_out(PGconn *connection, const char *query,
+libpq_function_copy_out(PGconn * connection, const char *query,
 						StringInfo result_str)
 {
 	PGresult   *res;
@@ -539,7 +552,7 @@ typedef struct TargetInfo
 	long		port;
 	bool		is_tcp;
 	char		host[FLEXIBLE_ARRAY_MEMBER];
-} TargetInfo;
+}			TargetInfo;
 
 static TargetInfo *
 get_target_info(const char *datadir)
@@ -588,7 +601,7 @@ get_target_info(const char *datadir)
 }
 
 static bool
-libpq_is_orioledb_available(PGconn *connection, bool target)
+libpq_is_orioledb_available(PGconn * connection, bool target)
 {
 	bool		result = true;
 	PGresult   *res;
@@ -608,7 +621,7 @@ libpq_is_orioledb_available(PGconn *connection, bool target)
 }
 
 static bool
-libpq_is_readonly(PGconn *connection, bool target)
+libpq_is_readonly(PGconn * connection, bool target)
 {
 	bool		result = true;
 	PGresult   *res;
@@ -628,7 +641,7 @@ libpq_is_readonly(PGconn *connection, bool target)
 }
 
 static bool
-libpq_is_orioledb_installed(PGconn *connection, bool target)
+libpq_is_orioledb_installed(PGconn * connection, bool target)
 {
 	bool		result = true;
 	PGresult   *res;
@@ -648,7 +661,7 @@ libpq_is_orioledb_installed(PGconn *connection, bool target)
 }
 
 static bool
-sort_rows_on_target(OrioledbKeyMap *orioledb_map, const char *argv0,
+sort_rows_on_target(OrioledbKeyMap * orioledb_map, const char *argv0,
 					const char *datadir, bool debug, StringInfo result)
 {
 	PGconn	   *target_conn;
@@ -852,8 +865,8 @@ patch_orioledb_control_file(const char *datadir, OXid divXid)
 }
 
 static void
-orioledb_process_row_map(OrioledbKeyMap *orioledb_map, const char *argv0,
-						 const char *datadir, bool debug, PGconn *conn,
+orioledb_process_row_map(OrioledbKeyMap * orioledb_map, const char *argv0,
+						 const char *datadir, bool debug, PGconn * conn,
 						 XLogRecPtr startpoint, OXid lastXid)
 {
 	StringInfo	str;
@@ -934,52 +947,15 @@ read_ntoh64(char **ptr)
 	return pg_ntoh64(u64data);
 }
 
-typedef struct RewindKeysFileInfo
-{
-	uint64		count;
-	uint64		payload_length;
-	uint32		checksum;
-} RewindKeysFileInfo;
-
 /*
- * Add the keys of a rewind keys file (see rewind_keys_save()) to the key map.
- * Returns the number of keys.
+ * Add the entries of the keys the promotion rolled back (see
+ * rewind_keys_capture()) to the key map.  Returns the number of keys.
  */
 static int
-add_rewind_keys(OrioledbKeyMap *map, char *ptr, char *end,
-				const char *what, XLogRecPtr switchpoint, bool add,
-				RewindKeysFileInfo *info)
+add_rewind_key_entries(OrioledbKeyMap * map, char *ptr, char *end,
+					   const char *what)
 {
 	int			nkeys = 0;
-	char	   *payload;
-	pg_crc32c	crc;
-	uint32		magic;
-	uint16		version;
-	uint16		header_length;
-	XLogRecPtr	file_switchpoint;
-
-	if (end - ptr < REWIND_KEYS_FINAL_HEADER_SIZE)
-		pg_fatal("%s is truncated", what);
-	magic = read_ntoh32(&ptr);
-	version = read_ntoh16(&ptr);
-	header_length = read_ntoh16(&ptr);
-	file_switchpoint = read_ntoh64(&ptr);
-	info->count = read_ntoh64(&ptr);
-	info->payload_length = read_ntoh64(&ptr);
-	info->checksum = read_ntoh32(&ptr);
-	if (magic != REWIND_KEYS_MAGIC ||
-		version != REWIND_KEYS_FORMAT_VERSION ||
-		header_length != REWIND_KEYS_FINAL_HEADER_SIZE ||
-		file_switchpoint != switchpoint)
-		pg_fatal("unexpected contents of %s", what);
-	if ((uint64) (end - ptr) != info->payload_length)
-		pg_fatal("invalid payload length in %s", what);
-	payload = ptr;
-	INIT_CRC32C(crc);
-	COMP_CRC32C(crc, payload, info->payload_length);
-	FIN_CRC32C(crc);
-	if ((uint32) crc != info->checksum)
-		pg_fatal("checksum mismatch in %s", what);
 
 	while (ptr < end)
 	{
@@ -1015,22 +991,65 @@ add_rewind_keys(OrioledbKeyMap *map, char *ptr, char *end,
 		if (end - ptr < (int) len)
 			pg_fatal("%s is truncated", what);
 
-		if (add)
-		{
-			orioledb_key_map_add_tree(map, tree_key);
-			map->tree_key = tree_key;
-			orioledb_key_map_add_key(map,
-									 create_orioledb_key(len, ptr, formatFlags));
-		}
+		orioledb_key_map_add_tree(map, tree_key);
+		map->tree_key = tree_key;
+		orioledb_key_map_add_key(map,
+								 create_orioledb_key(len, ptr, formatFlags));
 		ptr += len;
 		nkeys++;
 	}
-	if ((uint64) nkeys != info->count)
-		pg_fatal("entry count mismatch in %s", what);
-
 	return nkeys;
 }
 
+/*
+ * Handle ORIOLEDB_XLOG_REWIND_KEYS record of the target's WAL.  The records
+ * of the promotion at the divergence point are put together here; this is the
+ * promoted target case.  A promotion logs its keys in one or several records
+ * which come first after the switchpoint.  Take the first complete set: the
+ * one a crash interrupted has no last record, and a restart logs them over.
+ */
+static void
+extract_rewind_keys(XLogReaderState *record, OrioledbKeyMap * map)
+{
+	char	   *ptr = XLogRecGetData(record);
+	uint32		len = XLogRecGetDataLen(record);
+	uint16		version;
+	uint16		flags;
+	XLogRecPtr	switchpoint;
+	uint32		payload_len;
+
+	if (len < REWIND_KEYS_WAL_HEADER_SIZE)
+		pg_fatal("truncated OrioleDB rewind keys WAL record at %X/%X",
+				 LSN_FORMAT_ARGS(record->ReadRecPtr));
+	version = read_ntoh16(&ptr);
+	flags = read_ntoh16(&ptr);
+	switchpoint = read_ntoh64(&ptr);
+	payload_len = read_ntoh32(&ptr);
+	if (version != REWIND_KEYS_WAL_VERSION ||
+		len != REWIND_KEYS_WAL_HEADER_SIZE + payload_len)
+		pg_fatal("invalid OrioleDB rewind keys WAL record at %X/%X",
+				 LSN_FORMAT_ARGS(record->ReadRecPtr));
+	if (switchpoint != map->divergerec || map->rewind_keys_found)
+		return;
+
+	if (map->rewind_keys == NULL)
+		map->rewind_keys = makeStringInfo();
+	if (flags & REWIND_KEYS_FIRST)
+		resetStringInfo(map->rewind_keys);
+	appendBinaryStringInfoNT(map->rewind_keys, ptr, payload_len);
+	if (flags & REWIND_KEYS_LAST)
+	{
+		int			nkeys;
+
+		nkeys = add_rewind_key_entries(map, map->rewind_keys->data,
+									   map->rewind_keys->data +
+									   map->rewind_keys->len,
+									   "OrioleDB rewind keys of the target");
+		map->rewind_keys_found = true;
+		pg_log_info("added %d keys of rows rolled back at the divergence point, "
+					"found on the target", nkeys);
+	}
+}
 
 /*
  * Add the keys of the rows the promotion at the divergence point rolled
@@ -1047,95 +1066,49 @@ add_rewind_keys(OrioledbKeyMap *map, char *ptr, char *end,
  *                                [B: recovery_finish(), rolls T back]
  *
  * We can't easily roll the already-committed transaction back.  The promotion
- * is usually the source's, but it is the target's when a promoted standby is
- * rewound back into its old primary.  So here we look at both: the promoted
- * server and its standbys keep the keys under the switchpoint, which is the
- * divergence point.
+ * logs the keys of the rows it rolled back to WAL right after the switchpoint.
+ * It is usually the source's, so ask the source server to read them.  It is
+ * the target's when a promoted standby is rewound back into its old primary:
+ * extract_rewind_keys() takes them from the target's WAL then.
  */
 static void
-add_divergence_rewind_keys(OrioledbKeyMap *orioledb_map, PGconn *conn,
-						   const char *datadir_target, XLogRecPtr divergerec)
+add_divergence_rewind_keys(OrioledbKeyMap * map, PGconn * conn)
 {
-	char		path[MAXPGPATH];
-	char		target_path[MAXPGPATH];
-	char		what[MAXPGPATH + 32];
+	char		switchpoint[32];
 	const char *params[1];
 	PGresult   *res;
-	bool		found = false;
-	int			nkeys = 0;
-	int			fd;
-	RewindKeysFileInfo source_info = {0};
-	RewindKeysFileInfo target_info = {0};
-	char	   *source_buf = NULL;
-	int			source_len = 0;
 
-	snprintf(path, sizeof(path), REWIND_KEYS_FILENAME_FORMAT,
-			 LSN_FORMAT_ARGS(divergerec));
+	snprintf(switchpoint, sizeof(switchpoint), "%X/%X",
+			 LSN_FORMAT_ARGS(map->divergerec));
+	params[0] = switchpoint;
 
-	params[0] = path;
-	res = PQexecParams(conn,
-					   "SELECT pg_catalog.pg_read_binary_file($1, 0, s.size, true) "
-					   "FROM pg_catalog.pg_stat_file($1, true) s",
-					   1, NULL, params, NULL, NULL, 1);
-	if (PQresultStatus(res) != PGRES_TUPLES_OK)
-		pg_fatal("could not read \"%s\" from the source server: %s",
-				 path, PQresultErrorMessage(res));
-	if (PQntuples(res) == 1 && !PQgetisnull(res, 0, 0))
+	if (libpq_is_orioledb_installed(conn, false))
 	{
-		char	   *ptr = PQgetvalue(res, 0, 0);
-
-		snprintf(what, sizeof(what), "\"%s\" on the source server", path);
-		source_len = PQgetlength(res, 0, 0);
-		source_buf = pg_malloc(source_len);
-		memcpy(source_buf, ptr, source_len);
-		nkeys += add_rewind_keys(orioledb_map, source_buf,
-								 source_buf + source_len, what, divergerec,
-								 true, &source_info);
-		found = true;
-	}
-	PQclear(res);
-
-	snprintf(target_path, sizeof(target_path), "%s/%s", datadir_target, path);
-	fd = open(target_path, O_RDONLY | PG_BINARY, 0);
-	if (fd >= 0)
-	{
-		struct stat st;
-		char	   *buf;
-
-		if (fstat(fd, &st) != 0)
-			pg_fatal("could not stat file \"%s\": %m", target_path);
-		buf = pg_malloc(st.st_size);
-		if (read(fd, buf, st.st_size) != st.st_size)
-			pg_fatal("could not read file \"%s\": %m", target_path);
-		close(fd);
-
-		snprintf(what, sizeof(what), "\"%s\"", target_path);
-		if (found)
+		res = PQexecParams(conn,
+						   "SELECT public.orioledb_pg_rewind_divergence_keys($1::pg_lsn)",
+						   1, NULL, params, NULL, NULL, 1);
+		if (PQresultStatus(res) != PGRES_TUPLES_OK)
+			pg_fatal("could not read the OrioleDB rewind keys of the divergence point %s "
+					 "from the source server: %s",
+					 switchpoint, PQresultErrorMessage(res));
+		if (PQntuples(res) == 1 && !PQgetisnull(res, 0, 0))
 		{
-			(void) add_rewind_keys(orioledb_map, buf, buf + st.st_size, what,
-								   divergerec, false, &target_info);
-			if (source_info.payload_length != target_info.payload_length ||
-				source_info.count != target_info.count ||
-				source_info.checksum != target_info.checksum)
-				pg_fatal("source and target rewind key files for %X/%X do not match",
-						 LSN_FORMAT_ARGS(divergerec));
-		}
-		else
-			nkeys += add_rewind_keys(orioledb_map, buf, buf + st.st_size, what,
-									 divergerec, true, &target_info);
-		pg_free(buf);
-		found = true;
-	}
-	else if (errno != ENOENT)
-		pg_fatal("could not open file \"%s\": %m", target_path);
+			char	   *keys = PQgetvalue(res, 0, 0);
+			int			nkeys;
 
-	if (source_buf != NULL)
-		pg_free(source_buf);
-	if (!found)
-		pg_fatal("source and target servers do not have the OrioleDB rewind keys "
-				 "for divergence point %X/%X", LSN_FORMAT_ARGS(divergerec));
-	else
-		pg_log_info("added %d keys of rows rolled back at the divergence point", nkeys);
+			nkeys = add_rewind_key_entries(map, keys,
+										   keys + PQgetlength(res, 0, 0),
+										   "OrioleDB rewind keys of the source");
+			map->rewind_keys_found = true;
+			pg_log_info("added %d keys of rows rolled back at the divergence point, "
+						"found on the source", nkeys);
+		}
+		PQclear(res);
+	}
+
+	if (!map->rewind_keys_found)
+		pg_fatal("neither source nor target server has the OrioleDB rewind keys "
+				 "for divergence point %s", switchpoint);
 }
 
 static WalParseResult
@@ -1227,9 +1200,12 @@ extract_row_info(XLogReaderState *record, void *arg)
 {
 	RmgrId		rmid = XLogRecGetRmid(record);
 
-	/* Only containers carry changes; skip ORIOLEDB_XLOG_REWIND_KEYS */
 	if (rmid == ORIOLEDB_RMGR_ID &&
-		(XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_CONTAINER)
+		(XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_REWIND_KEYS)
+		extract_rewind_keys(record, (OrioledbKeyMap *) arg);
+	/* Only containers carry changes */
+	else if (rmid == ORIOLEDB_RMGR_ID &&
+			 (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_CONTAINER)
 	{
 		Pointer		startPtr = (Pointer) XLogRecGetData(record);
 		int			msg_len = XLogRecGetDataLen(record);
@@ -1289,10 +1265,10 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 				 (unsigned long) targetLastXid);
 
 	orioledb_map->fill_map = true;
+	orioledb_map->divergerec = divergerec;
 	SimpleXLogRead(datadir_target, startpoint, tliIndex, endpoint,
 				   restoreCommand, extract_row_info, orioledb_map);
-	add_divergence_rewind_keys(orioledb_map, source_conn, datadir_target,
-							   divergerec);
+	add_divergence_rewind_keys(orioledb_map, source_conn);
 
 	/*
 	 * Choose the xid floor (divXid) used to seed globalXmin /

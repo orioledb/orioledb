@@ -34,6 +34,21 @@
 #define ORIOLEDB_WAL_VERSION (20)
 
 /*
+ * ORIOLEDB_XLOG_REWIND_KEYS record: the header, then the entries of the keys
+ * the promotion rolled back, see rewind_keys_capture().  The header is
+ * network byte order:
+ *
+ *	uint16 version, uint16 flags, uint64 switchpoint, uint32 payload length
+ *
+ * A promotion logs one or more records: the first one has
+ * REWIND_KEYS_FIRST, the last one has REWIND_KEYS_LAST.
+ */
+#define REWIND_KEYS_WAL_VERSION		1
+#define REWIND_KEYS_WAL_HEADER_SIZE	16
+#define REWIND_KEYS_FIRST	(1 << 0)
+#define REWIND_KEYS_LAST	(1 << 1)
+
+/*
  * Value has been fixed at the moment of introducing WAL versioning.
  * WAL versions before FIRST_ORIOLEDB_WAL_VERSION are treated as zero
  * and still supported for on-the fly conversion to the current

@@ -4,7 +4,6 @@ from collections import Counter
 import os
 from shutil import rmtree
 import socket
-import struct
 import subprocess
 import time
 from tempfile import mkdtemp
@@ -12,6 +11,7 @@ from typing import List
 from unittest import result
 import unittest
 import glob
+import psycopg2
 import testgres
 from testgres.defaults import default_dbname
 from testgres.utils import file_tail, get_bin_path, options_string
@@ -148,10 +148,21 @@ class PgRewindTest(BaseTest):
 		return standby
 
 	@staticmethod
-	def rewind_keys_files(node):
-		# Return all rewind_keys file names
-		return glob.glob(
-		    os.path.join(node.data_dir, 'orioledb_data', 'pg_rewind_keys_*'))
+	def divergence_keys(node):
+		# Return the OrioleDB rewind keys the promotion of the node logged
+		# at the beginning of its timeline.  None for a node that was not
+		# promoted.
+		node.safe_psql("CHECKPOINT")
+		tli = node.execute("SELECT timeline_id FROM pg_control_checkpoint()")[0][0]
+		if tli == 1:
+			return None
+		history = node.execute(
+		    f"SELECT pg_read_file('pg_wal/{tli:08X}.history')")[0][0]
+		switchpoint = history.strip().splitlines()[-1].split('\t')[1]
+		keys = node.execute(
+		    f"SELECT orioledb_pg_rewind_divergence_keys('{switchpoint}'::pg_lsn)"
+		)[0][0]
+		return None if keys is None else bytes(keys)
 
 	def test_pg_rewind_remove_rows(self):
 		with self.node as master:
@@ -1124,66 +1135,6 @@ class PgRewindTest(BaseTest):
 		    "UPDATE {t} SET val = 'committed' WHERE mod(id, 10) = 3;",
 		    orig_rows=900)
 
-	def check_invalid_rewind_keys(self, failure):
-		with self.node as master:
-			self.enable_archive(master)
-			master.start()
-			with self.getReplica() as replica:
-				master.safe_psql("""
-                    CREATE EXTENSION orioledb;
-                    CREATE TABLE o_test (
-                        id integer PRIMARY KEY,
-                        val text
-                    ) USING orioledb;
-                    INSERT INTO o_test SELECT id, 'orig'
-                        FROM generate_series(1, 100) id;
-                    SELECT pg_create_physical_replication_slot('replica');
-                """)
-				replica.append_conf(primary_slot_name='replica')
-				replica.start()
-				self.catchup_orioledb(replica)
-
-				con = master.connect()
-				con.begin()
-				con.execute("UPDATE o_test SET val = 'unfinished'")
-				con.execute("SELECT orioledb_flush_local_wal()")
-				master.safe_psql("CHECKPOINT")
-				self.catchup_orioledb(replica)
-				replica.promote()
-				replica.safe_psql("CHECKPOINT")
-				con.commit()
-				con.close()
-
-				files = self.rewind_keys_files(replica)
-				self.assertEqual(len(files), 1)
-				if failure == 'checksum':
-					with open(files[0], 'r+b') as rewind_file:
-						rewind_file.seek(-1, os.SEEK_END)
-						byte = rewind_file.read(1)
-						rewind_file.seek(-1, os.SEEK_END)
-						rewind_file.write(bytes([byte[0] ^ 0xff]))
-				elif failure == 'missing':
-					os.remove(files[0])
-
-				replica.safe_psql(
-				    "SELECT pg_create_physical_replication_slot('origin')")
-				_, _, err = self.pg_rewind_master(master,
-				                                  replica.port,
-				                                  'origin',
-				                                  expect_error=True)
-				message = err.decode()
-				if failure == 'checksum':
-					self.assertIn('checksum mismatch', message)
-				elif failure == 'missing':
-					self.assertIn('do not have the OrioleDB rewind keys',
-					              message)
-
-	def test_pg_rewind_missing_rewind_keys_fails(self):
-		self.check_invalid_rewind_keys('missing')
-
-	def test_pg_rewind_corrupt_rewind_keys_fails(self):
-		self.check_invalid_rewind_keys('checksum')
-
 	def test_pg_rewind_zero_entry_file(self):
 		with self.node as master:
 			self.enable_archive(master)
@@ -1202,21 +1153,7 @@ class PgRewindTest(BaseTest):
 				replica.promote()
 				replica.safe_psql("CHECKPOINT")
 
-				files = self.rewind_keys_files(replica)
-				self.assertEqual(len(files), 1)
-				self.assertEqual(
-				    glob.glob(
-				        os.path.join(replica.data_dir, 'orioledb_data',
-				                     'pg_rewind_keys.*.part')), [])
-				with open(files[0], 'rb') as rewind_file:
-					header = rewind_file.read(36)
-				(magic, version, header_len, _, count, length,
-				 _) = struct.unpack('!IHHQQQI', header)
-				self.assertEqual(magic, 0x4f524b32)
-				self.assertEqual(version, 1)
-				self.assertEqual(header_len, 36)
-				self.assertEqual(count, 0)
-				self.assertEqual(length, 0)
+				self.assertEqual(self.divergence_keys(replica), b'')
 
 				replica.safe_psql("INSERT INTO o_test VALUES (2)")
 				master.safe_psql("INSERT INTO o_test VALUES (3)")
@@ -1229,6 +1166,7 @@ class PgRewindTest(BaseTest):
 		with self.node as master:
 			self.enable_archive(master)
 			master.start()
+			master.safe_psql("CREATE EXTENSION orioledb;")
 			master.stop()
 
 			# A clean shutdown checkpoint needs no WAL replay. PostgreSQL
@@ -1240,17 +1178,7 @@ class PgRewindTest(BaseTest):
 			master.start()
 			master.promote()
 
-			files = self.rewind_keys_files(master)
-			self.assertEqual(len(files), 1)
-			with open(files[0], 'rb') as rewind_file:
-				header = rewind_file.read(36)
-			(magic, version, header_len, _, count, length,
-			 _) = struct.unpack('!IHHQQQI', header)
-			self.assertEqual(magic, 0x4f524b32)
-			self.assertEqual(version, 1)
-			self.assertEqual(header_len, 36)
-			self.assertEqual(count, 0)
-			self.assertEqual(length, 0)
+			self.assertEqual(self.divergence_keys(master), b'')
 
 	def check_rewind_keys_promotion_crash(self, event):
 		with self.node as master:
@@ -1298,77 +1226,52 @@ class PgRewindTest(BaseTest):
 				con.commit()
 				con.close()
 
-				replica.safe_psql("CHECKPOINT")
-				self.assertEqual(len(self.rewind_keys_files(replica)), 1)
+				self.assertTrue(self.divergence_keys(replica))
 				self.assertEqual(
 				    replica.execute("""
                     SELECT count(*), count(*) FILTER (WHERE val = 'orig')
                         FROM o_test
                 """), [(100, 100)])
 
-	def test_pg_rewind_keys_crash_before_ready(self):
-		self.check_rewind_keys_promotion_crash('pg_rewind_keys_before_ready')
-
-	def test_pg_rewind_keys_crash_after_ready(self):
-		self.check_rewind_keys_promotion_crash('pg_rewind_keys_after_ready')
+	def test_pg_rewind_keys_crash_after_pending(self):
+		self.check_rewind_keys_promotion_crash('pg_rewind_keys_after_pending')
 
 	def test_pg_rewind_keys_crash_after_wal_flush(self):
 		self.check_rewind_keys_promotion_crash(
 		    'pg_rewind_keys_after_wal_flush')
 
-	def test_pg_rewind_keys_missing_part_stops_promotion(self):
+	def test_pg_rewind_missing_rewind_keys_fails(self):
+		"""
+        The keys of the promotion are gone with the WAL around its
+        switchpoint: pg_rewind must stop instead of taking it for a promotion
+        without keys.
+        """
 		with self.node as master:
 			self.enable_archive(master)
 			master.start()
 			with self.getReplica() as replica:
-				replica.append_conf("orioledb.enable_stopevents = true\n"
-				                    "orioledb.restart_after_crash = off")
 				master.safe_psql("""
                     CREATE EXTENSION orioledb;
-                    CREATE TABLE o_test (id integer PRIMARY KEY) USING orioledb;
-                    INSERT INTO o_test SELECT generate_series(1, 100);
-                    SELECT pg_create_physical_replication_slot('replica');
+                    CREATE TABLE h_test (id int);
                 """)
-				replica.append_conf(primary_slot_name='replica')
+				replica.append_conf(wal_keep_size='0')
 				replica.start()
 				self.catchup_orioledb(replica)
+				replica.promote()
+				for i in range(4):
+					replica.safe_psql("INSERT INTO h_test VALUES (1);")
+					replica.safe_psql("SELECT pg_switch_wal();")
+					replica.safe_psql("CHECKPOINT;")
+				master.safe_psql("INSERT INTO h_test VALUES (2);")
 
-				con = master.connect()
-				con.begin()
-				con.execute("DELETE FROM o_test")
-				con.execute("SELECT orioledb_flush_local_wal()")
-				master.safe_psql("CHECKPOINT")
-				self.catchup_orioledb(replica)
 				replica.safe_psql(
-				    "SELECT pg_stopevent_set('pg_rewind_keys_before_ready', "
-				    "'true')")
-				subprocess.run([
-				    get_bin_path('pg_ctl'), '-D', replica.data_dir, '-W',
-				    'promote'
-				],
-				               check=True)
-				replica.poll_query_until(
-				    "SELECT coalesce(array_length(waiter_pids, 1), 0) > 0 "
-				    "FROM pg_stopevents() "
-				    "WHERE stopevent = 'pg_rewind_keys_before_ready'",
-				    expected=True)
-				parts = glob.glob(
-				    os.path.join(replica.data_dir, 'orioledb_data',
-				                 'pg_rewind_keys.*.-1.part'))
-				self.assertEqual(len(parts), 1)
-				os.remove(parts[0])
-				replica.safe_psql(
-				    "SELECT pg_stopevent_reset('pg_rewind_keys_before_ready')")
-				for _ in range(100):
-					if replica.status() != NodeStatus.Running:
-						break
-					time.sleep(0.1)
-				self.assertNotEqual(replica.status(), NodeStatus.Running)
-				with open(replica.pg_log_file, 'r') as log_file:
-					self.assertIn('missing or invalid rewind keys part',
-					              log_file.read())
-				con.rollback()
-				con.close()
+				    "SELECT pg_create_physical_replication_slot('origin')")
+				_, _, err = self.pg_rewind_master(master,
+				                                  replica.port,
+				                                  'origin',
+				                                  expect_error=True)
+				self.assertIn('could not read the OrioleDB rewind keys',
+				              err.decode())
 
 	def test_pg_rewind_in_progress_trx_promoted_target(self):
 		"""
@@ -1428,18 +1331,10 @@ class PgRewindTest(BaseTest):
 				self.assertEqual(master.execute(query), [(1000, 200)])
 				self.assertEqual(replica.execute(query), [(1000, 200)])
 
-				# No timeline of the replica begins at its old switchpoint
-				# anymore: its next restartpoint removes the keys
-				master.safe_psql("CHECKPOINT;")
-				self.catchup_orioledb(replica)
-				replica.safe_psql("CHECKPOINT;")
-				wal = os.path.join(replica.data_dir, 'pg_wal')
-				self.assertEqual(self.rewind_keys_files(replica), [])
-
 	def test_pg_rewind_keys_removed_with_wal(self):
 		"""
-        Without WAL archiving the keys of a promotion go away together with
-        the WAL around its switchpoint: nobody could catch up from it.
+        The keys of a promotion are WAL: without WAL archiving they go away
+        together with the WAL around its switchpoint.
         """
 		with self.node as master:
 			master.start()
@@ -1452,15 +1347,14 @@ class PgRewindTest(BaseTest):
 				replica.start()
 				self.catchup_orioledb(replica)
 				replica.promote()
-				self.assertEqual(len(self.rewind_keys_files(replica)), 1)
-				replica.safe_psql("CHECKPOINT;")
-				self.assertEqual(len(self.rewind_keys_files(replica)), 1)
+				self.assertEqual(self.divergence_keys(replica), b'')
 
 				for i in range(4):
 					replica.safe_psql("INSERT INTO h_test VALUES (1);")
 					replica.safe_psql("SELECT pg_switch_wal();")
 					replica.safe_psql("CHECKPOINT;")
-				self.assertEqual(self.rewind_keys_files(replica), [])
+				with self.assertRaises(psycopg2.Error):
+					self.divergence_keys(replica)
 
 	def test_pg_rewind_large_divergence(self):
 		"""
