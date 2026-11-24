@@ -9,6 +9,31 @@ from testgres.exceptions import QueryException
 
 class DatabaseTemplateTest(BaseTest):
 
+	def test_create_database_copy_replica_restart(self):
+		master = self.node
+		master.start()
+		replica = self.getReplica()
+		replica.start()
+		master.safe_psql("CREATE DATABASE source;")
+		master.safe_psql(
+		    'source', """
+			CREATE EXTENSION orioledb;
+			CREATE TABLE test(id int) USING orioledb;
+			INSERT INTO test VALUES (1);
+		""")
+		self.catchup_orioledb(replica)
+
+		master.safe_psql("CREATE DATABASE copied TEMPLATE source;")
+		for restart in (False, True):
+			if restart:
+				replica.restart()
+			self.catchup_orioledb(replica)
+			replica.poll_query_until("SELECT orioledb_recovery_synchronized()",
+			                         dbname='copied',
+			                         max_attempts=60)
+			self.assertEqual(replica.execute('copied', "SELECT * FROM test"),
+			                 [(1, )])
+
 	TEMPLATE_DDL = """
         CREATE EXTENSION orioledb;
 
