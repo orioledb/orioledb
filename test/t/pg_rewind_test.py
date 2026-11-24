@@ -227,8 +227,11 @@ class PgRewindTest(BaseTest):
 
 	@staticmethod
 	def run_sql(node, sql):
-		for query in ([sql] if isinstance(sql, str) else sql):
-			node.safe_psql(query)
+		for query in ([sql] if isinstance(sql, str) or callable(sql) else sql):
+			if callable(query):
+				query(node)
+			else:
+				node.safe_psql(query)
 
 	@staticmethod
 	def table_digest(node, table):
@@ -1399,54 +1402,122 @@ class PgRewindTest(BaseTest):
 				    expected=True)
 				self.assertEqual(standby.execute(query), [(1001, 0)])
 
+	@staticmethod
+	def horizon_workload(node,
+	                     count,
+	                     tag,
+	                     table='o_test',
+	                     rollback_every=None):
+		# One transaction per iteration, like a real client
+		con = node.connect()
+		for i in range(count):
+			con.begin()
+			con.execute(f"""
+                UPDATE {table} SET val = '{tag}{i}'
+                    WHERE mod(id, 50) = {i % 50};
+                DELETE FROM {table} WHERE id = {1000 + i % 100};
+                INSERT INTO {table} VALUES ({1000 + i % 100}, '{tag}', 'x');
+            """)
+			if rollback_every and i % rollback_every == 0:
+				con.rollback()
+			else:
+				con.commit()
+			if i % 40 == 39:
+				con.execute("CHECKPOINT")
+		con.close()
+
+	@staticmethod
+	def xid_meta(node):
+		names = [
+		    'nextxid', 'runxmin', 'globalxmin', 'lastxidwhenupdatedglobalxmin',
+		    'writeinprogressxmin', 'writtenxmin', 'checkpointretainxmin',
+		    'checkpointretainxmax', 'cleanedxmin'
+		]
+		return dict(
+		    zip(names,
+		        node.execute(f"SELECT {', '.join(names)} "
+		                     "FROM orioledb_get_xid_meta()")[0]))
+
+	def check_horizons_order(self, node):
+		# The xid horizons never pass the next oxid, and the global one
+		# never passes the running one
+		meta = self.xid_meta(node)
+		for name, value in meta.items():
+			self.assertLessEqual(value, meta['nextxid'], f"{name}: {meta}")
+		self.assertLessEqual(meta['globalxmin'], meta['runxmin'], str(meta))
+		self.assertLessEqual(meta['checkpointretainxmin'],
+		                     meta['checkpointretainxmax'], str(meta))
+
+	def check_tbl(self, node):
+		# It takes an exclusive lock: primaries only
+		with node.connect() as con:
+			self.assertTrue(
+			    con.execute("""
+                    SELECT orioledb_tbl_check('o_test'::regclass, true)
+                """)[0][0])
+
+	def assert_same_tables(self, master, replica, tables=('o_test', )):
+		for table in tables:
+			self.assertEqual(self.table_digest(master, table),
+			                 self.table_digest(replica, table))
+
+	def exercise_rewound(self, master, replica, tables=('o_test', )):
+		"""
+        The rewind leaves the undo metadata of the target as it is and only
+        reseeds its xid horizons.  The rewound master follows the source:
+        check it stays consistent through the source's new transactions (their
+        oxids may be below what the target used), a restartpoint, a crash
+        restart, a promotion with rollbacks and another crash restart.
+        """
+		with open(master.pg_log_file, 'r') as log_file:
+			self.assertIn('orioledb rewind ended', log_file.read())
+		self.assert_same_tables(master, replica, tables)
+		self.check_tbl(replica)
+		self.check_horizons_order(master)
+
+		self.horizon_workload(replica, 100, 'after', rollback_every=7)
+		self.catchup_orioledb(master)
+		master.safe_psql("CHECKPOINT")
+		self.assert_same_tables(master, replica, tables)
+		self.check_horizons_order(master)
+		self.assertLessEqual(self.xid_meta(master)['nextxid'],
+		                     self.xid_meta(replica)['nextxid'])
+
+		master.stop(['-m', 'immediate'])
+		master.start()
+		self.horizon_workload(replica, 50, 'crash')
+		self.catchup_orioledb(master)
+		self.assert_same_tables(master, replica, tables)
+		self.check_horizons_order(master)
+
+		# The rewound node becomes the primary: its undo log and oxids must
+		# be usable, rollbacks included
+		master.promote()
+		self.horizon_workload(master, 150, 'promoted', rollback_every=5)
+		self.check_tbl(master)
+		self.check_horizons_order(master)
+		digest = self.table_digest(master, 'o_test')
+		master.stop(['-m', 'immediate'])
+		master.start()
+		self.assertEqual(self.table_digest(master, 'o_test'), digest)
+		self.check_tbl(master)
+		self.check_horizons_order(master)
+
 	def test_pg_rewind_state_after_rewind(self):
 		"""
-        The rewind leaves the undo metadata and the xid horizons of the
-        target as they are and only reseeds the xid horizons.  The target
-        runs many transactions and checkpoints past the divergence point
-        first, so its undo log holds records of oxids the source reuses.  The
-        rewound node must stay consistent through checkpoints, a crash
-        restart, replication, a promotion and rollbacks.
+        The target runs many transactions and checkpoints past the divergence
+        point, so its undo log holds records of oxids the source reuses.  A
+        transaction in progress at the divergence point commits on the
+        target.
         """
-
-		def workload(node, count, tag, rollback_every=None):
-			# One transaction per iteration, like a real client
-			con = node.connect()
-			for i in range(count):
-				con.begin()
-				con.execute(f"""
-                    UPDATE o_test SET val = '{tag}{i}'
-                        WHERE mod(id, 50) = {i % 50};
-                    DELETE FROM o_test WHERE id = {1000 + i % 100};
-                    INSERT INTO o_test VALUES ({1000 + i % 100}, '{tag}', 'x');
-                """)
-				if rollback_every and i % rollback_every == 0:
-					con.rollback()
-				else:
-					con.commit()
-				if i % 40 == 39:
-					con.execute("CHECKPOINT")
-			con.close()
-
-		def check(node):
-			# It takes an exclusive lock: primaries only
-			with node.connect() as con:
-				self.assertTrue(
-				    con.execute("""
-                        SELECT orioledb_tbl_check('o_test'::regclass, true)
-                    """)[0][0])
-
 		with self.node as master:
 			self.enable_archive(master)
 			master.start()
 			with self.getReplica() as replica:
 
 				def diverge():
-					# Past the divergence point the master (the target)
-					# advances its undo log and checkpoints, and so does the
-					# promoted replica (the source)
-					workload(master, 200, 'master')
-					workload(replica, 120, 'replica')
+					self.horizon_workload(master, 200, 'master')
+					self.horizon_workload(replica, 120, 'replica')
 
 				self.rewind_in_progress_trx(
 				    master, replica,
@@ -1454,39 +1525,173 @@ class PgRewindTest(BaseTest):
 				    "CREATE INDEX o_test_val_idx ON o_test (val);",
 				    "UPDATE o_test SET val = 'trx' WHERE mod(id, 10) = 1;",
 				    before_rewind=diverge)
+				self.exercise_rewound(master, replica)
 
-				with open(master.pg_log_file, 'r') as log_file:
+	def check_horizons(self, master_work, replica_work):
+		# master_work and replica_work are what each node does after the
+		# divergence point: a number of transactions on an OrioleDB table and
+		# on a heap table
+		with self.node as master:
+			self.enable_archive(master)
+			master.start()
+			with self.getReplica() as replica:
+
+				def work(spec):
+
+					def run(node):
+						orioledb_count, heap_count, tag, *rest = spec
+						# Transactions on a temporary table take oxids and log
+						# nothing: the first oxid in the node's WAL is above
+						# the ones it used
+						if rest:
+							before = self.xid_meta(node)['nextxid']
+							con = node.connect()
+							con.execute(
+							    "CREATE TEMP TABLE t_silent "
+							    "(id integer PRIMARY KEY) USING orioledb")
+							for i in range(rest[0]):
+								con.begin()
+								con.execute(
+								    f"INSERT INTO t_silent VALUES ({i})")
+								con.commit()
+							con.close()
+							self.assertGreaterEqual(
+							    self.xid_meta(node)['nextxid'] - before,
+							    rest[0])
+						# Some transactions roll back: a rolled back one must
+						# not turn into a committed one below the xid floor
+						if orioledb_count:
+							self.horizon_workload(node,
+							                      orioledb_count,
+							                      tag,
+							                      rollback_every=4)
+						if heap_count:
+							self.horizon_workload(node,
+							                      heap_count,
+							                      tag,
+							                      table='h_test',
+							                      rollback_every=4)
+						node.safe_psql("CHECKPOINT")
+
+					return run
+
+				self.rewind_diverged(
+				    master, replica,
+				    self.create_table_sql('o_test', 1000) +
+				    self.create_table_sql('h_test', 1000, 'heap') +
+				    "CREATE INDEX o_test_val_idx ON o_test (val);",
+				    work(replica_work), work(master_work))
+				self.exercise_rewound(master, replica, ('o_test', 'h_test'))
+
+	def test_pg_rewind_horizons_target_busy_source_idle(self):
+		"""
+        The source has no transactions after the divergence point, it only
+        starts them after the rewind, from oxids the busy target passed.
+        """
+		self.check_horizons((300, 0, 'master'), (0, 0, 'replica'))
+
+	def test_pg_rewind_horizons_target_idle_source_busy(self):
+		"""The target has no OrioleDB transactions to take the xid floor from."""
+		self.check_horizons((0, 0, 'master'), (300, 0, 'replica'))
+
+	def test_pg_rewind_horizons_both_idle(self):
+		self.check_horizons((0, 0, 'master'), (0, 0, 'replica'))
+
+	def test_pg_rewind_horizons_target_heap_only(self):
+		"""The target changes heap only, the source OrioleDB."""
+		self.check_horizons((0, 200, 'master'), (200, 0, 'replica'))
+
+	def test_pg_rewind_horizons_source_heap_only(self):
+		"""The source changes heap only, the target OrioleDB."""
+		self.check_horizons((200, 0, 'master'), (0, 200, 'replica'))
+
+	def test_pg_rewind_horizons_source_busier(self):
+		"""The source passes the oxids the target used by far."""
+		self.check_horizons((20, 0, 'master'), (400, 0, 'replica'))
+
+	def test_pg_rewind_horizons_target_silent_oxids(self):
+		"""
+        The target takes oxids for transactions that log nothing before its
+        first change: the first oxid in its WAL is above the first one the
+        source uses.
+        """
+		self.check_horizons((20, 0, 'master', 100), (100, 0, 'replica'))
+
+	def test_pg_rewind_horizons_target_unflushed_oxid(self):
+		"""
+        The target has a transaction in progress that changed a row and never
+        reached WAL, so the source never sees its oxid.  The source's first
+        oxid after the promotion is the oxid the target used for it; the
+        target aborts it when it is shut down for the rewind, and the first
+        oxid in its WAL is above that one.
+        """
+		with self.node as master:
+			self.enable_archive(master)
+			master.start()
+			with self.getReplica() as replica:
+				master.safe_psql("""
+                    CREATE EXTENSION orioledb;
+                    SELECT pg_create_physical_replication_slot('replica');
+                """)
+				self.run_sql(master, self.create_table_sql('o_test', 1000))
+				replica.append_conf(primary_slot_name='replica')
+				replica.start()
+				master.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				open_con = master.connect()
+				open_con.begin()
+				open_con.execute(
+				    "INSERT INTO o_test VALUES (5000, 'open', 'x')")
+				replica.promote()
+				replica.safe_psql("CHECKPOINT;")
+
+				# Rollbacks on the source: one below the target's floor must
+				# stay rolled back
+				self.horizon_workload(replica, 60, 'replica', rollback_every=3)
+				self.horizon_workload(master, 60, 'master')
+				self.rewind_and_follow(master, replica)
+				try:
+					open_con.close()
+				except Exception:
+					pass
+				self.exercise_rewound(master, replica)
+
+	def test_pg_rewind_horizons_rewind_twice(self):
+		"""
+        The rewound node is promoted and diverges from its old source, which
+        is then rewound onto it: the xid horizons seeded by the first rewind
+        must hold for the second one.
+        """
+		with self.node as master:
+			self.enable_archive(master)
+			master.start()
+			with self.getReplica() as replica:
+
+				def diverge():
+					self.horizon_workload(master, 150, 'master')
+					self.horizon_workload(replica, 100, 'replica')
+
+				self.rewind_in_progress_trx(
+				    master, replica,
+				    self.create_table_sql('o_test', 1000) +
+				    "CREATE INDEX o_test_val_idx ON o_test (val);",
+				    "UPDATE o_test SET val = 'trx' WHERE mod(id, 10) = 1;",
+				    before_rewind=diverge)
+				self.exercise_rewound(master, replica)
+
+				# The old source runs past the promoted master, then it is
+				# the one that is rewound
+				self.horizon_workload(replica, 80, 'old_source')
+				self.horizon_workload(master, 60, 'new_primary')
+				self.rewind_and_follow(replica, master)
+				with open(replica.pg_log_file, 'r') as log_file:
 					self.assertIn('orioledb rewind ended', log_file.read())
-				self.assertEqual(self.table_digest(master, 'o_test'),
-				                 self.table_digest(replica, 'o_test'))
-				check(replica)
-
-				# More work on the source reaches the rewound node, through
-				# a restartpoint of its own
-				workload(replica, 100, 'after', rollback_every=7)
-				self.catchup_orioledb(master)
-				master.safe_psql("CHECKPOINT")
-				self.assertEqual(self.table_digest(master, 'o_test'),
-				                 self.table_digest(replica, 'o_test'))
-
-				# Crash recovery of the rewound node
-				master.stop(['-m', 'immediate'])
-				master.start()
-				workload(replica, 50, 'crash')
-				self.catchup_orioledb(master)
-				self.assertEqual(self.table_digest(master, 'o_test'),
-				                 self.table_digest(replica, 'o_test'))
-
-				# The rewound node becomes the primary: its undo log and
-				# oxids must be usable, rollbacks included
-				master.promote()
-				workload(master, 150, 'promoted', rollback_every=5)
-				check(master)
-				digest = self.table_digest(master, 'o_test')
-				master.stop(['-m', 'immediate'])
-				master.start()
-				self.assertEqual(self.table_digest(master, 'o_test'), digest)
-				check(master)
+				self.assert_same_tables(replica, master)
+				self.horizon_workload(master, 50, 'again')
+				self.catchup_orioledb(replica)
+				self.assert_same_tables(replica, master)
+				self.check_tbl(master)
 
 	def test_pg_rewind_keys_removed_with_wal(self):
 		"""
