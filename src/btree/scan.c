@@ -247,6 +247,14 @@ struct BTreeSeqScan
 	 */
 	bool		ordered;
 	ScanDirection scanDir;
+
+	/*
+	 * Read on-disk leaves through the tree, which loads them into the page
+	 * pool, instead of into the private image only.  See
+	 * seq_scan_should_cache_leaves().
+	 */
+	bool		cacheLeaves;
+	OBTreeFindPageContext *leafLoadContext; /* for loading those leaves */
 #ifdef USE_ASSERT_CHECKING
 
 	/*
@@ -280,6 +288,7 @@ static dlist_head listOfScans = DLIST_STATIC_INIT(listOfScans);
 
 static void release_seq_scan_registration(BTreeSeqScan *scan);
 static void scan_make_iterator(BTreeSeqScan *scan, OTuple startKey, OTuple keyRangeHigh);
+static inline void seq_leaf_locator_start(BTreeSeqScan *scan);
 static bool get_prev_downlink_parallel(BTreeSeqScan *scan, uint64 *downlink,
 									   OFixedKey *keyRangeLow, OFixedKey *keyRangeHigh);
 static void get_next_key(BTreeSeqScan *scan, BTreePageItemLocator *intLoc, OFixedKey *nextKey, Page page);
@@ -1620,6 +1629,76 @@ check_in_memory_leaf_page(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRang
 }
 
 /*
+ * Reads an on-disk leaf by descending to it, which loads it into the page
+ * pool so the next scan finds it in memory, and then sets it up like a leaf
+ * read from memory.  The descent goes by the downlink's low key and finds the
+ * leaf as it is now: one that no longer covers the downlink's key range on
+ * either side gets its range read through an iterator instead.
+ */
+static void
+seq_scan_load_disk_leaf(BTreeSeqScan *scan)
+{
+	OBTreeFindPageContext *ctx = scan->leafLoadContext;
+	OTuple		low = scan->keyRangeLow.tuple;
+	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+	bool		startsAtLow;
+
+	if (ctx == NULL)
+		ctx = scan->leafLoadContext =
+			MemoryContextAlloc(btree_seqscan_context,
+							   sizeof(OBTreeFindPageContext));
+	init_page_find_context(ctx, scan->desc, scan->context.imgReadCsn,
+						   BTREE_PAGE_FIND_IMAGE);
+	if (O_TUPLE_IS_NULL(low))
+		findResult = find_page(ctx, NULL, BTreeKeyNone, 0);
+	else
+		findResult = find_page(ctx, &low, BTreeKeyNonLeafKey, 0);
+	Assert(findResult == OFindPageResultSuccess);
+	memcpy(scan->leafImg, ctx->img, ORIOLEDB_BLCKSZ);
+	scan->leafPartial.isPartial = false;
+	scan->haveLastLeafKey = false;
+
+	STOPEVENT(STOPEVENT_SCAN_DISK_PAGE,
+			  btree_page_stopevent_params(scan->desc, scan->leafImg));
+
+	/* Nothing on the leaf may come before the downlink's range */
+	if (O_TUPLE_IS_NULL(low))
+		startsAtLow = O_PAGE_IS(scan->leafImg, LEFTMOST);
+	else
+	{
+		BTreePageItemLocator loc;
+		OTuple		first;
+
+		BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &loc);
+		if (BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &loc))
+		{
+			BTREE_PAGE_READ_LEAF_TUPLE(first, scan->leafImg, &loc);
+			startsAtLow = o_btree_cmp(scan->desc,
+									  &first, BTreeKeyLeafTuple,
+									  &low, BTreeKeyNonLeafKey) >= 0;
+		}
+		else
+			startsAtLow = true;
+	}
+	if (!startsAtLow)
+	{
+		scan_make_iterator(scan, low, scan->keyRangeHigh.tuple);
+		return;
+	}
+
+	/* ... nor stop short of it or go past it */
+	check_in_memory_leaf_page(scan, low, scan->keyRangeHigh.tuple);
+	if (scan->iter)
+		return;
+
+	scan->hint.blkno = ctx->items[ctx->index].blkno;
+	scan->hint.pageChangeCount = ctx->items[ctx->index].pageChangeCount;
+	seq_leaf_locator_start(scan);
+	O_TUPLE_SET_NULL(scan->nextKey.tuple);
+	load_first_historical_page(scan);
+}
+
+/*
  * Checks if a downlink's key range overlaps the scan's key range filter.
  * Returns:
  *   -1 if the downlink range is entirely before the scan range (skip it)
@@ -2243,6 +2322,12 @@ iterate_internal_page(BTreeSeqScan *scan)
 				if (scan->poscan)
 					pg_atomic_fetch_sub_u32(&scan->poscan->downlinksWritersInProgress, 1);
 
+				if (scan->cacheLeaves)
+				{
+					seq_scan_load_disk_leaf(scan);
+					return true;
+				}
+
 				if (scan->ordered)
 				{
 					/*
@@ -2557,6 +2642,26 @@ btree_parallel_join_stopevent_params(BTreeDescr *desc)
 	return res;
 }
 
+/*
+ * Should the scan bring the leaves it finds on disk into the page pool?  A
+ * plain scan reads them into its private image and leaves them there, which
+ * keeps a large table from flushing the pool -- but a table that fits the
+ * pool easily is then read from disk again by every scan.  Like heap's
+ * bulk-read strategy, cache a tree that takes at most a quarter of the pool.
+ *
+ * Only plain scans: a bitmap or sampling scan reads part of the leaves, and
+ * an ordered one reads them inline already.
+ */
+static bool
+seq_scan_should_cache_leaves(BTreeSeqScan *scan)
+{
+	BTreeDescr *desc = scan->desc;
+
+	if (scan->ordered || scan->fetch || scan->needSampling || scan->cb)
+		return false;
+	return TREE_NUM_LEAF_PAGES(desc) <= ppool_size(desc->ppool) / 4;
+}
+
 static void
 init_btree_seq_scan(BTreeSeqScan *scan)
 {
@@ -2705,6 +2810,7 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 	clear_fixed_key(&scan->keyRangeLow);
 	scan->isSingleLeafPage = false;
 	o_btree_load_shmem(desc);
+	scan->cacheLeaves = seq_scan_should_cache_leaves(scan);
 	if (!iterate_internal_page(scan) && !single_leaf_page_rel(scan))
 	{
 		switch_to_disk_scan(scan);
@@ -2733,6 +2839,8 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->allocatedDownlinks = 16;
 	scan->downlinksCount = 0;
 	scan->downlinkIndex = 0;
+	scan->cacheLeaves = false;
+	scan->leafLoadContext = NULL;
 	scan->diskDownlinks = (BTreeSeqScanDiskDownlink *) MemoryContextAlloc(btree_seqscan_context,
 																		  sizeof(scan->diskDownlinks[0]) * scan->allocatedDownlinks);
 	scan->mctx = CurrentMemoryContext;
@@ -3634,6 +3742,12 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 	{
 		pfree(scan->diskDownlinks);
 		scan->diskDownlinks = NULL;
+	}
+
+	if (scan->leafLoadContext)
+	{
+		pfree(scan->leafLoadContext);
+		scan->leafLoadContext = NULL;
 	}
 
 	if (scan->descrPinned)
