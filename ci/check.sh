@@ -24,6 +24,33 @@ status=0
 REPEATS=${REPEATS:-1}
 pass_banner () { [ "$REPEATS" = 1 ] || echo "=== $1: pass $2 of $REPEATS ==="; }
 
+# Diagnostics for the flaky `window` test (orioledb/orioledb#1576).  Runs after
+# the installcheck-oriole step, where the flake was seen, and writes everything
+# into dump_diff_diag_pass<N>.txt, which the workflow uploads on failure.
+flake1576_diag () {
+	local pass=$1 pgstart=$2 out="dump_diff_diag_pass$1.txt"
+	{
+		echo "=== pass $pass $(date -u +%FT%TZ)"
+		echo "--- tenk1 indexes"
+		psql regression -p 5432 -X -c "select c.oid::regclass, am.amname, i.indisvalid from pg_index i join pg_class c on c.oid = i.indexrelid join pg_am am on am.oid = c.relam where i.indrelid = 'tenk1'::regclass order by 1" || true
+		echo "--- tenk1 pg_class / pg_stat_user_tables"
+		psql regression -p 5432 -X -x -c "select relname, relpages, reltuples, reloptions from pg_class where relname = 'tenk1'" -c "select * from pg_stat_user_tables where relname = 'tenk1'" || true
+		echo "--- row order of the failing queries (default plan, then forced seq/bitmap)"
+		psql regression -p 5432 -X \
+			-c "explain select sum(unique1) over (rows between 2 preceding and 2 following), unique1, four from tenk1 where unique1 < 10" \
+			-c "select unique1, ctid from tenk1 where unique1 < 10" \
+			-c "set enable_bitmapscan = off; set enable_indexscan = off; set enable_indexonlyscan = off" \
+			-c "select unique1, ctid from tenk1 where unique1 < 10" || true
+		echo "--- window.out timestamps and diff vs expected"
+		ls -l --time-style=full-iso src/test/regress/results/window.out || true
+		diff -u src/test/regress/expected/window.out src/test/regress/results/window.out | head -150 || true
+		echo "--- autovacuum activity on tenk1 since this pass started (with timestamps)"
+		tail -n +$((pgstart + 1)) pg.log | grep -E 'automatic (vacuum|analyze) of table "regression.public.tenk1"' || true
+		echo "--- server log entries of the window test (auto_explain plans etc.)"
+		tail -n +$((pgstart + 1)) pg.log | awk '/^20[0-9][0-9]-/ { keep = ($0 ~ / pg_regress\/window /) } keep' || true
+	} > "$out" 2>&1 || true
+}
+
 cd orioledb
 if [ $CHECK_TYPE = "valgrind_1" ]; then
 	for pass in $(seq 1 "$REPEATS"); do
@@ -131,7 +158,18 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         # per pass.
         sed -i '/^orioledb\.strict_mode/d' $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
         echo "orioledb.strict_mode = false" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+        # #1576 diagnostics: log every plan and autovacuum run with the
+        # application name (pg_regress/<test>) so the window test's plans can
+        # be pulled out of pg.log afterwards.
+        sed -i '/^session_preload_libraries/d;/^auto_explain\./d;/^log_autovacuum_min_duration/d;/^log_line_prefix/d' $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+        cat >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf <<'CONF'
+session_preload_libraries = 'auto_explain'
+auto_explain.log_min_duration = 0
+log_autovacuum_min_duration = 0
+log_line_prefix = '%m [%p] %a '
+CONF
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
+        pgstart=$(wc -l < pg.log)
 
         # pg_regress recreates its databases, but a tablespace is a cluster
         # object and test_setup's CREATE TABLESPACE would hit "already exists"
@@ -147,12 +185,14 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
 
         # Run Postgress regression tests
         make -C src/test/regress EXTRA_REGRESS_OPTS="--load-extension=orioledb" installcheck-oriole -j $(nproc) || true
+        flake1576_diag "$pass" "$pgstart"
         if [ -f src/test/regress/regression.diffs ]; then
           python3 ../orioledb/ci/filter_regression_diff.py --diff src/test/regress/regression.diffs > src/test/regress_filtered.diffs
           rm src/test/regress/regression.diffs
           [ -s src/test/regress_filtered.diffs ] || rm -f src/test/regress_filtered.diffs src/test/regress/regression.diffs
         fi
 
+        sed -i '/^session_preload_libraries/d;/^auto_explain\./d' $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
         sed -i '/^orioledb\.strict_mode/d' $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
         echo "orioledb.strict_mode = true" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
