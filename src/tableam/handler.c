@@ -98,6 +98,12 @@ typedef struct OScanDescData
 	BTreeSeqScan *scan;
 	OSnapshot	o_snapshot;
 	ItemPointerData iptr;
+
+	/*
+	 * The table's descriptor, looked up once for the per-row callbacks.  The
+	 * lock the scan holds keeps its layout; a slot keeps the same pointer.
+	 */
+	OTableDescr *descr;
 } OScanDescData;
 typedef OScanDescData *OScanDesc;
 
@@ -1846,6 +1852,7 @@ orioledb_rescan(TableScanDesc sscan, ScanKey key, bool set_params,
 
 	scan = (OScanDesc) sscan;
 	descr = relation_get_descr(scan->rs_base.rs_rd);
+	scan->descr = descr;
 
 	memcpy(scan->rs_base.rs_key, key, sizeof(ScanKeyData) *
 		   scan->rs_base.rs_nkeys);
@@ -1927,12 +1934,14 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 		bool		borrowed = false;
 
 		scan = (OScanDesc) sscan;
-		descr = relation_get_descr(scan->rs_base.rs_rd);
+		if (unlikely(scan->descr == NULL))
+			scan->descr = relation_get_descr(scan->rs_base.rs_rd);
+		descr = scan->descr;
 
 		/*
 		 * The tuple may stay in the scan's page image: the slot is refilled
-		 * by the next call before the image can change, and materializing
-		 * the slot copies the tuple.
+		 * by the next call before the image can change, and materializing the
+		 * slot copies the tuple.
 		 */
 		if (scan->scan)
 			tuple = btree_seq_scan_getnext_borrowed(scan->scan, slot->tts_mcxt,
