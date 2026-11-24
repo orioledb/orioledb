@@ -1448,6 +1448,29 @@ class PgRewindTest(BaseTest):
 		self.assertLessEqual(meta['checkpointretainxmin'],
 		                     meta['checkpointretainxmax'], str(meta))
 
+	def check_undo_order(self, node):
+		# The undo locations keep the order documented at UndoMeta
+		rows = node.execute("""
+            SELECT undo_type, cleanedlocation, minprocretainlocation,
+                   minproctransactionretainlocation, minprocreservedlocation,
+                   writtenlocation, writeinprogresslocation, lastusedlocation,
+                   advancereservedlocation, checkpointretainstartlocation,
+                   checkpointretainendlocation
+              FROM orioledb_get_undo_meta()
+        """)
+		self.assertTrue(rows)
+		for (undo_type, cleaned, retain, trx_retain, reserved, written,
+		     write_in_progress, last_used, advance_reserved, chkp_start,
+		     chkp_end) in rows:
+			where = f"{undo_type}: {rows}"
+			chain = [cleaned, retain, trx_retain, reserved]
+			self.assertEqual(chain, sorted(chain), where)
+			chain = [cleaned, written, write_in_progress, reserved]
+			self.assertEqual(chain, sorted(chain), where)
+			chain = [reserved, last_used, advance_reserved]
+			self.assertEqual(chain, sorted(chain), where)
+			self.assertLessEqual(chkp_start, chkp_end, where)
+
 	def check_tbl(self, node):
 		# It takes an exclusive lock: primaries only
 		with node.connect() as con:
@@ -1474,12 +1497,14 @@ class PgRewindTest(BaseTest):
 		self.assert_same_tables(master, replica, tables)
 		self.check_tbl(replica)
 		self.check_horizons_order(master)
+		self.check_undo_order(master)
 
 		self.horizon_workload(replica, 100, 'after', rollback_every=7)
 		self.catchup_orioledb(master)
 		master.safe_psql("CHECKPOINT")
 		self.assert_same_tables(master, replica, tables)
 		self.check_horizons_order(master)
+		self.check_undo_order(master)
 		self.assertLessEqual(self.xid_meta(master)['nextxid'],
 		                     self.xid_meta(replica)['nextxid'])
 
@@ -1489,6 +1514,7 @@ class PgRewindTest(BaseTest):
 		self.catchup_orioledb(master)
 		self.assert_same_tables(master, replica, tables)
 		self.check_horizons_order(master)
+		self.check_undo_order(master)
 
 		# The rewound node becomes the primary: its undo log and oxids must
 		# be usable, rollbacks included
@@ -1496,12 +1522,15 @@ class PgRewindTest(BaseTest):
 		self.horizon_workload(master, 150, 'promoted', rollback_every=5)
 		self.check_tbl(master)
 		self.check_horizons_order(master)
+		self.check_undo_order(master)
 		digest = self.table_digest(master, 'o_test')
 		master.stop(['-m', 'immediate'])
 		master.start()
 		self.assertEqual(self.table_digest(master, 'o_test'), digest)
 		self.check_tbl(master)
 		self.check_horizons_order(master)
+		self.check_undo_order(master)
+		self.check_undo_order(replica)
 
 	def test_pg_rewind_state_after_rewind(self):
 		"""
@@ -1655,6 +1684,121 @@ class PgRewindTest(BaseTest):
 					open_con.close()
 				except Exception:
 					pass
+				self.exercise_rewound(master, replica)
+
+	def test_pg_rewind_horizons_target_crashed_oxid(self):
+		"""
+        The target crashes with a transaction in progress that never reached
+        WAL, and is restarted and shut down cleanly for the rewind.  The
+        oxid the transaction took is in no WAL at all, neither as a change
+        nor as an abort.
+        """
+		with self.node as master:
+			self.enable_archive(master)
+			master.start()
+			with self.getReplica() as replica:
+				master.safe_psql("""
+                    CREATE EXTENSION orioledb;
+                    SELECT pg_create_physical_replication_slot('replica');
+                """)
+				self.run_sql(master, self.create_table_sql('o_test', 1000))
+				replica.append_conf(primary_slot_name='replica')
+				replica.start()
+				master.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				open_con = master.connect()
+				open_con.begin()
+				open_con.execute(
+				    "INSERT INTO o_test VALUES (5000, 'open', 'x')")
+				replica.promote()
+				replica.safe_psql("CHECKPOINT;")
+
+				master.stop(['-m', 'immediate'])
+				master.start()
+				self.horizon_workload(replica, 60, 'replica', rollback_every=3)
+				self.horizon_workload(master, 60, 'master')
+				self.rewind_and_follow(master, replica)
+				self.exercise_rewound(master, replica)
+
+	def test_pg_rewind_undo_after_rewind(self):
+		"""
+        Both nodes run transactions with far more undo than the undo buffers
+        hold, so the undo log is spilled to files, and the target commits
+        one past the divergence point.  The undo locations the rewound node
+        reserves and retains must stay in order, and the node keeps working.
+        """
+		with self.node as master:
+			self.enable_archive(master)
+			master.append_conf("orioledb.undo_buffers = 2MB")
+			master.start()
+			with self.getReplica() as replica:
+
+				def big_trx(node, rounds, tag):
+					# About 1.5 MB of rows rewritten again and again in one
+					# transaction
+					con = node.connect()
+					con.begin()
+					for i in range(rounds):
+						con.execute(
+						    f"UPDATE o_test SET val = '{tag}{i}', pad = repeat('{tag[0]}', 500)"
+						)
+					con.commit()
+					con.close()
+
+				def diverge():
+					big_trx(master, 8, 'master')
+					big_trx(replica, 8, 'replica')
+					self.check_undo_order(master)
+					self.check_undo_order(replica)
+					# The undo log outgrew its buffer and was written out
+					for node in (master, replica):
+						used, written = node.execute("""
+                            SELECT lastusedlocation, writtenlocation
+                              FROM orioledb_get_undo_meta()
+                             WHERE undo_type = 'row'
+                        """)[0]
+						self.assertGreater(used, 4 * 1024 * 1024)
+						self.assertGreater(written, 0)
+
+				self.rewind_in_progress_trx(
+				    master, replica,
+				    "CREATE TABLE o_test (id integer NOT NULL PRIMARY KEY, "
+				    "val text, pad text) USING orioledb;"
+				    "INSERT INTO o_test SELECT id, 'orig', repeat('x', 500) "
+				    "FROM generate_series(1, 3000) id;",
+				    "UPDATE o_test SET val = 'trx' WHERE mod(id, 10) = 1;",
+				    before_rewind=diverge)
+				self.exercise_rewound(master, replica)
+
+	def test_pg_rewind_parallel_recovery_workers(self):
+		"""
+        Both nodes run recovery with parallel workers: the promoted source
+        captures the keys in several processes, and the rewound target
+        replays the source's WAL through them.
+        """
+		with self.node as master:
+			self.enable_archive(master)
+			master.start()
+			with self.getReplica() as replica:
+				# pg_rewind copies the source's configuration to the target
+				replica.append_conf("orioledb.recovery_pool_size = 4\n"
+				                    "orioledb.recovery_idx_pool_size = 1")
+
+				def diverge():
+					self.horizon_workload(master, 150, 'master')
+					self.horizon_workload(replica, 100, 'replica')
+
+				self.rewind_in_progress_trx(
+				    master, replica,
+				    self.create_table_sql('o_test', 1000) +
+				    "CREATE INDEX o_test_val_idx ON o_test (val);",
+				    "UPDATE o_test SET val = 'trx' WHERE mod(id, 10) = 1;",
+				    before_rewind=diverge)
+				for node in (master, replica):
+					self.assertEqual(
+					    node.execute("SHOW orioledb.recovery_pool_size"),
+					    [('4', )])
 				self.exercise_rewound(master, replica)
 
 	def test_pg_rewind_horizons_rewind_twice(self):
