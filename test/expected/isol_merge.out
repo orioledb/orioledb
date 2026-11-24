@@ -765,10 +765,9 @@ step s1_begin_2: BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 step s2_begin_1: BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
 step s2_merge_5: MERGE INTO o_test_1 t
                     USING o_test_5 s
-                    ON t.val_1 = s.val_3
+                    ON t.val_1 = s.val_1
                     WHEN MATCHED THEN
                     DELETE;
-ERROR:  column s.val_3 does not exist
 step s1_create_table: CREATE TABLE o_test_3 (
                             val_11 int,
                             val_22 int

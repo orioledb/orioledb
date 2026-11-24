@@ -677,7 +677,7 @@ SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
 
 ALTER TABLE o_test_include_box_with_pkey_build ADD PRIMARY KEY (val_1);
 CREATE UNIQUE INDEX o_test_include_box_with_pkey_build_ix1
-	ON o_test_include_box_with_pkey (val_2) INCLUDE (val_4);
+	ON o_test_include_box_with_pkey_build (val_2) INCLUDE (val_4);
 CREATE UNIQUE INDEX o_test_include_box_with_pkey_build_ix2
 	ON o_test_include_box_with_pkey_build (val_3);
 \d+ o_test_include_box_with_pkey_build

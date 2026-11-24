@@ -151,7 +151,7 @@ step "s2_merge_4" { MERGE INTO o_test_1 t
 
 step "s2_merge_5" { MERGE INTO o_test_1 t
                     USING o_test_5 s
-                    ON t.val_1 = s.val_3
+                    ON t.val_1 = s.val_1
                     WHEN MATCHED THEN
                     DELETE; }
 
