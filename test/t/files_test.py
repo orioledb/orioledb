@@ -160,6 +160,51 @@ class FilesTest(BaseTest):
 		    [0][0])
 		node.stop()
 
+	def test_tbl_check_reports_every_index(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test (
+				id int PRIMARY KEY,
+				a int NOT NULL,
+				b int NOT NULL
+			) USING orioledb;
+			CREATE INDEX o_test_a ON o_test (a);
+			CREATE INDEX o_test_b ON o_test (b);
+			INSERT INTO o_test (SELECT i, i, i FROM generate_series(1, 1000) i);
+			CHECKPOINT;
+		""")
+		datoid = node.execute("""
+			SELECT oid FROM pg_database WHERE datname = current_database()
+		""")[0][0]
+		relnodes = [
+		    node.execute("SELECT relfilenode FROM pg_class "
+		                 f"WHERE oid = '{name}'::regclass")[0][0]
+		    for name in ('o_test_a', 'o_test_b')
+		]
+		node.stop()
+
+		# Break both secondary indices so that their checks fail
+		for relnode in relnodes:
+			pattern = os.path.join(node.data_dir, 'orioledb_data', str(datoid),
+			                       f'{relnode}-*.map')
+			map_files = glob.glob(pattern)
+			self.assertNotEqual([], map_files)
+			for f in map_files:
+				os.unlink(f)
+
+		node.start()
+		_, out, err = node.psql(
+		    'postgres', "SELECT orioledb_tbl_check('o_test'::regclass, TRUE);")
+		self.assertEqual(out.decode('utf-8').strip(), 'f')
+		err = err.decode('utf-8')
+		self.assertNotIn('check of index "o_test_pkey" failed', err)
+		self.assertIn('check of index "o_test_a" failed', err)
+		self.assertIn('check of index "o_test_b" failed', err)
+		node.stop()
+
 	def get_file_lists(self, filter_sys_trees=False):
 		map_files = []
 		tmp_files = []
