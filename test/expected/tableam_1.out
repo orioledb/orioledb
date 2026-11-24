@@ -4449,15 +4449,11 @@ ERROR:  "o_heap_test" is not a orioledb table
 SELECT orioledb_evict_pages('o_heap_test'::regclass, 1);
 ERROR:  "o_heap_test" is not a orioledb table
 SELECT orioledb_write_pages('o_heap_test'::regclass);
-<<<<<<< HEAD
 ERROR:  "o_heap_test" is not a orioledb table
-=======
-ERROR:  "o_heap_test" is not an orioledb table
 SELECT * FROM orioledb_tree_stat('o_heap_test'::regclass);
-ERROR:  "o_heap_test" is not an orioledb table
+ERROR:  "o_heap_test" is not a orioledb table
 SELECT * FROM orioledb_tree_stat('o_heap_test_pkey'::regclass);
-ERROR:  "o_heap_test" is not an orioledb table
->>>>>>> 8cb350ed (Reject unsupported relations in orioledb_tree_stat())
+ERROR:  "o_heap_test" is not a orioledb table
 DROP TABLE o_heap_test;
 CREATE TABLE o_tree_stat_gin (id int PRIMARY KEY, a int[]) USING orioledb;
 CREATE INDEX o_tree_stat_gin_idx ON o_tree_stat_gin USING gin (a);
