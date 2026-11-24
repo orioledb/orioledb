@@ -1703,6 +1703,9 @@ retry:
 		 * Evade deadlock: unlock the page before taking an unique lwlock.
 		 */
 		unlock_page(blkno);
+		if (STOPEVENTS_ENABLED())
+			params = prepare_modify_start_params(desc);
+		STOPEVENT(STOPEVENT_UNIQUE_PAGE_UNLOCKED, params);
 
 		LWLockAcquire(uniqueLock, LW_EXCLUSIVE);
 
@@ -1802,6 +1805,9 @@ retry:
 	if (result == OBTreeModifyResultInserted && found_but_insert)
 		result = OBTreeModifyResultFound;
 
+	if (STOPEVENTS_ENABLED())
+		params = prepare_modify_start_params(desc);
+	STOPEVENT(STOPEVENT_UNIQUE_INSERT_DONE, params);
 	LWLockRelease(uniqueLock);
 	return result;
 }

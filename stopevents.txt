@@ -61,3 +61,5 @@ oxid_notify_woke
 seq_scan_parallel_join
 seq_scan_dsm_create_fail
 define_index_before_update
+unique_insert_done
+unique_page_unlocked
