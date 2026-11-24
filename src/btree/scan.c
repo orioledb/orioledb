@@ -2850,6 +2850,30 @@ btree_seq_scan_get_tuple_from_iterator(BTreeSeqScan *scan,
 						&scan->iterSkipKeyVal.tuple, BTreeKeyNonLeafKey) <= 0)
 			continue;
 		scan->iterSkipKey = false;
+
+		/*
+		 * The iterator covers the key range of a downlink, which may stick
+		 * out of the scan's qualification range just like a leaf read
+		 * directly.  Skip what is before the range and finish the scan past
+		 * it, as btree_seq_scan_getnext_internal() does for a leaf.
+		 */
+		if (!O_TUPLE_IS_NULL(result) &&
+			scan->scanRange && !scan->pageFullyInRange)
+		{
+			int			rangeCheck = tuple_in_scan_range(scan, result);
+
+			if (rangeCheck == -1)
+			{
+				pfree(result.data);
+				continue;
+			}
+			if (rangeCheck == 1)
+			{
+				pfree(result.data);
+				O_TUPLE_SET_NULL(result);
+				scan->status = BTreeSeqScanFinished;
+			}
+		}
 		break;
 	}
 
@@ -3015,6 +3039,13 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 
 	while (true)
 	{
+		/* an iterator may have run past the scan range */
+		if (scan->status == BTreeSeqScanFinished)
+		{
+			O_TUPLE_SET_NULL(tuple);
+			return tuple;
+		}
+
 		while (scan->haveHistImg)
 		{
 			OTuple		histTuple;
