@@ -3024,11 +3024,34 @@ apply_next_key(BTreeSeqScan *scan)
 	}
 }
 
+/*
+ * The visible version of the tuple at loc on a page image of the scan.  With
+ * borrowed, the tuple on the image itself is returned by reference: the
+ * leaf and historical images are private to the scan and are only reloaded
+ * by a later call that fetches the next tuple.
+ */
+static inline OTuple
+seq_scan_find_tuple_version(BTreeSeqScan *scan, Page img,
+							BTreePageItemLocator *loc, CommitSeqNo *tupleCsn,
+							MemoryContext mctx, bool *borrowed)
+{
+	if (borrowed)
+		return o_find_tuple_version_borrowed(scan->desc, img, loc,
+											 &scan->oSnapshot, tupleCsn, mctx,
+											 borrowed);
+	return o_find_tuple_version(scan->desc, img, loc, &scan->oSnapshot,
+								tupleCsn, mctx, NULL, NULL);
+}
+
 static OTuple
 btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
-								CommitSeqNo *tupleCsn, BTreeLocationHint *hint)
+								CommitSeqNo *tupleCsn, BTreeLocationHint *hint,
+								bool *borrowed)
 {
 	OTuple		tuple;
+
+	if (borrowed)
+		*borrowed = false;
 
 	if (scan->iter)
 	{
@@ -3153,14 +3176,9 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 				}
 			}
 
-			tuple = o_find_tuple_version(scan->desc,
-										 scan->histImg,
-										 &scan->histLoc,
-										 &scan->oSnapshot,
-										 tupleCsn,
-										 mctx,
-										 NULL,
-										 NULL);
+			tuple = seq_scan_find_tuple_version(scan, scan->histImg,
+												&scan->histLoc, tupleCsn,
+												mctx, borrowed);
 			BTREE_PAGE_LOCATOR_NEXT(scan->histImg, &scan->histLoc);
 			if (!O_TUPLE_IS_NULL(tuple))
 			{
@@ -3265,14 +3283,9 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 			scan->haveLastLeafKey = true;
 		}
 
-		tuple = o_find_tuple_version(scan->desc,
-									 scan->leafImg,
-									 &scan->leafLoc,
-									 &scan->oSnapshot,
-									 tupleCsn,
-									 mctx,
-									 NULL,
-									 NULL);
+		tuple = seq_scan_find_tuple_version(scan, scan->leafImg,
+											&scan->leafLoc, tupleCsn, mctx,
+											borrowed);
 		seq_leaf_locator_advance(scan);
 		if (!O_TUPLE_IS_NULL(tuple))
 		{
@@ -3301,9 +3314,10 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 	return tuple;
 }
 
-OTuple
-btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
-					   CommitSeqNo *tupleCsn, BTreeLocationHint *hint)
+static OTuple
+seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
+				 CommitSeqNo *tupleCsn, BTreeLocationHint *hint,
+				 bool *borrowed)
 {
 	OTuple		tuple;
 
@@ -3314,7 +3328,8 @@ btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
 	if (scan->status == BTreeSeqScanInMemory ||
 		scan->status == BTreeSeqScanDisk)
 	{
-		tuple = btree_seq_scan_getnext_internal(scan, mctx, tupleCsn, hint);
+		tuple = btree_seq_scan_getnext_internal(scan, mctx, tupleCsn, hint,
+												borrowed);
 
 		if (!O_TUPLE_IS_NULL(tuple))
 		{
@@ -3351,6 +3366,26 @@ btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
 
 	O_TUPLE_SET_NULL(tuple);
 	return tuple;
+}
+
+OTuple
+btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
+					   CommitSeqNo *tupleCsn, BTreeLocationHint *hint)
+{
+	return seq_scan_getnext(scan, mctx, tupleCsn, hint, NULL);
+}
+
+/*
+ * Like btree_seq_scan_getnext(), but may return a tuple that lives in the
+ * scan's own page image, setting *borrowed.  Such a tuple stays valid only
+ * until the next call on this scan, and must not be freed.
+ */
+OTuple
+btree_seq_scan_getnext_borrowed(BTreeSeqScan *scan, MemoryContext mctx,
+								CommitSeqNo *tupleCsn, BTreeLocationHint *hint,
+								bool *borrowed)
+{
+	return seq_scan_getnext(scan, mctx, tupleCsn, hint, borrowed);
 }
 
 static OTuple

@@ -1924,19 +1924,25 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 		OTuple		tuple = {0};
 		BTreeLocationHint hint;
 		CommitSeqNo csn;
+		bool		borrowed = false;
 
 		scan = (OScanDesc) sscan;
 		descr = relation_get_descr(scan->rs_base.rs_rd);
 
+		/*
+		 * The tuple may stay in the scan's page image: the slot is refilled
+		 * by the next call before the image can change, and materializing
+		 * the slot copies the tuple.
+		 */
 		if (scan->scan)
-			tuple = btree_seq_scan_getnext(scan->scan, slot->tts_mcxt,
-										   &csn, &hint);
+			tuple = btree_seq_scan_getnext_borrowed(scan->scan, slot->tts_mcxt,
+													&csn, &hint, &borrowed);
 
 		if (O_TUPLE_IS_NULL(tuple))
 			return false;
 
 		tts_orioledb_store_tuple(slot, tuple, descr, csn,
-								 PrimaryIndexNumber, true, &hint);
+								 PrimaryIndexNumber, !borrowed, &hint);
 
 		result = slot_keytest(slot,
 							  scan->rs_base.rs_nkeys,

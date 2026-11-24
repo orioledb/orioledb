@@ -161,5 +161,11 @@ extern OTuple o_find_tuple_version(BTreeDescr *desc, Page p,
 								   MemoryContext mcxt,
 								   TupleFetchCallback cb,
 								   void *arg);
+extern OTuple o_find_tuple_version_borrowed(BTreeDescr *desc, Page p,
+											BTreePageItemLocator *loc,
+											OSnapshot *oSnapshot,
+											CommitSeqNo *tupleCsn,
+											MemoryContext mcxt,
+											bool *borrowed);
 
 #endif							/* __BTREE_ITERATOR_H__ */
