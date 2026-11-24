@@ -424,6 +424,17 @@ wal_parse_rec_dbcreate_copy(WalReaderState *r, WalRecord *rec)
 
 	WR_PARSE(r, &rec->u.dbcreate_copy.src_datoid);
 	WR_PARSE(r, &rec->u.dbcreate_copy.dst_datoid);
+	if (r->container.version >= ORIOLEDB_DATABASE_TABLESPACE_WAL_VERSION)
+	{
+		WR_PARSE(r, &rec->u.dbcreate_copy.src_tablespace);
+		WR_PARSE(r, &rec->u.dbcreate_copy.dst_tablespace);
+	}
+	else
+	{
+		/* Older copies kept every tree in its original tablespace. */
+		rec->u.dbcreate_copy.src_tablespace = InvalidOid;
+		rec->u.dbcreate_copy.dst_tablespace = InvalidOid;
+	}
 
 	return WALPARSE_OK;
 }

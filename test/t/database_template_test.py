@@ -79,6 +79,43 @@ class DatabaseTemplateTest(BaseTest):
 		check_rows(1002)
 		node.stop()
 
+	def test_create_database_template_tablespace(self):
+		master = self.node
+		master.append_conf("allow_in_place_tablespaces = true\n")
+		master.start()
+		replica = self.getReplica()
+		replica.append_conf("allow_in_place_tablespaces = true\n")
+
+		master.safe_psql("CREATE TABLESPACE db_ts LOCATION '';")
+		master.safe_psql(
+		    'template1', """
+			CREATE EXTENSION orioledb;
+			CREATE TABLE test(id int PRIMARY KEY) USING orioledb;
+			INSERT INTO test VALUES (1), (2);
+		""")
+		master.safe_psql("CREATE DATABASE copied TABLESPACE db_ts;")
+		master.restart()
+		# Replay the copy during standby startup without a database connection.
+		replica.start()
+		self.catchup_orioledb(replica)
+
+		for node in (master, replica):
+			self.assertEqual(
+			    node.execute('copied', "SELECT * FROM test ORDER BY id"),
+			    [(1, ), (2, )])
+			relpath = node.execute(
+			    'copied',
+			    "SELECT pg_relation_filepath('test'::regclass)")[0][0]
+			database_path = os.path.dirname(relpath)
+			dboid = os.path.basename(database_path)
+			dbpath = os.path.join(node.data_dir,
+			                      os.path.dirname(database_path),
+			                      'orioledb_data', dboid)
+			self.assertTrue(os.listdir(dbpath), dbpath)
+			self.assertFalse(
+			    os.path.exists(
+			        os.path.join(node.data_dir, 'orioledb_data', dboid)))
+
 	TEMPLATE_DDL = """
         CREATE EXTENSION orioledb;
 

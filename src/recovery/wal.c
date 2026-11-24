@@ -710,7 +710,8 @@ add_database_copy_wal_record(Oid dboid, Oid src_tblspc, Oid dst_tblspc)
 }
 
 void
-add_database_create_copy_wal_record(Oid src_datoid, Oid dst_datoid)
+add_database_create_copy_wal_record(Oid src_datoid, Oid dst_datoid,
+									Oid src_tablespace, Oid dst_tablespace)
 {
 	WALRecDbCreateCopy *rec;
 
@@ -725,6 +726,8 @@ add_database_create_copy_wal_record(Oid src_datoid, Oid dst_datoid)
 	rec->recType = WAL_REC_DATABASE_CREATE_COPY;
 	memcpy(rec->src_datoid, &src_datoid, sizeof(Oid));
 	memcpy(rec->dst_datoid, &dst_datoid, sizeof(Oid));
+	memcpy(rec->src_tablespace, &src_tablespace, sizeof(Oid));
+	memcpy(rec->dst_tablespace, &dst_tablespace, sizeof(Oid));
 
 	local_wal.buffer_offset += sizeof(*rec);
 }
@@ -747,6 +750,8 @@ add_database_template_checkpoint_wal_record(Oid src_datoid)
 	rec->recType = WAL_REC_DATABASE_TEMPLATE_CHECKPOINT;
 	memcpy(rec->src_datoid, &src_datoid, sizeof(Oid));
 	memcpy(rec->dst_datoid, &invalid_datoid, sizeof(Oid));
+	memset(rec->src_tablespace, 0, sizeof(Oid));
+	memset(rec->dst_tablespace, 0, sizeof(Oid));
 
 	local_wal.buffer_offset += sizeof(*rec);
 }

@@ -28,7 +28,7 @@
  * ORIOLEDB_COMPRESS_VERSION (see big comment on versioning
  * in include/orioledb.h)
  */
-#define ORIOLEDB_WAL_VERSION (21)
+#define ORIOLEDB_WAL_VERSION (22)
 
 /*
  * Value has been fixed at the moment of introducing WAL versioning.
@@ -79,6 +79,15 @@
  * We should never change this value.
  */
 #define ORIOLEDB_FLAT_OLD_TUPLE_WAL_VERSION (20)
+
+/*
+ * Default tablespace mapping in database-create copy records.  Recovery has
+ * no database connection, so replay cannot derive this from pg_database.
+ * DATABASE_TEMPLATE_CHECKPOINT shares the extended payload.
+ *
+ * We should never change this value.
+ */
+#define ORIOLEDB_DATABASE_TABLESPACE_WAL_VERSION (22)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
@@ -263,6 +272,9 @@ typedef struct
 	uint8		recType;
 	uint8		src_datoid[sizeof(Oid)];
 	uint8		dst_datoid[sizeof(Oid)];
+	/* Since ORIOLEDB_DATABASE_TABLESPACE_WAL_VERSION */
+	uint8		src_tablespace[sizeof(Oid)];
+	uint8		dst_tablespace[sizeof(Oid)];
 } WALRecDbCreateCopy;
 
 #define LOCAL_WAL_BUFFER_SIZE	(8192)
@@ -282,7 +294,8 @@ extern void add_savepoint_wal_record(SubTransactionId parentSubid,
 extern void add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid);
 extern void add_subxact_abort_wal_record(TransactionId logicalXid);
 extern void add_database_copy_wal_record(Oid dboid, Oid src_tblspc, Oid dst_tblspc);
-extern void add_database_create_copy_wal_record(Oid src_datoid, Oid dst_datoid);
+extern void add_database_create_copy_wal_record(Oid src_datoid, Oid dst_datoid,
+												Oid src_tablespace, Oid dst_tablespace);
 extern void add_database_template_checkpoint_wal_record(Oid src_datoid);
 extern void wal_reset_xid_record(void);
 extern bool local_wal_is_empty(void);

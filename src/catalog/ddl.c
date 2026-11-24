@@ -128,6 +128,8 @@ typedef struct
 {
 	Oid			src_datoid;
 	Oid			dst_datoid;
+	Oid			src_tablespace;
+	Oid			dst_tablespace;
 } createdb_params;
 
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
@@ -177,9 +179,10 @@ static void o_find_collation_dependencies(Oid colloid);
 static void redefine_indices(Relation rel, OTable *new_o_table, bool primary,
 							 Oid oldRelnode);
 
-static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
+static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP, Oid *tablespaceP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
-static void o_copy_orioledb_template(Oid src_dboid, Oid dst_dboid);
+static void o_copy_orioledb_template(Oid src_dboid, Oid dst_dboid,
+									 Oid src_tablespace, Oid dst_tablespace);
 static void o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt);
 static void o_process_added_column(AlterTableCmd *cmd);
 static void o_check_movedb(const AlterDatabaseStmt *stmt, movedb_params *movedb);
@@ -5384,7 +5387,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
  * return false.
  */
 static bool
-get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP)
+get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP, Oid *tablespaceP)
 {
 	bool		result = false;
 	Relation	relation;
@@ -5453,6 +5456,9 @@ get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP)
 				if (dbIdP)
 					*dbIdP = dbOid;
 
+				if (tablespaceP)
+					*tablespaceP = dbform->dattablespace;
+
 				ReleaseSysCache(tuple);
 				result = true;
 				break;
@@ -5477,21 +5483,21 @@ static Oid
 o_createdb(ParseState *pstate, const CreatedbStmt *stmt)
 {
 	Oid			src_dboid;
+	Oid			src_tablespace;
+	Oid			dst_tablespace;
 	ListCell   *option;
 	DefElem    *dtemplate = NULL;
+	DefElem    *dtablespace = NULL;
 	const char *dbtemplate = NULL;
 	Oid			result;
-
-	/*
-	 * Currently we don't support a template database which has OrioleDB
-	 * tables. The function raises an error otherwise.
-	 */
 
 	/* Extract options from the statement node tree */
 	foreach(option, stmt->options)
 	{
 		DefElem    *defel = (DefElem *) lfirst(option);
 
+		if (strcmp(defel->defname, "tablespace") == 0)
+			dtablespace = defel;
 		if (strcmp(defel->defname, "template") == 0)
 			dtemplate = defel;
 	}
@@ -5505,7 +5511,7 @@ o_createdb(ParseState *pstate, const CreatedbStmt *stmt)
 	 * Similar to createdb() we obtain share lock on the template database
 	 * within get_db_info().
 	 */
-	if (!get_db_info(dbtemplate, ShareLock, &src_dboid))
+	if (!get_db_info(dbtemplate, ShareLock, &src_dboid, &src_tablespace))
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_DATABASE),
 				 errmsg("template database \"%s\" does not exist",
@@ -5532,13 +5538,16 @@ o_createdb(ParseState *pstate, const CreatedbStmt *stmt)
 	 */
 	result = createdb(pstate, stmt);
 
-	o_copy_orioledb_template(src_dboid, result);
+	dst_tablespace = dtablespace ?
+		get_tablespace_oid(defGetString(dtablespace), false) : src_tablespace;
+	o_copy_orioledb_template(src_dboid, result, src_tablespace, dst_tablespace);
 
 	return result;
 }
 
 static void
-o_copy_orioledb_template(Oid src_dboid, Oid dst_dboid)
+o_copy_orioledb_template(Oid src_dboid, Oid dst_dboid,
+						 Oid src_tablespace, Oid dst_tablespace)
 {
 	if (o_tables_num(src_dboid) > 0)
 	{
@@ -5550,18 +5559,23 @@ o_copy_orioledb_template(Oid src_dboid, Oid dst_dboid)
 
 		fparms.src_datoid = src_dboid;
 		fparms.dst_datoid = dst_dboid;
+		fparms.src_tablespace = src_tablespace;
+		fparms.dst_tablespace = dst_tablespace;
 
 		PG_ENSURE_ERROR_CLEANUP(o_createdb_failure_callback,
 								PointerGetDatum(&fparms));
 		{
 			o_tables_table_meta_lock(NULL);
-			o_tables_copy_database_files(src_dboid, dst_dboid);
+			o_tables_copy_database_files(src_dboid, dst_dboid,
+										 src_tablespace, dst_tablespace);
 
 			if (STOPEVENT_CONDITION(STOPEVENT_CREATEDB_COPY_FAIL, NULL))
 				elog(ERROR, "Debug condition: createdb copy failed.");
 
-			add_database_create_copy_wal_record(src_dboid, dst_dboid);
-			o_tables_copy_all(oxid, oSnapshot.csn, src_dboid, dst_dboid);
+			add_database_create_copy_wal_record(src_dboid, dst_dboid,
+												src_tablespace, dst_tablespace);
+			o_tables_copy_all(oxid, oSnapshot.csn, src_dboid, dst_dboid,
+							  src_tablespace, dst_tablespace);
 			o_sys_caches_copy_datoid(src_dboid, dst_dboid);
 			o_tables_table_meta_unlock(NULL, InvalidOid);
 		}
@@ -5575,7 +5589,8 @@ o_createdb_failure_callback(int code, Datum arg)
 {
 	createdb_params *fparms = (createdb_params *) DatumGetPointer(arg);
 
-	o_tables_cleanup_database_files(fparms->src_datoid, fparms->dst_datoid);
+	o_tables_cleanup_database_files(fparms->src_datoid, fparms->dst_datoid,
+									fparms->src_tablespace, fparms->dst_tablespace);
 }
 
 static void
@@ -5587,7 +5602,7 @@ o_check_movedb(const AlterDatabaseStmt *stmt, movedb_params *movedb)
 	DefElem    *dtablespace = NULL;
 	HeapTuple	tuple = NULL;
 
-	if (!get_db_info(stmt->dbname, NoLock, &db_id))
+	if (!get_db_info(stmt->dbname, NoLock, &db_id, NULL))
 
 		/*
 		 * Lets standard processing of moving database generates an error.

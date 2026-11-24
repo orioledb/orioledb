@@ -5391,7 +5391,10 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				if (!ctx->single)
 					workers_synchronize(xlogPtr, true);
 
-				o_tables_copy_database_files(rec->u.dbcreate_copy.src_datoid, rec->u.dbcreate_copy.dst_datoid);
+				o_tables_copy_database_files(rec->u.dbcreate_copy.src_datoid,
+											 rec->u.dbcreate_copy.dst_datoid,
+											 rec->u.dbcreate_copy.src_tablespace,
+											 rec->u.dbcreate_copy.dst_tablespace);
 
 				if (!ctx->single)
 					workers_synchronize(xlogPtr + 1, true);
