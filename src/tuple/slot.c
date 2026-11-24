@@ -706,6 +706,29 @@ tts_orioledb_materialize(TupleTableSlot *slot)
 
 	slot_getallattrs(slot);
 
+	/*
+	 * A tuple the slot does not own, such as one in a sequential scan's page
+	 * image, changes when its owner moves on, and tts_orioledb_clear() frees
+	 * the tuple of a slot that owns its contents.  Take a copy.
+	 */
+	if (!O_TUPLE_IS_NULL(oslot->tuple))
+	{
+		OIndexDescr *idx;
+		uint32		len;
+		Pointer		copy;
+
+		if (oslot->ixnum == BridgeIndexNumber)
+			idx = oslot->descr->bridge;
+		else
+			idx = oslot->descr->indices[oslot->ixnum];
+		len = o_tuple_size(oslot->tuple,
+						   oslot->leafTuple ? &idx->leafSpec : &idx->nonLeafSpec);
+		copy = MemoryContextAlloc(slot->tts_mcxt, len);
+		memcpy(copy, oslot->tuple.data, len);
+		oslot->tuple.data = copy;
+		slot->tts_flags |= TTS_FLAG_SHOULDFREE;
+	}
+
 	/* compute size of memory required */
 	for (int natt = 0; natt < desc->natts; natt++)
 	{
