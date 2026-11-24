@@ -1448,6 +1448,25 @@ class PgRewindTest(BaseTest):
 		self.assertLessEqual(meta['checkpointretainxmin'],
 		                     meta['checkpointretainxmax'], str(meta))
 
+	@staticmethod
+	def big_undo_trx(node, rounds, tag):
+		# About 1.5 MB of rows rewritten again and again in one transaction:
+		# far more undo than a small undo buffer holds
+		con = node.connect()
+		con.begin()
+		for i in range(rounds):
+			con.execute(f"UPDATE o_test SET val = '{tag}{i}', "
+			            f"pad = repeat('{tag[0]}', 500)")
+		con.commit()
+		con.close()
+
+	@staticmethod
+	def undo_written(node):
+		return node.execute("""
+            SELECT writtenlocation FROM orioledb_get_undo_meta()
+             WHERE undo_type = 'row'
+        """)[0][0]
+
 	def check_undo_order(self, node):
 		# The undo locations keep the order documented at UndoMeta
 		rows = node.execute("""
@@ -1734,21 +1753,9 @@ class PgRewindTest(BaseTest):
 			master.start()
 			with self.getReplica() as replica:
 
-				def big_trx(node, rounds, tag):
-					# About 1.5 MB of rows rewritten again and again in one
-					# transaction
-					con = node.connect()
-					con.begin()
-					for i in range(rounds):
-						con.execute(
-						    f"UPDATE o_test SET val = '{tag}{i}', pad = repeat('{tag[0]}', 500)"
-						)
-					con.commit()
-					con.close()
-
 				def diverge():
-					big_trx(master, 8, 'master')
-					big_trx(replica, 8, 'replica')
+					self.big_undo_trx(master, 8, 'master')
+					self.big_undo_trx(replica, 8, 'replica')
 					self.check_undo_order(master)
 					self.check_undo_order(replica)
 					# The undo log outgrew its buffer and was written out
@@ -1769,6 +1776,63 @@ class PgRewindTest(BaseTest):
 				    "FROM generate_series(1, 3000) id;",
 				    "UPDATE o_test SET val = 'trx' WHERE mod(id, 10) = 1;",
 				    before_rewind=diverge)
+				self.exercise_rewound(master, replica)
+
+	def test_pg_rewind_undo_snapshot_on_rewound_standby(self):
+		"""
+        A snapshot on the rewound standby needs the old versions of the rows
+        the source rewrites later.  The undo for them is written by the
+        rewound node's own recovery, past the undo location it had at the
+        rewind, and the small undo buffer pushes it out to files while the
+        snapshot is still open.  The snapshot must keep seeing its rows.
+        """
+		query = "SELECT count(*), sum(hashtext(t::text)) FROM o_test t"
+		with self.node as master:
+			self.enable_archive(master)
+			master.append_conf("orioledb.undo_buffers = 2MB")
+			master.start()
+			with self.getReplica() as replica:
+
+				def diverge():
+					self.big_undo_trx(master, 4, 'master')
+					self.big_undo_trx(replica, 4, 'replica')
+
+				self.rewind_in_progress_trx(
+				    master, replica,
+				    "CREATE TABLE o_test (id integer NOT NULL PRIMARY KEY, "
+				    "val text, pad text) USING orioledb;"
+				    "INSERT INTO o_test SELECT id, 'orig', repeat('x', 500) "
+				    "FROM generate_series(1, 3000) id;",
+				    "UPDATE o_test SET val = 'trx' WHERE mod(id, 10) = 1;",
+				    before_rewind=diverge)
+				self.assert_same_tables(master, replica)
+
+				reader = master.connect()
+				reader.begin('repeatable read')
+				before = reader.execute(query)[0]
+				written = self.undo_written(master)
+
+				# Far more undo than the buffer holds is replayed under the
+				# open snapshot
+				self.big_undo_trx(replica, 8, 'late')
+				self.catchup_orioledb(master)
+				self.assertGreater(self.undo_written(master), written)
+				undo_dir = os.path.join(master.data_dir, 'orioledb_undo')
+				self.assertTrue(
+				    any(
+				        os.path.getsize(os.path.join(undo_dir, name)) > 0
+				        for name in os.listdir(undo_dir)))
+				self.check_undo_order(master)
+
+				self.assertEqual(reader.execute(query)[0], before)
+				reader.commit()
+				reader.close()
+
+				# The snapshot was not just looking at unchanged data
+				self.assertNotEqual(master.execute(query)[0], before)
+				self.assert_same_tables(master, replica)
+				master.safe_psql("CHECKPOINT")
+				self.check_undo_order(master)
 				self.exercise_rewound(master, replica)
 
 	def test_pg_rewind_parallel_recovery_workers(self):
