@@ -148,15 +148,18 @@ class PgRewindTest(BaseTest):
 		return standby
 
 	@staticmethod
-	def divergence_keys(node):
-		# Return the OrioleDB rewind keys the promotion of the node logged
-		# at the beginning of its timeline.  None for a node that was not
-		# promoted.
-		node.safe_psql("CHECKPOINT")
-		tli = node.execute("SELECT timeline_id FROM pg_control_checkpoint()")[0][0]
+	def divergence_keys(node, promoted=None):
+		# Return the OrioleDB rewind keys the promotion logged at the
+		# beginning of its timeline, as the node sees them in its WAL.  The
+		# promoted node is the one that was promoted: the node itself by
+		# default.  None for a node that was not promoted.
+		promoted = promoted or node
+		promoted.safe_psql("CHECKPOINT")
+		tli = promoted.execute(
+		    "SELECT timeline_id FROM pg_control_checkpoint()")[0][0]
 		if tli == 1:
 			return None
-		history = node.execute(
+		history = promoted.execute(
 		    f"SELECT pg_read_file('pg_wal/{tli:08X}.history')")[0][0]
 		switchpoint = history.strip().splitlines()[-1].split('\t')[1]
 		keys = node.execute(
@@ -1330,6 +1333,71 @@ class PgRewindTest(BaseTest):
 				query = "SELECT count(*), count(*) FILTER (WHERE val = 'trx') FROM o_test"
 				self.assertEqual(master.execute(query), [(1000, 200)])
 				self.assertEqual(replica.execute(query), [(1000, 200)])
+
+	def test_pg_rewind_in_progress_trx_standby_follows_promoted(self):
+		"""
+        A standby of the replica holds the transaction in progress just like
+        the replica does.  The replica is promoted and rolls the transaction
+        back; the standby gets the rollback and the rewind keys through WAL.
+        It replays the keys without applying them, keeps replaying what the
+        promoted node does next, and has the keys in its own WAL.
+        """
+		with self.node as master:
+			self.enable_archive(master)
+			master.start()
+			with self.getReplica() as replica:
+				master.safe_psql("""
+                    CREATE EXTENSION orioledb;
+                    SELECT pg_create_physical_replication_slot('replica');
+                """)
+				self.run_sql(master, self.create_table_sql('o_test', 1000))
+				replica.append_conf(primary_slot_name='replica')
+				replica.start()
+				self.catchup_orioledb(replica)
+
+				con = master.connect()
+				con.begin()
+				con.execute("""
+                    UPDATE o_test SET val = 'trx' WHERE mod(id, 10) = 1;
+                    DELETE FROM o_test WHERE mod(id, 10) = 2;
+                    INSERT INTO o_test SELECT id, 'trx', 'x'
+                        FROM generate_series(1001, 1100) id;
+                """)
+				con.execute("SELECT orioledb_flush_local_wal()")
+				master.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				standby = self.spawn_standby_of(replica, 'standby')
+				standby.start()
+				lsn = replica.execute("SELECT pg_last_wal_replay_lsn()")[0][0]
+				standby.poll_query_until(
+				    f"SELECT pg_last_wal_replay_lsn() >= '{lsn}'::pg_lsn",
+				    expected=True)
+
+				replica.promote()
+				replica.safe_psql("CHECKPOINT;")
+				con.commit()
+				con.close()
+
+				lsn = replica.execute("SELECT pg_current_wal_lsn()")[0][0]
+				standby.poll_query_until(
+				    f"SELECT pg_last_wal_replay_lsn() >= '{lsn}'::pg_lsn",
+				    expected=True)
+				query = "SELECT count(*), count(*) FILTER (WHERE val = 'trx') FROM o_test"
+				self.assertEqual(replica.execute(query), [(1000, 0)])
+				self.assertEqual(standby.execute(query), [(1000, 0)])
+
+				keys = self.divergence_keys(replica)
+				self.assertTrue(keys)
+				self.assertEqual(self.divergence_keys(standby, replica), keys)
+
+				# What the promoted node does next reaches the standby
+				replica.safe_psql("INSERT INTO o_test VALUES (2000, 'new', 'x')")
+				lsn = replica.execute("SELECT pg_current_wal_lsn()")[0][0]
+				standby.poll_query_until(
+				    f"SELECT pg_last_wal_replay_lsn() >= '{lsn}'::pg_lsn",
+				    expected=True)
+				self.assertEqual(standby.execute(query), [(1001, 0)])
 
 	def test_pg_rewind_keys_removed_with_wal(self):
 		"""
