@@ -33,9 +33,16 @@ step "s2_delete"    { DELETE FROM fu_reins WHERE id = 5; }
 session "s3"
 setup { BEGIN; }
 step "s3_reinsert"  { INSERT INTO fu_reins VALUES (5, 200); }
+step "s3_lock"      { SELECT id FROM fu_reins WHERE id = 5 FOR UPDATE; }
+step "s3_update"    { UPDATE fu_reins SET val = val + 1 WHERE id = 5; }
 step "s3_commit"    { COMMIT; }
 step "s3_rollback"  { ROLLBACK; }
 
 permutation "s1_begin_rr" "s1_snapshot" "s2_delete" "s3_reinsert" "s1_forupdate" "s3_commit" "s1_commit"
 permutation "s1_begin_rr" "s1_snapshot" "s2_delete" "s3_reinsert" "s3_rollback" "s1_forupdate" "s1_commit"
 permutation "s1_begin_rc" "s1_snapshot" "s2_delete" "s3_reinsert" "s1_forupdate" "s3_commit" "s1_commit"
+
+# A key that was never deleted: FOR UPDATE must wait on the in-progress locker
+# or updater, and get the row once it is released
+permutation "s1_begin_rr" "s1_snapshot" "s3_lock" "s1_forupdate" "s3_commit" "s1_commit"
+permutation "s1_begin_rr" "s1_snapshot" "s3_update" "s1_forupdate" "s3_rollback" "s1_commit"

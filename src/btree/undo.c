@@ -2457,10 +2457,11 @@ clean_chain_has_locks_flag(UndoLogType undoType, UndoLocation location,
 
 
 /*
- * True if the row is deleted at my_csn: the first committed version at or
- * below the chain top is a delete, or the chain ends before a live version
- * visible to my_csn.  Lets FOR UPDATE short-circuit an in-progress re-inserter
- * whose committed delete sits below it.
+ * True if the row is deleted at my_csn: a committed delete lies at or below
+ * the chain top, above any live version visible to my_csn.  Lets FOR UPDATE
+ * short-circuit an in-progress re-inserter whose committed delete sits below
+ * it.  Where the chain ends first, nothing is known about the version there,
+ * so the row counts as alive and the caller waits as usual.
  */
 bool
 tuple_is_deleted_for_csn(UndoLogType undoType, BTreeLeafTuphdr *pageTuphdr,
@@ -2485,9 +2486,9 @@ tuple_is_deleted_for_csn(UndoLogType undoType, BTreeLeafTuphdr *pageTuphdr,
 		}
 		if (!UndoLocationIsValid(cur.undoLocation) ||
 			cur.undoLocation < retainedUndoLocation)
-			return true;
+			return false;
 		if (!get_prev_leaf_header_from_undo_if_exists(undoType, &cur))
-			return true;
+			return false;
 	}
 }
 
