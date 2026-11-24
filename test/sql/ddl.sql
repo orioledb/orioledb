@@ -127,8 +127,8 @@ CREATE TABLE o_ddl_check
 	f4 int,
 	PRIMARY KEY(f1)
 ) USING orioledb;
-CREATE UNIQUE INDEX o_ddl_check_unique ON o_test24 (f2, f3, f4);
-CREATE INDEX o_ddl_check_regular ON o_test24 (f2, f3, f4);
+CREATE UNIQUE INDEX o_ddl_check_unique ON o_ddl_check (f2, f3, f4);
+CREATE INDEX o_ddl_check_regular ON o_ddl_check (f2, f3, f4);
 
 INSERT INTO o_ddl_check VALUES (1, 2, NULL, 5);
 INSERT INTO o_ddl_check VALUES (2, 2, NULL, 3);

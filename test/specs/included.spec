@@ -49,7 +49,7 @@ step "insert_2_uniq" { INSERT INTO o_test_1(val_1, val_2)
 					   ON CONFLICT (lower(val_2)) DO UPDATE 
 					   SET val_2 = EXCLUDED.val_2; }
 
-step "select_2" { SELECT * FROM o_test_2; }
+step "select_2" { SELECT * FROM o_test_1; }
 
 step "commit_2" { COMMIT; }
 

@@ -31,6 +31,10 @@ step insert_2_uniq: INSERT INTO o_test_1(val_1, val_2)
 					   SET val_2 = EXCLUDED.val_2; <waiting ...>
 step abort_1: ABORT;
 step insert_2_uniq: <... completed>
-step select_2: SELECT * FROM o_test_2;
-ERROR:  relation "o_test_2" does not exist
+step select_2: SELECT * FROM o_test_1;
+val_1|val_2
+-----+-----
+    2|aB   
+(1 row)
+
 step commit_2: COMMIT;

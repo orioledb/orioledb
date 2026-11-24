@@ -281,10 +281,8 @@ CREATE TABLE o_ddl_check
 	f4 int,
 	PRIMARY KEY(f1)
 ) USING orioledb;
-CREATE UNIQUE INDEX o_ddl_check_unique ON o_test24 (f2, f3, f4);
-ERROR:  relation "o_test24" does not exist
-CREATE INDEX o_ddl_check_regular ON o_test24 (f2, f3, f4);
-ERROR:  relation "o_test24" does not exist
+CREATE UNIQUE INDEX o_ddl_check_unique ON o_ddl_check (f2, f3, f4);
+CREATE INDEX o_ddl_check_regular ON o_ddl_check (f2, f3, f4);
 INSERT INTO o_ddl_check VALUES (1, 2, NULL, 5);
 INSERT INTO o_ddl_check VALUES (2, 2, NULL, 3);
 INSERT INTO o_ddl_check VALUES (3, 2, NULL, 2);
@@ -319,6 +317,32 @@ SELECT orioledb_tbl_structure('o_ddl_check'::regclass, 'nue');
      Item 4: offset = 464, tuple = ('5', '2', null, '3')            +
      Item 5: offset = 512, tuple = ('6', '2', null, null)           +
      Item 6: offset = 552, tuple = ('7', '2', null, null)           +
+                                                                    +
+ Index o_ddl_check_unique contents                                  +
+ Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 0               +
+ state = free, datoid equal, relnode equal, ix_type = unique, dirty +
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 272, tuple = ('1', null, '4', '4')            +
+     Item 1: offset = 320, tuple = ('2', null, '2', '3')            +
+     Item 2: offset = 368, tuple = ('2', null, '3', '2')            +
+     Item 3: offset = 416, tuple = ('2', null, '3', '5')            +
+     Item 4: offset = 464, tuple = ('2', null, '5', '1')            +
+     Item 5: offset = 512, tuple = ('2', null, null, '6')           +
+     Item 6: offset = 552, tuple = ('2', null, null, '7')           +
+                                                                    +
+ Index o_ddl_check_regular contents                                 +
+ Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 0               +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 272, tuple = ('1', null, '4', '4')            +
+     Item 1: offset = 320, tuple = ('2', null, '2', '3')            +
+     Item 2: offset = 368, tuple = ('2', null, '3', '2')            +
+     Item 3: offset = 416, tuple = ('2', null, '3', '5')            +
+     Item 4: offset = 464, tuple = ('2', null, '5', '1')            +
+     Item 5: offset = 512, tuple = ('2', null, null, '6')           +
+     Item 6: offset = 552, tuple = ('2', null, null, '7')           +
                                                                     +
  Index toast: not loaded                                            +
  
