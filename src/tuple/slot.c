@@ -416,6 +416,75 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 					 ctid_off == 0 &&
 					 idx->duplicates == NIL);
 
+	/*
+	 * With the mapping direct, take the attributes apart in one tight loop,
+	 * as heap's slot_deform_heap_tuple() does, instead of a call per
+	 * attribute into the generic reader.  It keeps the reader state exactly
+	 * as o_tuple_read_next_field() would, so it can stop anywhere and leave
+	 * the rest to the loop below: at a TOAST pointer, which needs the
+	 * primary key to resolve, and past the attributes the tuple holds.
+	 */
+	if (directMapping && oslot->state.attnum == slot->tts_nvalid)
+	{
+		OTupleReaderState *state = &oslot->state;
+		int			limit = Min(natts, (int) state->natts);
+
+		for (attnum = slot->tts_nvalid; attnum < limit; attnum++)
+		{
+			OTupleAttrCompact *att = OTupleDescAttrFast(state->desc, attnum);
+			uint32		off;
+			char	   *p;
+
+			if (state->hasnulls && att_isnull(attnum, state->bp))
+			{
+				values[attnum] = (Datum) 0;
+				isnull[attnum] = true;
+				state->slow = true;
+				state->attnum++;
+				continue;
+			}
+
+			if (!state->slow && att->attcacheoff >= 0)
+				off = att->attcacheoff;
+			else if (att->attlen == -1)
+			{
+				if (!state->slow &&
+					state->off == o_att_align_nominal(att, state->off))
+				{
+					att->attcacheoff = state->off;
+					off = state->off;
+				}
+				else
+				{
+					off = o_att_align_pointer(att, state->off, -1,
+											  state->tp + state->off);
+					state->slow = true;
+				}
+			}
+			else
+			{
+				off = o_att_align_nominal(att, state->off);
+				if (!state->slow)
+					att->attcacheoff = off;
+			}
+
+			p = state->tp + off;
+			if (att->attlen < 0 && IS_TOAST_POINTER(p))
+				break;
+
+			state->off = att_addlength_pointer(off, att->attlen, p);
+			if (att->attlen <= 0)
+				state->slow = true;
+			state->attnum++;
+
+			values[attnum] = fetchatt(att, p);
+			isnull[attnum] = false;
+		}
+		slot->tts_nvalid = attnum;
+		if (attnum >= natts)
+			return;
+	}
+
 	if (!directMapping)
 	{
 		int			needed = Max(natts, __natts);
