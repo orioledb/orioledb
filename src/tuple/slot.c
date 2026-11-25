@@ -241,6 +241,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	bool		index_order;
 	int			cur_tbl_attnum = 0;
 	bool	   *isfilled = NULL;
+	bool		directMapping;
 
 	/*
 	 * Early return if the requested number of attributes is already valid or
@@ -401,6 +402,90 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		return;
 	}
 
+	/*
+	 * A leaf tuple of the primary index, read in table order, maps position
+	 * for position onto the slot: attribute i of the tuple is attribute i of
+	 * the result.  That is the ordinary case, and knowing it up front keeps
+	 * the mapping decisions out of the loop -- and, because every attribute
+	 * from tts_nvalid up is then filled in turn, removes the need to track
+	 * which ones were.
+	 */
+	directMapping = (oslot->ixnum == PrimaryIndexNumber &&
+					 oslot->leafTuple &&
+					 !index_order &&
+					 ctid_off == 0 &&
+					 idx->duplicates == NIL);
+
+	/*
+	 * With the mapping direct, take the attributes apart in one tight loop,
+	 * as heap's slot_deform_heap_tuple() does, instead of a call per
+	 * attribute into the generic reader.  It keeps the reader state exactly
+	 * as o_tuple_read_next_field() would, so it can stop anywhere and leave
+	 * the rest to the loop below: at a TOAST pointer, which needs the
+	 * primary key to resolve, and past the attributes the tuple holds.
+	 */
+	if (directMapping && oslot->state.attnum == slot->tts_nvalid)
+	{
+		OTupleReaderState *state = &oslot->state;
+		int			limit = Min(natts, (int) state->natts);
+
+		for (attnum = slot->tts_nvalid; attnum < limit; attnum++)
+		{
+			OTupleAttrCompact *att = OTupleDescAttrFast(state->desc, attnum);
+			uint32		off;
+			char	   *p;
+
+			if (state->hasnulls && att_isnull(attnum, state->bp))
+			{
+				values[attnum] = (Datum) 0;
+				isnull[attnum] = true;
+				state->slow = true;
+				state->attnum++;
+				continue;
+			}
+
+			if (!state->slow && att->attcacheoff >= 0)
+				off = att->attcacheoff;
+			else if (att->attlen == -1)
+			{
+				if (!state->slow &&
+					state->off == o_att_align_nominal(att, state->off))
+				{
+					att->attcacheoff = state->off;
+					off = state->off;
+				}
+				else
+				{
+					off = o_att_align_pointer(att, state->off, -1,
+											  state->tp + state->off);
+					state->slow = true;
+				}
+			}
+			else
+			{
+				off = o_att_align_nominal(att, state->off);
+				if (!state->slow)
+					att->attcacheoff = off;
+			}
+
+			p = state->tp + off;
+			if (att->attlen < 0 && IS_TOAST_POINTER(p))
+				break;
+
+			state->off = att_addlength_pointer(off, att->attlen, p);
+			if (att->attlen <= 0)
+				state->slow = true;
+			state->attnum++;
+
+			values[attnum] = fetchatt(att, p);
+			isnull[attnum] = false;
+		}
+		slot->tts_nvalid = attnum;
+		if (attnum >= natts)
+			return;
+	}
+
+	if (!directMapping)
 	{
 		int			needed = Max(natts, __natts);
 
@@ -422,11 +507,16 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		Form_pg_attribute thisatt;
 		int			res_attnum = 0;
 
+		if (directMapping)
+		{
+			res_attnum = attnum;
+		}
+
 		/*
 		 * Determine the result attribute number based on the index type and
 		 * the order of attributes.
 		 */
-		if (oslot->ixnum == PrimaryIndexNumber)
+		else if (oslot->ixnum == PrimaryIndexNumber)
 		{
 			if (index_order)
 			{
@@ -487,7 +577,8 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			 */
 			values[res_attnum] = o_tuple_read_next_field(&oslot->state,
 														 &isnull[res_attnum]);
-			isfilled[res_attnum] = true;
+			if (!directMapping)
+				isfilled[res_attnum] = true;
 
 			/* Determine the attribute metadata based on the index and order. */
 			if (oslot->ixnum == PrimaryIndexNumber && !index_order)
@@ -572,7 +663,8 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 															 attnum + 1 + ctid_off,
 															 &toastValue,
 															 oslot->csn);
-					isfilled[attnum] = true;
+					if (!directMapping)
+						isfilled[attnum] = true;
 					oslot->vfree[attnum] = true;
 					MemoryContextSwitchTo(mcxt);
 				}
@@ -586,6 +678,12 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	/* Ensure the number of processed attributes matches the expected count. */
 	Assert(attnum == natts);
 
+	if (directMapping)
+	{
+		/* Every attribute up to natts was filled in turn */
+		slot->tts_nvalid = natts;
+	}
+	else
 	{
 		int			first_unfilled = slot->tts_nvalid;
 
@@ -676,6 +774,29 @@ tts_orioledb_materialize(TupleTableSlot *slot)
 		return;
 
 	slot_getallattrs(slot);
+
+	/*
+	 * A tuple the slot does not own, such as one in a sequential scan's page
+	 * image, changes when its owner moves on, and tts_orioledb_clear() frees
+	 * the tuple of a slot that owns its contents.  Take a copy.
+	 */
+	if (!O_TUPLE_IS_NULL(oslot->tuple))
+	{
+		OIndexDescr *idx;
+		uint32		len;
+		Pointer		copy;
+
+		if (oslot->ixnum == BridgeIndexNumber)
+			idx = oslot->descr->bridge;
+		else
+			idx = oslot->descr->indices[oslot->ixnum];
+		len = o_tuple_size(oslot->tuple,
+						   oslot->leafTuple ? &idx->leafSpec : &idx->nonLeafSpec);
+		copy = MemoryContextAlloc(slot->tts_mcxt, len);
+		memcpy(copy, oslot->tuple.data, len);
+		oslot->tuple.data = copy;
+		slot->tts_flags |= TTS_FLAG_SHOULDFREE;
+	}
 
 	/* compute size of memory required */
 	for (int natt = 0; natt < desc->natts; natt++)
@@ -1025,6 +1146,48 @@ tts_orioledb_store_tuple_internal(TupleTableSlot *slot, OTuple tuple,
 
 	Assert(COMMITSEQNO_IS_NORMAL(csn) || COMMITSEQNO_IS_INPROGRESS(csn));
 	Assert(slot->tts_ops == &TTSOpsOrioleDB);
+
+	/*
+	 * A scan stores row after row of one index into the same slot.  When the
+	 * previous row came from the same place and left nothing for
+	 * tts_orioledb_clear() to release, the slot needs only the new tuple:
+	 * skip clearing it and looking the index up again.  Indexes keyed by
+	 * ctid or bridged read extra fields first, so they take the full path.
+	 */
+	if (likely(oslot->descr == descr && oslot->ixnum == ixnum &&
+			   oslot->leafTuple == leafTuple &&
+			   ixnum != BridgeIndexNumber &&
+			   !TTS_SHOULDFREE(slot) && oslot->to_toast == NULL &&
+			   oslot->rowid == NULL && oslot->data == NULL))
+	{
+		OIndexDescr *idx = descr->indices[ixnum];
+
+		if (!idx->primaryIsCtid && !idx->bridging)
+		{
+			slot->tts_flags &= ~TTS_FLAG_EMPTY;
+			slot->tts_nvalid = 0;
+			ItemPointerSetInvalid(&slot->tts_tid);
+			oslot->tuple = tuple;
+			oslot->csn = csn;
+			oslot->version = o_tuple_get_version(tuple);
+			if (hint)
+				oslot->hint = *hint;
+			else
+			{
+				oslot->hint.blkno = OInvalidInMemoryBlkno;
+				oslot->hint.pageChangeCount = 0;
+			}
+			if (leafTuple)
+				o_tuple_init_reader(&oslot->state, tuple,
+									idx->leafTupdesc, &idx->leafSpec);
+			else
+				o_tuple_init_reader(&oslot->state, tuple,
+									idx->nonLeafTupdesc, &idx->nonLeafSpec);
+			if (shouldfree)
+				slot->tts_flags |= TTS_FLAG_SHOULDFREE;
+			return;
+		}
+	}
 
 	tts_orioledb_clear(slot);
 

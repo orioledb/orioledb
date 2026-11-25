@@ -21,6 +21,7 @@ OBJS = src/btree/btree.o \
 	   src/btree/find.o \
 	   src/btree/insert.o \
 	   src/btree/io.o \
+	   src/btree/io_aio.o \
 	   src/btree/iterator.o \
 	   src/btree/merge.o \
 	   src/btree/modify.o \
@@ -309,7 +310,9 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/page_pool_test.py \
 						test/t/bitmap_partition_test.py \
 						test/t/undo_image_chain_test.py \
-						test/t/evict_seq_scan_race_test.py
+						test/t/evict_seq_scan_race_test.py \
+						test/t/seq_scan_cache_test.py \
+						test/t/btree_prefetch_test.py
 TESTGRESCHECKS_PART_3 = test/t/logical_streaming_test.py \
 						test/t/relnode_wraparound_test.py \
 						test/t/rewind_time_test.py \

@@ -830,11 +830,11 @@ o_btree_find_tuple_by_key(BTreeDescr *desc, void *key, BTreeKeyType kind,
  * that may be deleted in uncommitted (sub-)transactions — on rollback those
  * trees become visible again.
  */
-OTuple
-o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
-					 OSnapshot *oSnapshot, CommitSeqNo *tupleCsn,
-					 MemoryContext mcxt, TupleFetchCallback cb,
-					 void *arg)
+static OTuple
+find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
+				   OSnapshot *oSnapshot, CommitSeqNo *tupleCsn,
+				   MemoryContext mcxt, TupleFetchCallback cb,
+				   void *arg, bool *borrowed)
 {
 	BTreeLeafTuphdr tupHdr,
 			   *tupHdrPtr;
@@ -1022,7 +1022,13 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		return result;
 	}
 
-	if (!curTupleAllocated)
+	if (!curTupleAllocated && borrowed)
+	{
+		/* the page's own tuple: hand out a reference into the page */
+		result = curTuple;
+		*borrowed = true;
+	}
+	else if (!curTupleAllocated)
 	{
 		result_size = o_btree_len(desc, curTuple, OTupleLength);
 		/* TODO: check result tuple size */
@@ -1038,6 +1044,34 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	Assert(!UndoLocationIsValid(undoLocation) || UNDO_REC_EXISTS(desc->undoType, undoLocation));
 	MemoryContextSwitchTo(prevMctx);
 	return result;
+}
+
+OTuple
+o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
+					 OSnapshot *oSnapshot, CommitSeqNo *tupleCsn,
+					 MemoryContext mcxt, TupleFetchCallback cb,
+					 void *arg)
+{
+	return find_tuple_version(desc, p, loc, oSnapshot, tupleCsn, mcxt, cb,
+							  arg, NULL);
+}
+
+/*
+ * Like o_find_tuple_version(), but when the visible version is the tuple on
+ * the page itself, returns a reference into the page rather than a copy, and
+ * sets *borrowed.  Only for a page image private to the caller, which keeps
+ * it intact as long as the tuple is used.  A version rebuilt from undo is
+ * still allocated in mcxt, and *borrowed is left false.
+ */
+OTuple
+o_find_tuple_version_borrowed(BTreeDescr *desc, Page p,
+							  BTreePageItemLocator *loc, OSnapshot *oSnapshot,
+							  CommitSeqNo *tupleCsn, MemoryContext mcxt,
+							  bool *borrowed)
+{
+	*borrowed = false;
+	return find_tuple_version(desc, p, loc, oSnapshot, tupleCsn, mcxt, NULL,
+							  NULL, borrowed);
 }
 
 /*

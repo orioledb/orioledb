@@ -1437,6 +1437,80 @@ check_orioledb_compress_version(OrioleDBOndiskPageHeader ondisk_page_header)
 }
 
 /*
+ * At this point, page is fully read and decompressed.  Do conversion of
+ * needed data from OrioleDBOndiskPageHeader to OrioleDBPageHeader, and of the
+ * page version (not implemented yet).
+ */
+static void
+finish_page_read(Pointer img, OrioleDBOndiskPageHeader *ondisk_page_header,
+				 bool needs_page_version_convert)
+{
+	if (needs_page_version_convert)
+		convert_orioledb_page_version(img);
+
+	/* Erase what's unused to be safe. */
+	memset(img, 0, O_PAGE_HEADER_SIZE);
+	((BTreePageHeader *) img)->o_header.checkpointNum = ondisk_page_header->checkpointNum;
+
+#ifdef IS_DEV
+	/* For eviction/page checkpoint number test */
+	store_read_page_checkpoint_stats(((BTreePageHeader *) img)->o_header.checkpointNum);
+#endif
+}
+
+/*
+ * Turns the raw image of an uncompressed page, just read from disk into img,
+ * into an in-memory page: verifies its checksum and converts its header.
+ * Also used for pages read through AIO, which bypass read_page_from_disk().
+ */
+OReadPageResult
+btree_finish_plain_page_read(Pointer img, bool checksumVerified)
+{
+	OrioleDBOndiskPageHeader ondisk_page_header;
+	bool		needs_page_version_convert;
+
+	/* for the checksum computation we need aligned buffer */
+	Assert(((uintptr_t) img % sizeof(uint32)) == 0);
+
+	ondisk_page_header = *((OrioleDBOndiskPageHeader *) img);
+	needs_page_version_convert = check_orioledb_page_version(ondisk_page_header);
+
+	if (orioledb_checksums_enabled && !checksumVerified &&
+		!check_orioledb_page_checksum(ondisk_page_header, img, "plain",
+									  oriole_checksum_block_len(ORIOLEDB_BLCKSZ)))
+		return OReadPageResultChecksumFailed;
+
+	elog(DEBUG1, "Read plain disk page: checkpoint %u", ondisk_page_header.checkpointNum);
+
+	finish_page_read(img, &ondisk_page_header, needs_page_version_convert);
+	return OReadPageResultOk;
+}
+
+/*
+ * Whether the raw image of an uncompressed page carries the checksum of its
+ * contents.  Leaves the image as it was and reports nothing, so that it can
+ * run in an io worker; a page that fails is verified again by
+ * btree_finish_plain_page_read(), which reports it.
+ */
+bool
+btree_plain_page_checksum_ok(Pointer img)
+{
+	OrioleDBOndiskPageHeader *header = (OrioleDBOndiskPageHeader *) img;
+	uint16		stored = header->checkSum;
+	uint16		computed;
+
+	if (!orioledb_checksums_enabled)
+		return true;
+
+	Assert(((uintptr_t) img % sizeof(uint32)) == 0);
+	header->checkSum = 0;
+	computed = (uint16) ((oriole_checksum_block((const OrioleDBChecksummablePage *) img,
+												oriole_checksum_block_len(ORIOLEDB_BLCKSZ)) % 65535) + 1);
+	header->checkSum = stored;
+	return computed == stored;
+}
+
+/*
  * Reads a page from disk to the img from a valid downlink. It's fills an empty
  * array of offsets for the page.
  */
@@ -1482,14 +1556,7 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 		if (err)
 			return OReadPageResultIOError;
 
-		ondisk_page_header = *((OrioleDBOndiskPageHeader *) img);
-		needs_page_version_convert = check_orioledb_page_version(ondisk_page_header);
-
-		if (orioledb_checksums_enabled &&
-			!check_orioledb_page_checksum(ondisk_page_header, img, "plain", oriole_checksum_block_len(read_size)))
-			return OReadPageResultChecksumFailed;
-
-		elog(DEBUG1, "Read plain disk page: checkpoint %u", ondisk_page_header.checkpointNum);
+		return btree_finish_plain_page_read(img, false);
 	}
 	else
 	{
@@ -1565,28 +1632,7 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 		}
 	}
 
-	/*
-	 * At this point, page is fully read and decompressed. Do conversion of
-	 * needed data from OrioleDBOndiskPageHeader to OrioleDBPageHeader. Do
-	 * conversion of page version (not implemented yet);
-	 */
-	Assert(!err);
-
-	if (needs_page_version_convert)
-		convert_orioledb_page_version(img);
-
-	/*
-	 * Convert needed data from OrioleDBOndiskPageHeader to
-	 * OrioleDBPageHeader. Erase what's unused to be safe.
-	 */
-	memset(img, 0, O_PAGE_HEADER_SIZE);
-	((BTreePageHeader *) img)->o_header.checkpointNum = ondisk_page_header.checkpointNum;
-
-#ifdef IS_DEV
-	/* For eviction/page checkpoint number test */
-	store_read_page_checkpoint_stats(((BTreePageHeader *) img)->o_header.checkpointNum);
-#endif
-
+	finish_page_read(img, &ondisk_page_header, needs_page_version_convert);
 	return OReadPageResultOk;
 }
 
@@ -1726,8 +1772,30 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
  * Load the page where context is pointing from disk to memory, assuming parent
  * page is locked.
  */
+static void load_page_internal(OBTreeFindPageContext *context,
+							   Pointer readImg, uint64 readDownlink);
+
 void
 load_page(OBTreeFindPageContext *context)
+{
+	load_page_internal(context, NULL, 0);
+}
+
+/*
+ * Like load_page(), but takes the page from img, already read from disk by
+ * the caller and verified as read_page_from_disk() does, if the parent still
+ * refers to it by downlink.  Otherwise the page is read as usual.
+ */
+void
+load_page_from_image(OBTreeFindPageContext *context, Pointer img,
+					 uint64 downlink)
+{
+	load_page_internal(context, img, downlink);
+}
+
+static void
+load_page_internal(OBTreeFindPageContext *context, Pointer readImg,
+				   uint64 readDownlink)
 {
 	OrioleDBPageDesc *page_desc;
 	BTreeDescr *desc = context->desc;
@@ -1792,8 +1860,18 @@ load_page(OBTreeFindPageContext *context)
 	page_desc->flags = 0;
 
 	/* Read page data and put it to the page */
-	read_result = read_page_from_disk(desc, buf, downlink,
-									  &page_desc->fileExtent);
+	if (readImg != NULL && downlink == readDownlink)
+	{
+		page_desc->fileExtent.off = DOWNLINK_GET_DISK_OFF(downlink);
+		page_desc->fileExtent.len = DOWNLINK_GET_DISK_LEN(downlink);
+		read_result = OReadPageResultOk;
+	}
+	else
+	{
+		readImg = buf;
+		read_result = read_page_from_disk(desc, buf, downlink,
+										  &page_desc->fileExtent);
+	}
 	if (read_result != OReadPageResultOk)
 	{
 		int_hdr->downlink = downlink;
@@ -1823,7 +1901,7 @@ load_page(OBTreeFindPageContext *context)
 								   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
 	}
 
-	put_page_image(blkno, buf);
+	put_page_image(blkno, readImg);
 	ppool_ucm_init(desc->ppool, blkno);
 
 	/*

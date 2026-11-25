@@ -18,6 +18,7 @@
 
 #include "btree/find.h"
 #include "btree/io.h"
+#include "btree/io_aio.h"
 #include "btree/scan.h"
 #include "catalog/cic_spool.h"
 #include "catalog/o_tables.h"
@@ -153,6 +154,8 @@ Size		device_length = 0;
 double		o_checkpoint_completion_ratio;
 int			bgwriter_num_workers = 1;
 int			max_io_concurrency = 0;
+int			btree_prefetch_depth = 0;
+int			btree_prefetch_buffers = 256;
 ODBProcData *oProcData;
 int			default_compress = InvalidOCompress;
 int			default_primary_compress = InvalidOCompress;
@@ -253,7 +256,10 @@ static ShmemItem shmemItems[] = {
 	{s3_queue_shmem_needs, s3_queue_init_shmem},
 	{s3_workers_shmem_needs, s3_workers_init_shmem},
 	{s3_headers_shmem_needs, s3_headers_shmem_init},
-	{rewind_shmem_needs, rewind_init_shmem}
+	{rewind_shmem_needs, rewind_init_shmem},
+#if PG_VERSION_NUM >= 180000
+	{btree_prefetch_shmem_needs, btree_prefetch_shmem_init},
+#endif
 };
 
 
@@ -1042,6 +1048,36 @@ _PG_init(void)
 							NULL,
 							NULL);
 
+	DefineCustomIntVariable("orioledb.btree_prefetch_depth",
+							"Number of leaf pages prefetched ahead during a "
+							"btree sequential scan.  Zero disables the "
+							"streaming-read prefetch path.",
+							NULL,
+							&btree_prefetch_depth,
+							0,
+							0,
+							1024,
+							PGC_USERSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.btree_prefetch_buffers",
+							"Number of shared buffers for prefetched leaf pages "
+							"with io_method = worker.",
+							"An io worker can only read into shared memory.  "
+							"With other io methods no buffers are allocated.",
+							&btree_prefetch_buffers,
+							256,
+							0,
+							65536,
+							PGC_POSTMASTER,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
 	DefineCustomBoolVariable("orioledb.use_mmap",
 							 "Store data in the mmap'ed file.",
 							 NULL,
@@ -1599,6 +1635,10 @@ _PG_init(void)
 		VacuumHorizonHook = orioledb_vacuum_horizon_hook;
 	orioledb_setup_ddl_hooks();
 	stopevents_make_cxt();
+
+#if PG_VERSION_NUM >= 180000
+	orioledb_aio_init();
+#endif
 }
 
 static void
