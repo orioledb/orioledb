@@ -122,6 +122,19 @@ extern bool btree_prefetch_ring_consume(BTreePrefetchRing *ring,
 										bool *fullyInRange_out,
 										OReadPageResult *result_out);
 
+/*
+ * Like btree_prefetch_ring_consume(), but hands out the page where it was
+ * read instead of copying it.  *img_out stays valid until the next consume
+ * from the ring or its destruction.
+ */
+extern bool btree_prefetch_ring_consume_ref(BTreePrefetchRing *ring,
+											BTreeDescr *desc,
+											Pointer *img_out,
+											uint64 *downlink_out,
+											CommitSeqNo *csn_out,
+											bool *fullyInRange_out,
+											OReadPageResult *result_out);
+
 #endif							/* PG_VERSION_NUM >= 180000 */
 
 #endif							/* __BTREE_IO_AIO_H__ */

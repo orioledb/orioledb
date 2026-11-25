@@ -1464,7 +1464,7 @@ finish_page_read(Pointer img, OrioleDBOndiskPageHeader *ondisk_page_header,
  * Also used for pages read through AIO, which bypass read_page_from_disk().
  */
 OReadPageResult
-btree_finish_plain_page_read(Pointer img)
+btree_finish_plain_page_read(Pointer img, bool checksumVerified)
 {
 	OrioleDBOndiskPageHeader ondisk_page_header;
 	bool		needs_page_version_convert;
@@ -1475,7 +1475,7 @@ btree_finish_plain_page_read(Pointer img)
 	ondisk_page_header = *((OrioleDBOndiskPageHeader *) img);
 	needs_page_version_convert = check_orioledb_page_version(ondisk_page_header);
 
-	if (orioledb_checksums_enabled &&
+	if (orioledb_checksums_enabled && !checksumVerified &&
 		!check_orioledb_page_checksum(ondisk_page_header, img, "plain",
 									  oriole_checksum_block_len(ORIOLEDB_BLCKSZ)))
 		return OReadPageResultChecksumFailed;
@@ -1484,6 +1484,30 @@ btree_finish_plain_page_read(Pointer img)
 
 	finish_page_read(img, &ondisk_page_header, needs_page_version_convert);
 	return OReadPageResultOk;
+}
+
+/*
+ * Whether the raw image of an uncompressed page carries the checksum of its
+ * contents.  Leaves the image as it was and reports nothing, so that it can
+ * run in an io worker; a page that fails is verified again by
+ * btree_finish_plain_page_read(), which reports it.
+ */
+bool
+btree_plain_page_checksum_ok(Pointer img)
+{
+	OrioleDBOndiskPageHeader *header = (OrioleDBOndiskPageHeader *) img;
+	uint16		stored = header->checkSum;
+	uint16		computed;
+
+	if (!orioledb_checksums_enabled)
+		return true;
+
+	Assert(((uintptr_t) img % sizeof(uint32)) == 0);
+	header->checkSum = 0;
+	computed = (uint16) ((oriole_checksum_block((const OrioleDBChecksummablePage *) img,
+												oriole_checksum_block_len(ORIOLEDB_BLCKSZ)) % 65535) + 1);
+	header->checkSum = stored;
+	return computed == stored;
 }
 
 /*
@@ -1532,7 +1556,7 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 		if (err)
 			return OReadPageResultIOError;
 
-		return btree_finish_plain_page_read(img);
+		return btree_finish_plain_page_read(img, false);
 	}
 	else
 	{

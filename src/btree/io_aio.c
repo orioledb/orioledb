@@ -170,6 +170,28 @@ btree_aio_readv_complete_shared(PgAioHandle *ioh,
 		result.id = ORIOLEDB_AIO_HCB_BTREE_READV;
 		result.error_data = (result.result < 0) ? errno : 0;
 	}
+	else if (result.status == PGAIO_RS_OK)
+	{
+		uint64	   *bufs;
+		uint8		nbufs;
+
+		/*
+		 * Verify the pages here, which is the io worker with io_method =
+		 * worker, and only tell the submitter whether all of them passed.
+		 */
+		bufs = pgaio_io_get_handle_data(ioh, &nbufs);
+		Assert(nbufs == od->read.iov_length);
+		for (int i = 0; i < nbufs; i++)
+		{
+			if (!btree_plain_page_checksum_ok((Pointer) (uintptr_t) bufs[i]))
+			{
+				result.status = PGAIO_RS_WARNING;
+				result.id = ORIOLEDB_AIO_HCB_BTREE_READV;
+				result.error_data = 0;
+				break;
+			}
+		}
+	}
 
 	return result;
 }
@@ -296,6 +318,16 @@ orioledb_aio_submit_btree_read(BTreeDescr *desc,
 	{
 		iov[i].iov_base = dests[i];
 		iov[i].iov_len = ORIOLEDB_BLCKSZ;
+	}
+	/* the completion callback verifies the pages, and cannot see the iovec */
+	StaticAssertStmt(sizeof(uint64) >= sizeof(char *),
+					 "buffer pointers must fit handle data");
+	{
+		uint64		bufs[PG_IOV_MAX];
+
+		for (int i = 0; i < nblocks; i++)
+			bufs[i] = (uint64) (uintptr_t) dests[i];
+		pgaio_io_set_handle_data_64(ioh, bufs, (uint8) nblocks);
 	}
 
 	pgaio_io_start_readv(ioh, fd, nblocks, segOffset);
@@ -477,6 +509,7 @@ typedef struct PrefetchSlot
 	uint32		chkpNum;
 	PrefetchSlotState state;
 	int			poolBuffer;		/* pool buffer read into, or -1 */
+	bool		verified;		/* checksum verified at the read's completion */
 
 	/*
 	 * One read covers a group of slots holding consecutive pages.  Its first
@@ -498,6 +531,8 @@ struct BTreePrefetchRing
 	int			combineLimit;	/* pages per read at most */
 	bool		usePool;		/* read into the shared pool */
 	char	   *buffers;		/* depth * ORIOLEDB_BLCKSZ, unless usePool */
+	char	   *scratch;		/* a page read synchronously by consume_ref */
+	int			held;			/* slot whose page consume_ref handed out */
 	PrefetchSlot *slots;
 	MemoryContext mctx;
 
@@ -555,6 +590,7 @@ btree_prefetch_ring_create(int depth, MemoryContext mctx)
 		ring->buffers = MemoryContextAllocAligned(mctx,
 												  (Size) depth * ORIOLEDB_BLCKSZ,
 												  PG_IO_ALIGN_SIZE, 0);
+	ring->held = -1;
 	ring->slots = palloc0(sizeof(PrefetchSlot) * depth);
 	for (int i = 0; i < depth; i++)
 	{
@@ -580,7 +616,19 @@ prefetch_slot_clear(PrefetchSlot *slot)
 		slot->poolBuffer = -1;
 	}
 	slot->groupSize = 0;
+	slot->verified = false;
 	slot->state = PREFETCH_SLOT_EMPTY;
+}
+
+/* Lets the slot handed out by the last consume_ref go */
+static void
+prefetch_ring_release_held(BTreePrefetchRing *ring)
+{
+	if (ring->held < 0)
+		return;
+	prefetch_slot_clear(&ring->slots[ring->held]);
+	ring->held = -1;
+	ring->inflight--;
 }
 
 /*
@@ -643,6 +691,8 @@ btree_prefetch_ring_destroy(BTreePrefetchRing *ring)
 	if (ring == NULL)
 		return;
 
+	prefetch_ring_release_held(ring);
+
 	/*
 	 * Drain any in-flight reads so the AIO handles and buffers are released.
 	 * Pending slots were never submitted, so clearing them waits for nothing.
@@ -657,6 +707,8 @@ btree_prefetch_ring_destroy(BTreePrefetchRing *ring)
 	pfree(ring->slots);
 	if (ring->buffers)
 		pfree(ring->buffers);
+	if (ring->scratch)
+		pfree(ring->scratch);
 	pfree(ring);
 }
 
@@ -746,20 +798,20 @@ btree_prefetch_ring_submit(BTreePrefetchRing *ring,
 	return true;
 }
 
-bool
-btree_prefetch_ring_consume(BTreePrefetchRing *ring,
-							BTreeDescr *desc,
-							Pointer dest,
-							uint64 *downlink_out,
-							CommitSeqNo *csn_out,
-							bool *fullyInRange_out,
-							OReadPageResult *result_out)
+/*
+ * Takes the oldest queued page, waiting for its read, and returns where it
+ * is: in the slot's buffer, which stays the scan's until the slot is
+ * released, or, for a page that had to be read synchronously, in dest.
+ * The slot is left held either way.
+ */
+static Pointer
+prefetch_ring_take(BTreePrefetchRing *ring, BTreeDescr *desc, Pointer dest,
+				   uint64 *downlink_out, CommitSeqNo *csn_out,
+				   bool *fullyInRange_out, OReadPageResult *result_out)
 {
 	PrefetchSlot *slot;
 	int			idx;
-
-	if (ring->inflight == 0)
-		return false;
+	Pointer		img;
 
 	/* whatever is pending gets submitted before we wait for anything */
 	prefetch_ring_flush(ring);
@@ -767,7 +819,7 @@ btree_prefetch_ring_consume(BTreePrefetchRing *ring,
 	idx = ring->tail;
 	slot = &ring->slots[idx];
 	ring->tail = RING_NEXT(ring, idx);
-	ring->inflight--;
+	ring->held = idx;
 
 	*downlink_out = slot->downlink;
 	*csn_out = slot->csn;
@@ -784,40 +836,81 @@ btree_prefetch_ring_consume(BTreePrefetchRing *ring,
 		Assert(slot->groupSize > 0);
 		pgaio_wref_wait(&slot->wref);
 		aioResult = slot->ret.result;
-		if (aioResult.status == PGAIO_RS_OK)
-		{
-			for (int i = RING_NEXT(ring, idx), n = 1; n < slot->groupSize;
-				 i = RING_NEXT(ring, i), n++)
-			{
-				Assert(ring->slots[i].state == PREFETCH_SLOT_ASYNC);
-				ring->slots[i].state = PREFETCH_SLOT_DONE;
-			}
-			memcpy(dest, prefetch_slot_buffer(ring, idx), ORIOLEDB_BLCKSZ);
-		}
-		prefetch_slot_clear(slot);
-
 		if (aioResult.status == PGAIO_RS_UNKNOWN)
 			elog(ERROR, "orioledb async read finished with no result");
-		if (aioResult.status != PGAIO_RS_OK)
+		if (aioResult.status != PGAIO_RS_OK &&
+			aioResult.status != PGAIO_RS_WARNING)
 			pgaio_result_report(aioResult, &slot->ret.target_data, ERROR);
 
-		*result_out = btree_finish_plain_page_read(dest);
+		/* A page that failed the check is verified again, and reported */
+		slot->verified = aioResult.status == PGAIO_RS_OK;
+		for (int i = RING_NEXT(ring, idx), n = 1; n < slot->groupSize;
+			 i = RING_NEXT(ring, i), n++)
+		{
+			Assert(ring->slots[i].state == PREFETCH_SLOT_ASYNC);
+			ring->slots[i].state = PREFETCH_SLOT_DONE;
+			ring->slots[i].verified = slot->verified;
+		}
+		slot->state = PREFETCH_SLOT_DONE;
 	}
-	else if (slot->state == PREFETCH_SLOT_DONE)
+
+	if (slot->state == PREFETCH_SLOT_DONE)
 	{
-		memcpy(dest, prefetch_slot_buffer(ring, idx), ORIOLEDB_BLCKSZ);
-		prefetch_slot_clear(slot);
-		*result_out = btree_finish_plain_page_read(dest);
+		img = prefetch_slot_buffer(ring, idx);
+		*result_out = btree_finish_plain_page_read(img, slot->verified);
 	}
 	else
 	{
 		FileExtent	extent;
 
 		Assert(slot->state == PREFETCH_SLOT_DEFERRED);
-		prefetch_slot_clear(slot);
-		*result_out = read_page_from_disk(desc, dest, slot->downlink, &extent);
+		img = dest;
+		*result_out = read_page_from_disk(desc, img, slot->downlink, &extent);
 	}
+	return img;
+}
 
+bool
+btree_prefetch_ring_consume(BTreePrefetchRing *ring,
+							BTreeDescr *desc,
+							Pointer dest,
+							uint64 *downlink_out,
+							CommitSeqNo *csn_out,
+							bool *fullyInRange_out,
+							OReadPageResult *result_out)
+{
+	Pointer		img;
+
+	prefetch_ring_release_held(ring);
+	if (ring->inflight == 0)
+		return false;
+
+	img = prefetch_ring_take(ring, desc, dest, downlink_out, csn_out,
+							 fullyInRange_out, result_out);
+	if (img != dest)
+		memcpy(dest, img, ORIOLEDB_BLCKSZ);
+	prefetch_ring_release_held(ring);
+	return true;
+}
+
+bool
+btree_prefetch_ring_consume_ref(BTreePrefetchRing *ring,
+								BTreeDescr *desc,
+								Pointer *img_out,
+								uint64 *downlink_out,
+								CommitSeqNo *csn_out,
+								bool *fullyInRange_out,
+								OReadPageResult *result_out)
+{
+	prefetch_ring_release_held(ring);
+	if (ring->inflight == 0)
+		return false;
+
+	if (ring->scratch == NULL)
+		ring->scratch = MemoryContextAllocAligned(ring->mctx, ORIOLEDB_BLCKSZ,
+												  PG_IO_ALIGN_SIZE, 0);
+	*img_out = prefetch_ring_take(ring, desc, ring->scratch, downlink_out,
+								  csn_out, fullyInRange_out, result_out);
 	return true;
 }
 

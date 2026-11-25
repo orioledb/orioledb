@@ -66,7 +66,9 @@ typedef enum
 } OReadPageResult;
 
 extern OReadPageResult read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink, FileExtent *extent);
-extern OReadPageResult btree_finish_plain_page_read(Pointer img);
+extern OReadPageResult btree_finish_plain_page_read(Pointer img,
+													bool checksumVerified);
+extern bool btree_plain_page_checksum_ok(Pointer img);
 extern void load_page(OBTreeFindPageContext *context);
 extern uint64 perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 							  Page img, uint32 checkpoint_number,
