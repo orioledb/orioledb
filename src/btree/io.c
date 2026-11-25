@@ -1772,8 +1772,30 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
  * Load the page where context is pointing from disk to memory, assuming parent
  * page is locked.
  */
+static void load_page_internal(OBTreeFindPageContext *context,
+							   Pointer readImg, uint64 readDownlink);
+
 void
 load_page(OBTreeFindPageContext *context)
+{
+	load_page_internal(context, NULL, 0);
+}
+
+/*
+ * Like load_page(), but takes the page from img, already read from disk by
+ * the caller and verified as read_page_from_disk() does, if the parent still
+ * refers to it by downlink.  Otherwise the page is read as usual.
+ */
+void
+load_page_from_image(OBTreeFindPageContext *context, Pointer img,
+					 uint64 downlink)
+{
+	load_page_internal(context, img, downlink);
+}
+
+static void
+load_page_internal(OBTreeFindPageContext *context, Pointer readImg,
+				   uint64 readDownlink)
 {
 	OrioleDBPageDesc *page_desc;
 	BTreeDescr *desc = context->desc;
@@ -1838,8 +1860,18 @@ load_page(OBTreeFindPageContext *context)
 	page_desc->flags = 0;
 
 	/* Read page data and put it to the page */
-	read_result = read_page_from_disk(desc, buf, downlink,
-									  &page_desc->fileExtent);
+	if (readImg != NULL && downlink == readDownlink)
+	{
+		page_desc->fileExtent.off = DOWNLINK_GET_DISK_OFF(downlink);
+		page_desc->fileExtent.len = DOWNLINK_GET_DISK_LEN(downlink);
+		read_result = OReadPageResultOk;
+	}
+	else
+	{
+		readImg = buf;
+		read_result = read_page_from_disk(desc, buf, downlink,
+										  &page_desc->fileExtent);
+	}
 	if (read_result != OReadPageResultOk)
 	{
 		int_hdr->downlink = downlink;
@@ -1869,7 +1901,7 @@ load_page(OBTreeFindPageContext *context)
 								   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
 	}
 
-	put_page_image(blkno, buf);
+	put_page_image(blkno, readImg);
 	ppool_ucm_init(desc->ppool, blkno);
 
 	/*

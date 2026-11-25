@@ -295,7 +295,26 @@ struct BTreeSeqScan
 	 * with their consumption by the scan.  NULL when disabled by GUC.
 	 */
 	BTreePrefetchRing *prefetchRing;
+
+	/*
+	 * Leaves of a cached scan queued to prefetchRing, oldest first, by their
+	 * place in the parent image: generation of the image and offset in it.
+	 * The parent image is looked ahead from prefetchLoc.
+	 */
+	struct
+	{
+		uint32		intPageGen;
+		OffsetNumber offset;
+		uint64		downlink;
+	}		   *leafQueue;
+	int			leafQueueHead;
+	int			leafQueueLen;
+	uint32		prefetchGen;
+	BTreePageItemLocator prefetchLoc;
 #endif
+
+	/* Incremented whenever a new internal page image is taken */
+	uint32		intPageGen;
 };
 
 static dlist_head listOfScans = DLIST_STATIC_INIT(listOfScans);
@@ -725,6 +744,7 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 		 */
 		*intLoc = scan->context.items[scan->context.index].locator;
 		*startOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, intLoc);
+		scan->intPageGen++;
 		if (isBitmapJump)
 		{
 			/*
@@ -1647,6 +1667,123 @@ check_in_memory_leaf_page(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRang
 	}
 }
 
+#if PG_VERSION_NUM >= 180000
+/*
+ * Queues reads of the on-disk leaves that follow in the parent image, as far
+ * as the prefetch ring takes them.  Only for a non-parallel scan, which
+ * visits every downlink of its parent images in order.
+ */
+static void
+seq_scan_prefetch_leaves(BTreeSeqScan *scan)
+{
+	BTreePrefetchRing *ring = scan->prefetchRing;
+	int			depth = btree_prefetch_ring_depth(ring);
+	Page		img = scan->context.img;
+
+	if (scan->leafQueue == NULL)
+		scan->leafQueue = MemoryContextAlloc(btree_seqscan_context,
+											 sizeof(scan->leafQueue[0]) * depth);
+
+	/* A new parent image is looked ahead from the downlink after ours */
+	if (scan->prefetchGen != scan->intPageGen)
+	{
+		scan->prefetchGen = scan->intPageGen;
+		scan->prefetchLoc = scan->intLoc;
+	}
+
+	if (!btree_prefetch_ring_needs_refill(ring))
+		return;
+
+	while (scan->leafQueueLen < depth &&
+		   BTREE_PAGE_LOCATOR_IS_VALID(img, &scan->prefetchLoc))
+	{
+		BTreeNonLeafTuphdr *hdr;
+
+		hdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(img,
+																 &scan->prefetchLoc);
+		if (DOWNLINK_IS_ON_DISK(hdr->downlink))
+		{
+			int			tail = (scan->leafQueueHead + scan->leafQueueLen) % depth;
+
+			if (!btree_prefetch_ring_submit(ring, scan->desc, hdr->downlink,
+											scan->context.imgReadCsn, false,
+											scan->checkpointNumber))
+				break;
+			scan->leafQueue[tail].intPageGen = scan->intPageGen;
+			scan->leafQueue[tail].offset =
+				BTREE_PAGE_LOCATOR_GET_OFFSET(img, &scan->prefetchLoc);
+			scan->leafQueue[tail].downlink = hdr->downlink;
+			scan->leafQueueLen++;
+		}
+		BTREE_PAGE_LOCATOR_NEXT(img, &scan->prefetchLoc);
+	}
+}
+
+/*
+ * Returns the image of the on-disk leaf the scan has just taken downlink to,
+ * if it was prefetched and read fine, or NULL.  The image stays in the
+ * prefetch ring until the next leaf is taken from it.  Reads queued for
+ * downlinks the scan has passed by are dropped.
+ */
+static Pointer
+seq_scan_prefetched_leaf(BTreeSeqScan *scan, uint64 downlink)
+{
+	Page		img = scan->context.img;
+	int			depth = btree_prefetch_ring_depth(scan->prefetchRing);
+	OffsetNumber offset;
+	Pointer		result = NULL;
+	Pointer		readImg;
+
+	/* scan->intLoc is already at the downlink after ours */
+	if (BTREE_PAGE_LOCATOR_IS_VALID(img, &scan->intLoc))
+		offset = BTREE_PAGE_LOCATOR_GET_OFFSET(img, &scan->intLoc) - 1;
+	else
+		offset = BTREE_PAGE_ITEMS_COUNT(img) - 1;
+
+	seq_scan_prefetch_leaves(scan);
+
+	while (scan->leafQueueLen > 0)
+	{
+		int			head = scan->leafQueueHead;
+		bool		ours;
+		uint64		readDownlink;
+		CommitSeqNo readCsn;
+		bool		fullyInRange;
+		OReadPageResult readResult;
+
+		ours = scan->leafQueue[head].intPageGen == scan->intPageGen &&
+			scan->leafQueue[head].offset == offset;
+		if (!ours &&
+			scan->leafQueue[head].intPageGen == scan->intPageGen &&
+			scan->leafQueue[head].offset > offset)
+			break;				/* queued ahead of us */
+
+		if (!btree_prefetch_ring_consume_ref(scan->prefetchRing, scan->desc,
+											 &readImg, &readDownlink,
+											 &readCsn, &fullyInRange,
+											 &readResult))
+		{
+			scan->leafQueueLen = 0;
+			break;
+		}
+		Assert(readDownlink == scan->leafQueue[head].downlink);
+		scan->leafQueueHead = (head + 1) % depth;
+		scan->leafQueueLen--;
+
+		if (ours)
+		{
+			if (readResult == OReadPageResultOk && readDownlink == downlink)
+				result = readImg;
+			break;
+		}
+	}
+
+	/* Keep the reads going while this leaf is loaded and returned */
+	seq_scan_prefetch_leaves(scan);
+	return result;
+}
+#endif
+
 /*
  * Loads the leaf covering low into the page pool under its parent, which the
  * scan has just read the downlink from, and reads the leaf into leafImg as of
@@ -1656,7 +1793,7 @@ check_in_memory_leaf_page(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRang
  */
 static bool
 seq_scan_load_leaf_under_parent(BTreeSeqScan *scan, OBTreeFindPageContext *ctx,
-								OTuple low)
+								OTuple low, uint64 downlink, Pointer readImg)
 {
 	Pointer		key = O_TUPLE_IS_NULL(low) ? NULL : (Pointer) &low;
 	BTreeKeyType kind = O_TUPLE_IS_NULL(low) ? BTreeKeyNone : BTreeKeyNonLeafKey;
@@ -1702,7 +1839,10 @@ seq_scan_load_leaf_under_parent(BTreeSeqScan *scan, OBTreeFindPageContext *ctx,
 		if (DOWNLINK_IS_ON_DISK(hdr->downlink))
 		{
 			/* Leaves the parent locked again, at the loaded downlink */
-			load_page(ctx);
+			if (readImg)
+				load_page_from_image(ctx, readImg, downlink);
+			else
+				load_page(ctx);
 			item = &ctx->items[ctx->index];
 			parent = O_GET_IN_MEMORY_PAGE(item->blkno);
 			hdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(parent,
@@ -1745,17 +1885,22 @@ seq_scan_load_leaf_under_parent(BTreeSeqScan *scan, OBTreeFindPageContext *ctx,
  * range read through an iterator instead.
  */
 static void
-seq_scan_load_disk_leaf(BTreeSeqScan *scan)
+seq_scan_load_disk_leaf(BTreeSeqScan *scan, uint64 downlink)
 {
 	OBTreeFindPageContext *ctx = scan->leafLoadContext;
 	OTuple		low = scan->keyRangeLow.tuple;
 	bool		startsAtLow;
+	Pointer		readImg = NULL;
 
 	if (ctx == NULL)
 		ctx = scan->leafLoadContext =
 			MemoryContextAlloc(btree_seqscan_context,
 							   sizeof(OBTreeFindPageContext));
-	if (!seq_scan_load_leaf_under_parent(scan, ctx, low))
+#if PG_VERSION_NUM >= 180000
+	if (scan->prefetchRing && !scan->poscan)
+		readImg = seq_scan_prefetched_leaf(scan, downlink);
+#endif
+	if (!seq_scan_load_leaf_under_parent(scan, ctx, low, downlink, readImg))
 	{
 		OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
@@ -2448,7 +2593,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 
 				if (scan->cacheLeaves)
 				{
-					seq_scan_load_disk_leaf(scan);
+					seq_scan_load_disk_leaf(scan, downlink);
 					return true;
 				}
 
@@ -3074,7 +3219,11 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 														btree_seqscan_context);
 	else
 		scan->prefetchRing = NULL;
+	scan->leafQueue = NULL;
+	scan->leafQueueHead = scan->leafQueueLen = 0;
+	scan->prefetchGen = 0;
 #endif
+	scan->intPageGen = 0;
 
 	dlist_push_tail(&listOfScans, &scan->listNode);
 	scan->resowner = NULL;
@@ -3973,6 +4122,11 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 	BTreeDescr *desc = scan->desc;
 
 #if PG_VERSION_NUM >= 180000
+	if (scan->leafQueue)
+	{
+		pfree(scan->leafQueue);
+		scan->leafQueue = NULL;
+	}
 	if (scan->prefetchRing)
 	{
 		btree_prefetch_ring_destroy(scan->prefetchRing);

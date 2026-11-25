@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import unittest
+
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_stopevent
@@ -129,3 +131,18 @@ class SeqScanCacheTest(BaseTest):
 			SELECT count(*), min(length(v)) FROM u;
 		""")[0], (50, 65))
 		node.stop()
+
+
+@unittest.skipIf(BaseTest.get_pg_version() < 18,
+                 'AIO prefetch needs PostgreSQL 18')
+class SeqScanCachePrefetchTest(SeqScanCacheTest):
+	"""
+	The same with the leaves read ahead through io workers: a cached scan
+	loads them from the images the prefetch read.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.node.append_conf(
+		    'postgresql.conf', "io_method = worker\n"
+		    "orioledb.btree_prefetch_depth = 16\n")
