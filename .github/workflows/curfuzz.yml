@@ -69,6 +69,7 @@ jobs:
           CONF
           pg_ctl -D data -l pg.log -w start
           export PGHOST=/tmp PGPORT=5679
+          psql -d postgres -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION orioledb'
           # The first four seed ranges are the ones that reproduced locally
           # (violations at seeds 400039 and 400056 on macOS arm64).
           pids=()
