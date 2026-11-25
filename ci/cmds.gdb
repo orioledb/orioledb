@@ -7,4 +7,10 @@ set $end=argc
 while ($i < $end)
 p argv[$i++]
 end
+frame function o_btree_iterator_fetch
+p *it
+p cmp
+p result
+p it->prevTuple
+p *desc
 quit

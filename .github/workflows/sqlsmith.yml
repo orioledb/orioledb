@@ -6,12 +6,7 @@ name: sqlsmith
 # on it is what keeps that number up.
 on:
   push:
-    branches: [main, "v[0-9]*.[0-9]*"]
-    paths-ignore:
-      - "test/**"
-      - "doc/**"
-      - "**/*.md"
-  pull_request:
+    branches: [main, "v[0-9]*.[0-9]*", "tmp/repro-1581"]
     paths-ignore:
       - "test/**"
       - "doc/**"
@@ -47,14 +42,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Assertions are the point of the exercise, so every cell is an
-          # assert-enabled build.  check_page additionally validates page
-          # structure on every access, which catches corruption a plain
-          # assert build walks straight past.
-          - { pg_version: 16, check_type: debug }
-          - { pg_version: 17, check_type: debug }
-          - { pg_version: 18, check_type: debug }
-          - { pg_version: 18, check_type: check_page }
+          # TEMP (#1581): replicate the failing PG18 debug cell with the CI
+          # seed and others; two check_page cells.
+          - { pg_version: 18, check_type: debug, seed: 1795005145 }
+          - { pg_version: 18, check_type: debug, seed: 1795005146 }
+          - { pg_version: 18, check_type: debug, seed: 1795005147 }
+          - { pg_version: 18, check_type: debug, seed: 1795005148 }
+          - { pg_version: 18, check_type: check_page, seed: 1795005149 }
+          - { pg_version: 18, check_type: check_page, seed: 1795005150 }
 
     runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
@@ -63,9 +58,9 @@ jobs:
       COMPILER: gcc
       CHECK_TYPE: ${{ matrix.check_type }}
       PG_VERSION: ${{ matrix.pg_version }}
-      SQLSMITH_SECONDS: ${{ github.event.inputs.seconds || '600' }}
-      SQLSMITH_SEED: ${{ github.event.inputs.seed || '' }}
-      SQLSMITH_WRITERS: ${{ github.event.inputs.writers || '4' }}
+      SQLSMITH_SECONDS: ${{ github.event.inputs.seconds || '1500' }}
+      SQLSMITH_SEED: ${{ github.event.inputs.seed || matrix.seed }}
+      SQLSMITH_WRITERS: ${{ github.event.inputs.writers || '6' }}
 
     steps:
       - name: Checkout extension code into workspace directory
@@ -116,11 +111,29 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: sqlsmith_${{ matrix.pg_version }}_${{ matrix.check_type }}_logs
+          name: sqlsmith_${{ matrix.pg_version }}_${{ matrix.check_type }}_${{ matrix.seed }}_logs
           path: |
             ./sqlsmith_pg.log
             ./sqlsmith_out.log
             ./sqlsmith_err.log
             ./sqlsmith_writer_*.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Pack core dumps and binaries
+        if: ${{ failure() }}
+        run: |
+          set -x
+          ls /tmp/cores-sqlsmith-* 2>/dev/null || true
+          tar czf cores_${{ matrix.check_type }}_${{ matrix.seed }}.tgz \
+            /tmp/cores-sqlsmith-* pgsql/bin/postgres pgsql/lib/orioledb.so 2>/dev/null || true
+          ls -la cores_*.tgz || true
+
+      - name: Upload core dumps and binaries
+        uses: actions/upload-artifact@v7
+        if: ${{ failure() }}
+        with:
+          name: sqlsmith_${{ matrix.check_type }}_${{ matrix.seed }}_cores
+          path: ./cores_*.tgz
           retention-days: 7
           if-no-files-found: ignore

@@ -1373,6 +1373,47 @@ o_btree_iterator_set_interruptible(BTreeIterator *it)
 	it->interruptible = true;
 }
 
+#ifdef USE_ASSERT_CHECKING
+/* TEMPORARY diagnostics for orioledb/orioledb#1581; not for merging. */
+static void
+iterator_log_order_violation(BTreeIterator *it, OTuple result, int cmp)
+{
+	BTreeDescr *desc = it->context.desc;
+	StringInfoData buf;
+	Page		img = it->context.img;
+	BTreePageHeader *header = (BTreePageHeader *) img;
+	BTreePageItemLocator *loc = &it->context.items[it->context.index].locator;
+	int			i,
+				plen = o_btree_len(desc, it->prevTuple.tuple, OTupleLength),
+				rlen = o_btree_len(desc, result, OTupleLength);
+
+	initStringInfo(&buf);
+	appendStringInfo(&buf, "prev(len=%d):", plen);
+	for (i = 0; i < plen && i < 160; i++)
+		appendStringInfo(&buf, " %02x", (unsigned char) it->prevTuple.tuple.data[i]);
+	appendStringInfo(&buf, "\nresult(len=%d):", rlen);
+	for (i = 0; i < rlen && i < 160; i++)
+		appendStringInfo(&buf, " %02x", (unsigned char) result.data[i]);
+
+	elog(LOG, "ITERATOR ORDER VIOLATION: cmp=%d forward=%d combinedResult=%d "
+		 "combinedPage=%d fetchMode=%d curKeySet=%d curKeyReturned=%d "
+		 "curKeyLazy=%d resumeLocValid=%d pageCount=%d index=%d blkno=%u "
+		 "pageChangeCount=%u pageCsn=" UINT64_FORMAT " pageUndoLoc=" UINT64_FORMAT
+		 " locValid=%d undoLocValid=%d snapshotCsn=" UINT64_FORMAT "\n%s",
+		 cmp, IT_IS_FORWARD(it), it->combinedResult, it->combinedPage,
+		 BTREE_PAGE_FIND_IS(&it->context, FETCH), it->curKeySet,
+		 it->curKeyReturned, it->curKeyLazy, it->resumeLocValid,
+		 it->pageCount, it->context.index,
+		 it->context.items[it->context.index].blkno,
+		 it->context.items[it->context.index].pageChangeCount,
+		 (uint64) header->csn, (uint64) header->undoLocation,
+		 BTREE_PAGE_LOCATOR_IS_VALID(img, loc),
+		 BTREE_PAGE_LOCATOR_IS_VALID(it->undoIt.image, &it->undoLoc),
+		 (uint64) it->oSnapshot.csn, buf.data);
+	pfree(buf.data);
+}
+#endif
+
 /*
  * Fetches the next tuple from the iterator.  Returns null tuple when there
  * are no more tuples before the end boundary (defined by `end`, `endType`,
@@ -1451,6 +1492,8 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 			cmp = o_btree_cmp(desc, &it->prevTuple.tuple, BTreeKeyLeafTuple,
 							  &result, BTreeKeyLeafTuple);
 
+			if (!((IT_IS_FORWARD(it) && cmp < 0) || cmp > 0))
+				iterator_log_order_violation(it, result, cmp);
 			Assert((IT_IS_FORWARD(it) && cmp < 0) || cmp > 0);
 		}
 		copy_fixed_tuple(desc, &it->prevTuple, result);
