@@ -1638,32 +1638,128 @@ check_in_memory_leaf_page(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRang
 }
 
 /*
- * Reads an on-disk leaf by descending to it, which loads it into the page
- * pool so the next scan finds it in memory, and then sets it up like a leaf
- * read from memory.  The descent goes by the downlink's low key and finds the
- * leaf as it is now: one that no longer covers the downlink's key range on
- * either side gets its range read through an iterator instead.
+ * Loads the leaf covering low into the page pool under its parent, which the
+ * scan has just read the downlink from, and reads the leaf into leafImg as of
+ * the scan's image CSN.  The parent is found by the scan's hint to it, so
+ * the tree is not descended from the root for every leaf.  Returns false if
+ * the leaf changed before it could be read.
+ */
+static bool
+seq_scan_load_leaf_under_parent(BTreeSeqScan *scan, OBTreeFindPageContext *ctx,
+								OTuple low)
+{
+	Pointer		key = O_TUPLE_IS_NULL(low) ? NULL : (Pointer) &low;
+	BTreeKeyType kind = O_TUPLE_IS_NULL(low) ? BTreeKeyNone : BTreeKeyNonLeafKey;
+	OInMemoryBlkno parentBlkno = OInvalidInMemoryBlkno;
+	uint32		parentChangeCount = InvalidOPageChangeCount;
+	OInMemoryBlkno blkno;
+	uint32		changeCount;
+
+	/* A parallel scan's internal page comes from shared memory, not a hint */
+	if (!scan->poscan)
+	{
+		parentBlkno = scan->context.items[scan->context.index].blkno;
+		parentChangeCount = scan->context.items[scan->context.index].pageChangeCount;
+	}
+
+	while (true)
+	{
+		OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+		OBtreePageFindItem *item;
+		BTreeNonLeafTuphdr *hdr;
+		Page		parent;
+
+		init_page_find_context(ctx, scan->desc, COMMITSEQNO_INPROGRESS,
+							   BTREE_PAGE_FIND_MODIFY |
+							   BTREE_PAGE_FIND_DOWNLINK_LOCATION);
+		if (OInMemoryBlknoIsValid(parentBlkno))
+			findResult = refind_page(ctx, key, kind, 1,
+									 parentBlkno, parentChangeCount);
+		else
+			findResult = find_page(ctx, key, kind, 1);
+		Assert(findResult == OFindPageResultSuccess);
+
+		item = &ctx->items[ctx->index];
+		parent = O_GET_IN_MEMORY_PAGE(item->blkno);
+		if (PAGE_GET_LEVEL(parent) != 1)
+		{
+			unlock_page(item->blkno);
+			return false;
+		}
+
+		hdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(parent,
+																 &item->locator);
+		if (DOWNLINK_IS_ON_DISK(hdr->downlink))
+		{
+			/* Leaves the parent locked again, at the loaded downlink */
+			load_page(ctx);
+			item = &ctx->items[ctx->index];
+			parent = O_GET_IN_MEMORY_PAGE(item->blkno);
+			hdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(parent,
+																	 &item->locator);
+		}
+
+		if (DOWNLINK_IS_IN_IO(hdr->downlink))
+		{
+			int			ionum = DOWNLINK_GET_IO_LOCKNUM(hdr->downlink);
+
+			unlock_page(item->blkno);
+			wait_for_io_completion(ionum);
+			parentBlkno = item->blkno;
+			parentChangeCount = item->pageChangeCount;
+			continue;
+		}
+
+		Assert(DOWNLINK_IS_IN_MEMORY(hdr->downlink));
+		blkno = DOWNLINK_GET_IN_MEMORY_BLKNO(hdr->downlink);
+		changeCount = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(hdr->downlink);
+		unlock_page(item->blkno);
+		break;
+	}
+
+	if (o_btree_try_read_page(scan->desc, blkno, changeCount, scan->leafImg,
+							  scan->context.imgReadCsn, NULL, BTreeKeyNone,
+							  NULL, true, NULL) != ReadPageResultOK)
+		return false;
+
+	scan->hint.blkno = blkno;
+	scan->hint.pageChangeCount = changeCount;
+	return true;
+}
+
+/*
+ * Reads an on-disk leaf through the tree, which loads it into the page pool
+ * so the next scan finds it in memory, and then sets it up like a leaf read
+ * from memory.  The leaf is found by the downlink's low key as it is now: one
+ * that no longer covers the downlink's key range on either side gets its
+ * range read through an iterator instead.
  */
 static void
 seq_scan_load_disk_leaf(BTreeSeqScan *scan)
 {
 	OBTreeFindPageContext *ctx = scan->leafLoadContext;
 	OTuple		low = scan->keyRangeLow.tuple;
-	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 	bool		startsAtLow;
 
 	if (ctx == NULL)
 		ctx = scan->leafLoadContext =
 			MemoryContextAlloc(btree_seqscan_context,
 							   sizeof(OBTreeFindPageContext));
-	init_page_find_context(ctx, scan->desc, scan->context.imgReadCsn,
-						   BTREE_PAGE_FIND_IMAGE);
-	if (O_TUPLE_IS_NULL(low))
-		findResult = find_page(ctx, NULL, BTreeKeyNone, 0);
-	else
-		findResult = find_page(ctx, &low, BTreeKeyNonLeafKey, 0);
-	Assert(findResult == OFindPageResultSuccess);
-	memcpy(scan->leafImg, ctx->img, ORIOLEDB_BLCKSZ);
+	if (!seq_scan_load_leaf_under_parent(scan, ctx, low))
+	{
+		OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+
+		init_page_find_context(ctx, scan->desc, scan->context.imgReadCsn,
+							   BTREE_PAGE_FIND_IMAGE);
+		if (O_TUPLE_IS_NULL(low))
+			findResult = find_page(ctx, NULL, BTreeKeyNone, 0);
+		else
+			findResult = find_page(ctx, &low, BTreeKeyNonLeafKey, 0);
+		Assert(findResult == OFindPageResultSuccess);
+		memcpy(scan->leafImg, ctx->img, ORIOLEDB_BLCKSZ);
+		scan->hint.blkno = ctx->items[ctx->index].blkno;
+		scan->hint.pageChangeCount = ctx->items[ctx->index].pageChangeCount;
+	}
 	scan->leafPartial.isPartial = false;
 	scan->haveLastLeafKey = false;
 
@@ -1700,8 +1796,6 @@ seq_scan_load_disk_leaf(BTreeSeqScan *scan)
 	if (scan->iter)
 		return;
 
-	scan->hint.blkno = ctx->items[ctx->index].blkno;
-	scan->hint.pageChangeCount = ctx->items[ctx->index].pageChangeCount;
 	seq_leaf_locator_start(scan);
 	O_TUPLE_SET_NULL(scan->nextKey.tuple);
 	load_first_historical_page(scan);
