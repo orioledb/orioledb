@@ -1,8 +1,10 @@
 import copy
+from contextlib import contextmanager
 from itertools import chain
 from collections import Counter
 import os
 import re
+import resource
 from shutil import rmtree
 import socket
 import struct
@@ -102,6 +104,19 @@ class PgRewindTest(BaseTest):
 			rewind_log_file = master.pg_log_file
 		return self.pg_rewind(master.data_dir, new_master_port, verbose,
 		                      rewind_log_file, **rewind_args)
+
+	@contextmanager
+	def expected_postgres_panic(self):
+		"""Prevent an intentional PostgreSQL PANIC from failing CI cleanup."""
+		old_core_limit = resource.getrlimit(resource.RLIMIT_CORE)
+		old_valgrind_logs = set(glob.glob('pid-*.log'))
+		try:
+			resource.setrlimit(resource.RLIMIT_CORE, (0, old_core_limit[1]))
+			yield
+		finally:
+			resource.setrlimit(resource.RLIMIT_CORE, old_core_limit)
+			for path in set(glob.glob('pid-*.log')) - old_valgrind_logs:
+				os.remove(path)
 
 	def start_master_as_standby(self,
 	                            master: testgres.PostgresNode,
@@ -1403,9 +1418,12 @@ class PgRewindTest(BaseTest):
 				master.append_conf(restart_after_crash='off')
 				master.append_conf(
 				    **{'orioledb.debug_recovery_crash_lsn': crash_lsn})
-				with self.assertRaises(testgres.exceptions.StartNodeException):
-					self.start_master_as_standby(master, replica,
-					                             primary_conninfo, master_slot)
+				with self.expected_postgres_panic():
+					with self.assertRaises(
+					    testgres.exceptions.StartNodeException):
+						self.start_master_as_standby(master, replica,
+						                             primary_conninfo,
+						                             master_slot)
 				with open(master.pg_log_file, 'r') as log_file:
 					crash_log = log_file.read()
 				self.assertIn('debug_recovery_crash_lsn reached', crash_log)
