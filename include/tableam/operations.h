@@ -106,6 +106,8 @@ extern TupleTableSlot *o_tbl_insert_with_arbiter(Relation rel,
 												 TupleTableSlot *lockedSlot,
 												 EState *estate,
 												 ResultRelInfo *resultRelInfo);
+extern void fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
+						   OBTreeKeyBound *bound);
 extern OBTreeModifyResult o_tbl_index_insert(OTableDescr *descr,
 											 OIndexDescr *id,
 											 OTuple *own_tup,
@@ -157,6 +159,13 @@ extern void fire_sk_modify_pending_stopevent(OTableDescr *descr,
 											 int pendingRows,
 											 bool batchComplete);
 extern void clear_pending_sk_marker(void);
+
+extern void multi_insert_pk_slow(TupleTableSlot *slot, OTuple *tuple,
+								 OTableDescr *descr, OIndexDescr *id,
+								 Relation relation,
+								 BTreeModifyCallbackInfo *callbackInfo,
+								 OXid oxid, CommitSeqNo csn,
+								 int pendingRows);
 
 extern bool o_is_index_predicate_satisfied(OIndexDescr *idx,
 										   TupleTableSlot *slot,
