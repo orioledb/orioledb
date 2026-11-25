@@ -122,6 +122,7 @@ init_ucm(UsageCountMap *map, Pointer ptr, bool found)
 	ptr += PG_CACHE_LINE_SIZE;
 
 	map->ucm = (pg_atomic_uint32 *) ptr;
+	map->searchFreeHint = 0;
 
 	if (found)
 		return;
@@ -549,7 +550,15 @@ ucm_occupy_free_page(UsageCountMap *map)
 	uint32		mask;
 
 	mask = UCM_LEVEL_MASK << (UCM_FREE_PAGES_LEVEL * UCM_LEVEL_BITS);
-	location = 0;
+
+	/*
+	 * Pages taken one after another leave the ones before the last find
+	 * occupied, and the search checks the pages of a leaf group one by one.
+	 * Starting from the beginning each time, it would go over them again.
+	 */
+	location = map->searchFreeHint;
+	if (location < 0 || location >= map->size)
+		location = 0;
 	factor = map->rootFactor;
 	base = 0;
 	num_iterations = 0;
@@ -571,6 +580,7 @@ ucm_occupy_free_page(UsageCountMap *map)
 				page_try_change_usage_count(map, blkno,
 											state, UCM_INVALID_LEVEL))
 			{
+				map->searchFreeHint = location + 1;
 				return blkno;
 			}
 		}
