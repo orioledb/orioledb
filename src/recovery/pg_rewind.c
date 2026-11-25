@@ -20,12 +20,16 @@
 
 #include "btree/io.h"
 #include "btree/iterator.h"
+#include "btree/modify.h"
+#include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "checkpoint/control.h"
 #include "recovery/internal.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
 #include "tableam/descr.h"
+#include "tableam/operations.h"
+#include "tuple/slot.h"
 
 #include "access/heapam.h"
 #include "access/table.h"
@@ -615,7 +619,11 @@ orioledb_pg_rewind_new_row_versions(PG_FUNCTION_ARGS)
 
 #define REWIND_OXID 0
 
-
+/*
+ * The rewind file is applied before replay, one row per transaction under
+ * REWIND_OXID.  The images the promotion logged are applied mid-stream and
+ * take no transaction at all, see apply_image_row().
+ */
 static void
 start_rewind_oxid(void)
 {
@@ -627,23 +635,20 @@ static void
 finish_rewind_oxid(void)
 {
 	bool		single = *recovery_single_process;
-	bool		sync = false;
 	XLogRecPtr	rec;
 
 	rec = recovery_get_current_ptr();
 	if (!single)
 	{
 		workers_send_oxid_finish(rec, false, true);
-		sync = true;
 		workers_synchronize(rec, false);
 	}
 	else
 	{
-		sync = true;
 		pg_atomic_write_u64(recovery_ptr, rec);
 	}
 
-	recovery_finish_current_oxid(COMMITSEQNO_FROZEN, rec, -1, sync);
+	recovery_finish_current_oxid(COMMITSEQNO_FROZEN, rec, -1, true);
 }
 
 static void
@@ -667,6 +672,153 @@ apply_rewind_row(OTableDescr *descr, OIndexDescr *indexDescr,
 }
 
 /*
+ * Bring the secondary indexes in line with one image row.
+ *
+ * The pre-image comes straight off the primary leaf page (see
+ * o_btree_frozen_modify()), not from the undo chain, so this cannot use
+ * apply_tbl_modify_record(): every entry is written frozen and raw too.
+ * 'oldTuple' and 'newTuple' are NULL tuples when the row was absent before
+ * or is absent after.
+ */
+static void
+apply_image_secondary_indexes(OTableDescr *descr, OTuple oldTuple,
+							  OTuple newTuple)
+{
+	TupleTableSlot *oldSlot = descr->oldTuple;
+	TupleTableSlot *newSlot = descr->newTuple;
+	bool		haveOld = !O_TUPLE_IS_NULL(oldTuple);
+	bool		haveNew = !O_TUPLE_IS_NULL(newTuple);
+	int			i;
+
+	if (descr->nIndices < 2)
+		return;
+
+	/*
+	 * The tuples are owned by the caller: the old one is its copy of the page
+	 * image, the new one points into the record being replayed.
+	 */
+	if (haveOld)
+		tts_orioledb_store_tuple(oldSlot, oldTuple, descr,
+								 COMMITSEQNO_INPROGRESS, PrimaryIndexNumber,
+								 false, NULL);
+	if (haveNew)
+		tts_orioledb_store_tuple(newSlot, newTuple, descr,
+								 COMMITSEQNO_INPROGRESS, PrimaryIndexNumber,
+								 false, NULL);
+
+	for (i = 1; i < descr->nIndices; i++)
+	{
+		OIndexDescr *sk = descr->indices[i];
+		OBTreeKeyBound oldKey,
+					newKey;
+		OTuple		nullTup;
+		bool		needDelete,
+					needInsert;
+
+		/* CIC: skip BUILDING secondaries.  See apply_tbl_insert(). */
+		if (sk->state != OINDEX_STATE_VALID)
+			continue;
+
+		O_TUPLE_SET_NULL(nullTup);
+
+		needDelete = haveOld &&
+			o_is_index_predicate_satisfied(sk, oldSlot, sk->econtext);
+		needInsert = haveNew &&
+			o_is_index_predicate_satisfied(sk, newSlot, sk->econtext);
+
+		if (needDelete)
+			tts_orioledb_fill_key_bound(oldSlot, sk, &oldKey);
+		if (needInsert)
+			tts_orioledb_fill_key_bound(newSlot, sk, &newKey);
+
+		o_btree_load_shmem(&sk->desc);
+
+		/* An entry that keeps its key is replaced where it is */
+		if (needDelete && needInsert &&
+			o_btree_cmp(&sk->desc, (Pointer) &oldKey, BTreeKeyBound,
+						(Pointer) &newKey, BTreeKeyBound) == 0)
+			needDelete = false;
+
+		if (needDelete)
+			(void) o_btree_frozen_modify(&sk->desc, BTreeOperationDelete,
+										 nullTup, BTreeKeyNone,
+										 (Pointer) &oldKey, BTreeKeyBound,
+										 NULL);
+
+		if (needInsert)
+		{
+			OTuple		newSkTup;
+
+			newSkTup = tts_orioledb_make_secondary_tuple(newSlot, sk, true);
+
+			/*
+			 * The primary logged the row even though the secondary tuple did
+			 * not fit, so replay has to tolerate the same.  See
+			 * apply_tbl_insert().
+			 */
+			if (o_btree_len(&sk->desc, newSkTup, OTupleLength) <=
+				O_BTREE_MAX_TUPLE_SIZE)
+				(void) o_btree_frozen_modify(&sk->desc, BTreeOperationInsert,
+											 newSkTup, BTreeKeyLeafTuple,
+											 (Pointer) &newKey, BTreeKeyBound,
+											 NULL);
+			pfree(newSkTup.data);
+		}
+	}
+
+	if (haveOld)
+		ExecClearTuple(oldSlot);
+	if (haveNew)
+		ExecClearTuple(newSlot);
+}
+
+/*
+ * Apply one row of the images the promotion logged.
+ *
+ * The rewind file is applied before replay; the images land in the middle of
+ * it, onto pages that still carry the versions of the transaction the
+ * promotion rolled back.  Those versions are committed on this node and their
+ * undo was reclaimed long ago, while every ordinary modify path starts by
+ * walking that chain -- so the row is written frozen and raw instead, and the
+ * secondary indexes are maintained from the pre-image the primary tree hands
+ * back.  See o_btree_frozen_modify().
+ */
+static void
+apply_image_row(OTableDescr *descr, OIndexDescr *indexDescr,
+				int sys_tree_num, OTuple rewind_row, bool deleted)
+{
+	BTreeDescr *td;
+	OTuple		oldTuple;
+	OTuple		nullTup;
+
+	O_TUPLE_SET_NULL(nullTup);
+	O_TUPLE_SET_NULL(oldTuple);
+
+	td = sys_tree_num > 0 ? get_sys_tree(sys_tree_num) : &indexDescr->desc;
+	o_btree_load_shmem(td);
+
+	if (deleted)
+		(void) o_btree_frozen_modify(td, BTreeOperationDelete,
+									 rewind_row, BTreeKeyNonLeafKey,
+									 NULL, BTreeKeyNone,
+									 descr ? &oldTuple : NULL);
+	else
+		(void) o_btree_frozen_modify(td, BTreeOperationInsert,
+									 rewind_row, BTreeKeyLeafTuple,
+									 NULL, BTreeKeyNone,
+									 descr ? &oldTuple : NULL);
+
+	if (descr == NULL)
+		return;
+
+	apply_image_secondary_indexes(descr, oldTuple,
+								  deleted ? nullTup : rewind_row);
+
+	if (!O_TUPLE_IS_NULL(oldTuple))
+		pfree(oldTuple.data);
+}
+
+/*
  * Reads the rewind rows in order: from the rewind file, or from memory when
  * the promoted node logged them (see rewind_images_redo()).
  */
@@ -677,6 +829,7 @@ typedef struct RewindReader
 	const char *buf;
 	uint64		len;
 	off_t		offset;
+	bool		frozen;			/* write the rows frozen and raw */
 } RewindReader;
 
 static void replay_rewind_trees(RewindReader *r);
@@ -766,22 +919,32 @@ replay_rewind_row(RewindReader *r, char *read_buf,
 /* TODO: Find out are we need real */
 		/* toast_consistent value */
 
-		/*
-		 * Delete the target's version of the row and insert the source's one
-		 * in a single transaction.  The insert finds the row deleted by its
-		 * own transaction and rolls the deletion back first, which needs the
-		 * undo record of the deletion.  The undo record is kept only while
-		 * the transaction runs.
-		 */
-		start_rewind_oxid();
-		apply_rewind_row(descr, indexDescr, sys_tree_num,
-						 rewind_row,
-						 true);
-		if (add_new)
+		if (r->frozen)
+		{
+			o_set_syscache_hooks();
+			apply_image_row(descr, indexDescr, sys_tree_num, rewind_row,
+							!add_new || deleted);
+			o_unset_syscache_hooks();
+		}
+		else
+		{
+			/*
+			 * Delete the target's version of the row and insert the source's
+			 * one in a single transaction.  The insert finds the row deleted
+			 * by its own transaction and rolls the deletion back first, which
+			 * needs the undo record of the deletion.  The undo record is kept
+			 * only while the transaction runs.
+			 */
+			start_rewind_oxid();
 			apply_rewind_row(descr, indexDescr, sys_tree_num,
 							 rewind_row,
-							 deleted);
-		finish_rewind_oxid();
+							 true);
+			if (add_new)
+				apply_rewind_row(descr, indexDescr, sys_tree_num,
+								 rewind_row,
+								 deleted);
+			finish_rewind_oxid();
+		}
 		toast_consistent = old_toast_consistent;
 	}
 	return rewind_row;
@@ -815,8 +978,6 @@ replay_rewind_row(RewindReader *r, char *read_buf,
  */
 bool		rewind_keys_capturing = false;
 
-/* The node replays WAL after a rewind: see rewind_images_redo() */
-static bool rewind_replaying = false;
 static StringInfo rewind_keys = NULL;
 static bool rewind_keys_collected = false;
 
@@ -826,7 +987,9 @@ static bool rewind_keys_collected = false;
 #define REWIND_KEY_ENTRY_HEADER_SIZE	(5 * sizeof(uint32) + sizeof(uint8) + sizeof(uint32))
 #define REWIND_KEYS_WAL_CHUNK			(1024 * 1024)
 
+#ifdef IS_DEV
 PG_FUNCTION_INFO_V1(orioledb_pg_rewind_divergence_keys);
+#endif
 
 void
 rewind_keys_capture(BTreeDescr *desc, BTreeOperationType action, OTuple tuple)
@@ -1442,11 +1605,10 @@ rewind_keys_save(XLogRecPtr switchpoint)
 			RewindImages *images = (RewindImages *) lfirst(ic);
 
 			if (images->switchpoint == pending_switchpoint)
-			{
 				log_rewind_payload(ORIOLEDB_XLOG_REWIND_IMAGES,
-								   pending_switchpoint, images->images->data,
+								   pending_switchpoint,
+								   images->images->data,
 								   images->images->len);
-			}
 		}
 		STOPEVENT(STOPEVENT_PG_REWIND_KEYS_AFTER_WAL_FLUSH, NULL);
 		pfree(data);
@@ -1478,13 +1640,15 @@ rewind_keys_save(XLogRecPtr switchpoint)
 	rewind_keys_remove_parts();
 }
 
+#ifdef IS_DEV
 /*
- * Reads the keys the promotion that forked at switchpoint logged, for the
- * source of pg_rewind.  Returns NULL if this server is not on a timeline
- * forked at the switchpoint, so it did not promote there: pg_rewind looks
- * for the keys at the other side then.  The result is the entries of the
- * records of the first complete set, in the format of
- * rewind_keys_capture().
+ * Reads the keys the promotion that forked at switchpoint logged.  Returns
+ * NULL if this server is not on a timeline forked at the switchpoint, so it
+ * did not promote there.  The result is the entries of the records of the
+ * first complete set, in the format of rewind_keys_capture().
+ *
+ * For the tests only.  pg_rewind finds these records in the target's WAL as
+ * it scans it, and replay reads them out of the WAL stream.
  */
 Datum
 orioledb_pg_rewind_divergence_keys(PG_FUNCTION_ARGS)
@@ -1585,17 +1749,30 @@ orioledb_pg_rewind_divergence_keys(PG_FUNCTION_ARGS)
 	memcpy(VARDATA(result), keys.data, keys.len);
 	PG_RETURN_BYTEA_P(result);
 }
+#endif							/* IS_DEV */
 
 /*
- * Redo of ORIOLEDB_XLOG_REWIND_IMAGES.  A node that replays WAL after a
- * rewind takes the rows of the first complete set after the common
- * checkpoint, which is the promotion at its divergence point: its own
- * version of them is the old primary's, and the rows the promotion left are
- * what everything the source did afterwards builds on.  The others have
- * undone the transaction from their own undo, and ignore the records.
+ * Redo of ORIOLEDB_XLOG_REWIND_IMAGES.  Only a node pg_rewind rewound onto
+ * the promotion these images belong to applies them: its own version of
+ * those rows is the old primary's, and the rows the promotion left behind
+ * are what everything the source did afterwards builds on.  Every other node
+ * -- a standby of the promoted one, or a target rewound onto a different
+ * switchpoint -- has undone the transaction from its own undo and ignores
+ * the records.  Which promotion that is comes from the control file, see
+ * rewind_images_pending().
  */
 static StringInfo rewind_images_redo_buf = NULL;
-static bool rewind_images_applied = false;
+
+/*
+ * The images the rewind target still owes, or InvalidXLogRecPtr.  Read from
+ * the control file, so a restartpoint between the rollback markers and the
+ * images -- or a crash -- does not lose it.
+ */
+XLogRecPtr
+rewind_images_pending(void)
+{
+	return pg_atomic_read_u64(&checkpoint_state->rewindImagesSwitchpoint);
+}
 
 void
 rewind_images_redo(XLogReaderState *record)
@@ -1603,8 +1780,10 @@ rewind_images_redo(XLogReaderState *record)
 	const char *rec = XLogRecGetData(record);
 	uint16		flags;
 	uint32		payload_len;
+	XLogRecPtr	switchpoint;
+	XLogRecPtr	pending = rewind_images_pending();
 
-	if (!rewind_replaying || rewind_images_applied)
+	if (XLogRecPtrIsInvalid(pending))
 		return;
 
 	if (XLogRecGetDataLen(record) < REWIND_KEYS_WAL_HEADER_SIZE)
@@ -1612,13 +1791,24 @@ rewind_images_redo(XLogReaderState *record)
 				(errcode(ERRCODE_DATA_CORRUPTED),
 				 errmsg("truncated OrioleDB rewind images WAL record")));
 	memcpy(&flags, rec + 2, sizeof(flags));
+	memcpy(&switchpoint, rec + 4, sizeof(switchpoint));
 	memcpy(&payload_len, rec + 12, sizeof(payload_len));
 	flags = pg_ntoh16(flags);
+	switchpoint = pg_ntoh64(switchpoint);
 	payload_len = pg_ntoh32(payload_len);
 	if (XLogRecGetDataLen(record) != REWIND_KEYS_WAL_HEADER_SIZE + payload_len)
 		ereport(PANIC,
 				(errcode(ERRCODE_DATA_CORRUPTED),
 				 errmsg("invalid OrioleDB rewind images WAL record")));
+
+	/*
+	 * Only the promotion this node was rewound onto left rows behind that its
+	 * own WAL does not account for.  A later promotion in the source's
+	 * history rolled back transactions that lie wholly inside the WAL being
+	 * replayed, and ordinary replay has already undone them.
+	 */
+	if (switchpoint != pending)
+		return;
 
 	if (rewind_images_redo_buf == NULL)
 	{
@@ -1645,20 +1835,13 @@ rewind_images_redo(XLogReaderState *record)
 		reader.buf = rewind_images_redo_buf->data;
 		reader.len = rewind_images_redo_buf->len;
 		reader.offset = 0;
-#ifdef REWIND_IMAGES_APPLY
-		replay_rewind_trees(&reader);
-#else
+		reader.frozen = true;
 
-		/*
-		 * Writing the rows mid-stream does not work yet: the rewind rows are
-		 * written under oxid 0, which is below the xid horizons that
-		 * replay_rewind() has seeded by now (update_run_xmin() asserts xmin
-		 * >= globalXmin), and an oxid just below the seed trips the FROZEN
-		 * check of set_oxid_xlog_ptr().  See the plan, 7.6.
-		 */
-		(void) reader;
-#endif
-		rewind_images_applied = true;
+		elog(LOG, "orioledb rewind: applying the row images of the promotion at %X/%X",
+			 LSN_FORMAT_ARGS(switchpoint));
+		replay_rewind_trees(&reader);
+		pg_atomic_write_u64(&checkpoint_state->rewindImagesSwitchpoint,
+							InvalidXLogRecPtr);
 		resetStringInfo(rewind_images_redo_buf);
 	}
 }
@@ -1679,7 +1862,9 @@ rewind_keys_desc(StringInfo buf, XLogReaderState *record)
 	memcpy(&switchpoint, rec + 4, sizeof(switchpoint));
 	flags = pg_ntoh16(flags);
 	switchpoint = pg_ntoh64(switchpoint);
-	appendStringInfo(buf, "rewind keys of the promotion at %X/%X: %u bytes%s%s",
+	appendStringInfo(buf, "rewind %s of the promotion at %X/%X: %u bytes%s%s",
+					 (XLogRecGetInfo(record) & ~XLR_INFO_MASK) ==
+					 ORIOLEDB_XLOG_REWIND_IMAGES ? "images" : "keys",
 					 LSN_FORMAT_ARGS(switchpoint),
 					 (unsigned) (XLogRecGetDataLen(record) - REWIND_KEYS_WAL_HEADER_SIZE),
 					 (flags & REWIND_KEYS_FIRST) ? ", first" : "",
@@ -1838,6 +2023,7 @@ replay_rewind(void)
 	reader.buf = NULL;
 	reader.len = 0;
 	reader.offset = 0;
+	reader.frozen = false;
 
 	if (rewind_read(&reader, &startpoint, sizeof(XLogRecPtr)) !=
 		sizeof(XLogRecPtr))
@@ -1850,43 +2036,35 @@ replay_rewind(void)
 							   reader.name)));
 
 	replay_rewind_trees(&reader);
-	rewind_replaying = true;
 
-	/* TODO: Basically mimic checkpoint_shmem_init */
+	/*
+	 * Replay starts where the rewind file was taken from: the last common
+	 * checkpoint.  The stage-0 window is empty, since the rows above brought
+	 * the sys trees to that point as well.
+	 */
 	checkpoint_state->controlToastConsistentPtr = startpoint;
 	checkpoint_state->controlReplayStartPtr = startpoint;
 	checkpoint_state->controlSysTreesStartPtr = startpoint;
-	Assert(OXidIsValid(lastXid));
 
 	/*
-	 * Seed the xid horizons from divXid (lastXid).  divXid is the lowest xid
-	 * the source's WAL will reference (see pg_rewind_orioledb.c), so it is
-	 * both the runXmin / globalXmin floor and the nextXid to assign: the
-	 * first replayed transaction carries exactly this oxid, and
-	 * advance_oxids() only initialises a slot to INPROGRESS when the incoming
-	 * oxid is >= nextXid.  Seeding nextXid at divXid (rather than divXid + 1)
-	 * is what lets the first replayed transaction get a fresh INPROGRESS slot
-	 * instead of inheriting the stale FROZEN slot the target's own xidmap
-	 * left behind.
+	 * The xid horizons are already seeded from divXid: pg_rewind wrote it
+	 * into the control file as checkpointRetainXmin, checkpointRetainXmax and
+	 * lastXid, and checkpoint_shmem_init() ran before this.  lastXid here is
+	 * the same value, written into the rewind file by the same run, so there
+	 * is nothing left to do but say so.
 	 *
-	 * checkpointRetainXmin == checkpointRetainXmax == divXid makes the xidmap
-	 * range loaded by checkpoint_shmem_init() empty, so no target xidmap
-	 * slots are trusted: every oxid < divXid is settled below the floor
-	 * (handled via the o_buffers write path, which never trips the FROZEN
-	 * assert), and every oxid >= divXid is initialised fresh by
-	 * advance_oxids() as WAL_REC_XID arrives.
+	 * What those horizons buy: divXid is the lowest xid the source's WAL will
+	 * reference, so it is both the runXmin / globalXmin floor and the nextXid
+	 * to assign -- advance_oxids() only initialises a slot to INPROGRESS when
+	 * the incoming oxid is >= nextXid, so the first replayed transaction gets
+	 * a fresh slot instead of inheriting the stale FROZEN one the target's
+	 * own xidmap left behind.  An empty retain range means no target xidmap
+	 * slot is trusted either: every oxid below divXid reads as settled, and
+	 * every oxid at or above it is initialised as WAL_REC_XID arrives.
 	 */
-	pg_atomic_init_u64(&xid_meta->nextXid, lastXid);
-	pg_atomic_init_u64(&xid_meta->runXmin, lastXid);
-	pg_atomic_init_u64(&xid_meta->globalXmin, lastXid);
-	pg_atomic_init_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, lastXid);
-	pg_atomic_init_u64(&xid_meta->writtenXmin, lastXid);
-	pg_atomic_init_u64(&xid_meta->writeInProgressXmin, lastXid);
-	pg_atomic_init_u64(&xid_meta->checkpointRetainXmin, lastXid);
-	pg_atomic_init_u64(&xid_meta->checkpointRetainXmax, lastXid);
-	pg_atomic_init_u64(&xid_meta->cleanedXmin, lastXid);
-	pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmin, lastXid);
-	pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmax, lastXid);
+	Assert(OXidIsValid(lastXid));
+	Assert(pg_atomic_read_u64(&xid_meta->nextXid) == lastXid);
+	Assert(pg_atomic_read_u64(&xid_meta->runXmin) == lastXid);
 
 	/*
 	 * The undo metadata is left alone.  It was loaded from the target's
@@ -1897,16 +2075,12 @@ replay_rewind(void)
 	 */
 
 	/*
-	 * Mark the checkpoint state as finished and reset the stack so that
-	 * everything is ready for the next real checkpoint.
+	 * Nothing above ran a checkpoint, so the rest of the checkpoint state is
+	 * as checkpoint_shmem_init() left it -- except for 'completed', which
+	 * says the data on disk is a finished checkpoint rather than one this
+	 * process still has to drive.
 	 */
-	checkpoint_state->curKeyType = CurKeyFinished;
 	checkpoint_state->completed = true;
-	checkpoint_state->treeType = oIndexInvalid;
-	checkpoint_state->datoid = InvalidOid;
-	checkpoint_state->reloid = InvalidOid;
-	checkpoint_state->relnode = InvalidOid;
-	checkpoint_state->tablespace = InvalidOid;
 
 	elog(LOG, "orioledb rewind ended");
 }

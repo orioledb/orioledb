@@ -272,6 +272,8 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		checkpoint_state->curKeyType = CurKeyFinished;
 		checkpoint_state->pid = InvalidPid;
 		pg_atomic_init_u64(&checkpoint_state->mmapDataLength, 0);
+		pg_atomic_init_u64(&checkpoint_state->rewindImagesSwitchpoint,
+						   InvalidXLogRecPtr);
 		pg_atomic_init_u32(&checkpoint_state->autonomousLevel, ORIOLEDB_MAX_DEPTH);
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
@@ -359,6 +361,8 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		checkpoint_state->controlReplayStartPtr = control.replayStartPtr;
 		checkpoint_state->controlSysTreesStartPtr = control.sysTreesStartPtr;
 		pg_atomic_write_u64(&checkpoint_state->mmapDataLength, control.mmapDataLength);
+		pg_atomic_write_u64(&checkpoint_state->rewindImagesSwitchpoint,
+							control.rewindImagesSwitchpoint);
 
 		for (i = 0; i < NUM_CHECKPOINTABLE_UNDO_LOGS; i++)
 		{
@@ -2050,6 +2054,8 @@ o_perform_checkpoint_guts(int flags)
 	control.replayStartPtr = checkpoint_state->replayStartPtr;
 	control.toastConsistentPtr = checkpoint_state->toastConsistentPtr;
 	control.mmapDataLength = pg_atomic_read_u64(&checkpoint_state->mmapDataLength);
+	control.rewindImagesSwitchpoint =
+		pg_atomic_read_u64(&checkpoint_state->rewindImagesSwitchpoint);
 	for (i = 0; i < NUM_CHECKPOINTABLE_UNDO_LOGS; i++)
 	{
 		UndoLogType undoType = GetCheckpointableUndoLog(i);
@@ -2437,6 +2443,22 @@ o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
 	 */
 	if (flags == 0)
 	{
+		XLogRecPtr	pending = rewind_images_pending();
+
+		/*
+		 * Replay has run out of WAL and the images the rewind target was told
+		 * to apply never arrived.  The rows the promotion rolled back are
+		 * still this node's own committed versions, so opening now would
+		 * serve data the source never had.
+		 */
+		if (!XLogRecPtrIsInvalid(pending))
+			ereport(FATAL,
+					(errcode(ERRCODE_DATA_CORRUPTED),
+					 errmsg("OrioleDB rewind did not find the row images of the promotion at %X/%X",
+							LSN_FORMAT_ARGS(pending)),
+					 errdetail("The source server's WAL has to carry them from the divergence point on."),
+					 errhint("Run pg_rewind again against a source that has that WAL.")));
+
 		o_emit_recovery_finish_rollbacks();
 		/* checkPointRedo is the end of recovery: a new timeline starts here.  */
 		rewind_keys_save(checkPointRedo);

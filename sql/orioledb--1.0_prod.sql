@@ -202,11 +202,6 @@ RETURNS bytea
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
-CREATE FUNCTION orioledb_pg_rewind_divergence_keys(switchpoint pg_lsn)
-RETURNS bytea
-AS 'MODULE_PATHNAME'
-VOLATILE LANGUAGE C;
-
 CREATE VIEW orioledb_table AS
   SELECT t.*,
          orioledb_table_description(t.datoid, t.reloid, t.relnode) AS description

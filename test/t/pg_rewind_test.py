@@ -150,20 +150,28 @@ class PgRewindTest(BaseTest):
 		return standby
 
 	@staticmethod
-	def divergence_keys(node, promoted=None):
+	def switchpoint_of(node):
+		# The LSN the node's timeline was branched at, from its history file.
+		# None for a node that was never promoted.
+		tli = node.execute(
+		    "SELECT timeline_id FROM pg_control_checkpoint()")[0][0]
+		if tli == 1:
+			return None
+		history = node.execute(
+		    f"SELECT pg_read_file('pg_wal/{tli:08X}.history')")[0][0]
+		return history.strip().splitlines()[-1].split('\t')[1]
+
+	@classmethod
+	def divergence_keys(cls, node, promoted=None):
 		# Return the OrioleDB rewind keys the promotion logged at the
 		# beginning of its timeline, as the node sees them in its WAL.  The
 		# promoted node is the one that was promoted: the node itself by
 		# default.  None for a node that was not promoted.
 		promoted = promoted or node
 		promoted.safe_psql("CHECKPOINT")
-		tli = promoted.execute(
-		    "SELECT timeline_id FROM pg_control_checkpoint()")[0][0]
-		if tli == 1:
+		switchpoint = cls.switchpoint_of(promoted)
+		if switchpoint is None:
 			return None
-		history = promoted.execute(
-		    f"SELECT pg_read_file('pg_wal/{tli:08X}.history')")[0][0]
-		switchpoint = history.strip().splitlines()[-1].split('\t')[1]
 		keys = node.execute(
 		    f"SELECT orioledb_pg_rewind_divergence_keys('{switchpoint}'::pg_lsn)"
 		)[0][0]
@@ -1235,11 +1243,24 @@ class PgRewindTest(BaseTest):
 				con.close()
 
 				self.assertTrue(self.divergence_keys(replica))
-				self.assertEqual(
-				    replica.execute("""
+				query = """
                     SELECT count(*), count(*) FILTER (WHERE val = 'orig')
                         FROM o_test
-                """), [(100, 100)])
+                """
+				self.assertEqual(replica.execute(query), [(100, 100)])
+
+				# The restart owes the row images as well as the keys: the
+				# master is rewound onto this node and nothing else can take
+				# its committed transaction back.
+				switchpoint = self.switchpoint_of(replica)
+				self.rewind_and_follow(master, replica)
+				self.assertEqual(master.execute(query), [(100, 100)])
+				self.assertEqual(self.table_digest(master, 'o_test'),
+				                 self.table_digest(replica, 'o_test'))
+				with open(master.pg_log_file, 'r') as log_file:
+					self.assertIn(
+					    'applying the row images of the promotion at '
+					    f'{switchpoint}', log_file.read())
 
 	def test_pg_rewind_keys_crash_after_pending(self):
 		self.check_rewind_keys_promotion_crash('pg_rewind_keys_after_pending')
@@ -1248,38 +1269,247 @@ class PgRewindTest(BaseTest):
 		self.check_rewind_keys_promotion_crash(
 		    'pg_rewind_keys_after_wal_flush')
 
-	def test_pg_rewind_missing_rewind_keys_fails(self):
+	def check_scans_agree(self, node, queries):
+		# The same answers with and without the secondary indexes: the rows
+		# the images wrote and the index entries they left behind agree.
+		con = node.connect()
+		try:
+			for query in queries:
+				con.execute("SET enable_seqscan = on;"
+				            "SET enable_indexscan = off;"
+				            "SET enable_bitmapscan = off")
+				seq = con.execute(query)
+				con.execute("SET enable_seqscan = off;"
+				            "SET enable_indexscan = on;"
+				            "SET enable_bitmapscan = on")
+				self.assertEqual(seq, con.execute(query), query)
+		finally:
+			con.close()
+
+	def test_pg_rewind_in_progress_images_indexes(self):
 		"""
-        The keys of the promotion are gone with the WAL around its
-        switchpoint: pg_rewind must stop instead of taking it for a promotion
-        without keys.
+        The promotion's row images are the only thing that reverts the
+        transaction, so they have to carry every index of the table with
+        them: a plain one, a partial one whose predicate the transaction
+        crosses, a bridged one, and the TOAST rows behind a long value.
         """
+		expected_rows = 300
+		with self.node as master:
+			self.enable_archive(master)
+			master.start()
+			with self.getReplica() as replica:
+				self.rewind_in_progress_trx(
+				    master, replica, """
+                        CREATE TABLE o_idx (
+                            id integer PRIMARY KEY,
+                            val text,
+                            big text,
+                            tags text[] COLLATE "C",
+                            hidden boolean DEFAULT false
+                        ) USING orioledb;
+                        CREATE INDEX o_idx_val ON o_idx (val);
+                        CREATE INDEX o_idx_live ON o_idx (val) WHERE NOT hidden;
+                        CREATE INDEX o_idx_tags ON o_idx USING gin (tags);
+                        INSERT INTO o_idx
+                            SELECT id, 'orig' || id, repeat('o', 3000),
+                                   ARRAY['orig', 't' || id], false
+                                FROM generate_series(1, 300) id;
+                    """, """
+                        UPDATE o_idx SET val = 'trx' || id,
+                                         big = repeat('u', 4000),
+                                         tags = ARRAY['trx', 'u' || id],
+                                         hidden = true
+                            WHERE mod(id, 3) = 0;
+                        DELETE FROM o_idx WHERE mod(id, 3) = 1;
+                        UPDATE o_idx SET id = id + 1000 WHERE mod(id, 9) = 2;
+                        INSERT INTO o_idx
+                            SELECT id, 'new' || id, repeat('n', 3000),
+                                   ARRAY['new'], false
+                                FROM generate_series(2001, 2100) id;
+                    """)
+				self.assertEqual(self.table_digest(master, 'o_idx'),
+				                 self.table_digest(replica, 'o_idx'))
+				for node in (master, replica):
+					self.assertEqual(
+					    node.execute("""
+                            SELECT count(*),
+                                   count(*) FILTER (WHERE hidden),
+                                   count(*) FILTER (WHERE val = 'orig3'),
+                                   count(*) FILTER (WHERE length(big) = 3000)
+                                FROM o_idx
+                        """), [(expected_rows, 0, 1, expected_rows)])
+					self.check_scans_agree(node, [
+					    "SELECT count(*) FROM o_idx WHERE val = 'orig3'",
+					    "SELECT count(*) FROM o_idx"
+					    "    WHERE val = 'orig4' AND NOT hidden",
+					    "SELECT count(*) FROM o_idx"
+					    "    WHERE tags @> ARRAY['orig']",
+					    "SELECT count(*) FROM o_idx WHERE tags @> ARRAY['trx']",
+					])
+
+	def check_in_progress_images_crash(self, crash_after_images):
+		"""
+        The target crashes during the replay that follows the rewind, before
+        or after it applied the promotion's row images.  Either way the
+        restart has to end up with the source's rows: the images it still
+        owes are named in its control file, and applying them twice is the
+        same as applying them once.
+        """
+		master_slot = 'origin'
 		with self.node as master:
 			self.enable_archive(master)
 			master.start()
 			with self.getReplica() as replica:
 				master.safe_psql("""
                     CREATE EXTENSION orioledb;
-                    CREATE TABLE h_test (id int);
+                    SELECT pg_create_physical_replication_slot('replica');
                 """)
-				replica.append_conf(wal_keep_size='0')
+				self.run_sql(master, self.create_table_sql('o_test', 1000))
+				replica.append_conf(primary_slot_name='replica')
 				replica.start()
+				con = master.connect()
+				con.begin()
+				con.execute(
+				    "UPDATE o_test SET val = 'trx' WHERE mod(id, 3) = 0")
+				con.execute("SELECT orioledb_flush_local_wal()")
+				master.safe_psql("CHECKPOINT;")
 				self.catchup_orioledb(replica)
 				replica.promote()
-				for i in range(4):
-					replica.safe_psql("INSERT INTO h_test VALUES (1);")
-					replica.safe_psql("SELECT pg_switch_wal();")
-					replica.safe_psql("CHECKPOINT;")
-				master.safe_psql("INSERT INTO h_test VALUES (2);")
+				replica.safe_psql("CHECKPOINT;")
+				con.commit()
+				con.close()
 
-				replica.safe_psql(
-				    "SELECT pg_create_physical_replication_slot('origin')")
-				_, _, err = self.pg_rewind_master(master,
-				                                  replica.port,
-				                                  'origin',
-				                                  expect_error=True)
-				self.assertIn('could not read the OrioleDB rewind keys',
-				              err.decode())
+				switchpoint = self.switchpoint_of(replica)
+				if crash_after_images:
+					# Past the images, which the promotion logs right after
+					# the switchpoint, but still inside the replay.
+					replica.safe_psql(
+					    "UPDATE o_test SET val = 'after' WHERE mod(id, 7) = 0")
+					crash_lsn = replica.execute(
+					    "SELECT pg_current_wal_lsn()")[0][0]
+				else:
+					crash_lsn = switchpoint
+				replica.safe_psql(f"""
+                    SELECT pg_create_physical_replication_slot('{master_slot}');
+                """)
+				self.pg_rewind_master(master, replica.port, master_slot)
+
+				primary_conninfo = {
+				    "host": replica.host,
+				    "port": replica.port,
+				    "gssencmode": 'disable',
+				    "target_session_attrs": 'any'
+				}
+				master.append_conf(restart_after_crash='off')
+				master.append_conf(
+				    **{'orioledb.debug_recovery_crash_lsn': crash_lsn})
+				with self.assertRaises(testgres.exceptions.StartNodeException):
+					self.start_master_as_standby(master, replica,
+					                             primary_conninfo, master_slot)
+				with open(master.pg_log_file, 'r') as log_file:
+					crash_log = log_file.read()
+				self.assertIn('debug_recovery_crash_lsn reached', crash_log)
+				# The crash landed on the side of the images it was aimed at
+				self.assertEqual(crash_after_images, 'applying the row images'
+				                 in crash_log)
+
+				master.append_conf(**{'orioledb.debug_recovery_crash_lsn': ''})
+				master.start()
+				self.catchup_orioledb(master)
+				# Nothing checkpointed the images away, so the restart replays
+				# them again -- which has to leave the same rows behind.
+				with open(master.pg_log_file, 'r') as log_file:
+					self.assertGreaterEqual(
+					    log_file.read().count('applying the row images'),
+					    2 if crash_after_images else 1)
+				self.assertEqual(self.table_digest(master, 'o_test'),
+				                 self.table_digest(replica, 'o_test'))
+				self.assertEqual(
+				    master.execute("""
+                        SELECT count(*) FILTER (WHERE val = 'orig'),
+                               count(*) FILTER (WHERE val = 'trx')
+                            FROM o_test
+                    """),
+				    replica.execute("""
+                        SELECT count(*) FILTER (WHERE val = 'orig'),
+                               count(*) FILTER (WHERE val = 'trx')
+                            FROM o_test
+                    """))
+				self.assertEqual(
+				    master.execute(
+				        "SELECT count(*) FROM o_test WHERE val = 'trx'"),
+				    [(0, )])
+
+	def test_pg_rewind_images_crash_before_apply(self):
+		self.check_in_progress_images_crash(crash_after_images=False)
+
+	def test_pg_rewind_images_crash_after_apply(self):
+		self.check_in_progress_images_crash(crash_after_images=True)
+
+	def test_pg_rewind_missing_images_fails(self):
+		"""
+        The target was rewound onto a promotion whose row images never reach
+        it.  It must refuse to finish recovery rather than open with its own
+        committed version of the transaction the promotion rolled back.
+        orioledb.replay_until_lsn stops OrioleDB replay at the switchpoint,
+        which is where the images are.
+        """
+		master_slot = 'origin'
+		with self.node as master:
+			self.enable_archive(master)
+			master.start()
+			with self.getReplica() as replica:
+				master.safe_psql("""
+                    CREATE EXTENSION orioledb;
+                    SELECT pg_create_physical_replication_slot('replica');
+                """)
+				self.run_sql(master, self.create_table_sql('o_test', 100))
+				replica.append_conf(primary_slot_name='replica')
+				replica.start()
+				con = master.connect()
+				con.begin()
+				con.execute(
+				    "UPDATE o_test SET val = 'trx' WHERE mod(id, 3) = 0")
+				con.execute("SELECT orioledb_flush_local_wal()")
+				master.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+				replica.promote()
+				replica.safe_psql("CHECKPOINT;")
+				con.commit()
+				con.close()
+
+				switchpoint = self.switchpoint_of(replica)
+				replica.safe_psql(f"""
+                    SELECT pg_create_physical_replication_slot('{master_slot}');
+                """)
+				self.pg_rewind_master(master, replica.port, master_slot)
+
+				primary_conninfo = {
+				    "host": replica.host,
+				    "port": replica.port,
+				    "gssencmode": 'disable',
+				    "target_session_attrs": 'any'
+				}
+				master.append_conf(restart_after_crash='off')
+				master.append_conf(
+				    **{'orioledb.replay_until_lsn': switchpoint})
+				self.start_master_as_standby(master, replica, primary_conninfo,
+				                             master_slot)
+
+				# The end of recovery is where replay runs out of chances to
+				# find the images, so that is where it gives up.
+				try:
+					master.promote()
+				except Exception:
+					pass
+				for _ in range(100):
+					if master.status() != NodeStatus.Running:
+						break
+					time.sleep(0.3)
+				self.assertNotEqual(master.status(), NodeStatus.Running)
+				with open(master.pg_log_file, 'r') as log_file:
+					self.assertIn('did not find the row images',
+					              log_file.read())
 
 	def test_pg_rewind_in_progress_trx_promoted_target(self):
 		"""
@@ -1403,6 +1633,199 @@ class PgRewindTest(BaseTest):
 				    f"SELECT pg_last_wal_replay_lsn() >= '{lsn}'::pg_lsn",
 				    expected=True)
 				self.assertEqual(standby.execute(query), [(1001, 0)])
+
+	def test_pg_rewind_images_of_later_promotion_ignored(self):
+		"""
+        The source's history holds a second promotion after the divergence
+        point, with row images of its own.  Only the images of the
+        divergence point may be applied: what the later promotion rolled
+        back lies wholly inside the WAL being replayed, which undoes it on
+        the way past.
+        """
+		master_slot = 'origin'
+		with self.node as master:
+			self.enable_archive(master)
+			master.start()
+			with self.getReplica() as replica:
+				master.safe_psql("""
+                    CREATE EXTENSION orioledb;
+                    SELECT pg_create_physical_replication_slot('replica');
+                """)
+				self.run_sql(master, self.create_table_sql('o_test', 1000))
+				replica.append_conf(primary_slot_name='replica')
+				replica.start()
+				self.catchup_orioledb(replica)
+
+				# The master's transaction, in progress at the first
+				# promotion and committed afterwards: only its images can
+				# take it back.
+				con1 = master.connect()
+				con1.begin()
+				con1.execute(
+				    "UPDATE o_test SET val = 'trx1' WHERE mod(id, 10) = 1")
+				con1.execute("SELECT orioledb_flush_local_wal()")
+				master.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				standby = self.spawn_standby_of(replica, 'standby')
+				try:
+					standby.start()
+					lsn = replica.execute(
+					    "SELECT pg_last_wal_replay_lsn()")[0][0]
+					standby.poll_query_until(
+					    f"SELECT pg_last_wal_replay_lsn() >= '{lsn}'::pg_lsn",
+					    expected=True)
+
+					replica.promote()
+					replica.safe_psql("CHECKPOINT;")
+					con1.commit()
+					con1.close()
+					switchpoint = self.switchpoint_of(replica)
+
+					# The replica's own transaction, in progress at the second
+					# promotion.  Its records are all after the last common
+					# checkpoint, so replay undoes it without any images.
+					con2 = replica.connect()
+					con2.begin()
+					con2.execute(
+					    "UPDATE o_test SET val = 'trx2' WHERE mod(id, 10) = 2")
+					con2.execute("SELECT orioledb_flush_local_wal()")
+					replica.safe_psql("CHECKPOINT;")
+					lsn = replica.execute("SELECT pg_current_wal_lsn()")[0][0]
+					standby.poll_query_until(
+					    f"SELECT pg_last_wal_replay_lsn() >= '{lsn}'::pg_lsn",
+					    expected=True)
+
+					standby.promote()
+					standby.safe_psql("CHECKPOINT;")
+					con2.commit()
+					con2.close()
+					self.assertNotEqual(self.switchpoint_of(standby),
+					                    switchpoint)
+
+					standby.safe_psql(f"""
+                        SELECT pg_create_physical_replication_slot('{master_slot}');
+                    """)
+					self.pg_rewind_master(master, standby.port, master_slot)
+					self.start_master_as_standby(
+					    master, standby, {
+					        "host": standby.host,
+					        "port": standby.port,
+					        "gssencmode": 'disable',
+					        "target_session_attrs": 'any'
+					    }, master_slot)
+					self.catchup_orioledb(master)
+
+					self.assertEqual(self.table_digest(master, 'o_test'),
+					                 self.table_digest(standby, 'o_test'))
+					query = """
+                        SELECT count(*),
+                               count(*) FILTER (WHERE val = 'orig'),
+                               count(*) FILTER (WHERE val <> 'orig')
+                            FROM o_test
+                    """
+					self.assertEqual(master.execute(query), [(1000, 1000, 0)])
+					self.assertEqual(standby.execute(query), [(1000, 1000, 0)])
+
+					# Only the divergence point's images were applied
+					with open(master.pg_log_file, 'r') as log_file:
+						applied = re.findall(
+						    r'applying the row images of the promotion at '
+						    r'([0-9A-F]+/[0-9A-F]+)', log_file.read())
+					self.assertEqual(applied, [switchpoint])
+				finally:
+					standby.cleanup()
+
+	def test_pg_rewind_both_nodes_promoted_at_same_point(self):
+		"""
+        Two standbys of the same primary are promoted at the same point, then
+        one is rewound onto the other.  Both rolled the same transactions
+        back, so their versions of those rows already agree and neither owes
+        the other any row images: the target's own keys drive the rewind.
+        """
+		master_slot = 'origin'
+		with self.node as master:
+			self.enable_archive(master)
+			master.start()
+			with self.getReplica() as replica:
+				master.safe_psql("""
+                    CREATE EXTENSION orioledb;
+                    SELECT pg_create_physical_replication_slot('replica');
+                """)
+				self.run_sql(master, self.create_table_sql('o_test', 1000))
+				replica.append_conf(primary_slot_name='replica')
+				replica.start()
+				self.catchup_orioledb(replica)
+
+				twin = self.spawn_standby_of(master, 'twin')
+				try:
+					# The archive is what makes the two promotions pick
+					# different timeline ids, and without that pg_rewind sees
+					# one timeline and declines.
+					twin.append_conf(
+					    restore_command=f'cp {self.archive_dir}/%f %p',
+					    recovery_target_timeline='latest')
+					twin.start()
+					con = master.connect()
+					con.begin()
+					con.execute(
+					    "UPDATE o_test SET val = 'trx' WHERE mod(id, 10) = 1")
+					con.execute("SELECT orioledb_flush_local_wal()")
+					master.safe_psql("CHECKPOINT;")
+					lsn = master.execute("SELECT pg_current_wal_lsn()")[0][0]
+					for node in (replica, twin):
+						node.poll_query_until(
+						    "SELECT pg_last_wal_replay_lsn() >= "
+						    f"'{lsn}'::pg_lsn",
+						    expected=True)
+
+					# The same switchpoint for both, different timeline ids:
+					# the shared archive hands out the next free one.
+					replica.promote()
+					replica.safe_psql("CHECKPOINT;")
+					twin.promote()
+					twin.safe_psql("CHECKPOINT;")
+					con.commit()
+					con.close()
+					self.assertEqual(self.switchpoint_of(twin),
+					                 self.switchpoint_of(replica))
+					self.assertNotEqual(
+					    twin.execute(
+					        "SELECT timeline_id FROM pg_control_checkpoint()"),
+					    replica.execute(
+					        "SELECT timeline_id FROM pg_control_checkpoint()"))
+
+					replica.safe_psql(
+					    "INSERT INTO o_test VALUES (2000, 'replica', 'x')")
+					twin.safe_psql(
+					    "INSERT INTO o_test VALUES (3000, 'twin', 'x')")
+
+					replica.safe_psql(f"""
+                        SELECT pg_create_physical_replication_slot('{master_slot}');
+                    """)
+					self.pg_rewind_master(twin, replica.port, master_slot)
+					self.start_master_as_standby(
+					    twin, replica, {
+					        "host": replica.host,
+					        "port": replica.port,
+					        "gssencmode": 'disable',
+					        "target_session_attrs": 'any'
+					    }, master_slot)
+					self.catchup_orioledb(twin)
+
+					self.assertEqual(self.table_digest(twin, 'o_test'),
+					                 self.table_digest(replica, 'o_test'))
+					query = """
+                        SELECT count(*),
+                               count(*) FILTER (WHERE val = 'orig')
+                            FROM o_test
+                    """
+					self.assertEqual(twin.execute(query), [(1001, 1000)])
+					with open(twin.pg_log_file, 'r') as log_file:
+						self.assertNotIn('applying the row images',
+						                 log_file.read())
+				finally:
+					twin.cleanup()
 
 	@staticmethod
 	def horizon_workload(node,
@@ -1944,6 +2367,7 @@ class PgRewindTest(BaseTest):
 					    "UPDATE o_test SET val = 'open' WHERE id = 7; "
 					    "INSERT INTO o_test VALUES (6000, 'open', 'x')")
 					state['open'].execute("SELECT orioledb_flush_local_wal()")
+
 					def last_xids_count():
 						data_dir = os.path.join(master.data_dir,
 						                        'orioledb_data')

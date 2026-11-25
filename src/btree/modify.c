@@ -1859,3 +1859,166 @@ o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
 
 	return (result == OBTreeModifyResultDeleted);
 }
+
+/*
+ * Write a row into the tree without looking at the version the page already
+ * holds: replace the leaf tuple of 'key' by 'tuple', or mark that tuple
+ * deleted, with frozen transaction info and no undo record.
+ *
+ * The rewind target applies the promoted node's row images this way.  Its
+ * pages carry versions of a transaction the promotion rolled back but the
+ * target committed, and the undo those versions point at was reclaimed on the
+ * target long ago -- while every ordinary modify path starts by walking that
+ * chain.  Writing the row frozen also makes the write idempotent: replaying
+ * the images after a crash lands on the same page state.
+ *
+ * The raw pre-image is handed back through 'oldTuple' (a copy; a NULL tuple
+ * when the row was not there).  With the undo chain off limits it is the only
+ * source of the secondary index entries the old row owns, so the caller has
+ * to remove those itself -- the primary tree is all this writes.
+ */
+OBTreeModifyResult
+o_btree_frozen_modify(BTreeDescr *desc, BTreeOperationType action,
+					  OTuple tuple, BTreeKeyType tupleType,
+					  Pointer key, BTreeKeyType keyType,
+					  OTuple *oldTuple)
+{
+	OBTreeFindPageContext pageFindContext;
+	OTupleXactInfo frozenXactInfo;
+	BTreeLeafTuphdr leafTuphdr;
+	BTreeLeafTuphdr *tuphdr = NULL;
+	OInMemoryBlkno blkno;
+	BTreePageItemLocator loc;
+	Page		page;
+	OTuple		curTuple;
+	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+	int			pageReserveKind;
+	int			tuplen;
+	bool		found;
+
+	Assert(action == BTreeOperationInsert || action == BTreeOperationDelete);
+	Assert(action != BTreeOperationInsert || tupleType == BTreeKeyLeafTuple);
+
+	if (oldTuple)
+		O_TUPLE_SET_NULL(*oldTuple);
+
+	/* If no key is separately given, use the tuple itself */
+	if (key == NULL)
+	{
+		key = (Pointer) &tuple;
+		keyType = tupleType;
+	}
+
+	frozenXactInfo = OXID_GET_XACT_INFO(BootstrapTransactionId,
+										RowLockUpdate, false);
+
+	/*
+	 * No undo record is made for the row itself, but a page split or
+	 * compaction on the way still takes a page image.
+	 */
+	reserve_undo_for_modification(desc->undoType);
+
+	if (OIDS_EQ_SYS_TREE(desc->oids, SYS_TREES_SHARED_ROOT_INFO))
+		pageReserveKind = PPOOL_RESERVE_SHARED_INFO_INSERT;
+	else
+		pageReserveKind = PPOOL_RESERVE_INSERT;
+
+	if (action != BTreeOperationDelete)
+		ppool_reserve_pages(desc->ppool, pageReserveKind, 2);
+
+	init_page_find_context(&pageFindContext, desc, COMMITSEQNO_INPROGRESS,
+						   BTREE_PAGE_FIND_MODIFY | BTREE_PAGE_FIND_FIX_LEAF_SPLIT);
+
+	/*
+	 * insertTuple is deliberately left unset: the fast insert path inside
+	 * find_page() would write the tuple without letting us see what the page
+	 * holds, and the pre-image is what the caller came for.
+	 */
+	findResult = find_page(&pageFindContext, key, keyType, 0);
+	Assert(findResult == OFindPageResultSuccess);
+
+	blkno = pageFindContext.items[pageFindContext.index].blkno;
+	loc = pageFindContext.items[pageFindContext.index].locator;
+	page = O_GET_IN_MEMORY_PAGE(blkno);
+	Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
+
+	found = BTREE_PAGE_LOCATOR_IS_VALID(page, &loc);
+	if (found)
+	{
+		BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, &loc);
+		found = o_btree_cmp(desc, key, keyType,
+							&curTuple, BTreeKeyLeafTuple) == 0;
+	}
+
+	/*
+	 * Take the pre-image whether or not the version on the page is marked
+	 * deleted: a delete only sets the flag, the tuple data stays, and the
+	 * entries the old row owns elsewhere have to go either way.
+	 */
+	if (found && oldTuple != NULL)
+	{
+		int			oldLen = o_btree_len(desc, curTuple, OTupleLength);
+
+		oldTuple->formatFlags = curTuple.formatFlags;
+		oldTuple->data = palloc(oldLen);
+		memcpy(oldTuple->data, curTuple.data, oldLen);
+	}
+
+	if (action == BTreeOperationDelete)
+	{
+		if (found)
+		{
+			START_CRIT_SECTION();
+			page_block_reads(blkno);
+
+			if (tuphdr->deleted == BTreeLeafTupleNonDeleted)
+			{
+				tuphdr->deleted = BTreeLeafTupleDeleted;
+				/* Bridge index deleted tuples not treated as vacated */
+				if (desc->type != oIndexBridge)
+					PAGE_ADD_N_VACATED(page,
+									   BTreeLeafTuphdrSize +
+									   MAXALIGN(o_btree_len(desc, curTuple,
+															OTupleLength)));
+			}
+			tuphdr->chainHasLocks = false;
+			tuphdr->undoLocation = InvalidUndoLocation;
+			tuphdr->xactInfo = frozenXactInfo;
+
+			MARK_DIRTY(desc, blkno);
+			END_CRIT_SECTION();
+		}
+
+		unlock_page(blkno);
+	}
+	else
+	{
+		leafTuphdr.deleted = BTreeLeafTupleNonDeleted;
+		leafTuphdr.chainHasLocks = false;
+		leafTuphdr.undoLocation = InvalidUndoLocation;
+		leafTuphdr.formatFlags = 0;
+		leafTuphdr.xactInfo = frozenXactInfo;
+
+		tuplen = o_btree_len(desc, tuple, OTupleLength);
+		Assert(tuplen <= O_BTREE_MAX_TUPLE_SIZE);
+
+		BTREE_PAGE_FIND_UNSET(&pageFindContext, FIX_LEAF_SPLIT);
+		/* Unlocks the page itself */
+		o_btree_insert_tuple_to_leaf(&pageFindContext, tuple, tuplen,
+									 &leafTuphdr, found, pageReserveKind);
+	}
+
+	if (desc->undoType != UndoLogNone)
+	{
+		release_undo_size(desc->undoType);
+		if (GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType) != desc->undoType)
+			release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+	}
+	if (action != BTreeOperationDelete)
+		ppool_release_reserved(desc->ppool,
+							   PPOOL_KIND_GET_MASK(pageReserveKind));
+
+	if (action == BTreeOperationDelete)
+		return found ? OBTreeModifyResultDeleted : OBTreeModifyResultNotFound;
+	return found ? OBTreeModifyResultUpdated : OBTreeModifyResultInserted;
+}

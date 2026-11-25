@@ -35,6 +35,23 @@ own compatibility boundary. A future incompatible change must bump
 `REWIND_KEYS_WAL_VERSION` and either provide an explicit compatibility path
 or reject the older format.
 
+### Checkpoint control file
+
+`orioledb_data/control` carries its own format version,
+`ORIOLEDB_CHECKPOINT_CONTROL_VERSION` in `include/checkpoint/control.h`, and
+struct layout may only change between `.controlFileVersion` and `.crc`. Bump it
+whenever `CheckpointControl` changes, and teach `check_checkpoint_control()`
+to read the previous layout: it dispatches on the version before checking the
+CRC, since a layout change moves `offsetof(CheckpointControl, crc)` and would
+otherwise look like a corrupt file.
+
+Version 3 added `rewindImagesSwitchpoint`, the promotion whose row images a
+rewind target still has to apply. `convert_checkpoint_control_v2()` reads a
+version 2 file through a verbatim copy of that layout and leaves the new field
+empty, which is what a cluster that never went through such a rewind holds.
+`pg_rewind_orioledb` writes the control file too, and refuses a version it was
+not built for rather than patching an unknown layout.
+
 ## Cross-architecture support
 
 At this point, PostgreSQL and OrioleDB cannot promise that a database initialized

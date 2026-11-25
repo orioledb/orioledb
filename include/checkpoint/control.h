@@ -32,7 +32,7 @@ typedef struct
  * Also on-the-flight conversion routine should be added to
  * check_checkpoint_control()
  */
-#define ORIOLEDB_CHECKPOINT_CONTROL_VERSION	2
+#define ORIOLEDB_CHECKPOINT_CONTROL_VERSION	3
 
 /*
  * To ensure correct reading of controlFileVersion, changes in struct layout
@@ -56,6 +56,18 @@ typedef struct
 	UndoLocation checkpointRetainEndLocation;
 	OXid		checkpointRetainXmin;
 	OXid		checkpointRetainXmax;
+
+	/*
+	 * Switchpoint of the promotion whose row images this node still owes the
+	 * rewind, InvalidXLogRecPtr when it owes none.  pg_rewind sets it on the
+	 * target; replay clears it once it has applied the images of that
+	 * switchpoint (rewind_images_redo()).  It has to live here rather than in
+	 * a file of its own: a checkpoint taken before the images carries it
+	 * over, so a crash that restarts from that checkpoint still applies them,
+	 * and one taken after does not, since replay will never reach the record
+	 * again.
+	 */
+	XLogRecPtr	rewindImagesSwitchpoint;
 	uint32		binaryVersion;
 	bool		s3Mode;
 

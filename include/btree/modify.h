@@ -79,6 +79,13 @@ extern OBTreeModifyResult o_btree_modify(BTreeDescr *desc,
 										 RowLockMode lockMode,
 										 BTreeLocationHint *hint,
 										 BTreeModifyCallbackInfo *callbackInfo);
+extern OBTreeModifyResult o_btree_frozen_modify(BTreeDescr *desc,
+												BTreeOperationType action,
+												OTuple tuple,
+												BTreeKeyType tupleType,
+												Pointer key,
+												BTreeKeyType keyType,
+												OTuple *oldTuple);
 extern OBTreeModifyResult o_btree_delete_moved_partitions(BTreeDescr *desc,
 														  Pointer key,
 														  BTreeKeyType keyType,

@@ -215,6 +215,14 @@ typedef struct
 	pg_atomic_uint64 mmapDataLength;
 
 	/*
+	 * CheckpointControl.rewindImagesSwitchpoint: the promotion whose row
+	 * images replay still owes.  Atomic because the checkpointer reads it to
+	 * carry it into the next control file while the startup process clears
+	 * it.
+	 */
+	pg_atomic_uint64 rewindImagesSwitchpoint;
+
+	/*
 	 * Shared memory queue of records for writing to the xids file.  Backends
 	 * write to this queue last undo position on transaction commit/abort.
 	 * Checkpoint writes current undo positions for in-progress transactions.

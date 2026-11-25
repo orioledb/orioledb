@@ -73,6 +73,81 @@ get_checkpoint_control_data(CheckpointControl *control)
 }
 
 /*
+ * Layout of the control file of version 2, which knew nothing of
+ * rewindImagesSwitchpoint.  Kept verbatim so a file written by an older
+ * server can still be read; see convert_checkpoint_control_v2().
+ */
+typedef struct
+{
+	uint64		controlIdentifier;
+	uint32		lastCheckpointNumber;
+	uint32		controlFileVersion;
+	CommitSeqNo lastCSN;
+	OXid		lastXid;
+	UndoLocation lastUndoLocation;
+	XLogRecPtr	toastConsistentPtr;
+	XLogRecPtr	replayStartPtr;
+	XLogRecPtr	sysTreesStartPtr;
+	uint64		mmapDataLength;
+	CheckpointUndoInfo undoInfo[NUM_CHECKPOINTABLE_UNDO_LOGS];
+	UndoLocation checkpointRetainStartLocation;
+	UndoLocation checkpointRetainEndLocation;
+	OXid		checkpointRetainXmin;
+	OXid		checkpointRetainXmax;
+	uint32		binaryVersion;
+	bool		s3Mode;
+	bool		checksums_enabled;
+	uint32		pgVersion;
+	pg_crc32c	crc;
+} CheckpointControlV2;
+
+/*
+ * Read a version 2 control file into the current layout.  Nothing owed the
+ * rewind back then, so the new field starts out empty.
+ */
+static void
+convert_checkpoint_control_v2(CheckpointControl *control)
+{
+	CheckpointControlV2 old;
+	pg_crc32c	crc;
+
+	memcpy(&old, control, sizeof(old));
+
+	INIT_CRC32C(crc);
+	COMP_CRC32C(crc, &old, offsetof(CheckpointControlV2, crc));
+	FIN_CRC32C(crc);
+
+	if (crc != old.crc)
+		elog(ERROR, "Wrong CRC in control file");
+
+	memset(control, 0, sizeof(*control));
+	control->controlIdentifier = old.controlIdentifier;
+	control->lastCheckpointNumber = old.lastCheckpointNumber;
+	control->controlFileVersion = ORIOLEDB_CHECKPOINT_CONTROL_VERSION;
+	control->lastCSN = old.lastCSN;
+	control->lastXid = old.lastXid;
+	control->lastUndoLocation = old.lastUndoLocation;
+	control->toastConsistentPtr = old.toastConsistentPtr;
+	control->replayStartPtr = old.replayStartPtr;
+	control->sysTreesStartPtr = old.sysTreesStartPtr;
+	control->mmapDataLength = old.mmapDataLength;
+	memcpy(control->undoInfo, old.undoInfo, sizeof(control->undoInfo));
+	control->checkpointRetainStartLocation = old.checkpointRetainStartLocation;
+	control->checkpointRetainEndLocation = old.checkpointRetainEndLocation;
+	control->checkpointRetainXmin = old.checkpointRetainXmin;
+	control->checkpointRetainXmax = old.checkpointRetainXmax;
+	control->rewindImagesSwitchpoint = InvalidXLogRecPtr;
+	control->binaryVersion = old.binaryVersion;
+	control->s3Mode = old.s3Mode;
+	control->checksums_enabled = old.checksums_enabled;
+	control->pgVersion = old.pgVersion;
+
+	INIT_CRC32C(control->crc);
+	COMP_CRC32C(control->crc, control, offsetof(CheckpointControl, crc));
+	FIN_CRC32C(control->crc);
+}
+
+/*
  * Check checkpoint control data
  *   - Check control version
  *   - Check CRC
@@ -88,14 +163,11 @@ check_checkpoint_control(CheckpointControl *control)
 	 * offsetof(CheckpointControl, crc), which would otherwise fail as a
 	 * misleading "Wrong CRC" rather than a version mismatch.
 	 */
+	if (control->controlFileVersion == 2)
+		convert_checkpoint_control_v2(control);
+
 	if (control->controlFileVersion != ORIOLEDB_CHECKPOINT_CONTROL_VERSION)
 	{
-		/*
-		 * Now we have only one control version. When we bump
-		 * ORIOLEDB_CHECKPOINT_CONTROL_VERSION this is the place to write
-		 * routine for on-the-flight convesion of data read from control file
-		 * to CheckpointControl contents.
-		 */
 		ereport(FATAL,
 				(errmsg("checkpoint files are incompatible with server"),
 				 errdetail("OrioleDB checkpount control file was initialized with version %d,"

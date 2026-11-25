@@ -31,6 +31,7 @@ extern void rewind_keys_remove_parts(void);
 extern void rewind_keys_finish_process(int worker_id);
 extern void rewind_images_prepare(void);
 extern void rewind_images_redo(XLogReaderState *record);
+extern XLogRecPtr rewind_images_pending(void);
 extern void rewind_keys_save(XLogRecPtr switchpoint);
 extern void rewind_keys_desc(StringInfo buf, XLogReaderState *record);
 

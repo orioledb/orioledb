@@ -790,7 +790,8 @@ read_target_last_xid(const char *datadir_target)
 }
 
 static void
-patch_orioledb_control_file(const char *datadir, OXid divXid)
+patch_orioledb_control_file(const char *datadir, OXid divXid,
+							XLogRecPtr imagesSwitchpoint)
 {
 	char		path[MAXPGPATH];
 	int			fd;
@@ -812,6 +813,12 @@ patch_orioledb_control_file(const char *datadir, OXid divXid)
 		close(fd);
 		return;
 	}
+
+	if (control.controlFileVersion != ORIOLEDB_CHECKPOINT_CONTROL_VERSION)
+		pg_fatal("orioledb control file \"%s\" has version %u, "
+				 "but this pg_rewind extension writes version %u",
+				 path, control.controlFileVersion,
+				 ORIOLEDB_CHECKPOINT_CONTROL_VERSION);
 
 	/* Verify CRC before modifying */
 	expected_crc = control.crc;
@@ -841,6 +848,14 @@ patch_orioledb_control_file(const char *datadir, OXid divXid)
 	control.checkpointRetainXmax = divXid;
 	control.lastXid = divXid;
 
+	/*
+	 * Tell replay which promotion's row images it still has to apply.  The
+	 * control file is the only place that survives both a restartpoint
+	 * between the rollback markers and the images and a crash in between; see
+	 * CheckpointControl.rewindImagesSwitchpoint.
+	 */
+	control.rewindImagesSwitchpoint = imagesSwitchpoint;
+
 	/* Recompute CRC */
 	INIT_CRC32C(control.crc);
 	COMP_CRC32C(control.crc,
@@ -860,14 +875,17 @@ patch_orioledb_control_file(const char *datadir, OXid divXid)
 	if (close(fd) != 0)
 		pg_fatal("could not close orioledb control file \"%s\": %m", path);
 
-	pg_log_debug("patched orioledb control file: checkpointRetainXmin/Xmax/lastXid -> %lu",
-				 (unsigned long) divXid);
+	pg_log_debug("patched orioledb control file: checkpointRetainXmin/Xmax/lastXid -> %lu, "
+				 "rewind images switchpoint -> %X/%X",
+				 (unsigned long) divXid,
+				 LSN_FORMAT_ARGS(imagesSwitchpoint));
 }
 
 static void
 orioledb_process_row_map(OrioledbKeyMap * orioledb_map, const char *argv0,
 						 const char *datadir, bool debug, PGconn * conn,
-						 XLogRecPtr startpoint, OXid lastXid)
+						 XLogRecPtr startpoint, OXid lastXid,
+						 XLogRecPtr imagesSwitchpoint)
 {
 	StringInfo	str;
 	int			fd = -1;
@@ -913,7 +931,7 @@ orioledb_process_row_map(OrioledbKeyMap * orioledb_map, const char *argv0,
 		pfree(str->data);
 		pfree(str);
 	}
-	patch_orioledb_control_file(datadir, lastXid);
+	patch_orioledb_control_file(datadir, lastXid, imagesSwitchpoint);
 }
 
 /* Read u32 by address, advance the address on sizeof(u32).  */
@@ -1052,9 +1070,8 @@ extract_rewind_keys(XLogReaderState *record, OrioledbKeyMap * map)
 }
 
 /*
- * Add the keys of the rows the promotion at the divergence point rolled
- * back.  The target could commit the transaction (let T) after the divergence
- * point:
+ * Settle what the promotion at the divergence point left behind.  The target
+ * could commit the transaction (let T) after the divergence point:
  *                                              [A: COMMIT T]
  *                                                    v
  *                                            ------- * ------ (A: old primary)
@@ -1065,50 +1082,49 @@ extract_rewind_keys(XLogReaderState *record, OrioledbKeyMap * map)
  *                                               ^
  *                                [B: recovery_finish(), rolls T back]
  *
- * We can't easily roll the already-committed transaction back.  The promotion
- * logs the keys of the rows it rolled back to WAL right after the switchpoint.
- * It is usually the source's, so ask the source server to read them.  It is
- * the target's when a promoted standby is rewound back into its old primary:
- * extract_rewind_keys() takes them from the target's WAL then.
+ * T cannot be rolled back here, so its rows have to come from the node that
+ * rolled it back.  Returns the switchpoint whose row images the target still
+ * owes, or InvalidXLogRecPtr when it owes none:
+ *
+ * - The target forked at the divergence point (it is B).  Its own WAL carries
+ *   the keys of the rows it rolled back, picked up by extract_rewind_keys()
+ *   during the scan above, and the rewind file takes the source's committed
+ *   version of each.  Two standbys promoted at the same point land here too,
+ *   and rightly so: they rolled the same transactions back, so their versions
+ *   of those rows already agree.
+ *
+ * - Otherwise the source forked there (it is B).  The target keeps its own
+ *   rows for now and replay overwrites them when it reaches the row images
+ *   the source logged right after the switchpoint; the control file carries
+ *   the switchpoint until then.  Nothing to fetch here, and nothing the
+ *   source could be asked for: the rows T changed before the last common
+ *   checkpoint are in neither node's scanned WAL.
  */
-static void
-add_divergence_rewind_keys(OrioledbKeyMap * map, PGconn * conn)
+static XLogRecPtr
+divergence_images_switchpoint(OrioledbKeyMap * map)
 {
 	char		switchpoint[32];
-	const char *params[1];
-	PGresult   *res;
 
 	snprintf(switchpoint, sizeof(switchpoint), "%X/%X",
 			 LSN_FORMAT_ARGS(map->divergerec));
-	params[0] = switchpoint;
 
-	if (libpq_is_orioledb_installed(conn, false))
+	/*
+	 * Which node promoted is read off the target's own WAL: a promotion logs
+	 * its keys as the first OrioleDB record of the new timeline, right after
+	 * the divergence point, which is inside the range just scanned.  A
+	 * promotion that rolled nothing back still logs an empty record, so the
+	 * record is there whenever the target is B -- and only then.  (The
+	 * timeline histories would say the same, but pg_rewind's extension API
+	 * hands out neither of them.)
+	 */
+	if (!map->rewind_keys_found)
 	{
-		res = PQexecParams(conn,
-						   "SELECT public.orioledb_pg_rewind_divergence_keys($1::pg_lsn)",
-						   1, NULL, params, NULL, NULL, 1);
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-			pg_fatal("could not read the OrioleDB rewind keys of the divergence point %s "
-					 "from the source server: %s",
-					 switchpoint, PQresultErrorMessage(res));
-		if (PQntuples(res) == 1 && !PQgetisnull(res, 0, 0))
-		{
-			char	   *keys = PQgetvalue(res, 0, 0);
-			int			nkeys;
-
-			nkeys = add_rewind_key_entries(map, keys,
-										   keys + PQgetlength(res, 0, 0),
-										   "OrioleDB rewind keys of the source");
-			map->rewind_keys_found = true;
-			pg_log_info("added %d keys of rows rolled back at the divergence point, "
-						"found on the source", nkeys);
-		}
-		PQclear(res);
+		pg_log_info("the source promoted at %s, its row images will revert "
+					"the transactions it rolled back", switchpoint);
+		return map->divergerec;
 	}
 
-	if (!map->rewind_keys_found)
-		pg_fatal("neither source nor target server has the OrioleDB rewind keys "
-				 "for divergence point %s", switchpoint);
+	return InvalidXLogRecPtr;
 }
 
 static WalParseResult
@@ -1238,6 +1254,7 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 	OrioledbKeyMap *orioledb_map;
 	PGconn	   *source_conn;
 	OXid		targetLastXid;
+	XLogRecPtr	imagesSwitchpoint;
 
 	/*
 	 * The row-level rewind below fetches new row versions from a running
@@ -1268,7 +1285,8 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 	orioledb_map->divergerec = divergerec;
 	SimpleXLogRead(datadir_target, startpoint, tliIndex, endpoint,
 				   restoreCommand, extract_row_info, orioledb_map);
-	add_divergence_rewind_keys(orioledb_map, source_conn);
+
+	imagesSwitchpoint = divergence_images_switchpoint(orioledb_map);
 
 	/*
 	 * Choose the xid floor (divXid) used to seed globalXmin /
@@ -1307,7 +1325,7 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 		orioledb_key_map_print(orioledb_map);
 	orioledb_process_row_map(orioledb_map, argv0, datadir_target, debug,
 							 source_conn, startpoint,
-							 orioledb_map->divXid);
+							 orioledb_map->divXid, imagesSwitchpoint);
 	free_orioledb_key_map(orioledb_map);
 	PQfinish(source_conn);
 
