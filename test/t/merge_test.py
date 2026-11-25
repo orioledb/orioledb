@@ -55,13 +55,12 @@ class MergeTest(BaseTest):
 		o_btree_cleanup_pages() -> free_meta_page() to completion.  The merge
 		then descends into a tree that is gone.
 
-		The evictor only merges a page it finds too sparse, and DELETE merges
-		eagerly whenever the neighbour is loaded -- so the sparse pages have to
-		be made with the pool too small to hold the neighbours, which is what
-		the narrow deletes below do.  Only the o_mNN trees are left sparse, so
-		every merge the evictor attempts is one of them; the scan that drives
-		the eviction runs over o_filler and therefore holds no lock on any of
-		them.
+		The evictor only merges a page it finds too sparse, so nearly every
+		o_mNN leaf is made sparse below: the scan that drives the eviction
+		evicts only a few pages, and they must not have to be particular ones.
+		Only the o_mNN trees are left sparse, so every merge the evictor
+		attempts is one of them; the scan runs over o_filler and therefore
+		holds no lock on any of them.
 		"""
 		NTABLES = 16
 		node = self.node
@@ -90,14 +89,13 @@ class MergeTest(BaseTest):
 			    % (i, i))
 		node.safe_psql('postgres', "CHECKPOINT;")
 
-		# narrow deletes: the neighbour is not resident, so DELETE cannot merge
-		# and the pages stay sparse until the evictor reaches them
+		# Keep one row in 18, about one per leaf, so that nearly every o_mNN
+		# leaf is sparse and any of them the clock sweep picks starts a merge,
+		# wherever the sweep starts.  Merges before the stopevent is armed
+		# only join sparse leaves into leaves that are still sparse.
 		with node.connect() as maker:
 			for i in range(NTABLES):
-				for k in range(1, 25000, 700):
-					maker.execute(
-					    "DELETE FROM o_m%02d WHERE id BETWEEN %d AND %d" %
-					    (i, k, k + 12))
+				maker.execute("DELETE FROM o_m%02d WHERE id %%%% 18 <> 0" % i)
 				maker.commit()
 
 		ctrl = node.connect()
