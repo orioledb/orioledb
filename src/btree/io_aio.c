@@ -35,6 +35,8 @@
 #include "storage/aio.h"
 #include "storage/aio_types.h"
 #include "storage/fd.h"
+#include "storage/ipc.h"
+#include "storage/procnumber.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
 
@@ -190,19 +192,24 @@ btree_aio_readv_report(PgAioResult result,
 }
 
 /*
- * Submit an async read of one leaf-page from a btree segment file.
+ * Submit an async read of one leaf-page from a btree segment file into dest.
+ * localBuffer says whether dest lives in this backend's memory, which keeps
+ * the read in this process; otherwise it is in shared memory, which an io
+ * worker can write to.  *ret receives the outcome once the read is reclaimed.
  *
  * Currently only handles the simplest configuration: non-compressed btree,
  * non-S3 mode, non-mmap / non-device storage, a single block read that fits
  * inside one segment file.  Returns false if those preconditions are not
  * met (in which case the caller should fall back to the synchronous path).
  */
-bool
+static bool
 orioledb_aio_submit_btree_read(BTreeDescr *desc,
 							   uint32 chkpNum,
 							   off_t byteOffset,
 							   char *dest,
-							   PgAioWaitRef *wref_out)
+							   bool localBuffer,
+							   PgAioWaitRef *wref_out,
+							   PgAioReturn *ret)
 {
 	PgAioHandle *ioh;
 	PgAioTargetData *td;
@@ -226,8 +233,6 @@ orioledb_aio_submit_btree_read(BTreeDescr *desc,
 	if (segOffset + ORIOLEDB_BLCKSZ > ORIOLEDB_SEGMENT_SIZE)
 		return false;			/* spans segments — fall back */
 
-	ioh = pgaio_io_acquire(NULL, NULL);
-
 	{
 		OIndexKey	key = {.oids = desc->oids};
 
@@ -236,10 +241,13 @@ orioledb_aio_submit_btree_read(BTreeDescr *desc,
 	fd = OpenTransientFile(path, O_RDONLY | PG_BINARY);
 	pfree(path);
 	if (fd < 0)
-	{
-		pgaio_io_release(ioh);
 		return false;
-	}
+
+	/*
+	 * No resource owner: the ring that owns *ret waits for every read it
+	 * submitted before it goes away, on error too.
+	 */
+	ioh = pgaio_io_acquire(NULL, ret);
 
 	/*
 	 * From here through pgaio_io_start_readv() we must keep interrupts held:
@@ -250,14 +258,13 @@ orioledb_aio_submit_btree_read(BTreeDescr *desc,
 	HOLD_INTERRUPTS();
 
 	/*
-	 * The ring buffer lives in this backend's process-local memory; mark the
-	 * IO accordingly so the AIO subsystem doesn't dispatch it to a worker
-	 * that would write to its own copy of the page.  In worker mode this
-	 * forces synchronous in-process execution; in io_uring mode the IO
-	 * remains async because the kernel uses the submitter's address space
-	 * directly.
+	 * A process-local destination must not be handed to an io worker, which
+	 * would write to its own copy of the page.  In worker mode this forces
+	 * synchronous in-process execution; in io_uring mode the IO remains async
+	 * because the kernel uses the submitter's address space directly.
 	 */
-	pgaio_io_set_flag(ioh, PGAIO_HF_REFERENCES_LOCAL);
+	if (localBuffer)
+		pgaio_io_set_flag(ioh, PGAIO_HF_REFERENCES_LOCAL);
 
 	pgaio_io_set_target(ioh, ORIOLEDB_AIO_TID_BTREE);
 	td = pgaio_io_get_target_data(ioh);
@@ -284,14 +291,156 @@ orioledb_aio_submit_btree_read(BTreeDescr *desc,
 
 	/*
 	 * The submitter-side transient fd is no longer needed once the IO has
-	 * been started: an io worker, if used, has reopened the file in its own
-	 * process; the synchronous fallback already executed the read by the time
-	 * pgaio_io_start_readv() returns.  Either way we can release the
-	 * descriptor here.
+	 * been started: an io worker, if used, reopens the file in its own
+	 * process, and CloseTransientFile() submits a read still staged on this
+	 * fd before closing it.
 	 */
 	CloseTransientFile(fd);
 
 	return true;
+}
+
+
+/* --------------------------------------------------------------------------
+ * Shared pool of prefetch buffers, for io_method = worker.
+ *
+ * An io worker can only write into shared memory, so with io_method = worker
+ * the ring reads into buffers taken from this pool.  Only io_workers reads
+ * proceed at once, so the pool is sized by its own setting rather than per
+ * backend; a ring that finds no free buffer reads synchronously.  A buffer
+ * is held from submit until its page is copied out, or until the read it is
+ * the target of has finished, never longer.
+ * -------------------------------------------------------------------------- */
+
+typedef struct BTreePrefetchPool
+{
+	int			nbuffers;
+	pg_atomic_uint32 nextSearch;	/* where the next free-buffer search
+									 * starts */
+	/* owner of each buffer: 0 if free, else the owner's ProcNumber + 1 */
+	pg_atomic_uint32 owner[FLEXIBLE_ARRAY_MEMBER];
+} BTreePrefetchPool;
+
+static BTreePrefetchPool *prefetchPool = NULL;
+static char *prefetchPoolBuffers = NULL;
+
+/*
+ * Wait reference of the read each buffer this backend holds is the target
+ * of, so that the buffers can be released safely when the backend exits.
+ */
+static PgAioWaitRef *heldBufferWrefs = NULL;
+static bool prefetchPoolExitRegistered = false;
+
+static bool
+prefetch_pool_enabled(void)
+{
+	return io_method == IOMETHOD_WORKER && btree_prefetch_buffers > 0;
+}
+
+Size
+btree_prefetch_shmem_needs(void)
+{
+	Size		size;
+
+	if (!prefetch_pool_enabled())
+		return 0;
+
+	size = add_size(offsetof(BTreePrefetchPool, owner),
+					mul_size(btree_prefetch_buffers, sizeof(pg_atomic_uint32)));
+	size = add_size(size, PG_IO_ALIGN_SIZE);
+	size = add_size(size, mul_size(btree_prefetch_buffers, ORIOLEDB_BLCKSZ));
+	return size;
+}
+
+void
+btree_prefetch_shmem_init(Pointer ptr, bool found)
+{
+	Size		headerSize;
+
+	if (!prefetch_pool_enabled())
+		return;
+
+	headerSize = offsetof(BTreePrefetchPool, owner) +
+		btree_prefetch_buffers * sizeof(pg_atomic_uint32);
+	prefetchPool = (BTreePrefetchPool *) ptr;
+	prefetchPoolBuffers = (char *) TYPEALIGN(PG_IO_ALIGN_SIZE, ptr + headerSize);
+
+	if (!found)
+	{
+		prefetchPool->nbuffers = btree_prefetch_buffers;
+		pg_atomic_init_u32(&prefetchPool->nextSearch, 0);
+		for (int i = 0; i < btree_prefetch_buffers; i++)
+			pg_atomic_init_u32(&prefetchPool->owner[i], 0);
+	}
+}
+
+#define POOL_BUFFER(i) (prefetchPoolBuffers + (Size) (i) * ORIOLEDB_BLCKSZ)
+
+/*
+ * Gives a buffer back.  At backend exit prefetch_pool_at_exit() may have
+ * done so already, before the scan's ring gets destroyed, and someone else
+ * may hold the buffer by then, so only a buffer still ours is released.
+ * The compare-and-exchange is a full barrier: the page is copied out before
+ * another backend can reuse the buffer.
+ */
+static void
+prefetch_pool_release(int i)
+{
+	uint32		expected = (uint32) MyProcNumber + 1;
+
+	if (pg_atomic_compare_exchange_u32(&prefetchPool->owner[i], &expected, 0))
+		pgaio_wref_clear(&heldBufferWrefs[i]);
+}
+
+/*
+ * Releases the buffers a backend still holds when it exits, waiting first
+ * for the reads that target them.  Runs before AIO shuts down for this
+ * backend, as it is registered later -- and also before an open transaction
+ * is aborted, so before the rings of its scans release the same buffers.
+ */
+static void
+prefetch_pool_at_exit(int code, Datum arg)
+{
+	for (int i = 0; i < prefetchPool->nbuffers; i++)
+	{
+		if (pg_atomic_read_u32(&prefetchPool->owner[i]) !=
+			(uint32) MyProcNumber + 1)
+			continue;
+		if (pgaio_wref_valid(&heldBufferWrefs[i]))
+			pgaio_wref_wait(&heldBufferWrefs[i]);
+		prefetch_pool_release(i);
+	}
+}
+
+/* Takes a free buffer of the pool, or returns -1 if there is none. */
+static int
+prefetch_pool_acquire(void)
+{
+	int			n = prefetchPool->nbuffers;
+	uint32		start;
+
+	if (!prefetchPoolExitRegistered)
+	{
+		heldBufferWrefs = MemoryContextAllocZero(TopMemoryContext,
+												 sizeof(PgAioWaitRef) * n);
+		for (int i = 0; i < n; i++)
+			pgaio_wref_clear(&heldBufferWrefs[i]);
+		before_shmem_exit(prefetch_pool_at_exit, (Datum) 0);
+		prefetchPoolExitRegistered = true;
+	}
+
+	start = pg_atomic_fetch_add_u32(&prefetchPool->nextSearch, 1) % n;
+	for (int k = 0; k < n; k++)
+	{
+		int			i = (start + k) % n;
+		uint32		expected = 0;
+
+		if (pg_atomic_read_u32(&prefetchPool->owner[i]) == 0 &&
+			pg_atomic_compare_exchange_u32(&prefetchPool->owner[i], &expected,
+										   (uint32) MyProcNumber + 1))
+			return i;
+	}
+	return -1;
 }
 
 
@@ -303,7 +452,7 @@ typedef enum
 {
 	PREFETCH_SLOT_EMPTY,
 	PREFETCH_SLOT_ASYNC,		/* AIO submitted, waiting on wref */
-	PREFETCH_SLOT_READY,		/* Buffer already contains page data */
+	PREFETCH_SLOT_DEFERRED,		/* no AIO possible: read it at consume */
 } PrefetchSlotState;
 
 typedef struct PrefetchSlot
@@ -313,6 +462,8 @@ typedef struct PrefetchSlot
 	bool		fullyInRange;
 	uint32		chkpNum;
 	PgAioWaitRef wref;
+	PgAioReturn ret;
+	int			poolBuffer;		/* pool buffer read into, or -1 */
 	PrefetchSlotState state;
 } PrefetchSlot;
 
@@ -322,13 +473,19 @@ struct BTreePrefetchRing
 	int			head;			/* next slot to submit into */
 	int			tail;			/* next slot to consume from */
 	int			inflight;		/* number of populated slots */
-	char	   *buffers;		/* depth * ORIOLEDB_BLCKSZ contiguous */
+	bool		usePool;		/* read into the shared pool */
+	char	   *buffers;		/* depth * ORIOLEDB_BLCKSZ, unless usePool */
 	PrefetchSlot *slots;
 	MemoryContext mctx;
 };
 
 #define RING_BUFFER(ring, i) ((ring)->buffers + (i) * ORIOLEDB_BLCKSZ)
 
+/*
+ * Creates a ring of the given depth, or returns NULL when prefetching cannot
+ * help: io_method = sync runs every read in this process anyway, and
+ * io_method = worker needs the shared pool.
+ */
 BTreePrefetchRing *
 btree_prefetch_ring_create(int depth, MemoryContext mctx)
 {
@@ -337,22 +494,45 @@ btree_prefetch_ring_create(int depth, MemoryContext mctx)
 
 	Assert(depth > 0);
 
+	if (io_method == IOMETHOD_SYNC)
+		return NULL;
+	if (io_method == IOMETHOD_WORKER && !prefetchPool)
+		return NULL;
+
 	oldcxt = MemoryContextSwitchTo(mctx);
 	ring = palloc0(sizeof(BTreePrefetchRing));
 	ring->depth = depth;
 	ring->mctx = mctx;
-	ring->buffers = MemoryContextAllocAligned(mctx,
-											  (Size) depth * ORIOLEDB_BLCKSZ,
-											  ORIOLEDB_BLCKSZ, 0);
+	ring->usePool = (io_method == IOMETHOD_WORKER);
+	if (!ring->usePool)
+		ring->buffers = MemoryContextAllocAligned(mctx,
+												  (Size) depth * ORIOLEDB_BLCKSZ,
+												  PG_IO_ALIGN_SIZE, 0);
 	ring->slots = palloc0(sizeof(PrefetchSlot) * depth);
 	for (int i = 0; i < depth; i++)
 	{
 		ring->slots[i].state = PREFETCH_SLOT_EMPTY;
+		ring->slots[i].poolBuffer = -1;
 		pgaio_wref_clear(&ring->slots[i].wref);
 	}
 	MemoryContextSwitchTo(oldcxt);
 
 	return ring;
+}
+
+/* Empties a slot, first waiting for the read targeting its buffer, if any */
+static void
+prefetch_slot_clear(PrefetchSlot *slot)
+{
+	if (slot->state == PREFETCH_SLOT_ASYNC && pgaio_wref_valid(&slot->wref))
+		pgaio_wref_wait(&slot->wref);
+	pgaio_wref_clear(&slot->wref);
+	if (slot->poolBuffer >= 0)
+	{
+		prefetch_pool_release(slot->poolBuffer);
+		slot->poolBuffer = -1;
+	}
+	slot->state = PREFETCH_SLOT_EMPTY;
 }
 
 void
@@ -361,23 +541,17 @@ btree_prefetch_ring_destroy(BTreePrefetchRing *ring)
 	if (ring == NULL)
 		return;
 
-	/* Drain any in-flight reads so the AIO handles are released. */
+	/* Drain any in-flight reads so the AIO handles and buffers are released */
 	while (ring->inflight > 0)
 	{
-		PrefetchSlot *slot = &ring->slots[ring->tail];
-
-		if (slot->state == PREFETCH_SLOT_ASYNC &&
-			pgaio_wref_valid(&slot->wref))
-			pgaio_wref_wait(&slot->wref);
-
-		slot->state = PREFETCH_SLOT_EMPTY;
-		pgaio_wref_clear(&slot->wref);
+		prefetch_slot_clear(&ring->slots[ring->tail]);
 		ring->tail = (ring->tail + 1) % ring->depth;
 		ring->inflight--;
 	}
 
 	pfree(ring->slots);
-	pfree(ring->buffers);
+	if (ring->buffers)
+		pfree(ring->buffers);
 	pfree(ring);
 }
 
@@ -402,48 +576,45 @@ btree_prefetch_ring_submit(BTreePrefetchRing *ring,
 						   uint32 chkpNum)
 {
 	PrefetchSlot *slot;
-	uint64		offset;
+	char	   *buf = NULL;
 	off_t		byteOffset;
-	char	   *buf;
-	bool		async_ok = false;
 
 	if (ring->inflight >= ring->depth)
 		return false;
 
 	slot = &ring->slots[ring->head];
 	Assert(slot->state == PREFETCH_SLOT_EMPTY);
-	buf = RING_BUFFER(ring, ring->head);
+	Assert(slot->poolBuffer < 0);
 
 	slot->downlink = downlink;
 	slot->csn = csn;
 	slot->fullyInRange = fullyInRange;
 	slot->chkpNum = chkpNum;
+	slot->state = PREFETCH_SLOT_DEFERRED;
 
-	if (!orioledb_s3_mode)
+	if (ring->usePool)
 	{
-		offset = DOWNLINK_GET_DISK_OFF(downlink);
-		byteOffset = (off_t) offset * (off_t) ORIOLEDB_BLCKSZ;
-		async_ok = orioledb_aio_submit_btree_read(desc, chkpNum, byteOffset,
-												  buf, &slot->wref);
-	}
-
-	if (async_ok)
-	{
-		slot->state = PREFETCH_SLOT_ASYNC;
+		slot->poolBuffer = prefetch_pool_acquire();
+		if (slot->poolBuffer >= 0)
+			buf = POOL_BUFFER(slot->poolBuffer);
 	}
 	else
-	{
-		FileExtent	tmp;
+		buf = RING_BUFFER(ring, ring->head);
 
-		/*
-		 * AIO path unavailable for this configuration -- fall back to a
-		 * synchronous read into the ring buffer so the consumer interface
-		 * stays uniform.
-		 */
-		if (read_page_from_disk(desc, buf, downlink, &tmp) != OReadPageResultOk)
-			elog(ERROR,
-				 "could not read leaf page from disk during prefetch fallback");
-		slot->state = PREFETCH_SLOT_READY;
+	byteOffset = (off_t) DOWNLINK_GET_DISK_OFF(downlink) * ORIOLEDB_BLCKSZ;
+	if (buf &&
+		orioledb_aio_submit_btree_read(desc, chkpNum, byteOffset, buf,
+									   !ring->usePool, &slot->wref,
+									   &slot->ret))
+	{
+		slot->state = PREFETCH_SLOT_ASYNC;
+		if (slot->poolBuffer >= 0)
+			heldBufferWrefs[slot->poolBuffer] = slot->wref;
+	}
+	else if (slot->poolBuffer >= 0)
+	{
+		prefetch_pool_release(slot->poolBuffer);
+		slot->poolBuffer = -1;
 	}
 
 	ring->head = (ring->head + 1) % ring->depth;
@@ -453,36 +624,80 @@ btree_prefetch_ring_submit(BTreePrefetchRing *ring,
 
 bool
 btree_prefetch_ring_consume(BTreePrefetchRing *ring,
+							BTreeDescr *desc,
+							Pointer dest,
 							uint64 *downlink_out,
 							CommitSeqNo *csn_out,
 							bool *fullyInRange_out,
-							char **page_out)
+							OReadPageResult *result_out)
 {
 	PrefetchSlot *slot;
-	char	   *buf;
 
 	if (ring->inflight == 0)
 		return false;
 
 	slot = &ring->slots[ring->tail];
-	buf = RING_BUFFER(ring, ring->tail);
-
-	if (slot->state == PREFETCH_SLOT_ASYNC)
-	{
-		pgaio_wref_wait(&slot->wref);
-		pgaio_wref_clear(&slot->wref);
-	}
+	ring->tail = (ring->tail + 1) % ring->depth;
+	ring->inflight--;
 
 	*downlink_out = slot->downlink;
 	*csn_out = slot->csn;
 	*fullyInRange_out = slot->fullyInRange;
-	*page_out = buf;
 
-	slot->state = PREFETCH_SLOT_EMPTY;
-	ring->tail = (ring->tail + 1) % ring->depth;
-	ring->inflight--;
+	if (slot->state == PREFETCH_SLOT_ASYNC)
+	{
+		PgAioResult aioResult;
+
+		pgaio_wref_wait(&slot->wref);
+		aioResult = slot->ret.result;
+		if (aioResult.status == PGAIO_RS_OK)
+			memcpy(dest, slot->poolBuffer >= 0 ?
+				   POOL_BUFFER(slot->poolBuffer) :
+				   RING_BUFFER(ring, slot - ring->slots),
+				   ORIOLEDB_BLCKSZ);
+		prefetch_slot_clear(slot);
+
+		if (aioResult.status == PGAIO_RS_UNKNOWN)
+			elog(ERROR, "orioledb async read finished with no result");
+		if (aioResult.status != PGAIO_RS_OK)
+			pgaio_result_report(aioResult, &slot->ret.target_data, ERROR);
+
+		*result_out = btree_finish_plain_page_read(dest);
+	}
+	else
+	{
+		FileExtent	extent;
+
+		Assert(slot->state == PREFETCH_SLOT_DEFERRED);
+		prefetch_slot_clear(slot);
+		*result_out = read_page_from_disk(desc, dest, slot->downlink, &extent);
+	}
 
 	return true;
 }
 
 #endif							/* PG_VERSION_NUM >= 180000 */
+
+#ifdef IS_DEV
+/*
+ * Number of shared prefetch buffers held by any backend, for tests that a
+ * scan releases them however it ends.  Zero when there is no pool.
+ */
+PG_FUNCTION_INFO_V1(orioledb_prefetch_buffers_held);
+
+Datum
+orioledb_prefetch_buffers_held(PG_FUNCTION_ARGS)
+{
+	int32		held = 0;
+
+#if PG_VERSION_NUM >= 180000
+	if (prefetchPool)
+	{
+		for (int i = 0; i < prefetchPool->nbuffers; i++)
+			if (pg_atomic_read_u32(&prefetchPool->owner[i]) != 0)
+				held++;
+	}
+#endif
+	PG_RETURN_INT32(held);
+}
+#endif

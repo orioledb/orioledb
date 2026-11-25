@@ -22,6 +22,7 @@
 #include "postgres.h"
 
 #include "btree.h"
+#include "io.h"
 #include "orioledb.h"
 
 /*
@@ -68,6 +69,10 @@ StaticAssertDecl(sizeof(OrioleBtreeAioTargetData) <=
 /* Initialisation: registers the target + callback descriptors. */
 extern void orioledb_aio_init(void);
 
+/* Shared pool of prefetch buffers, allocated for io_method = worker only */
+extern Size btree_prefetch_shmem_needs(void);
+extern void btree_prefetch_shmem_init(Pointer ptr, bool found);
+
 
 /*
  * Per-scan prefetch ring buffer used by btree seqscan to issue async reads
@@ -82,11 +87,10 @@ extern int	btree_prefetch_ring_inflight(const BTreePrefetchRing *ring);
 extern int	btree_prefetch_ring_depth(const BTreePrefetchRing *ring);
 
 /*
- * Submit a prefetch read of the page referenced by `downlink` (raw form from
- * BTreeSeqScanDiskDownlink) belonging to checkpoint `chkpNum`.  Returns true
- * if the slot has been claimed (whether the underlying AIO went async or was
- * served synchronously by btree_smgr_read).  Returns false only when the
- * ring is already full.
+ * Queue a read of the page referenced by `downlink` (raw form from
+ * BTreeSeqScanDiskDownlink) belonging to checkpoint `chkpNum`.  Starts an
+ * async read when the configuration allows one; otherwise the page is read
+ * synchronously when consumed.  Returns false only when the ring is full.
  */
 extern bool btree_prefetch_ring_submit(BTreePrefetchRing *ring,
 									   BTreeDescr *desc,
@@ -96,37 +100,19 @@ extern bool btree_prefetch_ring_submit(BTreePrefetchRing *ring,
 									   uint32 chkpNum);
 
 /*
- * Consume the oldest slot.  Waits for any outstanding AIO.  Returns false
- * if the ring is empty.  On success, *downlink_out and *csn_out are filled
- * with the values originally passed to submit, and *page_out points to a
- * ring-owned buffer that stays valid until the next consume call or until
- * the ring is destroyed.
+ * Consume the oldest queued page into dest, waiting for its read.  Returns
+ * false if the ring is empty.  On success, *downlink_out, *csn_out and
+ * *fullyInRange_out are the values passed to submit, and *result_out tells
+ * whether the page read and verified as read_page_from_disk() would report
+ * it.  A failed async read raises an error.
  */
 extern bool btree_prefetch_ring_consume(BTreePrefetchRing *ring,
+										BTreeDescr *desc,
+										Pointer dest,
 										uint64 *downlink_out,
 										CommitSeqNo *csn_out,
 										bool *fullyInRange_out,
-										char **page_out);
-
-/*
- * Submit an async read of one page from btree segment file.
- *
- * - desc       : btree being read (used to derive datoid/reloid/relnode/tspc)
- * - chkpNum    : checkpoint number associated with the downlink
- * - byteOffset : absolute byte offset within the logical btree file
- * - dest       : destination buffer, must be ORIOLEDB_BLCKSZ bytes
- * - wref_out   : populated with a wait reference the caller can later wait on
- *
- * Returns true if the read was successfully submitted asynchronously, or
- * false if the call falls back to / completed synchronously (e.g. because
- * the AIO subsystem chose to execute the IO in the issuing process).  In the
- * synchronous case `*wref_out` is left invalid.
- */
-extern bool orioledb_aio_submit_btree_read(BTreeDescr *desc,
-										   uint32 chkpNum,
-										   off_t byteOffset,
-										   char *dest,
-										   PgAioWaitRef *wref_out);
+										OReadPageResult *result_out);
 
 #endif							/* PG_VERSION_NUM >= 180000 */
 
