@@ -104,6 +104,14 @@ typedef struct OScanDescData
 	 * lock the scan holds keeps its layout; a slot keeps the same pointer.
 	 */
 	OTableDescr *descr;
+
+	/* Rows of btree_seq_scan_getnext_batch() not returned yet */
+	OTuple	   *batch;
+	int			batchPos;
+	int			batchLen;
+	bool		batchBorrowed;
+	CommitSeqNo batchCsn;
+	BTreeLocationHint batchHint;
 } OScanDescData;
 typedef OScanDescData *OScanDesc;
 
@@ -1859,6 +1867,7 @@ orioledb_rescan(TableScanDesc sscan, ScanKey key, bool set_params,
 
 	if (scan->scan)
 		free_btree_seq_scan(scan->scan);
+	scan->batchPos = scan->batchLen = 0;
 
 	scan->scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, &scan->o_snapshot,
 									 scan->rs_base.rs_parallel);
@@ -1926,36 +1935,39 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 	if (OidIsValid(o_saved_relrewrite))
 		return false;
 
+	scan = (OScanDesc) sscan;
+	if (unlikely(scan->descr == NULL))
+		scan->descr = relation_get_descr(scan->rs_base.rs_rd);
+	descr = scan->descr;
+
 	do
 	{
-		OTuple		tuple = {0};
-		BTreeLocationHint hint;
-		CommitSeqNo csn;
-		bool		borrowed = false;
-
-		scan = (OScanDesc) sscan;
-		if (unlikely(scan->descr == NULL))
-			scan->descr = relation_get_descr(scan->rs_base.rs_rd);
-		descr = scan->descr;
-
 		/*
-		 * The tuple may stay in the scan's page image: the slot is refilled
-		 * by the next call before the image can change, and materializing the
-		 * slot copies the tuple.
+		 * The rows may stay in the scan's page image: the slot is refilled
+		 * from the batch or by the next call before the image can change, and
+		 * materializing the slot copies the row.
 		 */
-		if (scan->scan)
-			tuple = btree_seq_scan_getnext_borrowed(scan->scan, slot->tts_mcxt,
-													&csn, &hint, &borrowed);
+		if (scan->batchPos >= scan->batchLen)
+		{
+			if (scan->scan == NULL)
+				return false;
+			scan->batchLen = btree_seq_scan_getnext_batch(scan->scan,
+														  slot->tts_mcxt,
+														  &scan->batch,
+														  &scan->batchCsn,
+														  &scan->batchHint,
+														  &scan->batchBorrowed);
+			scan->batchPos = 0;
+			if (scan->batchLen == 0)
+				return false;
+		}
 
-		if (O_TUPLE_IS_NULL(tuple))
-			return false;
+		tts_orioledb_store_tuple(slot, scan->batch[scan->batchPos++], descr,
+								 scan->batchCsn, PrimaryIndexNumber,
+								 !scan->batchBorrowed, &scan->batchHint);
 
-		tts_orioledb_store_tuple(slot, tuple, descr, csn,
-								 PrimaryIndexNumber, !borrowed, &hint);
-
-		result = slot_keytest(slot,
-							  scan->rs_base.rs_nkeys,
-							  scan->rs_base.rs_key);
+		result = scan->rs_base.rs_nkeys == 0 ||
+			slot_keytest(slot, scan->rs_base.rs_nkeys, scan->rs_base.rs_key);
 	}
 	while (!result);
 

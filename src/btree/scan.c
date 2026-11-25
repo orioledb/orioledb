@@ -255,6 +255,10 @@ struct BTreeSeqScan
 	 */
 	bool		cacheLeaves;
 	OBTreeFindPageContext *leafLoadContext; /* for loading those leaves */
+
+	/* Rows handed out at once by btree_seq_scan_getnext_batch() */
+	OTuple	   *batch;
+	OTuple		singleRow;
 #ifdef USE_ASSERT_CHECKING
 
 	/*
@@ -2846,6 +2850,7 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->downlinkIndex = 0;
 	scan->cacheLeaves = false;
 	scan->leafLoadContext = NULL;
+	scan->batch = NULL;
 	scan->diskDownlinks = (BTreeSeqScanDiskDownlink *) MemoryContextAlloc(btree_seqscan_context,
 																		  sizeof(scan->diskDownlinks[0]) * scan->allocatedDownlinks);
 	scan->mctx = CurrentMemoryContext;
@@ -3514,16 +3519,78 @@ btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
 }
 
 /*
- * Like btree_seq_scan_getnext(), but may return a tuple that lives in the
- * scan's own page image, setting *borrowed.  Such a tuple stays valid only
+ * Takes the rows of the current leaf that are visible as they are, up to the
+ * first one that is not, in one pass: what the row-at-a-time path would
+ * return for them, without its per-row bookkeeping.  Only for a leaf read
+ * whole and returned without a historical image, a key callback or range
+ * checks.
+ */
+static int
+seq_scan_fill_batch(BTreeSeqScan *scan)
+{
+	Page		img = scan->leafImg;
+	OXid		xmin = scan->oSnapshot.xmin;
+	int			n = 0;
+
+	if (scan->status == BTreeSeqScanFinished || scan->iter ||
+		scan->haveHistImg || scan->ordered || scan->leafPartialFailed ||
+		scan->leafPartial.isPartial ||
+		(scan->cb && scan->cb->getNextKey) ||
+		(scan->scanRange && !scan->pageFullyInRange) ||
+		!BTREE_PAGE_LOCATOR_IS_VALID(img, &scan->leafLoc))
+		return 0;
+
+	if (scan->batch == NULL)
+		scan->batch = MemoryContextAlloc(btree_seqscan_context,
+										 sizeof(OTuple) * BTREE_PAGE_MAX_ITEMS);
+
+	do
+	{
+		BTreeLeafTuphdr *tuphdr;
+		OTuple		tuple;
+		OXid		oxid;
+
+		BTREE_PAGE_READ_LEAF_ITEM(tuphdr, tuple, img, &scan->leafLoc);
+		oxid = XACT_INFO_GET_OXID(tuphdr->xactInfo);
+		if (tuphdr->deleted != BTreeLeafTupleNonDeleted ||
+			XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo) ||
+			!(oxid < xmin || oxid == BootstrapTransactionId))
+			break;
+		scan->batch[n++] = tuple;
+		seq_leaf_locator_advance(scan);
+	} while (BTREE_PAGE_LOCATOR_IS_VALID(img, &scan->leafLoc));
+
+	return n;
+}
+
+/*
+ * Puts the next rows of the scan to *tuples and returns their number, 0 at
+ * the end of the scan.  The rows share *tupleCsn, *hint and *borrowed.  With
+ * *borrowed, they live in the scan's own page image: they stay valid only
  * until the next call on this scan, and must not be freed.
  */
-OTuple
-btree_seq_scan_getnext_borrowed(BTreeSeqScan *scan, MemoryContext mctx,
-								CommitSeqNo *tupleCsn, BTreeLocationHint *hint,
-								bool *borrowed)
+int
+btree_seq_scan_getnext_batch(BTreeSeqScan *scan, MemoryContext mctx,
+							 OTuple **tuples, CommitSeqNo *tupleCsn,
+							 BTreeLocationHint *hint, bool *borrowed)
 {
-	return seq_scan_getnext(scan, mctx, tupleCsn, hint, borrowed);
+	int			n;
+
+	if (scan->initialized && (n = seq_scan_fill_batch(scan)) > 0)
+	{
+		*tupleCsn = COMMITSEQNO_IS_NORMAL(scan->oSnapshot.csn) ?
+			scan->oSnapshot.csn : COMMITSEQNO_MAX_NORMAL - 1;
+		*hint = scan->hint;
+		*borrowed = true;
+		*tuples = scan->batch;
+		return n;
+	}
+
+	scan->singleRow = seq_scan_getnext(scan, mctx, tupleCsn, hint, borrowed);
+	if (O_TUPLE_IS_NULL(scan->singleRow))
+		return 0;
+	*tuples = &scan->singleRow;
+	return 1;
 }
 
 static OTuple
@@ -3778,6 +3845,12 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 	{
 		pfree(scan->leafLoadContext);
 		scan->leafLoadContext = NULL;
+	}
+
+	if (scan->batch)
+	{
+		pfree(scan->batch);
+		scan->batch = NULL;
 	}
 
 	if (scan->descrPinned)
