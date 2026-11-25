@@ -155,6 +155,7 @@ double		o_checkpoint_completion_ratio;
 int			bgwriter_num_workers = 1;
 int			max_io_concurrency = 0;
 int			btree_prefetch_depth = 0;
+int			btree_prefetch_buffers = 256;
 ODBProcData *oProcData;
 int			default_compress = InvalidOCompress;
 int			default_primary_compress = InvalidOCompress;
@@ -255,7 +256,10 @@ static ShmemItem shmemItems[] = {
 	{s3_queue_shmem_needs, s3_queue_init_shmem},
 	{s3_workers_shmem_needs, s3_workers_init_shmem},
 	{s3_headers_shmem_needs, s3_headers_shmem_init},
-	{rewind_shmem_needs, rewind_init_shmem}
+	{rewind_shmem_needs, rewind_init_shmem},
+#if PG_VERSION_NUM >= 180000
+	{btree_prefetch_shmem_needs, btree_prefetch_shmem_init},
+#endif
 };
 
 
@@ -1054,6 +1058,21 @@ _PG_init(void)
 							0,
 							1024,
 							PGC_USERSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.btree_prefetch_buffers",
+							"Number of shared buffers for prefetched leaf pages "
+							"with io_method = worker.",
+							"An io worker can only read into shared memory.  "
+							"With other io methods no buffers are allocated.",
+							&btree_prefetch_buffers,
+							256,
+							0,
+							65536,
+							PGC_POSTMASTER,
 							0,
 							NULL,
 							NULL,

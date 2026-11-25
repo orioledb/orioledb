@@ -2640,7 +2640,7 @@ consume_prefetched_disk_leaf(BTreeSeqScan *scan,
 {
 	BTreePrefetchRing *ring = scan->prefetchRing;
 	int			depth = btree_prefetch_ring_depth(ring);
-	char	   *page;
+	OReadPageResult read_result;
 
 	while (btree_prefetch_ring_inflight(ring) < depth)
 	{
@@ -2654,13 +2654,12 @@ consume_prefetched_disk_leaf(BTreeSeqScan *scan,
 										  scan->checkpointNumber);
 	}
 
-	if (!btree_prefetch_ring_consume(ring, &downlink->downlink, &downlink->csn,
-									 &downlink->fullyInRange, &page))
+	if (!btree_prefetch_ring_consume(ring, scan->desc, scan->leafImg,
+									 &downlink->downlink, &downlink->csn,
+									 &downlink->fullyInRange, &read_result))
 		return false;
 
-	memcpy(scan->leafImg, page, ORIOLEDB_BLCKSZ);
-	finish_disk_leaf_img(scan, downlink->downlink, downlink->csn,
-						 OReadPageResultOk);
+	finish_disk_leaf_img(scan, downlink->downlink, downlink->csn, read_result);
 	return true;
 }
 #endif
