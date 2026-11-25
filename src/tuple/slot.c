@@ -1147,6 +1147,48 @@ tts_orioledb_store_tuple_internal(TupleTableSlot *slot, OTuple tuple,
 	Assert(COMMITSEQNO_IS_NORMAL(csn) || COMMITSEQNO_IS_INPROGRESS(csn));
 	Assert(slot->tts_ops == &TTSOpsOrioleDB);
 
+	/*
+	 * A scan stores row after row of one index into the same slot.  When the
+	 * previous row came from the same place and left nothing for
+	 * tts_orioledb_clear() to release, the slot needs only the new tuple:
+	 * skip clearing it and looking the index up again.  Indexes keyed by
+	 * ctid or bridged read extra fields first, so they take the full path.
+	 */
+	if (likely(oslot->descr == descr && oslot->ixnum == ixnum &&
+			   oslot->leafTuple == leafTuple &&
+			   ixnum != BridgeIndexNumber &&
+			   !TTS_SHOULDFREE(slot) && oslot->to_toast == NULL &&
+			   oslot->rowid == NULL && oslot->data == NULL))
+	{
+		OIndexDescr *idx = descr->indices[ixnum];
+
+		if (!idx->primaryIsCtid && !idx->bridging)
+		{
+			slot->tts_flags &= ~TTS_FLAG_EMPTY;
+			slot->tts_nvalid = 0;
+			ItemPointerSetInvalid(&slot->tts_tid);
+			oslot->tuple = tuple;
+			oslot->csn = csn;
+			oslot->version = o_tuple_get_version(tuple);
+			if (hint)
+				oslot->hint = *hint;
+			else
+			{
+				oslot->hint.blkno = OInvalidInMemoryBlkno;
+				oslot->hint.pageChangeCount = 0;
+			}
+			if (leafTuple)
+				o_tuple_init_reader(&oslot->state, tuple,
+									idx->leafTupdesc, &idx->leafSpec);
+			else
+				o_tuple_init_reader(&oslot->state, tuple,
+									idx->nonLeafTupdesc, &idx->nonLeafSpec);
+			if (shouldfree)
+				slot->tts_flags |= TTS_FLAG_SHOULDFREE;
+			return;
+		}
+	}
+
 	tts_orioledb_clear(slot);
 
 	Assert(!TTS_SHOULDFREE(slot));
