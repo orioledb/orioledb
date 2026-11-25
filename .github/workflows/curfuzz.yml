@@ -1,0 +1,99 @@
+name: curfuzz
+
+# TEMP (#1581): deterministic cursor-scan order fuzz.  Not for merging.
+on:
+  push:
+    branches: ["tmp/repro-1581"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  curfuzz:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { pg_version: 18, check_type: debug, base: 0 }
+          - { pg_version: 18, check_type: debug, base: 1000000 }
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    env:
+      LLVM_VER: 18
+      CPU: amd64
+      COMPILER: gcc
+      CHECK_TYPE: ${{ matrix.check_type }}
+      PG_VERSION: ${{ matrix.pg_version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: orioledb
+
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+
+      - uses: actions/checkout@v6
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PGTAG }}
+          path: postgresql
+
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/setup/prerequisites.sh
+
+      - name: Build
+        run: bash ./orioledb/ci/setup/build.sh
+
+      - name: Install post build prerequisites
+        run: bash ./orioledb/ci/setup/post_build_prerequisites.sh
+
+      - name: Run curfuzz
+        timeout-minutes: 40
+        run: |
+          set -u
+          export PATH="$GITHUB_WORKSPACE/pgsql/bin:$GITHUB_WORKSPACE/python3-venv/bin:$PATH"
+          ulimit -c unlimited -S || true
+          mkdir -p out && cd out
+          initdb -N --encoding=UTF-8 --locale=C -D data >/dev/null
+          cat >> data/postgresql.conf <<CONF
+          port = 5679
+          listen_addresses = ''
+          unix_socket_directories = '/tmp'
+          shared_preload_libraries = 'orioledb'
+          log_min_messages = warning
+          log_line_prefix = '%m [%p] '
+          restart_after_crash = off
+          max_connections = 100
+          CONF
+          pg_ctl -D data -l pg.log -w start
+          export PGHOST=/tmp PGPORT=5679
+          # The first four seed ranges are the ones that reproduced locally
+          # (violations at seeds 400039 and 400056 on macOS arm64).
+          pids=()
+          for k in 1 2 3 4 5 6 7 8; do
+            base=$(( ${{ matrix.base }} + k * 100000 ))
+            trials=250; [ $k -gt 4 ] && trials=700
+            python3 -u ../orioledb/ci/curfuzz.py 5679 $base $trials v > cf_$k.out 2>&1 &
+            pids+=($!)
+          done
+          rc=0
+          for p in "${pids[@]}"; do wait $p || rc=1; done
+          tail -n 3 cf_*.out
+          grep -h "ORDER/DUP\|CRASH" cf_*.out && rc=1
+          grep -nE "TRAP|PANIC|terminated by signal" pg.log && rc=1
+          pg_ctl -D data -m fast stop || true
+          exit $rc
+
+      - name: Upload outputs
+        uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: curfuzz_${{ matrix.base }}
+          path: |
+            out/cf_*.out
+            out/curfuzz_struct_*.txt
+            out/pg.log
+          retention-days: 7
+          if-no-files-found: ignore
