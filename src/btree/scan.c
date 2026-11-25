@@ -422,6 +422,11 @@ load_first_historical_page(BTreeSeqScan *scan)
 	if (!COMMITSEQNO_IS_NORMAL(scan->oSnapshot.csn))
 		return;
 
+	/* The snapshot sees the live page: nothing to reconstruct */
+	if (!(COMMITSEQNO_IS_NORMAL(header->csn) &&
+		  header->csn >= scan->oSnapshot.csn))
+		return;
+
 	if (!O_PAGE_IS(scan->leafImg, RIGHTMOST))
 		copy_fixed_hikey(scan->desc, &hikey, scan->leafImg);
 	else
