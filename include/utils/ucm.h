@@ -31,6 +31,9 @@ typedef struct UsageCountMap
 	int			nonLeaf;
 	int			rootFactor;
 	uint32		usageCounter;
+
+	/* where ucm_occupy_free_page() starts to look, past its last find */
+	int64		freeSearchStart;
 } UsageCountMap;
 
 extern bool skip_ucm;
