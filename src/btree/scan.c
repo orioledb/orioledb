@@ -3144,9 +3144,34 @@ seq_scan_find_tuple_version(BTreeSeqScan *scan, Page img,
 							MemoryContext mctx, bool *borrowed)
 {
 	if (borrowed)
+	{
+		BTreeLeafTuphdr *tuphdr;
+		OTuple		tuple;
+		OXid		oxid;
+
+		/*
+		 * Most rows of a scan were written by a transaction that finished
+		 * before the snapshot's xmin and are neither deleted nor merely
+		 * locked: their version on the page is the visible one, as
+		 * o_find_tuple_version() finds after deciding the same with
+		 * oxid_match_snapshot().  Answer that here, without the call.
+		 */
+		BTREE_PAGE_READ_LEAF_ITEM(tuphdr, tuple, img, loc);
+		oxid = XACT_INFO_GET_OXID(tuphdr->xactInfo);
+		if (tuphdr->deleted == BTreeLeafTupleNonDeleted &&
+			!XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo) &&
+			(oxid < scan->oSnapshot.xmin || oxid == BootstrapTransactionId))
+		{
+			if (tupleCsn)
+				*tupleCsn = COMMITSEQNO_IS_NORMAL(scan->oSnapshot.csn) ?
+					scan->oSnapshot.csn : COMMITSEQNO_MAX_NORMAL - 1;
+			*borrowed = true;
+			return tuple;
+		}
 		return o_find_tuple_version_borrowed(scan->desc, img, loc,
 											 &scan->oSnapshot, tupleCsn, mctx,
 											 borrowed);
+	}
 	return o_find_tuple_version(scan->desc, img, loc, &scan->oSnapshot,
 								tupleCsn, mctx, NULL, NULL);
 }
