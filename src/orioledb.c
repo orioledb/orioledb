@@ -183,6 +183,9 @@ XLogRecPtr	debug_recovery_crash_lsn = InvalidXLogRecPtr;
 static char *debug_recovery_crash_lsn_string;
 int			debug_commit_window_ms = 0;
 bool		debug_checkpoint_error = false;
+
+/* Test writing legacy undo and reading it back during normal operation. */
+bool		debug_write_legacy_modify_undo = false;
 #endif
 
 /* For page eviction/read checkpoint test only */
@@ -1400,6 +1403,16 @@ _PG_init(void)
 							 &debug_checkpoint_error,
 							 false,
 							 PGC_SIGHUP,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+	DefineCustomBoolVariable("orioledb.debug_write_legacy_modify_undo",
+							 "Write modify undo records in legacy 64-byte format for testing.",
+							 NULL,
+							 &debug_write_legacy_modify_undo,
+							 false,
+							 PGC_USERSET,
 							 0,
 							 NULL,
 							 NULL,

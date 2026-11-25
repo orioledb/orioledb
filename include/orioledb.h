@@ -109,7 +109,7 @@
  */
 #define ORIOLEDB_VERSION "OrioleDB beta 19"
 #define ORIOLEDB_BINARY_VERSION 10
-#define ORIOLEDB_CHECKPOINT_VERSION	1	/* Version of checkpoint format; bump
+#define ORIOLEDB_CHECKPOINT_VERSION	2	/* Version of checkpoint format; bump
 										 * on any checkpoint on-disk change */
 #define ORIOLEDB_SYS_TREE_VERSION	1	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION		1	/* Version of binary page format */
@@ -555,6 +555,7 @@ extern XLogRecPtr replay_until_lsn;
 extern XLogRecPtr debug_recovery_crash_lsn;
 extern int	debug_commit_window_ms;
 extern bool debug_checkpoint_error;
+extern bool debug_write_legacy_modify_undo;
 #endif
 
 /* For page eviction/read checkpoint test only */

@@ -1167,7 +1167,7 @@ multi_insert_prepare_batch(UndoLogType undoType,
 
 	for (batch_size = 0; batch_size < remaining; batch_size++)
 	{
-		Size		one = MAXALIGN(sizeof(BTreeModifyUndoStackItem) + tuplens[batch_size]);
+		Size		one = MAXALIGN(sizeof(BTreeModifyUndoStackItemV2) + tuplens[batch_size]);
 
 		if (batch_size > 0 && need + one + Max(maxrow, one) > 2 * O_MAX_UNDO_RECORD_SIZE)
 			break;

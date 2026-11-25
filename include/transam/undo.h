@@ -260,6 +260,10 @@ typedef enum
 	CICCaptureUndoItemType,
 	LockDispatchUndoItemType,
 	UpdateDiffUndoItemType,
+	ModifyUndoItemTypeV2,
+	RowLockUndoItemTypeV2,
+	LockDispatchUndoItemTypeV2,
+	UpdateDiffUndoItemTypeV2,
 } UndoItemType;
 
 struct UndoStackItem
@@ -267,7 +271,6 @@ struct UndoStackItem
 	UndoLocation prev;
 	LocationIndex itemSize;
 	uint8		type;
-	uint8		indexType;
 };
 
 typedef struct

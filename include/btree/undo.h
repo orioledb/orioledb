@@ -128,6 +128,8 @@ typedef enum
 } BTreeModifyLockStatus;
 
 /* Undo records */
+
+/* Legacy pre-V2 undo record layout, only read during recovery of old clusters. */
 typedef struct
 {
 	UndoStackItem header;
@@ -139,7 +141,8 @@ typedef struct
 } BTreeModifyUndoStackItem;
 
 /*
- * Lock dispatch record.
+ * Legacy pre-V2 lock dispatch record, only read during recovery of old
+ * clusters.
  *
  * A rollback of a version that has row-level locks above it restores the
  * previous version into the page, but must not rewrite the lock-only records
@@ -164,7 +167,16 @@ typedef struct
 
 #define O_LOCK_DISPATCH_UNDO_SIZE MAXALIGN(sizeof(BTreeLockDispatchUndoStackItem))
 
+StaticAssertDecl(sizeof(BTreeModifyUndoStackItem) == 64,
+				 "BTreeModifyUndoStackItem must be 64 bytes");
+StaticAssertDecl(offsetof(BTreeModifyUndoStackItem, tuphdr) == 48,
+				 "BTreeModifyUndoStackItem tuphdr must be at offset 48");
+StaticAssertDecl(sizeof(BTreeLockDispatchUndoStackItem) == 72,
+				 "BTreeLockDispatchUndoStackItem must be 72 bytes");
+
 /*
+ * Legacy pre-V2 update-diff record, only read during recovery of old clusters.
+ *
  * Update record holding the previous version of the row as a difference from
  * the version that replaced it.
  *
@@ -196,6 +208,50 @@ typedef struct
 
 #define O_UPDATE_DIFF_FRAGMENT_HEADER_SIZE (3 * sizeof(LocationIndex))
 
+StaticAssertDecl(sizeof(BTreeUpdateDiffUndoStackItem) == 72,
+				 "BTreeUpdateDiffUndoStackItem must be 72 bytes");
+
+/*
+ * V2 BTree modify/lock undo record (flattened).  The first three fields
+ * match UndoStackItem; the remaining start at offset 11, overlapping
+ * UndoStackItem's tail padding and eliminating alignment gaps that the
+ * original embedded sub-struct created.  New records use V2 type codes
+ * (ModifyUndoItemTypeV2, etc.) and this layout.
+ */
+typedef struct
+{
+	UndoLocation prev;
+	LocationIndex itemSize;
+	uint8		type;
+	uint8		indexType;
+	BTreeOperationType action;
+	ORelOids	oids;
+	OInMemoryBlkno blkno;
+	uint32		pageChangeCount;
+	BTreeLeafTuphdr tuphdr;
+} BTreeModifyUndoStackItemV2;
+
+typedef struct
+{
+	BTreeModifyUndoStackItemV2 base;
+	UndoLocation lockChain;
+} BTreeLockDispatchUndoStackItemV2;
+
+/* V2 update difference record */
+typedef struct
+{
+	BTreeModifyUndoStackItemV2 base;
+	LocationIndex newTupleLen;
+	LocationIndex tupleLen;
+	LocationIndex keyLen;
+	uint8		keyFormatFlags;
+} BTreeUpdateDiffUndoStackItemV2;
+
+StaticAssertDecl(sizeof(BTreeModifyUndoStackItemV2) == 56,
+				 "BTreeModifyUndoStackItemV2 must be 56 bytes");
+StaticAssertDecl(sizeof(BTreeLockDispatchUndoStackItemV2) == 64,
+				 "BTreeLockDispatchUndoStackItemV2 must be 64 bytes");
+
 typedef struct
 {
 	OnCommitUndoStackItem header;
@@ -216,7 +272,7 @@ typedef struct
 /* size of image in undo log produced by page split */
 #define O_SPLIT_UNDO_IMAGE_SIZE(splitKeySize) (MAXALIGN(sizeof(UndoPageImageSplitHeader)) + ORIOLEDB_BLCKSZ + MAXALIGN(splitKeySize))
 /* max size of update undo record */
-#define O_UPDATE_MAX_UNDO_SIZE (sizeof(BTreeModifyUndoStackItem) + O_BTREE_MAX_TUPLE_SIZE)
+#define O_UPDATE_MAX_UNDO_SIZE (sizeof(BTreeModifyUndoStackItemV2) + O_BTREE_MAX_TUPLE_SIZE)
 /* on modification we should reserve size for split and update undo records */
 #define O_MODIFY_UNDO_RESERVE_SIZE (2 * (O_MAX_SPLIT_UNDO_IMAGE_SIZE + O_UPDATE_MAX_UNDO_SIZE))
 /* size of image in undo log produced by pages merge */
@@ -312,18 +368,99 @@ extern void btree_relnode_undo_callback(UndoLogType undoType,
 										UndoStackItem *baseItem, OXid oxid,
 										OUndoCallbackStage stage,
 										bool changeCountsValid);
+static inline bool
+is_legacy_btree_modify_type(uint8 type)
+{
+	return unlikely(type == ModifyUndoItemType ||
+					type == RowLockUndoItemType ||
+					type == LockDispatchUndoItemType ||
+					type == UpdateDiffUndoItemType);
+}
+
+static inline size_t
+btree_modify_tuphdr_offset(uint8 type)
+{
+	return is_legacy_btree_modify_type(type) ?
+		offsetof(BTreeModifyUndoStackItem, tuphdr) :
+		offsetof(BTreeModifyUndoStackItemV2, tuphdr);
+}
+
+static inline size_t
+btree_modify_ondisk_size(uint8 type)
+{
+	return is_legacy_btree_modify_type(type) ?
+		sizeof(BTreeModifyUndoStackItem) :
+		sizeof(BTreeModifyUndoStackItemV2);
+}
+
+/* Convert legacy pre-V2 record to V2 layout during recovery of old clusters. */
+static inline BTreeModifyUndoStackItemV2
+btree_modify_undo_legacy_to_v2(const BTreeModifyUndoStackItem legacy)
+{
+	BTreeModifyUndoStackItemV2 v2;
+
+	v2.prev = legacy.header.prev;
+	v2.itemSize = legacy.header.itemSize - 8;
+	v2.type = legacy.header.type;
+	v2.indexType = *((&legacy.header.type) + 1);
+	v2.action = legacy.action;
+	v2.oids = legacy.oids;
+	v2.blkno = legacy.blkno;
+	v2.pageChangeCount = legacy.pageChangeCount;
+	v2.tuphdr = legacy.tuphdr;
+	return v2;
+}
+
+#ifdef IS_DEV
+/* Convert V2 back to legacy layout for debug_write_legacy_modify_undo. */
+static inline BTreeModifyUndoStackItem
+btree_modify_undo_v2_to_legacy(const BTreeModifyUndoStackItemV2 v2)
+{
+	BTreeModifyUndoStackItem legacy;
+
+	Assert(debug_write_legacy_modify_undo);
+	memset(&legacy, 0, sizeof(legacy));
+	legacy.header.prev = v2.prev;
+	legacy.header.itemSize = v2.itemSize + 8;
+	legacy.header.type = v2.type;
+	*((&legacy.header.type) + 1) = v2.indexType;
+	legacy.action = v2.action;
+	legacy.oids = v2.oids;
+	legacy.blkno = v2.blkno;
+	legacy.pageChangeCount = v2.pageChangeCount;
+	legacy.tuphdr = v2.tuphdr;
+	return legacy;
+}
+#endif
+
+/*
+ * Decode a modify/lock undo record into V2 layout.  For a V2 record, returns
+ * a direct cast of raw; for a legacy pre-V2 record (recovery of old clusters),
+ * converts into caller-provided buf and returns buf.
+ */
+static inline BTreeModifyUndoStackItemV2 *
+btree_modify_undo_decode(UndoStackItem *raw, BTreeModifyUndoStackItemV2 *buf)
+{
+	if (is_legacy_btree_modify_type(raw->type))
+	{
+		*buf = btree_modify_undo_legacy_to_v2(*(const BTreeModifyUndoStackItem *) raw);
+		return buf;
+	}
+	return (BTreeModifyUndoStackItemV2 *) raw;
+}
+
 static inline LocationIndex
 validate_undo_item_size(LocationIndex itemSize)
 {
 	LocationIndex tupleSize;
 
-	if (unlikely(itemSize < sizeof(BTreeModifyUndoStackItem)))
+	if (unlikely(itemSize < sizeof(BTreeModifyUndoStackItemV2)))
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_CORRUPTED),
 				 errmsg("corrupted undo record: item size %u smaller than header %u",
 						(unsigned) itemSize,
-						(unsigned) sizeof(BTreeModifyUndoStackItem))));
-	tupleSize = itemSize - sizeof(BTreeModifyUndoStackItem);
+						(unsigned) sizeof(BTreeModifyUndoStackItemV2))));
+	tupleSize = itemSize - sizeof(BTreeModifyUndoStackItemV2);
 	if (unlikely(tupleSize > O_BTREE_MAX_TUPLE_SIZE))
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_CORRUPTED),

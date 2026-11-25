@@ -527,7 +527,7 @@ static bool
 apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
 						   UndoLocation *prevLoc)
 {
-	BTreeModifyUndoStackItem item = {0};
+	BTreeModifyUndoStackItemV2 item = {0};
 	UndoStackItem header = {0};
 	LocationIndex oldTupleSize;
 	OTableDescr *descr;
@@ -559,16 +559,28 @@ apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
 
 	/*
 	 * Read the common header on its own: the record may be of any item type,
-	 * and only a modify item is as long as a BTreeModifyUndoStackItem.
+	 * and only a modify item is as long as a BTreeModifyUndoStackItemV2.
 	 */
 	undo_read(UndoLogRegular, itemLoc, sizeof(header), (Pointer) &header);
 	*prevLoc = header.prev;
 	if (header.type != ModifyUndoItemType &&
-		header.type != UpdateDiffUndoItemType)
+		header.type != UpdateDiffUndoItemType &&
+		header.type != ModifyUndoItemTypeV2 &&
+		header.type != UpdateDiffUndoItemTypeV2)
 		return true;
-	isDiff = header.type == UpdateDiffUndoItemType;
+	isDiff = (header.type == UpdateDiffUndoItemType ||
+			  header.type == UpdateDiffUndoItemTypeV2);
 
-	undo_read(UndoLogRegular, itemLoc, sizeof(item), (Pointer) &item);
+	/* Legacy pre-V2 undo format, only during recovery of old clusters. */
+	if (is_legacy_btree_modify_type(header.type))
+	{
+		BTreeModifyUndoStackItem legacy;
+
+		undo_read(UndoLogRegular, itemLoc, sizeof(legacy), (Pointer) &legacy);
+		item = btree_modify_undo_legacy_to_v2(legacy);
+	}
+	else
+		undo_read(UndoLogRegular, itemLoc, sizeof(item), (Pointer) &item);
 
 	/*
 	 * Only PK modifications carry SK-side obligations; tuple inserts /
@@ -599,32 +611,48 @@ apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
 
 	if (isDiff)
 	{
-		BTreeUpdateDiffUndoStackItem diffItem;
+		BTreeUpdateDiffUndoStackItemV2 diffItem;
 
 		/*
 		 * The pre-image is a difference from the version that replaced it,
 		 * and is rebuilt below.  Find the row by the key the record keeps.
 		 */
-		undo_read(UndoLogRegular, itemLoc, sizeof(diffItem),
-				  (Pointer) &diffItem);
+		/* Legacy pre-V2 undo format, only during recovery of old clusters. */
+		if (is_legacy_btree_modify_type(header.type))
+		{
+			BTreeUpdateDiffUndoStackItem legacy;
+
+			undo_read(UndoLogRegular, itemLoc, sizeof(legacy), (Pointer) &legacy);
+			diffItem.base = btree_modify_undo_legacy_to_v2(legacy.base);
+			diffItem.newTupleLen = legacy.newTupleLen;
+			diffItem.tupleLen = legacy.tupleLen;
+			diffItem.keyLen = legacy.keyLen;
+			diffItem.keyFormatFlags = legacy.keyFormatFlags;
+		}
+		else
+			undo_read(UndoLogRegular, itemLoc, sizeof(diffItem),
+					  (Pointer) &diffItem);
 		if (diffItem.keyLen == 0 ||
-			diffItem.keyLen > item.header.itemSize - sizeof(diffItem))
+			diffItem.keyLen > item.itemSize - sizeof(diffItem))
 			return true;
 		oldTuple.formatFlags = diffItem.keyFormatFlags;
 		oldTuple.data = palloc(diffItem.keyLen);
-		undo_read(UndoLogRegular, itemLoc + sizeof(diffItem),
+		undo_read(UndoLogRegular,
+				  itemLoc + (is_legacy_btree_modify_type(header.type) ?
+							 sizeof(BTreeUpdateDiffUndoStackItem) :
+							 sizeof(BTreeUpdateDiffUndoStackItemV2)),
 				  diffItem.keyLen, oldTuple.data);
 	}
 	else
 	{
 		/* The undo entry stores the pre-image tuple right after the header. */
-		oldTupleSize = validate_undo_item_size(item.header.itemSize);
+		oldTupleSize = validate_undo_item_size(item.itemSize);
 		if (oldTupleSize == 0)
 			return true;
 		oldTuple.formatFlags = item.tuphdr.formatFlags;
 		oldTuple.data = palloc(oldTupleSize);
 		undo_read(UndoLogRegular,
-				  itemLoc + sizeof(BTreeModifyUndoStackItem),
+				  itemLoc + btree_modify_ondisk_size(header.type),
 				  oldTupleSize,
 				  oldTuple.data);
 	}
@@ -707,7 +735,7 @@ apply_one_pending_sk_fixup(OXid entryOxid, UndoLocation itemLoc,
 		OTuple		preImage;
 
 		if (!rebuild_version_from_undo(&primary->desc, pkPage, &pageLoc,
-									   itemLoc + offsetof(BTreeModifyUndoStackItem, tuphdr),
+									   itemLoc + btree_modify_tuphdr_offset(header.type),
 									   &preImage))
 		{
 			unlock_page(context.items[context.index].blkno);
@@ -864,19 +892,36 @@ apply_pending_sk_fixup_run(PendingSkFixup *entry)
 {
 	UndoLocation firstItemLoc;
 	UndoLocation itemLoc;
+	UndoStackItem header;
 
 	if (!UndoLocationIsValid(entry->lastLocation))
 		return;
 
 	/*
 	 * Both ends name the BTreeLeafTuphdr field inside the record (that is
-	 * what make_undo_record() hands out); back up to the record itself.
+	 * what make_undo_record() hands out); back up to the record itself. The
+	 * tuphdr offset depends on record format: 40 for current, 48 for legacy.
 	 */
-	itemLoc = entry->lastLocation - offsetof(BTreeModifyUndoStackItem, tuphdr);
+	itemLoc = entry->lastLocation - offsetof(BTreeModifyUndoStackItemV2, tuphdr);
+	if (UNDO_REC_EXISTS(UndoLogRegular, itemLoc))
+	{
+		undo_read(UndoLogRegular, itemLoc, sizeof(header), (Pointer) &header);
+		itemLoc = entry->lastLocation - btree_modify_tuphdr_offset(header.type);
+	}
+
 	if (UndoLocationIsValid(entry->firstLocation) &&
 		entry->firstLocation <= entry->lastLocation)
+	{
 		firstItemLoc = entry->firstLocation -
-			offsetof(BTreeModifyUndoStackItem, tuphdr);
+			offsetof(BTreeModifyUndoStackItemV2, tuphdr);
+		if (UNDO_REC_EXISTS(UndoLogRegular, firstItemLoc))
+		{
+			undo_read(UndoLogRegular, firstItemLoc,
+					  sizeof(header), (Pointer) &header);
+			firstItemLoc = entry->firstLocation -
+				btree_modify_tuphdr_offset(header.type);
+		}
+	}
 	else
 		firstItemLoc = itemLoc;
 
