@@ -2642,16 +2642,19 @@ consume_prefetched_disk_leaf(BTreeSeqScan *scan,
 	int			depth = btree_prefetch_ring_depth(ring);
 	OReadPageResult read_result;
 
-	while (btree_prefetch_ring_inflight(ring) < depth)
+	if (btree_prefetch_ring_needs_refill(ring))
 	{
-		BTreeSeqScanDiskDownlink claimed;
+		while (btree_prefetch_ring_inflight(ring) < depth)
+		{
+			BTreeSeqScanDiskDownlink claimed;
 
-		if (!claim_next_disk_downlink(scan, &claimed))
-			break;
-		(void) btree_prefetch_ring_submit(ring, scan->desc,
-										  claimed.downlink, claimed.csn,
-										  claimed.fullyInRange,
-										  scan->checkpointNumber);
+			if (!claim_next_disk_downlink(scan, &claimed))
+				break;
+			(void) btree_prefetch_ring_submit(ring, scan->desc,
+											  claimed.downlink, claimed.csn,
+											  claimed.fullyInRange,
+											  scan->checkpointNumber);
+		}
 	}
 
 	if (!btree_prefetch_ring_consume(ring, scan->desc, scan->leafImg,

@@ -58,7 +58,7 @@ typedef struct OrioleBtreeAioTargetData
 	uint32		chkpNum;
 	uint16		segno;			/* segment file index */
 	uint8		index_type;		/* OIndexType */
-	uint8		flags;			/* reserved for future use */
+	uint8		nblocks;		/* pages the read covers */
 } OrioleBtreeAioTargetData;
 
 StaticAssertDecl(sizeof(OrioleBtreeAioTargetData) <=
@@ -87,10 +87,18 @@ extern int	btree_prefetch_ring_inflight(const BTreePrefetchRing *ring);
 extern int	btree_prefetch_ring_depth(const BTreePrefetchRing *ring);
 
 /*
+ * Whether enough slots are free to be worth submitting more: pages queued
+ * together can be read together.
+ */
+extern bool btree_prefetch_ring_needs_refill(const BTreePrefetchRing *ring);
+
+/*
  * Queue a read of the page referenced by `downlink` (raw form from
- * BTreeSeqScanDiskDownlink) belonging to checkpoint `chkpNum`.  Starts an
- * async read when the configuration allows one; otherwise the page is read
- * synchronously when consumed.  Returns false only when the ring is full.
+ * BTreeSeqScanDiskDownlink) belonging to checkpoint `chkpNum`.  Pages queued
+ * one after another and adjacent on disk are read together by one async
+ * read, submitted when the group ends or a page is consumed; when no async
+ * read is possible, the page is read synchronously when consumed.  Returns
+ * false only when the ring is full.
  */
 extern bool btree_prefetch_ring_submit(BTreePrefetchRing *ring,
 									   BTreeDescr *desc,

@@ -57,6 +57,7 @@ class BtreePrefetchTest(BaseTest):
 		"""
 		A prefetching scan returns what a plain one does, also from an older
 		snapshot that needs the pages' undo, and gives its buffers back.
+		Adjacent pages are read together, several per read.
 		"""
 		node = self.node
 		self.make_table()
@@ -64,6 +65,8 @@ class BtreePrefetchTest(BaseTest):
 		with node.connect() as con:
 			self.assertEqual(self.scan(con, 0), expected)
 			self.assertEqual(self.scan(con, 16), expected)
+			# deeper than the pool: some pages get read synchronously
+			self.assertEqual(self.scan(con, 64), expected)
 
 			con.commit()
 			con.begin()
