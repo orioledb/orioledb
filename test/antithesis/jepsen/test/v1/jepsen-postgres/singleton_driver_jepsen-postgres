@@ -16,8 +16,12 @@ if [ -n "${JEPSEN_JDWP_PORT:-}" ]; then
 	jdwp_option="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:${JEPSEN_JDWP_PORT}"
 fi
 
+# Suppress jepsen stdout by default to limit log volume under Antithesis;
+# set JEPSEN_SUPPRESS_STDOUT to "" or 0 to keep it.
+suppress_stdout="${JEPSEN_SUPPRESS_STDOUT-1}"
+
 (
-	if [ -n "${JEPSEN_SUPPRESS_STDOUT:-}" ]; then
+	if [ -n "$suppress_stdout" ] && [ "$suppress_stdout" != 0 ]; then
 		exec >/dev/null
 	fi
 
