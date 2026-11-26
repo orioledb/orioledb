@@ -298,8 +298,7 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 {
 	OTuple		idx_tup;
 	OIndexBuildStackItem *stack;
-	int			root_level = 0,
-				saved_root_level;
+	int			root_level = 0;
 	Page		root_page;
 	uint64		downlink;
 	BTreePageHeader *root_page_header;
@@ -342,8 +341,16 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	pfree(values);
 	pfree(isnull);
 
-	saved_root_level = root_level;
-	for (i = 0; i < saved_root_level; i++)
+	/*
+	 * Flush the rightmost page of each level and link it into its parent.
+	 * Linking a page can split its parent, and if the parent is the root,
+	 * that adds a new level above it.  So the bound must be re-read on each
+	 * iteration: the right half of a root split here is a page like any other
+	 * and still has to be written out and linked.  Otherwise the new root
+	 * ends up with the left half as its last child and everything to the
+	 * right of it is unreachable.
+	 */
+	for (i = 0; i < root_level; i++)
 	{
 		if (i != 0)
 			PAGE_SET_N_ONDISK(stack[i].img, BTREE_PAGE_ITEMS_COUNT(stack[i].img));
