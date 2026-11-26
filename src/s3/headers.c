@@ -208,6 +208,12 @@ read_from_file(S3HeaderTag tag, uint32 values[S3_HEADER_NUM_VALUES],
 
 	filename = btree_filename(tag.key, tag.segNum, tag.checkpointNum);
 	fd = BasicOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+	if (fd <= 0 && errno == ENOENT)
+	{
+		/* The data directory may not exist - create and retry. */
+		btree_ensure_dir(tag.key.oids);
+		fd = BasicOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+	}
 	if (fd <= 0)
 		ereport(FATAL,
 				(errcode_for_file_access(),
@@ -252,6 +258,12 @@ write_to_file(S3HeaderTag tag, uint32 values[S3_HEADER_NUM_VALUES])
 
 	filename = btree_filename(tag.key, tag.segNum, tag.checkpointNum);
 	fd = BasicOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+	if (fd <= 0 && errno == ENOENT)
+	{
+		/* The data directory may not exist - create and retry. */
+		btree_ensure_dir(tag.key.oids);
+		fd = BasicOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+	}
 	if (fd <= 0)
 		ereport(FATAL,
 				(errcode_for_file_access(),
