@@ -635,6 +635,8 @@ lock_page_with_tuple(BTreeDescr *desc,
 												 lockerState->undoLocation);
 			}
 
+			/* Queued insertion completed without returning to find/refind. */
+			o_btree_count_page_hit(desc);
 			return OLockPageWithTupleResultInserted;
 		}
 	}
