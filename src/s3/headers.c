@@ -1036,7 +1036,7 @@ iterate_tablespace_files(Oid tablespace, char *path, IterateFilesCallback callba
 		if (sscanf(file->d_name, "%u", &dbOid) != 1)
 			continue;
 
-		dbDirName = psprintf(ORIOLEDB_DATA_DIR "/%u", dbOid);
+		dbDirName = psprintf("%s/%u", path, dbOid);
 		dbDir = opendir(dbDirName);
 		pfree(dbDirName);
 		if (dbDir == NULL)

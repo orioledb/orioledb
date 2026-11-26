@@ -4,7 +4,7 @@ import time
 import re
 import shutil
 import signal
-from tempfile import mkstemp
+from tempfile import mkdtemp, mkstemp
 
 from unittest.mock import patch
 
@@ -461,6 +461,66 @@ class S3Test(S3BaseTest):
 		node.start()
 		self.assertEqual(20000,
 		                 node.execute("SELECT COUNT(*) FROM o_test")[0][0])
+		node.stop()
+
+	def test_s3_user_tablespace_files_iteration(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+			orioledb.s3_desired_size = 20MB
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+		node.start()
+		ts_path = os.path.join(mkdtemp(), 'user_ts1')
+		os.mkdir(ts_path)
+		node.safe_psql(f"CREATE TABLESPACE user_ts1 LOCATION '{ts_path}';")
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_ts_tbl (
+				id int PRIMARY KEY,
+				value text NOT NULL
+			) USING orioledb TABLESPACE user_ts1;
+			INSERT INTO o_ts_tbl (id, value)
+				(SELECT id, repeat('x', 2500) FROM generate_series(1, 20000) id);
+			CHECKPOINT;
+		""")
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		with open(node.pg_log_file) as f:
+			log = f.read()
+		# The table files live in the user tablespace.  Initial parts
+		# counting must see them.
+		scan_lines = re.findall(
+		    r"initial files scan finished \(num files (\d+)", log)
+		self.assertTrue(scan_lines)
+		self.assertGreater(int(scan_lines[-1]), 0)
+
+		def get_ts_data_size():
+			total_size = 0
+			for dirpath, dirnames, filenames in os.walk(ts_path):
+				for f in filenames:
+					fp = os.path.join(dirpath, f)
+					if not os.path.islink(fp):
+						total_size += self.get_file_occupied_size(fp)
+			return total_size
+
+		# Eviction must see the user tablespace files too.  The loaded
+		# data (about 50 MB) exceeds s3_desired_size, so the bgwriter
+		# evicts parts down to 20 MB.
+		deadline = time.time() + 120
+		while get_ts_data_size() > 1024 * 1024:
+			self.assertLess(time.time(), deadline, "eviction timeout")
+			time.sleep(1)
+		self.assertEqual(20000,
+		                 node.execute("SELECT COUNT(*) FROM o_ts_tbl")[0][0])
 		node.stop()
 
 	def test_s3_data_dir_load(self):
