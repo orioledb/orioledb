@@ -210,6 +210,10 @@ check_btree(BTreeDescr *desc, bool force_file_check, bool wait_for_checkpoint)
 	if (status.hasError)
 		return false;
 
+	/*
+	 * Validate the checkpoint image separately; it can be older than the live
+	 * tree checked above.
+	 */
 	if (force_file_check && !orioledb_s3_mode &&
 		!check_checkpoint_image(desc))
 		status.hasError = true;
@@ -421,9 +425,11 @@ get_image_extents(BTreeDescr *desc, uint64 downlink, ExtentsArray *busy)
 }
 
 /*
- * Checks the map file of the tree's current checkpoint against the image the
- * checkpoint wrote: the image pages and the free extents of the map must
- * cover the data file up to the map's datafileLength exactly once.
+ * Validates the last checkpoint's on-disk state: the image pages and the free
+ * extents listed in the map file must cover the data file up to the map's
+ * datafileLength exactly once.  That image can be older than the live tree;
+ * the check verifies that recovery would start from a self-consistent
+ * snapshot.
  *
  * The map is the free space of that image, not of the live tree: pages
  * written since have taken extents it lists, and the live free stream lists
