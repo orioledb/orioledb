@@ -20,6 +20,7 @@
 #include "btree/page_chunks.h"
 #include "btree/print.h"
 #include "btree/undo.h"
+#include "catalog/sys_trees.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "tuple/format.h"
@@ -135,6 +136,13 @@ o_print_btree_pages(BTreeDescr *desc, StringInfo outbuf,
 		if (desc->undoType != GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType))
 			update_min_undo_locations(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType), false, true);
 	}
+
+	/*
+	 * The walk below starts at the root and reads pages in place; keep the
+	 * tree from being evicted under it.  System trees are never evicted.
+	 */
+	if (!IS_SYS_TREE_OIDS(desc->oids))
+		o_btree_load_shmem_pinned(desc);
 	Assert(OInMemoryBlknoIsValid(desc->rootInfo.rootPageBlkno) &&
 		   OInMemoryBlknoIsValid(desc->rootInfo.metaPageBlkno));
 
@@ -178,6 +186,9 @@ o_print_btree_pages(BTreeDescr *desc, StringInfo outbuf,
 		list_free_deep(printData.undosList[i]);
 	hash_destroy(printData.pageHash);
 	hash_destroy(printData.backendIdHash);
+
+	if (!IS_SYS_TREE_OIDS(desc->oids))
+		btree_unpin_meta_page();
 }
 
 /*
