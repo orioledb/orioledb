@@ -1,0 +1,59 @@
+-- pg_jsonschema has no SQL suite upstream (its tests are pgrx #[pg_test]
+-- functions that start their own server).  Exercise each documented function
+-- and a CHECK constraint on an orioledb table.
+CREATE EXTENSION pg_jsonschema;
+CREATE TABLE docs (
+    id int PRIMARY KEY,
+    doc jsonb,
+    CHECK (jsonb_matches_schema('{"type":"object","properties":{"a":{"type":"integer"}},"required":["a"]}', doc))
+);
+SELECT a.amname FROM pg_class c JOIN pg_am a ON a.oid = c.relam WHERE c.relname = 'docs';
+  amname  
+----------
+ orioledb
+(1 row)
+
+INSERT INTO docs VALUES (1, '{"a": 1}');
+INSERT INTO docs VALUES (2, '{"a": "x"}');
+ERROR:  new row for relation "docs" violates check constraint "docs_doc_check"
+DETAIL:  Failing row contains (2, {"a": "x"}).
+INSERT INTO docs VALUES (3, '{}');
+ERROR:  new row for relation "docs" violates check constraint "docs_doc_check"
+DETAIL:  Failing row contains (3, {}).
+SELECT * FROM docs ORDER BY id;
+ id |   doc    
+----+----------
+  1 | {"a": 1}
+(1 row)
+
+SELECT json_matches_schema('{"type":"string"}', '"x"');
+ json_matches_schema 
+---------------------
+ t
+(1 row)
+
+SELECT json_matches_schema('{"type":"string"}', '1');
+ json_matches_schema 
+---------------------
+ f
+(1 row)
+
+SELECT jsonschema_is_valid('{"type":"object"}');
+ jsonschema_is_valid 
+---------------------
+ t
+(1 row)
+
+SELECT jsonschema_is_valid('{"type":"nope"}');
+NOTICE:  Invalid JSON schema at path: /type
+ jsonschema_is_valid 
+---------------------
+ f
+(1 row)
+
+SELECT jsonschema_validation_errors('{"type":"object","required":["a"]}', '{}');
+   jsonschema_validation_errors   
+----------------------------------
+ {"\"a\" is a required property"}
+(1 row)
+

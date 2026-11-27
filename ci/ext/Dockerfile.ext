@@ -1,0 +1,25 @@
+# Adds the toolchain the extension-compatibility harness needs on top of the
+# published OrioleDB image: python3 for the runner and report, unidiff for the
+# existing ci/filter_regression_diff.py, and a C toolchain plus git so external
+# PGXS extensions can be built against the patched server in the image.
+ARG BASE=orioledb/orioledb:latest-pg17
+FROM ${BASE}
+USER root
+RUN apk add --no-cache python3 py3-pip make gcc g++ musl-dev git curl tar \
+        zstd-dev openssl-dev curl-dev icu-dev clang llvm libsodium-dev perl patch krb5-dev \
+        autoconf automake libtool gettext-dev flex bison libxslt docbook-xsl \
+        geos-dev proj-dev gdal-dev libxml2-dev json-c-dev protobuf-c-dev sfcgal-dev pcre2-dev clang-dev \
+    && pip3 install --no-cache-dir --break-system-packages unidiff==0.7.5
+# Rust via rustup (Alpine's packaged cargo predates edition 2024, which
+# cargo-pgrx 0.16 needs) plus the cargo-pgrx the current Rust extensions pin;
+# run.py installs another version if a crate asks for one.  On musl a cdylib
+# cannot be built with a static CRT.
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:$PATH \
+    RUSTFLAGS="-C target-feature=-crt-static"
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
+    && cargo install --locked cargo-pgrx --version 0.16.1 && rm -rf /usr/local/cargo/registry
+# libsodium from upstream's current stable release: Alpine's 1.0.20 predates the
+# ipcrypt API pgsodium 3.1.11 uses.
+RUN curl -fsSL https://download.libsodium.org/libsodium/releases/LATEST.tar.gz | tar -xz -C /tmp \
+    && cd /tmp/libsodium-stable && ./configure --prefix=/usr >/dev/null && make -j4 >/dev/null && make install >/dev/null \
+    && rm -rf /tmp/libsodium-stable

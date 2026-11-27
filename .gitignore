@@ -66,3 +66,8 @@ orioledb_version.txt
 
 # Exclude the PostGIS Docker build directory
 /docker-postgis
+
+# Extension compatibility harness scratch space (fetched suites, results)
+/ci/ext/work/
+/ci/ext/__pycache__/
+/ci/ext/smoke/results/
