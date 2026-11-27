@@ -161,6 +161,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_scan \
 				  concurrent_create_index \
 				  concurrent_update_delete \
+				  descr_rewrite_stale_primary \
 				  descr_torn_pair \
 				  fkeys \
 				  forupdate_reinsert \

@@ -846,11 +846,14 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 {
 	MemoryContext old_context;
 	int			refcnt;
+	bool		fill_in_progress;
 
 	refcnt = descr->refcnt;
+	fill_in_progress = descr->fill_in_progress;
 	memset(descr, 0, sizeof(OTableDescr));
 	old_context = MemoryContextSwitchTo(descrCxt);
 	descr->refcnt = refcnt;
+	descr->fill_in_progress = fill_in_progress;
 	descr->oids = o_table->oids;
 	descr->version = o_table->version;
 	descr->oids.spcoid = o_table->oids.spcoid;
@@ -899,6 +902,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 	OIndexDescr *indexDescr;
 
 	descr->refcnt = 0;
+	descr->fill_in_progress = false;
 	fill_table_descr_common_fields(descr, o_table);
 
 	old_context = MemoryContextSwitchTo(descrCxt);
@@ -2514,6 +2518,7 @@ recreate_table_descr(OTableDescr *descr)
 	OTable	   *o_table;
 	bool		old_enable_stopevents;
 	OEACallsCounters *saved_ea_counters;
+	OTableDescr *prev_filling;
 	int			si,
 				di;
 
@@ -2535,6 +2540,16 @@ recreate_table_descr(OTableDescr *descr)
 	ea_counters = NULL;
 
 	/*
+	 * Mark the entry as being refilled so that a reentrant
+	 * o_invalidate_descrs_internal() skips it, mirroring
+	 * create_table_descr(). fill_table_descr_common_fields() preserves this
+	 * flag across its memset.
+	 */
+	prev_filling = filling_table_descr;
+	filling_table_descr = descr;
+	descr->fill_in_progress = true;
+
+	/*
 	 * Filter stale indices before refilling.  A concurrent abort may have
 	 * removed an o_indices entry while the OTable sys tree still lists it.
 	 */
@@ -2550,16 +2565,36 @@ recreate_table_descr(OTableDescr *descr)
 				o_table->indices[di] = o_table->indices[si];
 			di++;
 		}
+		else if (o_table->indices[si].type == oIndexPrimary)
+		{
+			/*
+			 * Only an aborted secondary index can be stale here.  Without the
+			 * primary, the OTable itself is outdated: a concurrent rewrite or
+			 * drop of the table removed its indices.  Let the caller drop the
+			 * descriptor; the next lookup builds it from the current OTable.
+			 */
+			descr->fill_in_progress = false;
+			filling_table_descr = prev_filling;
+			o_table_free(o_table);
+			ea_counters = saved_ea_counters;
+			enable_stopevents = old_enable_stopevents;
+			return false;
+		}
 	}
 	o_table->nindices = di;
 
 	table_descr_free(descr);
 	if (!fill_table_descr(descr, o_table, &o_non_deleted_snapshot))
 	{
+		descr->fill_in_progress = false;
+		filling_table_descr = prev_filling;
 		ea_counters = saved_ea_counters;
 		enable_stopevents = old_enable_stopevents;
 		return false;
 	}
+
+	descr->fill_in_progress = false;
+	filling_table_descr = prev_filling;
 	ea_counters = saved_ea_counters;
 
 	enable_stopevents = old_enable_stopevents;
