@@ -97,6 +97,13 @@ if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ]; then
 			echo "skipping $f: posix_spawn child killed at node stop, no errors"
 			continue
 		fi
+		# safe_recovery_test intentionally PANICs a recovery worker via
+		# debug_modify_panic_reloid.  The abort() produces a "Process
+		# terminating" entry with 0 valgrind errors.
+		if grep -q 'safe_recovery.*crash_loop' $f && grep -q 'ERROR SUMMARY: 0 errors' $f; then
+			echo "skipping $f: safe_recovery crash-loop test intentional PANIC, no errors"
+			continue
+		fi
 		echo "========= Contents of $f"
 		cat $f
 		status=1
