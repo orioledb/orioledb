@@ -1190,9 +1190,11 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 	pgstat_progress_update_param(PROGRESS_VACUUM_HEAP_BLKS_SCANNED, blocksScanned);
 
 	/*
-	 * Also compute the total number of surviving heap entries.  In the
-	 * (unlikely) scenario that new_live_tuples is -1, take it as zero.
+	 * Also compute the total number of surviving heap entries.  This reaches
+	 * the primary index's amvacuumcleanup, which stores it as reltuples of
+	 * the table, so it must be the real live count, not the initial 0.
 	 */
+	vacrel->new_live_tuples = vacrel->live_tuples;
 	vacrel->new_rel_tuples =
 		Max(vacrel->new_live_tuples, 0) + vacrel->recently_dead_tuples +
 		vacrel->missed_dead_tuples;
