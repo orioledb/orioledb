@@ -1708,8 +1708,16 @@ get_checkpoint_xlog_ptr(void)
 {
 	if (is_recovery_in_progress())
 	{
-		/* FIXME: synchronize recovery workers */
-		return GetCurrentReplayRecPtr(NULL);
+		/*
+		 * A database-template checkpoint can be requested partway through
+		 * replaying an OrioleDB WAL container.  GetCurrentReplayRecPtr()
+		 * includes that entire record, including sys-tree changes not yet
+		 * applied.  Pin replay to the last completed record so those changes
+		 * are replayed after a restart instead of being skipped.
+		 *
+		 * FIXME: synchronize recovery workers.
+		 */
+		return GetXLogReplayRecPtr(NULL);
 	}
 	else
 		return GetXLogInsertRecPtr();
