@@ -29,6 +29,26 @@ Each undo type's circular buffer is at least `max_procs * 2 *
 O_MAX_UNDO_RECORD_SIZE` bytes, so the actual buffer at startup may be larger than
 what this GUC requested when `max_procs` is high.
 
+### `orioledb.undo_numa_chunks`
+
+|             |    |
+| ----------- | -- |
+| **Default** | on |
+
+Hands out row-level undo to the backends in chunks per NUMA node, instead of one shared position for all of them. With
+many backends modifying data, the shared position is among the busiest cache lines in the system, and on a multi-socket
+machine it moves between the sockets on every change. With this parameter on, the backends of a node take their undo
+records from the node's current chunk.
+
+### `orioledb.undo_chunk_size`
+
+|             |       |
+| ----------- | ----- |
+| **Default** | 64 kB |
+
+The size of the row-level undo chunks of `orioledb.undo_numa_chunks`. It is capped at a small fraction of the row-level
+undo ring.
+
 ### `orioledb.recovery_pool_size`
 
 |             |     |

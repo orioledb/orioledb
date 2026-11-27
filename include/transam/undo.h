@@ -442,6 +442,16 @@ extern void release_reserved_undo_location(UndoLogType undoType);
 extern void add_new_undo_stack_item(UndoLogType undoType,
 									UndoLocation location);
 extern UndoLocation get_subxact_undo_location(UndoLogType undoType);
+extern Pointer get_undo_record_after(UndoLogType undoType,
+									 UndoLocation *undoLocation, Size size,
+									 UndoLocation after);
+extern Pointer get_undo_record_for_waiter(UndoLogType undoType,
+										  UndoLocation *undoLocation, Size size,
+										  int waiterNode,
+										  UndoLocation waiterLastLocation);
+extern int	undo_tx_node(UndoLogType undoType);
+extern UndoLocation undo_tx_last_location(UndoLogType undoType);
+extern void undo_tx_note_location(UndoLogType undoType, UndoLocation location);
 extern void add_new_undo_stack_item_to_process(UndoLogType undoType,
 											   UndoLocation location,
 											   int pgprocno,

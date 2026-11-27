@@ -302,6 +302,8 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 			lockerState->undoLocation = InvalidUndoLocation;
 			lockerState->pageChangeCount = *pageChangeCount;
 			lockerState->autonomousNestingLevel = GET_CUR_PROCDATA()->autonomousNestingLevel;
+			lockerState->undoNode = undo_tx_node(desc->undoType);
+			lockerState->undoLastLocation = undo_tx_last_location(desc->undoType);
 			Assert(!lockerState->inserted);
 			lockerState->next = (state & PAGE_STATE_LIST_TAIL_MASK);
 			newState = state & (~PAGE_STATE_LIST_TAIL_MASK);
@@ -610,6 +612,7 @@ lock_page_with_tuple(BTreeDescr *desc,
 			if (undoType != UndoLogNone)
 			{
 				giveup_reserved_undo_size(undoType);
+				undo_tx_note_location(undoType, lockerState->undoLocation);
 				if (UndoLocationIsValid(lockerState->undoLocation) &&
 					!UndoLocationIsValid(curRetainUndoLocations[undoType]))
 					curRetainUndoLocations[undoType] = lockerState->undoLocation;

@@ -133,6 +133,9 @@ static Size page_descs_size;
 Size		undo_circular_buffer_size;
 uint32		undo_buffers_count;
 double		regular_block_undo_circular_buffer_fraction;
+bool		undo_numa_chunks = true;
+static int	undo_chunk_size_guc;
+Size		undo_chunk_size;
 double		system_undo_circular_buffer_fraction;
 Size		xid_circular_buffer_size;
 uint32		xid_buffers_count;
@@ -183,6 +186,7 @@ XLogRecPtr	debug_recovery_crash_lsn = InvalidXLogRecPtr;
 static char *debug_recovery_crash_lsn_string;
 int			debug_commit_window_ms = 0;
 bool		debug_checkpoint_error = false;
+int			debug_undo_numa_nodes = 0;
 #endif
 
 /* For page eviction/read checkpoint test only */
@@ -806,6 +810,30 @@ _PG_init(void)
 							NULL);
 
 
+	DefineCustomBoolVariable("orioledb.undo_numa_chunks",
+							 "Hand out row-level undo in chunks per NUMA node.",
+							 NULL,
+							 &undo_numa_chunks,
+							 true,
+							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomIntVariable("orioledb.undo_chunk_size",
+							"Size of the row-level undo chunks handed out per NUMA node.",
+							NULL,
+							&undo_chunk_size_guc,
+							64,
+							8,
+							1024 * 1024,
+							PGC_POSTMASTER,
+							GUC_UNIT_KB,
+							NULL,
+							NULL,
+							NULL);
+
 	DefineCustomRealVariable("orioledb.regular_block_undo_circular_buffer_fraction",
 							 "Fraction of circular buffer for block-level undo of regular tables.",
 							 NULL,
@@ -1391,6 +1419,21 @@ _PG_init(void)
 							PGC_USERSET,
 							GUC_UNIT_MS,
 							NULL, NULL, NULL);
+	DefineCustomIntVariable("orioledb.debug_undo_numa_nodes",
+							"Pretends there are this many NUMA nodes for the"
+							" row-level undo chunks.",
+							"Each transaction then takes its undo from a"
+							" random node.  For tests of undo coming from"
+							" several nodes; 0 means the real topology.",
+							&debug_undo_numa_nodes,
+							0,
+							0,
+							8,
+							PGC_POSTMASTER,
+							0,
+							NULL,
+							NULL,
+							NULL);
 	DefineCustomBoolVariable("orioledb.debug_checkpoint_error",
 							 "Makes every checkpoint fail once it is done with"
 							 " the system trees.",
@@ -1430,6 +1473,7 @@ _PG_init(void)
 	orioledb_buffers_size = mul_size(orioledb_buffers_count, ORIOLEDB_BLCKSZ);
 
 	undo_circular_buffer_size = ((Size) undo_buffers_guc * BLCKSZ) / 2;
+	undo_chunk_size = (Size) undo_chunk_size_guc * 1024;
 	undo_circular_buffer_size /= ORIOLEDB_BLCKSZ;
 	undo_buffers_count = (uint32) undo_circular_buffer_size;
 	undo_circular_buffer_size *= ORIOLEDB_BLCKSZ;

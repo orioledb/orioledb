@@ -55,6 +55,118 @@
 #include "btree/iterator.h"
 #include "replication/slot.h"
 
+#include <ctype.h>
+#include <dirent.h>
+#include <sched.h>
+#include <unistd.h>
+
+/*
+ * Regular undo per NUMA node.
+ *
+ * Handing out every regular undo record from the shared lastUsedLocation,
+ * and reserving its location against update_min_undo_locations() one by one,
+ * makes a few cache lines of UndoMeta the busiest in the system once many
+ * backends modify data -- on a multi-socket machine they bounce between the
+ * sockets on every record.  Instead, each NUMA node takes a chunk of the log
+ * at a time, and its backends carve their records out of it with an atomic
+ * local to the node.
+ *
+ * update_min_undo_locations() takes the chunks into account in place of the
+ * per-record reservations: a chunk with records being written keeps its
+ * start.  The current chunk of a node with none is closed at its cursor, so
+ * that nothing gets written below what may be evicted from then on.
+ *
+ * Undo locations must keep growing along a row's version chain and within a
+ * transaction (undo stacks, savepoints, command ids).  So a record comes from
+ * a chunk whose cursor is past both the record of the previous version and
+ * the transaction's last record: its own node's if possible, otherwise
+ * another node's, and the shared lastUsedLocation as the last resort.
+ *
+ * A chunk is reserved from advanceReservedLocation as a whole when it is
+ * taken.  What a backend reserves for its records comes from a pool of credit
+ * per node and only gets used up by records that come from lastUsedLocation
+ * after all.
+ */
+#define UNDO_NODES_MAX			8
+#define UNDO_NODES_MAX_CPUS		1024
+#define UNDO_CHUNKS_PER_NODE	2
+#define UNDO_CREDIT_REFILL		(1024 * 1024)
+
+/*
+ * Neither the chunks nor the credit of the nodes may take more than a small
+ * part of the ring: a node's credit never goes back to advanceReservedLocation,
+ * and a chunk is pinned while records are written into it.
+ */
+#define UNDO_NODE_RING_SHARE(undoType) \
+	(o_undo_circular_sizes[(int) (undoType)] / (16 * undoNodes->numNodes))
+
+typedef struct UndoChunk
+{
+	pg_atomic_uint64 cursor;	/* next location to hand out */
+	pg_atomic_uint64 end;		/* end of the chunk, or where it was closed */
+	pg_atomic_uint32 writers;	/* records being written into the chunk */
+	UndoLocation start;
+} UndoChunk;
+
+/*
+ * Each part of a node gets a cache line of its own: the credit and the
+ * chunks are written by different backends at different times.
+ */
+typedef union UndoChunkPadded
+{
+	UndoChunk	chunk;
+	char		pad[PG_CACHE_LINE_SIZE];
+} UndoChunkPadded;
+
+typedef union UndoNodeStatePadded
+{
+	struct
+	{
+		pg_atomic_uint32 current;	/* index of the chunk to take records from */
+		slock_t		lock;		/* serializes taking a new chunk */
+	}			s;
+	char		pad[PG_CACHE_LINE_SIZE];
+} UndoNodeStatePadded;
+
+typedef union UndoNodeCreditPadded
+{
+	pg_atomic_uint64 credit;	/* reserved space, not yet given out */
+	char		pad[PG_CACHE_LINE_SIZE];
+} UndoNodeCreditPadded;
+
+typedef struct UndoNode
+{
+	UndoNodeStatePadded state;
+	UndoNodeCreditPadded credit;
+	UndoChunkPadded chunks[UNDO_CHUNKS_PER_NODE];
+} UndoNode;
+
+/* Allocated at a cache line boundary, nodes first to keep them aligned */
+typedef struct UndoNodes
+{
+	UndoNode	nodes[UNDO_NODES_MAX];
+	int			numNodes;
+	int			numCpus;
+	uint8		cpuNode[UNDO_NODES_MAX_CPUS];
+} UndoNodes;
+
+static UndoNodes *undoNodes = NULL;
+
+/* Node the current transaction takes its regular undo from, or -1 */
+static int	undoTxNode = -1;
+
+/* The current transaction's last regular undo record */
+static UndoLocation undoTxLastLocation = InvalidUndoLocation;
+
+/* The chunk we're writing a record into, if any */
+static UndoChunk *undoWritingChunk = NULL;
+
+static void set_my_reserved_location(UndoLogType undoType);
+static Pointer get_undo_record_shared(UndoLogType undoType,
+									  UndoLocation *undoLocation, Size size);
+static bool reserve_undo_size_shared(UndoLogType undoType, Size size,
+									 bool waitForUndoLocation);
+
 static const char *get_undo_type_name(UndoLogType undoType);
 static void write_shared_undo_locations(UndoStackSharedLocations *to, UndoStackLocations *from);
 static void o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit,
@@ -431,8 +543,401 @@ undo_shmem_needs(void)
 	}
 
 	size = add_size(size, o_buffers_shmem_needs(&undoBuffersDesc));
+	size = add_size(size, sizeof(UndoNodes) + PG_CACHE_LINE_SIZE);
 
 	return size;
+}
+
+/*
+ * Map CPUs to NUMA nodes.  Without the information everything is one node,
+ * which still spares the per-record work on the shared state.
+ */
+static void
+undo_nodes_detect(UndoNodes *un)
+{
+	int			numCpus = 1;
+	int			maxNode = 0;
+	int			cpu;
+
+#ifdef __linux__
+	numCpus = (int) sysconf(_SC_NPROCESSORS_CONF);
+	numCpus = Max(numCpus, 1);
+	numCpus = Min(numCpus, UNDO_NODES_MAX_CPUS);
+	for (cpu = 0; cpu < numCpus; cpu++)
+	{
+		char		path[MAXPGPATH];
+		DIR		   *dir;
+		struct dirent *de;
+		int			node = 0;
+
+		snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d", cpu);
+		dir = opendir(path);
+		if (dir)
+		{
+			while ((de = readdir(dir)) != NULL)
+			{
+				if (strncmp(de->d_name, "node", 4) == 0 &&
+					isdigit((unsigned char) de->d_name[4]))
+					node = atoi(de->d_name + 4);
+			}
+			closedir(dir);
+		}
+		if (node < 0 || node >= UNDO_NODES_MAX)
+			node = 0;
+		un->cpuNode[cpu] = (uint8) node;
+		maxNode = Max(maxNode, node);
+	}
+#else
+	un->cpuNode[0] = 0;
+	(void) cpu;
+#endif
+	un->numCpus = numCpus;
+	un->numNodes = maxNode + 1;
+#ifdef IS_DEV
+	if (debug_undo_numa_nodes > 0)
+		un->numNodes = debug_undo_numa_nodes;
+#endif
+}
+
+static void
+undo_nodes_init(UndoNodes *un)
+{
+	int			n,
+				i;
+
+	memset(un, 0, sizeof(UndoNodes));
+	undo_nodes_detect(un);
+	for (n = 0; n < UNDO_NODES_MAX; n++)
+	{
+		UndoNode   *node = &un->nodes[n];
+
+		pg_atomic_init_u32(&node->state.s.current, 0);
+		SpinLockInit(&node->state.s.lock);
+		pg_atomic_init_u64(&node->credit.credit, 0);
+		for (i = 0; i < UNDO_CHUNKS_PER_NODE; i++)
+		{
+			pg_atomic_init_u64(&node->chunks[i].chunk.cursor, 0);
+			pg_atomic_init_u64(&node->chunks[i].chunk.end, 0);
+			pg_atomic_init_u32(&node->chunks[i].chunk.writers, 0);
+			node->chunks[i].chunk.start = 0;
+		}
+	}
+}
+
+static inline bool
+undo_chunks_enabled(UndoLogType undoType)
+{
+	return undoType == UndoLogRegular && undo_numa_chunks &&
+		undoNodes != NULL && !is_recovery_process();
+}
+
+static int
+undo_cpu_node(void)
+{
+#ifdef __linux__
+	int			cpu;
+#endif
+
+#ifdef IS_DEV
+	if (debug_undo_numa_nodes > 0)
+		return (int) (random() % undoNodes->numNodes);
+#endif
+#ifdef __linux__
+	cpu = sched_getcpu();
+	if (cpu >= 0 && cpu < undoNodes->numCpus)
+		return undoNodes->cpuNode[cpu];
+#endif
+	return 0;
+}
+
+/*
+ * Node the current transaction's regular undo comes from: the one it first
+ * wrote regular undo on.  -1 when records come from lastUsedLocation.
+ */
+int
+undo_tx_node(UndoLogType undoType)
+{
+	if (!undo_chunks_enabled(undoType))
+		return -1;
+	if (undoTxNode < 0)
+		undoTxNode = undo_cpu_node();
+	return undoTxNode;
+}
+
+/*
+ * Location the current transaction's next regular undo record must be past.
+ */
+UndoLocation
+undo_tx_last_location(UndoLogType undoType)
+{
+	return undoType == UndoLogRegular ? undoTxLastLocation : InvalidUndoLocation;
+}
+
+/*
+ * Remember a record another process wrote for the current transaction.
+ */
+void
+undo_tx_note_location(UndoLogType undoType, UndoLocation location)
+{
+	if (undoType == UndoLogRegular && UndoLocationIsValid(location) &&
+		(!UndoLocationIsValid(undoTxLastLocation) || location > undoTxLastLocation))
+		undoTxLastLocation = location;
+}
+
+static void
+undo_chunk_writing_done(void)
+{
+	if (undoWritingChunk)
+	{
+		pg_atomic_fetch_sub_u32(&undoWritingChunk->writers, 1);
+		undoWritingChunk = NULL;
+	}
+}
+
+/*
+ * Lowest location the chunks may still write to: the start of a chunk with
+ * records being written.  A node's current chunk with none is closed at its
+ * cursor -- a writer that comes later finds it full and takes a new chunk.
+ */
+static UndoLocation
+undo_chunks_min_location(void)
+{
+	UndoLocation result = InvalidUndoLocation;
+	int			n,
+				i;
+
+	for (n = 0; n < undoNodes->numNodes; n++)
+	{
+		UndoNode   *node = &undoNodes->nodes[n];
+		uint32		current = pg_atomic_read_u32(&node->state.s.current);
+
+		pg_read_barrier();
+		for (i = 0; i < UNDO_CHUNKS_PER_NODE; i++)
+		{
+			UndoChunk  *chunk = &node->chunks[i].chunk;
+			UndoLocation end = pg_atomic_read_u64(&chunk->end),
+						cursor;
+
+			if (end == 0)
+				continue;
+
+			cursor = pg_atomic_read_u64(&chunk->cursor);
+			pg_memory_barrier();
+			if (pg_atomic_read_u32(&chunk->writers) == 0)
+			{
+				if ((uint32) i != current || cursor >= end)
+					continue;
+
+				/*
+				 * A writer that registered after we read the cursor gets a
+				 * location at or past it, and either sees the chunk closed or
+				 * is seen in writers below.
+				 */
+				(void) pg_atomic_compare_exchange_u64(&chunk->end, &end, cursor);
+				pg_memory_barrier();
+				if (pg_atomic_read_u32(&chunk->writers) == 0)
+					continue;
+			}
+			if (!UndoLocationIsValid(result) || chunk->start < result)
+				result = chunk->start;
+		}
+	}
+	return result;
+}
+
+/*
+ * Take a new chunk for the node, unless somebody already did.  Returns false
+ * if it can't be done without waiting.
+ */
+static bool
+undo_chunk_switch(UndoLogType undoType, UndoNode *node, uint32 oldIndex)
+{
+	UndoMeta   *meta = get_undo_meta_by_type(undoType);
+	Size		circularBufferSize = o_undo_circular_sizes[(int) undoType];
+	ODBProcData *curProcData = GET_CUR_PROCDATA();
+	uint32		newIndex = (oldIndex + 1) % UNDO_CHUNKS_PER_NODE;
+	UndoChunk  *chunk = &node->chunks[newIndex].chunk;
+	UndoLocation start,
+				end;
+	Size		chunkSize;
+	bool		result = true;
+
+	SpinLockAcquire(&node->state.s.lock);
+	if (pg_atomic_read_u32(&node->state.s.current) != oldIndex)
+	{
+		SpinLockRelease(&node->state.s.lock);
+		return true;
+	}
+	if (pg_atomic_read_u32(&chunk->writers) != 0)
+	{
+		SpinLockRelease(&node->state.s.lock);
+		return false;
+	}
+
+	/*
+	 * The chunk is reserved as a whole, the way get_undo_record_shared()
+	 * relies on: lastUsedLocation never runs ahead of
+	 * advanceReservedLocation, so a record taken from it always finds its
+	 * ring slot written out.  We may hold page locks, so we don't wait for
+	 * the room.
+	 */
+	chunkSize = MAXALIGN_DOWN(Min(undo_chunk_size, UNDO_NODE_RING_SHARE(undoType)));
+	if (pg_atomic_fetch_add_u64(&meta->advanceReservedLocation, chunkSize) + chunkSize >
+		pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize)
+	{
+		pg_atomic_fetch_sub_u64(&meta->advanceReservedLocation, chunkSize);
+		SpinLockRelease(&node->state.s.lock);
+		return false;
+	}
+
+	/*
+	 * Our reserved location covers the new chunk until
+	 * update_min_undo_locations() can see it through the node.
+	 */
+	set_my_reserved_location(undoType);
+	start = pg_atomic_fetch_add_u64(&meta->lastUsedLocation, chunkSize);
+	end = start + chunkSize;
+	if (start % circularBufferSize + chunkSize > circularBufferSize)
+		end = start + (circularBufferSize - start % circularBufferSize);
+
+	if (end <= pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize)
+	{
+		chunk->start = start;
+		pg_atomic_write_u64(&chunk->cursor, start);
+		pg_atomic_write_u64(&chunk->end, end);
+		pg_write_barrier();
+		pg_atomic_write_u32(&node->state.s.current, newIndex);
+		pg_memory_barrier();
+	}
+	else
+	{
+		/* The ring has no room for the chunk yet; it stays unused. */
+		result = false;
+	}
+
+	pg_atomic_write_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation,
+						InvalidUndoLocation);
+	SpinLockRelease(&node->state.s.lock);
+	return result;
+}
+
+/*
+ * Take a record from the node's current chunk, past the given location.
+ */
+static bool
+undo_chunk_take(UndoLogType undoType, UndoNode *node, Size size,
+				UndoLocation after, UndoLocation *location, bool *tooLow)
+{
+	int			attempts;
+
+	*tooLow = false;
+	for (attempts = 0; attempts < 4; attempts++)
+	{
+		uint32		index = pg_atomic_read_u32(&node->state.s.current);
+		UndoChunk  *chunk = &node->chunks[index].chunk;
+		UndoLocation loc;
+
+		pg_atomic_fetch_add_u32(&chunk->writers, 1);
+		if (pg_atomic_read_u32(&node->state.s.current) != index)
+		{
+			pg_atomic_fetch_sub_u32(&chunk->writers, 1);
+			continue;
+		}
+
+		/* The cursor only grows, so this keeps what we take past "after". */
+		if (UndoLocationIsValid(after) &&
+			pg_atomic_read_u64(&chunk->cursor) <= after)
+		{
+			pg_atomic_fetch_sub_u32(&chunk->writers, 1);
+			*tooLow = true;
+			return false;
+		}
+
+		loc = pg_atomic_fetch_add_u64(&chunk->cursor, size);
+		if (loc + size <= pg_atomic_read_u64(&chunk->end))
+		{
+			Assert(undoWritingChunk == NULL);
+			undoWritingChunk = chunk;
+			*location = loc;
+			return true;
+		}
+		pg_atomic_fetch_sub_u32(&chunk->writers, 1);
+
+		if (!undo_chunk_switch(undoType, node, index))
+			return false;
+	}
+	return false;
+}
+
+/*
+ * Get a regular undo record of the given size past "after" from the chunks,
+ * starting with the given node's.  Updates *node to the node the record came
+ * from.  Returns NULL if the record has to come from lastUsedLocation.
+ */
+static Pointer
+get_undo_record_from_chunks(UndoLogType undoType, UndoLocation *undoLocation,
+							Size size, UndoLocation after, int *nodeNum)
+{
+	bool		tooLow;
+	int			n;
+
+	Assert(size == MAXALIGN(size) && size <= O_MAX_UNDO_RECORD_SIZE);
+
+	/* Large records would waste the rest of too many chunks. */
+	if (size * 4 > Min(undo_chunk_size, UNDO_NODE_RING_SHARE(undoType)))
+		return NULL;
+
+	if (!undo_chunk_take(undoType, &undoNodes->nodes[*nodeNum], size, after,
+						 undoLocation, &tooLow))
+	{
+		if (!tooLow)
+			return NULL;
+
+		/*
+		 * Our node's chunk is behind the location.  Some other node's is at
+		 * least as new as the one it came from.
+		 */
+		for (n = 0; n < undoNodes->numNodes; n++)
+		{
+			if (n == *nodeNum)
+				continue;
+			if (undo_chunk_take(undoType, &undoNodes->nodes[n], size, after,
+								undoLocation, &tooLow))
+				break;
+		}
+		if (n >= undoNodes->numNodes)
+			return NULL;
+		*nodeNum = n;
+	}
+
+	/*
+	 * The chunk was reserved when it was taken.  What the caller reserved for
+	 * the record stays for the case it has to come from lastUsedLocation, and
+	 * goes back to the node's credit when released.
+	 */
+	mark_undo_range_dirty(undoType, *undoLocation, size);
+	return GET_UNDO_REC(undoType, *undoLocation);
+}
+
+/*
+ * get_undo_record() for a record the page lock holder writes for a waiter:
+ * from the waiter's node, past the waiter's last record.
+ */
+Pointer
+get_undo_record_for_waiter(UndoLogType undoType, UndoLocation *undoLocation,
+						   Size size, int waiterNode,
+						   UndoLocation waiterLastLocation)
+{
+	if (undo_chunks_enabled(undoType) && waiterNode >= 0)
+	{
+		Pointer		result;
+
+		result = get_undo_record_from_chunks(undoType, undoLocation, size,
+											 waiterLastLocation, &waiterNode);
+		if (result)
+			return result;
+	}
+	return get_undo_record_shared(undoType, undoLocation, size);
 }
 
 void
@@ -477,6 +982,11 @@ undo_shmem_init(Pointer buf, bool found)
 
 	o_buffers_shmem_init(&undoBuffersDesc, ptr, found);
 	ptr += o_buffers_shmem_needs(&undoBuffersDesc);
+
+	undoNodes = (UndoNodes *) TYPEALIGN(PG_CACHE_LINE_SIZE, ptr);
+	ptr += sizeof(UndoNodes) + PG_CACHE_LINE_SIZE;
+	if (!found)
+		undo_nodes_init(undoNodes);
 	Assert(ptr - buf <= undo_shmem_needs());
 
 	if (!found)
@@ -705,6 +1215,18 @@ update_min_undo_locations(UndoLogType undoType,
 	{
 		if (UndoLocationIsValid(replicationCatalogUndoRetainLocation))
 			minRetainLocation = Min(minRetainLocation, replicationCatalogUndoRetainLocation);
+	}
+
+	if (undoType == UndoLogRegular && undoNodes)
+	{
+		UndoLocation chunksLocation = undo_chunks_min_location();
+
+		if (UndoLocationIsValid(chunksLocation))
+		{
+			minReservedLocation = Min(minReservedLocation, chunksLocation);
+			minRetainLocation = Min(minRetainLocation, chunksLocation);
+			minTransactionRetainLocation = Min(minTransactionRetainLocation, chunksLocation);
+		}
 	}
 
 	/*
@@ -1611,6 +2133,12 @@ free_retained_undo_location(UndoLogType undoType)
 	Assert(pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation) == InvalidUndoLocation);
 	pg_atomic_write_u64(&curProcData->undoRetainLocations[(int) undoType].transactionUndoRetainLocation, InvalidUndoLocation);
 	curRetainUndoLocations[undoType] = InvalidUndoLocation;
+	if (undoType == UndoLogRegular)
+	{
+		undo_chunk_writing_done();
+		undoTxNode = -1;
+		undoTxLastLocation = InvalidUndoLocation;
+	}
 }
 
 static bool
@@ -2099,9 +2627,90 @@ try_evict_undo_opportunistically(UndoLogType undoType)
 						   true);
 }
 
+static Size
+undo_node_credit_refill(UndoLogType undoType)
+{
+	return MAXALIGN_DOWN(Min(UNDO_CREDIT_REFILL, UNDO_NODE_RING_SHARE(undoType)));
+}
+
+/*
+ * Give reserved space back to the credit of the current node.  Credit is
+ * taken on one node and returned on another -- backends move, and the page
+ * lock holder takes over what its waiters reserved -- so a node may collect
+ * more than it hands out while the others keep refilling.  What a node has
+ * beyond two refills goes back to advanceReservedLocation.
+ */
+static void
+undo_node_credit_return(UndoLogType undoType, Size size)
+{
+	UndoNode   *node = &undoNodes->nodes[undo_cpu_node()];
+	Size		limit = 2 * undo_node_credit_refill(undoType);
+	uint64		credit = pg_atomic_add_fetch_u64(&node->credit.credit, size);
+
+	while (credit > limit)
+	{
+		if (pg_atomic_compare_exchange_u64(&node->credit.credit, &credit, limit))
+		{
+			pg_atomic_fetch_sub_u64(&get_undo_meta_by_type(undoType)->advanceReservedLocation,
+									credit - limit);
+			break;
+		}
+	}
+}
+
 bool
 reserve_undo_size_extended(UndoLogType undoType, Size size,
 						   bool waitForUndoLocation)
+{
+	Assert(size <= 2 * O_MAX_UNDO_RECORD_SIZE);
+	Assert(reserved_undo_sizes[(int) undoType] <= 2 * O_MAX_UNDO_RECORD_SIZE);
+
+	if (undo_chunks_enabled(undoType))
+	{
+		UndoNode   *node = &undoNodes->nodes[undo_cpu_node()];
+		Size		refill = undo_node_credit_refill(undoType);
+		Size		need;
+
+		if (reserved_undo_sizes[(int) undoType] >= size)
+			return true;
+		need = size - reserved_undo_sizes[(int) undoType];
+
+		for (;;)
+		{
+			uint64		credit = pg_atomic_read_u64(&node->credit.credit);
+			Size		reserved;
+			bool		refilled;
+
+			while (credit >= need)
+			{
+				if (pg_atomic_compare_exchange_u64(&node->credit.credit,
+												   &credit, credit - need))
+				{
+					reserved_undo_sizes[(int) undoType] += need;
+					return true;
+				}
+			}
+
+			/* Refill the node's credit from the shared reservation. */
+			reserved = reserved_undo_sizes[(int) undoType];
+			reserved_undo_sizes[(int) undoType] = 0;
+			refilled = reserve_undo_size_shared(undoType, Max(refill, need),
+												waitForUndoLocation);
+			reserved_undo_sizes[(int) undoType] = reserved;
+			if (!refilled)
+				return false;
+			pg_atomic_fetch_add_u64(&node->credit.credit, Max(refill, need));
+		}
+	}
+	return reserve_undo_size_shared(undoType, size, waitForUndoLocation);
+}
+
+/*
+ * Reserve undo space from the shared advanceReservedLocation.
+ */
+static bool
+reserve_undo_size_shared(UndoLogType undoType, Size size,
+						 bool waitForUndoLocation)
 {
 	UndoLocation location;
 	uint64		minProcReservedLocation;
@@ -2112,8 +2721,6 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 	Assert(!waitForUndoLocation || !have_locked_pages());
 	Assert(undoType != UndoLogNone);
 	Assert(size > 0);
-	Assert(size <= 2 * O_MAX_UNDO_RECORD_SIZE);
-	Assert(reserved_undo_sizes[(int) undoType] <= 2 * O_MAX_UNDO_RECORD_SIZE);
 	Assert(pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation) == InvalidUndoLocation);
 
 	if (reserved_undo_sizes[(int) undoType] >= size)
@@ -2265,6 +2872,56 @@ fsync_undo_range(UndoLogType undoType,
 Pointer
 get_undo_record(UndoLogType undoType, UndoLocation *undoLocation, Size size)
 {
+	return get_undo_record_after(undoType, undoLocation, size, InvalidUndoLocation);
+}
+
+/*
+ * get_undo_record() for a record that must be past the given location: the
+ * record of the previous version of the row it links to.
+ */
+Pointer
+get_undo_record_after(UndoLogType undoType, UndoLocation *undoLocation,
+					  Size size, UndoLocation after)
+{
+	Pointer		result = NULL;
+
+	if (undo_chunks_enabled(undoType))
+	{
+		int			nodeNum = undo_tx_node(undoType);
+
+		if (!UndoLocationIsValid(after) ||
+			(UndoLocationIsValid(undoTxLastLocation) && undoTxLastLocation > after))
+			after = undoTxLastLocation;
+
+		result = get_undo_record_from_chunks(undoType, undoLocation, size,
+											 after, &nodeNum);
+		if (result)
+		{
+			ODBProcData *curProcData = GET_CUR_PROCDATA();
+			UndoRetainSharedLocations *shared = &curProcData->undoRetainLocations[(int) undoType];
+
+			undoTxNode = nodeNum;
+			if (!UndoLocationIsValid(pg_atomic_read_u64(&shared->transactionUndoRetainLocation)))
+				pg_atomic_write_u64(&shared->transactionUndoRetainLocation, *undoLocation);
+			if (!UndoLocationIsValid(curRetainUndoLocations[undoType]))
+				curRetainUndoLocations[undoType] = *undoLocation;
+		}
+	}
+
+	if (!result)
+		result = get_undo_record_shared(undoType, undoLocation, size);
+
+	if (undoType == UndoLogRegular)
+		undo_tx_note_location(undoType, *undoLocation);
+	return result;
+}
+
+/*
+ * Get an undo record from the shared lastUsedLocation.
+ */
+static Pointer
+get_undo_record_shared(UndoLogType undoType, UndoLocation *undoLocation, Size size)
+{
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
 	Size		circularBufferSize = o_undo_circular_sizes[(int) undoType];
 
@@ -2334,7 +2991,10 @@ release_undo_size(UndoLogType undoType)
 
 	if (reserved_undo_sizes[(int) undoType] != 0)
 	{
-		pg_atomic_fetch_sub_u64(&meta->advanceReservedLocation, reserved_undo_sizes[(int) undoType]);
+		if (undo_chunks_enabled(undoType))
+			undo_node_credit_return(undoType, reserved_undo_sizes[(int) undoType]);
+		else
+			pg_atomic_fetch_sub_u64(&meta->advanceReservedLocation, reserved_undo_sizes[(int) undoType]);
 		reserved_undo_sizes[(int) undoType] = 0;
 	}
 }
@@ -2351,6 +3011,9 @@ void
 release_reserved_undo_location(UndoLogType undoType)
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
+
+	if (undoType == UndoLogRegular)
+		undo_chunk_writing_done();
 
 	pg_atomic_write_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation,
 						InvalidUndoLocation);
