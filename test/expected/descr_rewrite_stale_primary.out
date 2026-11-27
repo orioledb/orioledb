@@ -1,0 +1,47 @@
+Parsed test spec with 3 sessions
+
+starting permutation: s1_setup s1_cache s2_add_c1 s3_arm s1_select s3_rewrite s3_release
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+
+step s1_cache: 
+	SELECT * FROM o_rewrite_pk;
+
+id|v
+--+-
+ 1|a
+(1 row)
+
+step s2_add_c1: 
+	ALTER TABLE o_rewrite_pk ADD COLUMN c1 int DEFAULT 1;
+
+step s3_arm: 
+	SELECT pg_stopevent_set('recreate_table_descr',
+		'$applicationName == "s1"');
+
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_select: 
+	SELECT id, v, c1 FROM o_rewrite_pk;
+ <waiting ...>
+step s3_rewrite: 
+	ALTER TABLE o_rewrite_pk ADD COLUMN r float8 DEFAULT random();
+
+step s3_release: 
+	SELECT pg_stopevent_reset('recreate_table_descr');
+
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_select: <... completed>
+id|v|c1
+--+-+--
+ 1|a| 1
+(1 row)
+

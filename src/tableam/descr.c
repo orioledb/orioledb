@@ -2565,6 +2565,21 @@ recreate_table_descr(OTableDescr *descr)
 				o_table->indices[di] = o_table->indices[si];
 			di++;
 		}
+		else if (o_table->indices[si].type == oIndexPrimary)
+		{
+			/*
+			 * Only an aborted secondary index can be stale here.  Without the
+			 * primary, the OTable itself is outdated: a concurrent rewrite or
+			 * drop of the table removed its indices.  Let the caller drop the
+			 * descriptor; the next lookup builds it from the current OTable.
+			 */
+			descr->fill_in_progress = false;
+			filling_table_descr = prev_filling;
+			o_table_free(o_table);
+			ea_counters = saved_ea_counters;
+			enable_stopevents = old_enable_stopevents;
+			return false;
+		}
 	}
 	o_table->nindices = di;
 
