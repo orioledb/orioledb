@@ -234,7 +234,7 @@ struct antithesis__state
 								 * ready */
 	void		(*fuzz_json_data) (const char *message, size_t length);
 	void		(*fuzz_flush) (void);
-	uint64_t	(*fuzz_get_random) (void);
+				uint64_t(*fuzz_get_random) (void);
 	FILE	   *local_file;
 	uint64_t	rng_state;
 };
@@ -505,7 +505,7 @@ antithesis__init_state(struct antithesis__state *st)
 			antithesis__voidstar_symbol(lib, "fuzz_json_data");
 		st->fuzz_flush = (void (*) (void))
 			antithesis__voidstar_symbol(lib, "fuzz_flush");
-		st->fuzz_get_random = (uint64_t (*) (void))
+		st->fuzz_get_random = (uint64_t(*) (void))
 			antithesis__voidstar_symbol(lib, "fuzz_get_random");
 	}
 	else
