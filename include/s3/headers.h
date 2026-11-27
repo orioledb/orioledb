@@ -52,6 +52,7 @@ extern bool s3_header_lock_part(S3HeaderTag tag, int index,
 								uint32 *loadId);
 extern S3PartStatus s3_header_mark_part_loading(S3HeaderTag tag, int index);
 extern void s3_header_mark_part_loaded(S3HeaderTag tag, int index);
+extern bool s3_header_mark_part_load_failed(S3HeaderTag tag, int index);
 extern void s3_header_unlock_part(S3HeaderTag tag, int index, bool setDirty);
 extern bool s3_header_mark_part_scheduled_for_write(S3HeaderTag tag, int index);
 extern void s3_header_mark_part_writing(S3HeaderTag tag, int index);
