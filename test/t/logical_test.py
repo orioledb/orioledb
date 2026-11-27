@@ -93,6 +93,76 @@ class LogicalTest(BaseTest):
 		super().setUp()
 		self.node.append_conf('postgresql.conf', "wal_level = logical\n")
 
+	def test_template1_logical_replication(self):
+		"""Copy and stream template1 tables with implicit and explicit keys."""
+		publisher = self.node
+		publisher.start()
+		subscriber = self.getSubscriber()
+		subscriber.start()
+		for node in (publisher, subscriber):
+			self.assertEqual(
+			    node.execute(
+			        "SELECT oid FROM pg_database WHERE datname = 'template1'"),
+			    [(1, )])
+			node.safe_psql(
+			    'template1', """
+				CREATE EXTENSION orioledb;
+				CREATE TABLE template_rows(id int, val text) USING orioledb;
+				ALTER TABLE template_rows REPLICA IDENTITY FULL;
+				CREATE INDEX template_rows_idx ON template_rows(val);
+				CREATE TABLE template_keyed(id int PRIMARY KEY, val text) USING orioledb;
+			""")
+		for table in ('template_rows', 'template_keyed'):
+			publisher.safe_psql(
+			    'template1', f"""
+				INSERT INTO {table} SELECT g, 'row' || g FROM generate_series(1, 3) g;
+			""")
+		pub = publisher.publish('template_pub',
+		                        tables=['template_rows', 'template_keyed'],
+		                        dbname='template1')
+		sub = subscriber.subscribe(pub, 'template_sub', dbname='template1')
+		sub.catchup()
+
+		def check_rows(expected):
+			for node in (publisher, subscriber):
+				for table in ('template_rows', 'template_keyed'):
+					self.assertEqual(
+					    node.execute('template1',
+					                 f"SELECT * FROM {table} ORDER BY id"),
+					    expected)
+					self.assertEqual(
+					    node.execute(
+					        'template1',
+					        f"SELECT orioledb_tbl_check('{table}'::regclass)"),
+					    [(True, )])
+				self.assertEqual(
+				    node.execute(
+				        'template1', "SELECT count(*), count(DISTINCT ctid) "
+				        "FROM template_rows"),
+				    [(len(expected), len(expected))])
+
+		check_rows([(1, 'row1'), (2, 'row2'), (3, 'row3')])
+		for table in ('template_rows', 'template_keyed'):
+			publisher.safe_psql(
+			    'template1', f"""
+				INSERT INTO {table} VALUES (4, 'row4');
+				UPDATE {table} SET val = 'updated' WHERE id = 2;
+				DELETE FROM {table} WHERE id = 1;
+			""")
+		sub.catchup()
+		expected = [(2, 'updated'), (3, 'row3'), (4, 'row4')]
+		check_rows(expected)
+
+		# Resume decoding and apply after both sides have restored their trees.
+		publisher.restart()
+		subscriber.restart()
+		for table in ('template_rows', 'template_keyed'):
+			publisher.safe_psql('template1',
+			                    f"INSERT INTO {table} VALUES (5, 'row5')")
+		sub.catchup()
+		check_rows(expected + [(5, 'row5')])
+		subscriber.safe_psql('template1', "DROP SUBSCRIPTION template_sub")
+
 	def squashLogicalChanges(self, rows):
 		result = ''
 		for row in rows:

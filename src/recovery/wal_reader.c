@@ -150,16 +150,8 @@ wal_parse_rec_relation(WalReaderState *r, WalRecord *rec)
 	WR_PARSE(r, &rec->oids.reloid);
 	WR_PARSE(r, &rec->oids.relnode);
 
-	/*
-	 * When the datoid marks this as a system-tree relation, relnode is
-	 * interpreted as a system-tree number and used to index fixed arrays
-	 * (sysTreesMeta, sysTreesDescrs).  A forged or truncated WAL container
-	 * could carry an out-of-range value; reject it here before any consumer
-	 * dereferences the array, returning WALPARSE_BAD_TYPE as for any other
-	 * unparseable record.
-	 */
-	if (rec->oids.datoid == SYS_TREES_DATOID &&
-		(rec->oids.relnode < 1 || rec->oids.relnode > SYS_TREES_NUM))
+	/* Zero is neither a system-tree number nor a valid user relfilenumber. */
+	if (!OidIsValid(rec->oids.relnode))
 		return WALPARSE_BAD_TYPE;
 
 	if (r->container.version >= 17)
@@ -432,6 +424,17 @@ wal_parse_rec_dbcreate_copy(WalReaderState *r, WalRecord *rec)
 
 	WR_PARSE(r, &rec->u.dbcreate_copy.src_datoid);
 	WR_PARSE(r, &rec->u.dbcreate_copy.dst_datoid);
+	if (r->container.version >= ORIOLEDB_DATABASE_TABLESPACE_WAL_VERSION)
+	{
+		WR_PARSE(r, &rec->u.dbcreate_copy.src_tablespace);
+		WR_PARSE(r, &rec->u.dbcreate_copy.dst_tablespace);
+	}
+	else
+	{
+		/* Older copies kept every tree in its original tablespace. */
+		rec->u.dbcreate_copy.src_tablespace = InvalidOid;
+		rec->u.dbcreate_copy.dst_tablespace = InvalidOid;
+	}
 
 	return WALPARSE_OK;
 }

@@ -9,6 +9,113 @@ from testgres.exceptions import QueryException
 
 class DatabaseTemplateTest(BaseTest):
 
+	def test_template1_insert(self):
+		"""User trees in template1 must not be mistaken for system trees."""
+		node = self.node
+		node.start()
+		self.assertEqual(
+		    node.execute(
+		        "SELECT oid FROM pg_database WHERE datname = 'template1'"),
+		    [(1, )])
+		node.safe_psql('template1', "CREATE EXTENSION orioledb;")
+		node.safe_psql('template1', "CREATE TABLE test(i int) USING orioledb;")
+		node.safe_psql('template1', "INSERT INTO test VALUES (1);")
+		self.assertEqual(node.execute('template1', "SELECT * FROM test;"),
+		                 [(1, )])
+
+		# Populate multiple pages and a secondary index to exercise checkpoint
+		# ordering alongside primary and secondary trees in another database.
+		for database in ('template1', 'postgres'):
+			if database == 'postgres':
+				node.safe_psql(database, "CREATE EXTENSION orioledb;")
+			node.safe_psql(
+			    database, """
+				CREATE TABLE keyed(i int PRIMARY KEY) USING orioledb;
+				CREATE INDEX keyed_idx ON keyed(i);
+				INSERT INTO keyed SELECT generate_series(1, 1000);
+			""")
+		node.safe_psql(
+		    'template1', """
+			CREATE INDEX test_idx ON test(i);
+			INSERT INTO test SELECT generate_series(2, 1000);
+		""")
+
+		def check_rows(count):
+			self.assertEqual(
+			    node.execute(
+			        'template1', "SELECT count(*), count(DISTINCT i), "
+			        "count(DISTINCT ctid), sum(i) FROM test;"),
+			    [(count, count, count, count * (count + 1) // 2)])
+			self.assertEqual(
+			    node.execute('template1',
+			                 "SELECT orioledb_tbl_check('test'::regclass);"),
+			    [(True, )])
+			for database in ('template1', 'postgres'):
+				self.assertEqual(
+				    node.execute(database,
+				                 "SELECT count(*), sum(i) FROM keyed;"),
+				    [(1000, 500500)])
+				self.assertEqual(
+				    node.execute(
+				        database,
+				        "SELECT orioledb_tbl_check('keyed'::regclass);"),
+				    [(True, )])
+
+		check_rows(1000)
+		node.safe_psql('template1', "CHECKPOINT;")
+		node.restart()
+		check_rows(1000)
+
+		# Replay template1 user-tree WAL, then allocate another CTID to check
+		# that recovery restored the counter as well as the rows.
+		node.safe_psql('template1', "INSERT INTO test VALUES (1001);")
+		node.stop(['-m', 'immediate'])
+		node.start()
+		check_rows(1001)
+		node.safe_psql('template1', "INSERT INTO test VALUES (1002);")
+		check_rows(1002)
+		node.safe_psql('template1', "CHECKPOINT;")
+		node.restart()
+		check_rows(1002)
+		node.stop()
+
+	def test_create_database_template_tablespace(self):
+		master = self.node
+		master.append_conf("allow_in_place_tablespaces = true\n")
+		master.start()
+		replica = self.getReplica()
+		replica.append_conf("allow_in_place_tablespaces = true\n")
+
+		master.safe_psql("CREATE TABLESPACE db_ts LOCATION '';")
+		master.safe_psql(
+		    'template1', """
+			CREATE EXTENSION orioledb;
+			CREATE TABLE test(id int PRIMARY KEY) USING orioledb;
+			INSERT INTO test VALUES (1), (2);
+		""")
+		master.safe_psql("CREATE DATABASE copied TABLESPACE db_ts;")
+		master.restart()
+		# Replay the copy during standby startup without a database connection.
+		replica.start()
+		self.catchup_orioledb(replica)
+
+		for node in (master, replica):
+			self.assertEqual(
+			    node.execute('copied', "SELECT * FROM test ORDER BY id"),
+			    [(1, ), (2, )])
+			relpath = node.execute(
+			    'copied',
+			    "SELECT pg_relation_filepath('test'::regclass)")[0][0]
+			database_path = os.path.dirname(relpath)
+			dboid = os.path.basename(database_path)
+			dbpath = os.path.join(node.data_dir,
+			                      os.path.dirname(database_path),
+			                      'orioledb_data', dboid)
+			self.assertTrue(os.listdir(dbpath), dbpath)
+			self.assertFalse(
+			    os.path.exists(
+			        os.path.join(node.data_dir, 'orioledb_data', dboid)))
+
 	TEMPLATE_DDL = """
         CREATE EXTENSION orioledb;
 

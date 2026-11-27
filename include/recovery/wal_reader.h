@@ -123,6 +123,8 @@ typedef struct WalRecord
 		{
 			Oid			src_datoid;
 			Oid			dst_datoid;
+			Oid			src_tablespace;
+			Oid			dst_tablespace;
 		}			dbcreate_copy;
 
 	}			u;

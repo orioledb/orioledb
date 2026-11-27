@@ -29,6 +29,84 @@ class StandbyDiverged(Exception):
 
 class ReplicationTest(BaseTest):
 
+	def test_template1_physical_replication(self):
+		"""Restore, replay, and promote template1 user trees beside system trees."""
+		master = self.node
+		master.start()
+		self.assertEqual(
+		    master.execute(
+		        "SELECT oid FROM pg_database WHERE datname = 'template1'"),
+		    [(1, )])
+		master.safe_psql(
+		    'template1', """
+			CREATE EXTENSION orioledb;
+			CREATE TABLE template_rows(id int, val text) USING orioledb;
+			CREATE INDEX template_rows_idx ON template_rows(val);
+			CREATE TABLE template_keyed(id int PRIMARY KEY, val text) USING orioledb;
+			INSERT INTO template_rows SELECT g, 'row' || g FROM generate_series(1, 3) g;
+			INSERT INTO template_keyed SELECT * FROM template_rows;
+		""")
+		replica = self.getReplica()
+		replica.start()
+
+		def check_replica(expected):
+			self.catchup_orioledb(replica)
+			replica.poll_query_until("SELECT orioledb_recovery_synchronized()",
+			                         dbname='template1',
+			                         max_attempts=60)
+			for table in ('template_rows', 'template_keyed'):
+				self.assertEqual(
+				    replica.execute('template1',
+				                    f"SELECT * FROM {table} ORDER BY id"),
+				    expected)
+			self.assertEqual(
+			    replica.execute(
+			        'template1', "SELECT count(*), count(DISTINCT ctid) "
+			        "FROM template_rows"), [(len(expected), len(expected))])
+
+		check_replica([(1, 'row1'), (2, 'row2'), (3, 'row3')])
+		for table in ('template_rows', 'template_keyed'):
+			master.safe_psql(
+			    'template1', f"""
+				INSERT INTO {table} VALUES (4, 'row4');
+				UPDATE {table} SET val = 'updated' WHERE id = 2;
+				DELETE FROM {table} WHERE id = 1;
+			""")
+		# Also replay creation of a template1 tree absent from the base backup.
+		master.safe_psql(
+		    'template1', """
+			CREATE TABLE template_streamed(id int) USING orioledb;
+			INSERT INTO template_streamed VALUES (10);
+			CHECKPOINT;
+		""")
+		expected = [(2, 'updated'), (3, 'row3'), (4, 'row4')]
+		check_replica(expected)
+		replica.restart()
+		check_replica(expected)
+		self.assertEqual(
+		    replica.execute('template1', "SELECT * FROM template_streamed"),
+		    [(10, )])
+
+		# Promotion must retain the CTID counter for subsequent local inserts.
+		master.stop(['-m', 'immediate'])
+		replica.promote()
+		replica.safe_psql('template1',
+		                  "INSERT INTO template_rows VALUES (5, 'row5')")
+		self.assertEqual(
+		    replica.execute('template1',
+		                    "SELECT * FROM template_rows ORDER BY id"),
+		    expected + [(5, 'row5')])
+		self.assertEqual(
+		    replica.execute(
+		        'template1', "SELECT count(*), count(DISTINCT ctid) "
+		        "FROM template_rows"), [(4, 4)])
+		for table in ('template_rows', 'template_keyed', 'template_streamed'):
+			self.assertEqual(
+			    replica.execute(
+			        'template1',
+			        f"SELECT orioledb_tbl_check('{table}'::regclass)"),
+			    [(True, )])
+
 	def test_replication_move_database_tablespace(self):
 		"""A database tablespace move must preserve rows on the standby."""
 		master = self.node

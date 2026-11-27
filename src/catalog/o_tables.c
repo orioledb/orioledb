@@ -2925,6 +2925,8 @@ typedef struct
 	CommitSeqNo csn;
 	Oid			src_datoid;
 	Oid			dst_datoid;
+	Oid			src_tablespace;
+	Oid			dst_tablespace;
 } OTablesCopyAllArg;
 
 typedef struct
@@ -2963,15 +2965,16 @@ o_tables_copy_database_files_collect_tablespace(ORelOids oids, void *arg)
 }
 
 static void
-o_tables_copy_database_tablespace_files(Oid src_datoid, Oid dst_datoid, Oid tablespace)
+o_tables_copy_database_tablespace_files(Oid src_datoid, Oid dst_datoid,
+										Oid src_tablespace, Oid dst_tablespace)
 {
 	char	   *src_path = NULL;
 	char	   *dst_path = NULL;
 	char	   *dst_prefix = NULL;
 	struct stat st;
 
-	o_get_prefixes_for_tablespace(src_datoid, tablespace, NULL, &src_path);
-	o_get_prefixes_for_tablespace(dst_datoid, tablespace, &dst_prefix, &dst_path);
+	o_get_prefixes_for_tablespace(src_datoid, src_tablespace, NULL, &src_path);
+	o_get_prefixes_for_tablespace(dst_datoid, dst_tablespace, &dst_prefix, &dst_path);
 
 	if (stat(src_path, &st) < 0 || !S_ISDIR(st.st_mode) || directory_is_empty(src_path))
 	{
@@ -2998,6 +3001,8 @@ typedef struct
 {
 	Oid			src_datoid;
 	Oid			dst_datoid;
+	Oid			src_tablespace;
+	Oid			dst_tablespace;
 } OTablesCopyDatabaseChkpNumArg;
 
 static void
@@ -3031,7 +3036,8 @@ o_tables_copy_database_chkp_num_callback(ORelOids oids, void *arg)
 		{
 			o_update_latest_chkp_num(chkp_arg->dst_datoid,
 									 trees[i].oids.relnode,
-									 trees[i].oids.spcoid,
+									 trees[i].oids.spcoid == chkp_arg->src_tablespace ?
+									 chkp_arg->dst_tablespace : trees[i].oids.spcoid,
 									 chkp_num);
 		}
 	}
@@ -3041,7 +3047,8 @@ o_tables_copy_database_chkp_num_callback(ORelOids oids, void *arg)
 }
 
 void
-o_tables_copy_database_files(Oid src_datoid, Oid dst_datoid)
+o_tables_copy_database_files(Oid src_datoid, Oid dst_datoid,
+							 Oid src_tablespace, Oid dst_tablespace)
 {
 	OTablesCopyDatabaseFilesArg arg;
 	OTablesCopyDatabaseChkpNumArg chkp_arg;
@@ -3053,19 +3060,28 @@ o_tables_copy_database_files(Oid src_datoid, Oid dst_datoid)
 	o_tables_foreach_oids(o_tables_copy_database_files_collect_tablespace,
 						  &o_non_deleted_snapshot, &arg);
 
+	/* PostgreSQL remaps only the template database's default tablespace. */
 	foreach(lc, arg.tablespace)
-		o_tables_copy_database_tablespace_files(src_datoid, dst_datoid, lfirst_oid(lc));
+	{
+		Oid			tablespace = lfirst_oid(lc);
+
+		o_tables_copy_database_tablespace_files(src_datoid, dst_datoid, tablespace,
+												tablespace == src_tablespace ? dst_tablespace : tablespace);
+	}
 
 	list_free(arg.tablespace);
 
 	chkp_arg.src_datoid = src_datoid;
 	chkp_arg.dst_datoid = dst_datoid;
+	chkp_arg.src_tablespace = src_tablespace;
+	chkp_arg.dst_tablespace = dst_tablespace;
 	o_tables_foreach_oids(o_tables_copy_database_chkp_num_callback,
 						  &o_non_deleted_snapshot, &chkp_arg);
 }
 
 void
-o_tables_cleanup_database_files(Oid src_datoid, Oid dst_datoid)
+o_tables_cleanup_database_files(Oid src_datoid, Oid dst_datoid,
+								Oid src_tablespace, Oid dst_tablespace)
 {
 	OTablesCopyDatabaseFilesArg arg;
 	ListCell   *lc;
@@ -3081,12 +3097,22 @@ o_tables_cleanup_database_files(Oid src_datoid, Oid dst_datoid)
 		Oid			tablespaces = lfirst_oid(lc);
 		char	   *dst_path = NULL;
 
-		o_get_prefixes_for_tablespace(dst_datoid, tablespaces, NULL, &dst_path);
+		o_get_prefixes_for_tablespace(dst_datoid,
+									  tablespaces == src_tablespace ? dst_tablespace : tablespaces,
+									  NULL, &dst_path);
 		(void) rmtree(dst_path, true);
 		pfree(dst_path);
 	}
 
 	list_free(arg.tablespace);
+}
+
+static void
+o_tables_copy_oids(ORelOids *oids, OTablesCopyAllArg *arg)
+{
+	oids->datoid = arg->dst_datoid;
+	if (oids->spcoid == arg->src_tablespace)
+		oids->spcoid = arg->dst_tablespace;
 }
 
 static void
@@ -3106,15 +3132,15 @@ o_tables_copy_all_callback(ORelOids oids, void *arg)
 		int			i;
 		bool		is_temp;
 
-		o_table->oids.datoid = copy_arg->dst_datoid;
+		o_tables_copy_oids(&o_table->oids, copy_arg);
 		for (i = 0; i < o_table->nindices; i++)
 		{
-			o_table->indices[i].oids.datoid = copy_arg->dst_datoid;
+			o_tables_copy_oids(&o_table->indices[i].oids, copy_arg);
 		}
 		if (ORelOidsIsValid(o_table->bridge_oids))
-			o_table->bridge_oids.datoid = copy_arg->dst_datoid;
+			o_tables_copy_oids(&o_table->bridge_oids, copy_arg);
 		if (ORelOidsIsValid(o_table->toast_oids))
-			o_table->toast_oids.datoid = copy_arg->dst_datoid;
+			o_tables_copy_oids(&o_table->toast_oids, copy_arg);
 
 		trees = o_table_make_index_keys(o_table, &numTrees);
 
@@ -3128,7 +3154,8 @@ o_tables_copy_all_callback(ORelOids oids, void *arg)
 }
 
 void
-o_tables_copy_all(OXid oxid, CommitSeqNo csn, Oid src_datoid, Oid dst_datoid)
+o_tables_copy_all(OXid oxid, CommitSeqNo csn, Oid src_datoid, Oid dst_datoid,
+				  Oid src_tablespace, Oid dst_tablespace)
 {
 	OTablesCopyAllArg arg;
 
@@ -3136,6 +3163,8 @@ o_tables_copy_all(OXid oxid, CommitSeqNo csn, Oid src_datoid, Oid dst_datoid)
 	arg.csn = csn;
 	arg.src_datoid = src_datoid;
 	arg.dst_datoid = dst_datoid;
+	arg.src_tablespace = src_tablespace;
+	arg.dst_tablespace = dst_tablespace;
 
 	o_tables_foreach_oids(o_tables_copy_all_callback,
 						  &o_non_deleted_snapshot, &arg);

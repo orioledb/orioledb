@@ -1497,7 +1497,7 @@ o_get_latest_chkp_num(Oid datoid, Oid relnode, Oid tablespace,
 	uint32		chkp_num;
 	ChkpNumTuple *result;
 
-	if (datoid == SYS_TREES_DATOID)
+	if (IS_SYS_TREE(datoid, relnode))
 	{
 		if (found)
 			*found = true;
@@ -3102,6 +3102,10 @@ static int
 chkp_ordering_cmp(OIndexType type1, Oid datoid1, Oid tablespace1, Oid relnode1,
 				  OIndexType type2, Oid datoid2, Oid tablespace2, Oid relnode2)
 {
+	/* InvalidOid is the checkpoint position before any tree is processed. */
+	bool		before_user1 = !OidIsValid(datoid1) || IS_SYS_TREE(datoid1, relnode1);
+	bool		before_user2 = !OidIsValid(datoid2) || IS_SYS_TREE(datoid2, relnode2);
+
 	if (datoid1 == SYS_TREES_DATOID && relnode1 == SYS_TREES_CHKP_NUM &&
 		!(datoid2 == SYS_TREES_DATOID && relnode2 == SYS_TREES_CHKP_NUM))
 		return 1;
@@ -3110,10 +3114,10 @@ chkp_ordering_cmp(OIndexType type1, Oid datoid1, Oid tablespace1, Oid relnode1,
 		!(datoid1 == SYS_TREES_DATOID && relnode1 == SYS_TREES_CHKP_NUM))
 		return -1;
 
-	if (datoid1 <= SYS_TREES_DATOID && datoid2 > SYS_TREES_DATOID)
+	if (before_user1 && !before_user2)
 		return -1;
 
-	if (datoid1 > SYS_TREES_DATOID && datoid2 <= SYS_TREES_DATOID)
+	if (!before_user1 && before_user2)
 		return 1;
 
 	if (type1 != type2)
