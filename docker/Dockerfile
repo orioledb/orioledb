@@ -1,14 +1,14 @@
 # This is slightly adjusted Dockerfile from
 # https://github.com/docker-library/postgres
 
-# set ALPINE_VERSION= [ edge 3.21 3.20 3.19 3.18 ]
+# set ALPINE_VERSION= [ edge 3.24 3.23 3.22 3.21 ]
 ARG ALPINE_VERSION=3.21
 FROM alpine:${ALPINE_VERSION}
 
 ARG ALPINE_VERSION
 
-# Set PG_MAJOR = [ 17 16 ]
-ARG PG_MAJOR=17
+# Set PG_MAJOR = [ 18 17 16 ]
+ARG PG_MAJOR=18
 ENV PG_MAJOR=${PG_MAJOR}
 
 # set compiler: [ clang gcc ]
@@ -29,12 +29,14 @@ ARG DOCKER_PG_LLVM_DEPS="llvm-dev clang"
 ENV DOCKER_PG_LLVM_DEPS=${DOCKER_PG_LLVM_DEPS}
 
 # 70 is the standard uid/gid for "postgres" in Alpine
-# https://git.alpinelinux.org/aports/tree/main/postgresql/postgresql.pre-install?h=3.12-stable
+# https://git.alpinelinux.org/aports/tree/main/postgresql-common/postgresql-common.pre-install?h=3.22-stable
 RUN set -eux; \
 	addgroup -g 70 -S postgres; \
 	adduser -u 70 -S -D -G postgres -H -h /var/lib/postgresql -s /bin/sh postgres; \
-	mkdir -p /var/lib/postgresql; \
-	chown -R postgres:postgres /var/lib/postgresql
+	install -d -o postgres -g postgres /var/lib/postgresql
+
+# Upgrade base packages for latest security/toolchain fixes (like full-upgrade in Dockerfile.ubuntu); trades reproducibility for freshness.
+RUN apk upgrade --no-cache --available
 
 # su-exec (gosu-compatible) is installed further down
 
@@ -48,7 +50,7 @@ COPY . /usr/src/postgresql/contrib/orioledb
 
 RUN mkdir /docker-entrypoint-initdb.d /docker-default-initdb.d
 
-RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 2777 /var/run/postgresql
+RUN install -d -m 3777 -o postgres -g postgres /var/run/postgresql
 
 RUN set -eux; \
 	\
@@ -61,8 +63,7 @@ RUN set -eux; \
 	# https://wiki.alpinelinux.org/wiki/Release_Notes_for_Alpine_3.16.0#ICU_data_split
 	# https://github.com/docker-library/postgres/issues/327#issuecomment-1201582069
 	case "$ALPINE_VERSION" in 3.13 | 3.14 | 3.15 )  EXTRA_ICU_PACKAGES='' ;; \
-		3.16 | 3.17 | 3.18 | 3.19 | 3.20 | 3.21* )  EXTRA_ICU_PACKAGES=icu-data-full ;; \
-		*) : ;; \
+		* )  EXTRA_ICU_PACKAGES=icu-data-full ;; \
 	esac ; \
 	\
 	echo "PG_MAJOR=$PG_MAJOR" ; \
@@ -81,7 +82,7 @@ RUN set -eux; \
 		echo "CUSTOM_LLVM_VERSION=$CUSTOM_LLVM_VERSION" ; \
 		export LLVM_CONFIG="/usr/lib/llvm${CUSTOM_LLVM_VERSION}/bin/llvm-config" ; \
 		export CLANG=clang-${CUSTOM_LLVM_VERSION} ; \
-		if [[ "${BUILD_CC_COMPILER}" == "clang" ]]; then \
+		if [ "${BUILD_CC_COMPILER}" = "clang" ]; then \
 			export BUILD_CC_COMPILER=clang-${CUSTOM_LLVM_VERSION} ; \
 			echo "fix: BUILD_CC_COMPILER=clang-${CUSTOM_LLVM_VERSION}" ; \
 		fi ; \
@@ -126,7 +127,6 @@ RUN set -eux; \
 	\
 	curl -o postgresql.tar.gz \
 			--header "Accept: application/vnd.github.v3.raw" \
-			--remote-name \
 			--location https://github.com/orioledb/postgres/tarball/$PGTAG; \
 	mkdir -p /usr/src/postgresql; \
 	tar \
@@ -143,7 +143,7 @@ RUN set -eux; \
 	echo "POSTGRESQL_VERSION=$POSTGRESQL_VERSION" ; \
 	\
 # update "DEFAULT_PGSOCKET_DIR" to "/var/run/postgresql" (matching Debian)
-# see https://anonscm.debian.org/git/pkg-postgresql/postgresql.git/tree/debian/patches/51-default-sockets-in-var.patch?id=8b539fcb3e093a521c095e70bdfa76887217b89f
+# see https://salsa.debian.org/postgresql/postgresql/-/blob/HEAD/debian/patches/51-default-sockets-in-var.patch
 	awk '$1 == "#define" && $2 == "DEFAULT_PGSOCKET_DIR" && $3 == "\"/tmp\"" { $3 = "\"/var/run/postgresql\""; print; next } { print }' src/include/pg_config_manual.h > src/include/pg_config_manual.h.new; \
 	grep '/var/run/postgresql' src/include/pg_config_manual.h.new; \
 	mv src/include/pg_config_manual.h.new src/include/pg_config_manual.h; \
@@ -152,19 +152,18 @@ RUN set -eux; \
 	cp /usr/src/postgresql/contrib/orioledb/docker/config.guess config/config.guess; \
 	cp /usr/src/postgresql/contrib/orioledb/docker/config.sub config/config.sub; \
 # configure options taken from:
-# https://anonscm.debian.org/cgit/pkg-postgresql/postgresql.git/tree/debian/rules?h=9.5
+# https://salsa.debian.org/postgresql/postgresql/-/blob/HEAD/debian/rules
 	( CC=${BUILD_CC_COMPILER} ./configure \
+		--enable-option-checking=fatal \
 		--build="$gnuArch" \
 # "/usr/src/postgresql/src/backend/access/common/tupconvert.c:105: undefined reference to `libintl_gettext'"
 #		--enable-nls \
 		--enable-integer-datetimes \
-		--enable-thread-safety \
 		--enable-tap-tests \
 # skip debugging info -- we want tiny size instead
 #		--enable-debug \
 		--disable-rpath \
 		--with-uuid=e2fs \
-		--with-gnu-ld \
 		--with-pgport=5432 \
 		--with-system-tzdata=/usr/share/zoneinfo \
 		--prefix=/usr/local \
@@ -176,7 +175,7 @@ RUN set -eux; \
 		--with-perl \
 		--with-python \
 #		--with-pam \
-		--with-openssl \
+		--with-ssl=openssl \
 		--with-libxml \
 		--with-libxslt \
 		--with-icu \
@@ -186,17 +185,15 @@ RUN set -eux; \
 		# The "testgres" package expects the PostgreSQL version as the last word.
 		# Therefore, the extra ${POSTGRESQL_VERSION} is added as a workaround.
 		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} alpine:${ALPINE_VERSION}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
-	|| cat config.log ); \
+	|| { cat config.log; exit 1; } ); \
 	if printf "%s\n" "$PGTAG" | grep -Fqe "patches${PG_MAJOR}_"; then \
-		echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
+		echo "ORIOLEDB_PATCHSET_VERSION = $(echo $PGTAG | cut -d'_' -f2)" >> src/Makefile.global; \
 	else \
 		echo "ORIOLEDB_PATCHSET_VERSION = $PGTAG" >> src/Makefile.global; \
 	fi ; \
 	# install postgresql
-	make -j "$(nproc)"; \
-	make -C contrib -j "$(nproc)"; \
-	make install; \
-	make -C contrib install; \
+	make -j "$(nproc)" world-bin; \
+	make install-world-bin; \
 	# install orioledb extension
 	cd /usr/src/postgresql/contrib/orioledb; \
 	# Remove any stale generated SQL files that may have leaked into the
@@ -232,7 +229,7 @@ RUN set -eux; \
 		bash \
 		su-exec \
 		# tzdata is optional, but only adds around 1Mb to image size and is recommended by Django documentation:
-		# https://docs.djangoproject.com/en/1.10/ref/databases/#optimizing-postgresql-s-configuration
+		# https://docs.djangoproject.com/en/stable/ref/databases/#optimizing-postgresql-s-configuration
 		tzdata \
 		# install extra icu packages ( >=Alpine3.16 )
 		$EXTRA_ICU_PACKAGES \
@@ -242,8 +239,8 @@ RUN set -eux; \
 	initdb --version
 
 ENV PGDATA=/var/lib/postgresql/data
-# this 777 will be replaced by 700 at runtime (allows semi-arbitrary "--user" values)
-RUN mkdir -p "$PGDATA" && chown -R postgres:postgres "$PGDATA" && chmod 777 "$PGDATA"
+# this 1777 will be replaced by 700 at runtime (allows semi-arbitrary "--user" values)
+RUN install -d -m 1777 -o postgres -g postgres "$PGDATA"
 VOLUME /var/lib/postgresql/data
 
 RUN mkdir -p /etc/postgresql && chown -R postgres:postgres /etc/postgresql && chmod 700 /etc/postgresql
@@ -263,14 +260,14 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 # corruption.
 #
 # Users who know their applications do not keep open long-lived idle connections
-# may way to use a value of SIGTERM instead, which corresponds to "Smart
+# may want to use a value of SIGTERM instead, which corresponds to "Smart
 # Shutdown mode" in which any existing sessions are allowed to finish and the
 # server stops when all sessions are terminated.
 #
-# See https://www.postgresql.org/docs/12/server-shutdown.html for more details
+# See https://www.postgresql.org/docs/current/server-shutdown.html for more details
 # about available PostgreSQL server shutdown signals.
 #
-# See also https://www.postgresql.org/docs/12/server-start.html for further
+# See also https://www.postgresql.org/docs/current/server-start.html for further
 # justification of this as the default value, namely that the example (and
 # shipped) systemd service files use the "Fast Shutdown mode" for service
 # termination.
@@ -283,7 +280,7 @@ STOPSIGNAL SIGINT
 # STOPSIGNAL and sending SIGKILL (which is likely to cause data corruption).
 #
 # The default in most runtimes (such as Docker) is 10 seconds, and the
-# documentation at https://www.postgresql.org/docs/12/server-start.html notes
+# documentation at https://www.postgresql.org/docs/current/server-start.html notes
 # that even 90 seconds may not be long enough in many instances.
 
 EXPOSE 5432
