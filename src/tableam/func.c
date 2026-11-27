@@ -1359,11 +1359,14 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 
 		o_tables_rel_lock_extended(&idx->oids, AccessExclusiveLock, true);
 		o_btree_load_shmem(&idx->desc);
-		result = check_btree(&idx->desc, force_map_check, false);
+		if (!check_btree(&idx->desc, force_map_check, false))
+		{
+			ereport(NOTICE,
+					(errmsg("check of index \"%s\" failed",
+							NameStr(idx->name))));
+			result = false;
+		}
 		o_tables_rel_unlock_extended(&idx->oids, AccessExclusiveLock, true);
-
-		if (result == false)
-			break;
 	}
 	relation_close(rel, AccessExclusiveLock);
 

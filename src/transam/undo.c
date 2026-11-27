@@ -2716,7 +2716,11 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * replication wait that come first.
 				 */
 				if (TransactionIdIsValid(heapXid))
+				{
+					if (STOPEVENT_CONDITION(STOPEVENT_COMMIT_ASSERT, NULL))
+						elog(PANIC, "stop event \"commit_assert\" fired");
 					current_oxid_precommit();
+				}
 
 				break;
 
@@ -2782,12 +2786,18 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * visible; see the comment there.
 				 */
 				if (!TransactionIdIsValid(heapXid))
+				{
+					if (STOPEVENT_CONDITION(STOPEVENT_COMMIT_ASSERT, NULL))
+						elog(PANIC, "stop event \"commit_assert\" fired");
 					current_oxid_precommit();
+				}
 
 				csn = GetCurrentCSN();
 				if (csn == COMMITSEQNO_INPROGRESS)
 					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 
+				if (STOPEVENT_CONDITION(STOPEVENT_CSN_INCREMENTED, NULL))
+					elog(ERROR, "stop event \"csn_incremented\" fired");
 				current_oxid_commit(csn);
 
 				END_CRIT_SECTION();
@@ -2802,6 +2812,9 @@ undo_xact_callback(XactEvent event, void *arg)
 					add_to_rewind_buffer(oxid, xid1, nsubxids, subxids);
 					reset_precommit_xid_subxids();
 				}
+
+				if (STOPEVENT_CONDITION(STOPEVENT_BEFORE_ON_COMMIT_UNDO_STACK, NULL))
+					elog(PANIC, "stop event \"before_on_commit_undo_stack\" fired");
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 				{
@@ -2830,7 +2843,6 @@ undo_xact_callback(XactEvent event, void *arg)
 					 " logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 					 oxid, logicalXidContext.xid, heapXid,
 					 GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
-
 
 				if (!RecoveryInProgress())
 					wal_rollback(oxid, logicalXidContext.xid, false);
