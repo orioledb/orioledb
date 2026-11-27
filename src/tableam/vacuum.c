@@ -1189,6 +1189,9 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 	/* report that everything is now scanned */
 	pgstat_progress_update_param(PROGRESS_VACUUM_HEAP_BLKS_SCANNED, blocksScanned);
 
+	/* The whole bridge index is scanned: no estimate is needed */
+	vacrel->new_live_tuples = vacrel->live_tuples;
+
 	/*
 	 * Also compute the total number of surviving heap entries.  In the
 	 * (unlikely) scenario that new_live_tuples is -1, take it as zero.
@@ -1256,6 +1259,7 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 	char	  **indnames = NULL;
 	bool		verbose;
 	bool		instrument;
+	bool		has_primary_index = false;
 	PGRUsage	ru0;
 	TimestampTz starttime = 0;
 	PgStat_Counter startreadtime = 0,
@@ -1263,7 +1267,8 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 	WalUsage	startwalusage = pgWalUsage;
 	BufferUsage startbufferusage = pgBufferUsage;
 	BlockNumber orig_rel_pages,
-				new_rel_pages;
+				new_rel_pages,
+				curpages;
 	OIndexDescr *bridge;
 	ErrorContextCallback errcallback;
 
@@ -1313,6 +1318,14 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 	vacrel->descr = descr;
 	vac_open_bridged_indexes(vacrel->rel, RowExclusiveLock, &vacrel->nindexes,
 							 &vacrel->indrels);
+	for (int i = 0; i < vacrel->nindexes; i++)
+	{
+		if (vacrel->indrels[i]->rd_index->indisprimary)
+		{
+			has_primary_index = true;
+			break;
+		}
+	}
 	vacrel->bstrategy = bstrategy;
 	if (instrument && vacrel->nindexes > 0)
 	{
@@ -1397,6 +1410,28 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 	 */
 	dead_items_cleanup(vacrel);
 	Assert(!IsInParallelMode());
+
+	/*
+	 * Update heap statistics only after leaving parallel mode.  With a
+	 * parallel vacuum, the leader stays in parallel mode until
+	 * dead_items_cleanup(), index cleanup included, and vac_update_relstats()
+	 * performs an in-place pg_class update that is forbidden there.
+	 */
+	if (has_primary_index && vacrel->do_index_cleanup)
+	{
+		curpages = RelationGetNumberOfBlocks(rel);
+		vac_update_relstats(rel,
+							curpages,
+							vacrel->new_rel_tuples,
+							curpages,
+#if PG_VERSION_NUM >= 180000
+							0,
+#endif
+							true,
+							InvalidTransactionId,
+							InvalidMultiXactId,
+							NULL, NULL, false);
+	}
 
 	/*
 	 * Update pg_class entries for each of rel's indexes where appropriate.
