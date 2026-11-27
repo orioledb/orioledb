@@ -6322,6 +6322,8 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 		}
 
 		put_page_image(desc->rootInfo.rootPageBlkno, buf);
+		/* read_page_from_disk() already counted this root acquisition. */
+		desc->rootReadCount++;
 		CLEAN_DIRTY(desc->ppool, desc->rootInfo.rootPageBlkno);
 		if (!*evicted_data)
 		{

@@ -40,6 +40,9 @@ typedef struct
 	bool		tryLockFailed;
 } OBTreeFindPageInternalContext;
 
+static OFindPageResult find_page_internal(OBTreeFindPageContext *context,
+										  void *key, BTreeKeyType keyType,
+										  uint16 targetLevel, bool rootRead);
 static bool follow_rightlink(OBTreeFindPageInternalContext *intCxt);
 static void step_upward_level(OBTreeFindPageInternalContext *intCxt);
 static bool btree_find_read_page(OBTreeFindPageContext *context,
@@ -504,6 +507,14 @@ OFindPageResult
 find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		  uint16 targetLevel)
 {
+	return find_page_internal(context, key, keyType, targetLevel, false);
+}
+
+/* rootRead carries a root load already done by refind_page(). */
+static OFindPageResult
+find_page_internal(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
+				   uint16 targetLevel, bool rootRead)
+{
 	BTreeDescr *desc = context->desc;
 	OBTreeFindPageInternalContext intCxt;
 	BTreePageItemLocator loc;
@@ -521,6 +532,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	bool		loadHikeys;
 	FastpathFindDownlinkMeta fastpathMeta;
 	Jsonb	   *params = NULL;
+	bool		countRoot = true;
 
 	memset(&intCxt, 0, sizeof(intCxt));
 	ASAN_UNPOISON_MEMORY_REGION(&intCxt, sizeof(intCxt));
@@ -561,7 +573,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 	if (!tryFlag)
 	{
-		o_btree_load_shmem(desc);
+		rootRead |= o_btree_load_shmem(desc);
 	}
 	else
 	{
@@ -573,6 +585,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	/* starts from the rootPageBlkno */
 	intCxt.blkno = desc->rootInfo.rootPageBlkno;
 	intCxt.pageChangeCount = desc->rootInfo.rootPageChangeCount;
+
 	while (true)
 	{
 		BTreeNonLeafTuphdr *nonLeafHdr = NULL;
@@ -825,8 +838,11 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			}
 			else
 			{
-				o_btree_load_shmem(desc);
+				rootRead = o_btree_load_shmem(desc);
 			}
+			if (tryFlag)
+				rootRead = false;
+			countRoot = true;
 			shmemIsReloaded = true;
 
 			/* Initiate another attempt */
@@ -844,6 +860,18 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			 */
 			step_upward_level(&intCxt);
 			continue;
+		}
+
+		/*
+		 * Count the root once, after the existing checks accept it. A root
+		 * loaded by this request is a read, not an additional hit. Retrying
+		 * its page copy does not acquire another page.
+		 */
+		if (context->index == 0 && countRoot)
+		{
+			if (!rootRead)
+				o_btree_count_page_hit(desc);
+			countRoot = false;
 		}
 
 		if (level > targetLevel || (downlinkLocationFlag && level > 0))
@@ -1133,6 +1161,9 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		}
 		else
 		{
+			/* The downlink is resolved and is at memory => hit.  */
+			o_btree_count_page_hit(desc);
+
 			/*
 			 * IN_MEMORY downlink at the parent of the target in IMAGE mode.
 			 * If we got here under the lock (needLock = true on an earlier
@@ -1278,6 +1309,8 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 				intCxt->haveLock = false;
 				return true;
 			}
+			/* The locked sibling is another resident-page acquisition. */
+			o_btree_count_page_hit(desc);
 		}
 		else
 		{
@@ -1291,6 +1324,8 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 									  intCxt->partial,
 									  true))
 				return true;
+			/* This sibling acquisition bypasses the normal downlink path. */
+			o_btree_count_page_hit(desc);
 			intCxt->pagePtr = useParentImg ? context->parentImg : context->img;
 			intCxt->pageChangeCount = O_PAGE_GET_CHANGE_COUNT(intCxt->pagePtr);
 			Assert(RIGHTLINK_GET_CHANGECOUNT(rightlink) ==
@@ -1348,8 +1383,7 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	{
 		OInMemoryBlkno rootBlkno = desc->rootInfo.rootPageBlkno;
 		uint32		rootPageChangeCount = desc->rootInfo.rootPageChangeCount;
-
-		o_btree_load_shmem(desc);
+		bool		rootRead = o_btree_load_shmem(desc);
 
 		/*
 		 * The hint names a page of the incarnation the caller was looking at.
@@ -1358,10 +1392,11 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		 * since handed to somebody else, and descending from it would walk
 		 * another tree.  There is nothing to refind from, so go down from the
 		 * new root instead, which is what an invalid hint already does below.
+		 * Carry any root read into the descent to avoid an additional hit.
 		 */
-		if (desc->rootInfo.rootPageBlkno != rootBlkno ||
+		if (rootRead || desc->rootInfo.rootPageBlkno != rootBlkno ||
 			desc->rootInfo.rootPageChangeCount != rootPageChangeCount)
-			return find_page(context, key, keyType, level);
+			return find_page_internal(context, key, keyType, level, rootRead);
 	}
 	else
 	{
@@ -1430,6 +1465,9 @@ retry:
 			return find_page(context, key, keyType, level);
 		}
 
+		/* A successful hint avoids find_page(), but still acquires a page. */
+		o_btree_count_page_hit(desc);
+
 		if (level == 0 && BTREE_PAGE_FIND_IS(context, FIX_LEAF_SPLIT))
 		{
 			/* called from o_btree_normal_modify() */
@@ -1485,6 +1523,8 @@ retry:
 			return find_page(context, key, keyType, level);
 		}
 		Assert(O_PAGE_GET_CHANGE_COUNT(img) == intCxt.pageChangeCount);
+		/* The read-only hint path needs the same accounting as modification. */
+		o_btree_count_page_hit(desc);
 	}
 	else
 	{
@@ -1681,6 +1721,8 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 			if (success &&
 				PAGE_GET_LEVEL(context->img) == level)
 			{
+				/* The parent image supplies a sibling without a root descent. */
+				o_btree_count_page_hit(desc);
 				Assert(O_PAGE_GET_CHANGE_COUNT(context->img) == item->pageChangeCount);
 				BTREE_PAGE_LOCATOR_FIRST(context->img, &item->locator);
 				parentItem->locator = loc;
@@ -1868,6 +1910,13 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 												   BTREE_PAGE_FIND_IS(context, FETCH) ?
 												   &context->partial : NULL,
 												   true);
+
+					/*
+					 * Count each acquired left sibling, including historical
+					 * steps.
+					 */
+					if (success)
+						o_btree_count_page_hit(desc);
 
 					if (success &&
 						UndoLocationIsValid(prevLoc) &&

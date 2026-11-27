@@ -551,10 +551,12 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	return true;
 }
 
-void
+/* Return true only if this call read the root from disk. */
+bool
 o_btree_load_shmem(BTreeDescr *desc)
 {
 	OInMemoryBlkno metaPageBlkno = desc->rootInfo.metaPageBlkno;
+	uint64		rootReadCount = desc->rootReadCount;
 	bool		result PG_USED_FOR_ASSERTS_ONLY;
 
 	result = o_btree_load_shmem_internal(desc, false);
@@ -571,6 +573,9 @@ o_btree_load_shmem(BTreeDescr *desc)
 	 */
 	if (desc->rootInfo.metaPageBlkno != metaPageBlkno)
 		btree_seq_scans_reregister(desc);
+
+	/* An uninitialized descriptor can still find a root already in memory. */
+	return desc->rootReadCount != rootReadCount;
 }
 
 bool
