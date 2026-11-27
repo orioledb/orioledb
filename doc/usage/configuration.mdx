@@ -164,6 +164,22 @@ The number of background writer processes, which flush dirty pages of OrioleDB t
 
 Maximum number of concurrent IO operations issued by OrioleDB in parallel. We recommend setting this parameter when the OS kernel becomes a bottleneck for high concurrent IO.
 
+### `orioledb.btree_prefetch_depth`
+
+|             |         |
+| ----------- | ------- |
+| **Default** | 0 (off) |
+
+PostgreSQL 18 only. Number of leaf pages a sequential scan reads ahead from disk through the asynchronous IO subsystem. Has no effect with `io_method = sync`. Can be changed per session.
+
+### `orioledb.btree_prefetch_buffers`
+
+|             |         |
+| ----------- | ------- |
+| **Default** | 256     |
+
+PostgreSQL 18 only. Number of shared buffers, 8 KB each, into which IO workers read prefetched leaf pages when `io_method = worker`; no buffers are allocated with other IO methods. When all of them are in use, a scan reads its next pages synchronously. Requires a restart to change.
+
 ### `orioledb.device_filename`
 
 |             |         |
