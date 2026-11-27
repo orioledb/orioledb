@@ -106,6 +106,7 @@ REGRESSCHECKS = btree_sys_check \
 				alter_index \
 				bitmap_scan \
 				bitmap_fixed_types \
+				index_only_scan_batch \
 				btree_compression \
 				btree_print \
 				createas \

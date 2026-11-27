@@ -111,6 +111,18 @@ struct BTreeIterator
 	bool		curKeyLazy;
 
 	/*
+	 * Cached page-level answer to "can the iteration end key fall on the leaf
+	 * we are reading from?".  When it cannot, no tuple of that leaf can
+	 * overshoot the bound and o_btree_iterator_fetch() skips its per-row
+	 * compare.  See iterator_end_may_be_on_page() for how the cache is keyed.
+	 */
+	OInMemoryBlkno endPageBlkno;
+	uint32		endPageChangeCount;
+	void	   *endPageKey;
+	bool		endPageValid;
+	bool		endOnPage;
+
+	/*
 	 * Optimistic array-advance parking.  When o_btree_iterator_fetch()
 	 * discards a tuple that overshot the end bound -- e.g. the first row of
 	 * the next array element in a "col = ANY" scan -- it rewinds the leaf
@@ -165,6 +177,8 @@ static OTuple fetch_tuple_from_page(BTreeDescr *desc, Page p,
 static bool page_contains_key(BTreeIterator *it, void *key,
 							  BTreeKeyType kind, Page p, OTuple lokey);
 static OTuple get_lokey_if_exists(BTreeIterator *it);
+static bool iterator_end_may_be_on_page(BTreeIterator *it,
+										BtreeIterationEnd *end);
 static void get_next_combined_location(BTreeIterator *it);
 static void load_page_from_undo(BTreeIterator *it, void *key, BTreeKeyType kind);
 static bool btree_iterator_check_load_next_page(BTreeIterator *it,
@@ -410,6 +424,7 @@ o_btree_find_tuples_start(BTreeDescr *desc, void *key,
 	it->startKind = BTreeKeyNone;
 	it->pageCount = 1;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&it->undoLoc);
+	it->endPageValid = false;
 #ifdef USE_ASSERT_CHECKING
 	O_TUPLE_SET_NULL(it->prevTuple.tuple);
 #endif
@@ -798,7 +813,14 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 	BTREE_PAGE_READ_LEAF_ITEM(tupHdrPtr, curTuple, p, loc);
 	tupHdr = *tupHdrPtr;
-	(void) find_non_lock_only_undo_record(desc->undoType, &tupHdr);
+
+	/*
+	 * find_non_lock_only_undo_record() walks the chain only while the header
+	 * is lock-only, so it leaves an ordinary tuple untouched.  Test that here
+	 * to keep the out-of-line call off the per-tuple path of a scan.
+	 */
+	if (XACT_INFO_IS_LOCK_ONLY(tupHdr.xactInfo))
+		(void) find_non_lock_only_undo_record(desc->undoType, &tupHdr);
 
 	Assert(COMMITSEQNO_IS_NORMAL(oSnapshot->csn) ||
 		   COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn));
@@ -1056,6 +1078,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	it->startKey = NULL;
 	it->startKind = BTreeKeyNone;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&it->undoLoc);
+	it->endPageValid = false;
 #ifdef USE_ASSERT_CHECKING
 	O_TUPLE_SET_NULL(it->prevTuple.tuple);
 #endif
@@ -1221,6 +1244,14 @@ o_btree_iterator_advance(BTreeIterator *it, void *key, BTreeKeyType kind)
 	bool		found_in_page = false;
 
 	Assert(key != NULL && kind != BTreeKeyNone);
+
+	/*
+	 * Advancing installs a new key range, and for a "col = ANY" scan the
+	 * caller rewrites the bound in place -- same object, new contents.  The
+	 * cached page-level end-bound answer was computed against the old bound
+	 * and can survive a stay on the same leaf, so drop it here.
+	 */
+	it->endPageValid = false;
 
 	/*
 	 * Advancing can re-descend and replace the page image, which would strand
@@ -1412,7 +1443,9 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 	it->resumeLocValid = false;
 	result = o_btree_iterator_fetch_internal(it, tupleCsn, endPtr);
 
-	if (!O_TUPLE_IS_NULL(result) && endKey != NULL)
+	if (!O_TUPLE_IS_NULL(result) && endKey != NULL &&
+		(endPtr == NULL || it->combinedResult ||
+		 iterator_end_may_be_on_page(it, endPtr)))
 	{
 		int			cmp = o_btree_cmp(desc, &result, BTreeKeyLeafTuple, endKey, endKind);
 
@@ -1464,6 +1497,141 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 	}
 
 	return result;
+}
+
+/*
+ * Is this leaf item's own version the one `snapshot` sees, with nothing to
+ * walk?  It is when its transaction finished before any snapshot taken now
+ * could start -- o_find_tuple_version() would stop at it at once -- and it
+ * neither deletes the row nor only locks it.
+ */
+static inline bool
+leaf_item_visible_as_is(BTreeLeafTuphdr *tuphdr, OSnapshot *snapshot)
+{
+	OXid		oxid;
+
+	if (tuphdr->deleted != BTreeLeafTupleNonDeleted ||
+		XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo))
+		return false;
+
+	oxid = XACT_INFO_GET_OXID(tuphdr->xactInfo);
+	return oxid == BootstrapTransactionId || oxid < snapshot->xmin;
+}
+
+/*
+ * Hand out the next rows of the chunk the iterator is in as one batch, for
+ * a caller that would otherwise fetch them one by one: those the iterator
+ * would return as they lie, up to the end bound.  The iterator moves past
+ * the rows handed out.
+ *
+ * False when no row qualifies, leaving the iterator where it was for
+ * o_btree_iterator_fetch() to go on.  Backward scans, scans merging undo
+ * images, scans with a fetch callback and scans as of a WAL position are
+ * left to it as well.
+ */
+bool
+o_btree_iterator_fetch_batch(BTreeIterator *it, void *endKey,
+							 BTreeKeyType endKind, bool endIsIncluded,
+							 BTreeIteratorBatch *batch)
+{
+	BTreeDescr *desc = it->context.desc;
+	OBTreeFindPageContext *context = &it->context;
+	BtreeIterationEnd end;
+	BtreeIterationEnd *endPtr = NULL;
+	BTreePageItemLocator *loc;
+	BTreePageItemLocator probe;
+	OffsetNumber stop;
+	bool		partial;
+
+	if (!IT_IS_FORWARD(it) || it->fetchCallback != NULL ||
+		!XLogRecPtrIsInvalid(it->oSnapshot.xlogptr) ||
+		!COMMITSEQNO_IS_NORMAL(it->oSnapshot.csn))
+		return false;
+
+	if (endKey != NULL && endKind != BTreeKeyNone)
+	{
+		end.key = endKey;
+		end.keyKind = endKind;
+		end.isIncluded = endIsIncluded;
+		endPtr = &end;
+	}
+
+	if ((it->combinedPage ||
+		 !BTREE_PAGE_LOCATOR_IS_VALID(context->img,
+									  &context->items[context->index].locator)) &&
+		!btree_iterator_check_load_next_page(it, endPtr))
+		return false;
+	if (it->combinedPage)
+		return false;
+
+	loc = &context->items[context->index].locator;
+
+	/*
+	 * A partial page has to have the chunk loaded to be read.  A load that
+	 * fails is left to the fetch, which re-finds the position.
+	 */
+	partial = BTREE_PAGE_FIND_IS(context, FETCH);
+	if (partial &&
+		!partial_load_chunk(&context->partial, context->img,
+							loc->chunkOffset, NULL))
+		return false;
+
+	/* Where the end bound cuts the chunk, when it may be on this leaf */
+	stop = loc->chunkItemsCount;
+	if (endPtr != NULL && iterator_end_may_be_on_page(it, endPtr))
+	{
+		OTuple		tuple;
+
+		probe = *loc;
+		for (; probe.itemOffset < stop; probe.itemOffset++)
+		{
+			BTREE_PAGE_READ_LEAF_TUPLE(tuple, context->img, &probe);
+			if (o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple, endKey,
+							endKind) >= (endIsIncluded ? 1 : 0))
+				break;
+		}
+		stop = probe.itemOffset;
+	}
+
+	/* And where the first row that needs a closer look is */
+	probe = *loc;
+	for (; probe.itemOffset < stop; probe.itemOffset++)
+	{
+		if (!leaf_item_visible_as_is((BTreeLeafTuphdr *)
+									 BTREE_PAGE_LOCATOR_GET_ITEM(context->img,
+																 &probe),
+									 &it->oSnapshot))
+			break;
+	}
+	stop = probe.itemOffset;
+
+	if (stop <= loc->itemOffset)
+		return false;
+
+	/*
+	 * Stepping off a partial page's chunk needs its high keys.  Load them
+	 * now: a load failing after the batch was handed out would re-find the
+	 * position into the image the batch is read from.
+	 */
+	if (partial && stop == loc->chunkItemsCount &&
+		!partial_load_hikeys_chunk(&context->partial, context->img))
+		return false;
+
+	batch->img = context->img;
+	batch->loc = *loc;
+	batch->count = stop - loc->itemOffset;
+	batch->csn = it->oSnapshot.csn;
+
+	/* As if each row had been fetched: a re-find resumes after the last */
+	loc->itemOffset = stop - 1;
+	it->curKeyLoc = *loc;
+	it->curKeyLazy = true;
+	it->curKeySet = true;
+	it->curKeyReturned = true;
+	it->resumeLocValid = false;
+	IT_NEXT_OFFSET(it, loc);
+
+	return true;
 }
 
 /*
@@ -1774,7 +1942,18 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 
 	while (true)
 	{
-		if (!btree_iterator_check_load_next_page(it, end))
+		/*
+		 * While the current leaf still has items and we are not merging an
+		 * undo image, btree_iterator_check_load_next_page() has nothing to do
+		 * but return true: its undo pre-check bails out on !combinedPage and
+		 * its loop is this very condition.  Test it here so a row that stays
+		 * on the same leaf -- nearly all of them -- does not pay for the
+		 * call.
+		 */
+		if ((it->combinedPage ||
+			 !BTREE_PAGE_LOCATOR_IS_VALID(context->img,
+										  &context->items[context->index].locator)) &&
+			!btree_iterator_check_load_next_page(it, end))
 		{
 			O_TUPLE_SET_NULL(result);
 			return result;
@@ -1948,6 +2127,69 @@ page_contains_end(BTreeIterator *it, Page p,
 			return true;
 	}
 	return false;
+}
+
+/*
+ * Can the iteration end key fall on the leaf the iterator is reading from?
+ *
+ * o_btree_iterator_fetch() compares every returned tuple against the end
+ * bound.  That compare is only ever decided by the last leaf of the scan: on
+ * any earlier leaf the whole page lies within the bound, which is exactly what
+ * page_contains_end() answers, once per page instead of once per row.
+ *
+ * The locator has already advanced past the returned tuple by the time the
+ * caller asks, so this may describe a later leaf than the tuple came from.
+ * That stays safe in both directions: forward, a later leaf's hikey is not
+ * below the tuple's leaf's hikey, so "end is beyond this leaf" implies it is
+ * beyond the tuple's leaf too; backward, the same holds for the lokey.
+ *
+ * Every uncertain case answers true, which only costs the per-row compare the
+ * caller would have made anyway.
+ */
+static bool
+iterator_end_may_be_on_page(BTreeIterator *it, BtreeIterationEnd *end)
+{
+	OBTreeFindPageContext *context = &it->context;
+	OBtreePageFindItem *item = &context->items[context->index];
+
+	/*
+	 * page_contains_end() reads the leaf's hikey, and a partial (FETCH) leaf
+	 * may not have that chunk loaded.  Loading it here can fail and demand a
+	 * re-find, which this point cannot do.  A scan long enough for this to
+	 * matter switches to IMAGE after a few pages anyway.
+	 */
+	if (BTREE_PAGE_FIND_IS(context, FETCH))
+		return true;
+
+	/*
+	 * The backward case reads the lokey, which is not always available.  A
+	 * leaf that is the root has no parent to find it in, and is leftmost.
+	 */
+	if (IT_IS_BACKWARD(it) &&
+		(context->index == 0 || !btree_find_context_has_lokey(context)))
+		return true;
+
+	/*
+	 * Keyed on the leaf's identity: stepping to a sibling changes blkno, and
+	 * a concurrent reuse of the same buffer changes pageChangeCount.  The
+	 * bound is keyed too, because a caller may hand a different one to the
+	 * next fetch without the leaf changing; o_btree_iterator_advance()
+	 * additionally invalidates, since it rewrites a bound in place.
+	 */
+	if (!it->endPageValid ||
+		it->endPageBlkno != item->blkno ||
+		it->endPageChangeCount != item->pageChangeCount ||
+		it->endPageKey != end->key)
+	{
+		it->endOnPage = page_contains_end(it, context->img,
+										  get_lokey_if_exists(it), end);
+		it->endPageBlkno = item->blkno;
+		it->endPageChangeCount = item->pageChangeCount;
+		it->endPageKey = end->key;
+		it->endPageValid = true;
+	}
+
+	return it->endOnPage;
 }
 
 /*

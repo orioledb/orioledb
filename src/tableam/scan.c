@@ -1217,6 +1217,7 @@ o_rescan_custom_scan(CustomScanState *node)
 			btree_iterator_free(ix_plan_state->ostate.iterator);
 			ix_plan_state->ostate.iterator = NULL;
 		}
+		ix_plan_state->ostate.batch.count = 0;
 		if (node->ss.ps.chgParam != NULL)
 		{
 			MemoryContextReset(ix_plan_state->ostate.cxt);
