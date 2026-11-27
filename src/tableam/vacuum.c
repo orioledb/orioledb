@@ -1189,6 +1189,9 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 	/* report that everything is now scanned */
 	pgstat_progress_update_param(PROGRESS_VACUUM_HEAP_BLKS_SCANNED, blocksScanned);
 
+	/* The whole bridge index is scanned: no estimate is needed */
+	vacrel->new_live_tuples = vacrel->live_tuples;
+
 	/*
 	 * Also compute the total number of surviving heap entries.  In the
 	 * (unlikely) scenario that new_live_tuples is -1, take it as zero.

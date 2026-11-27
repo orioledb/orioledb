@@ -89,10 +89,19 @@ class VacuumTest(BaseTest):
 				USING gin (to_tsvector('english', body));
 		""")
 
+		def reltuples():
+			return con.execute("SELECT reltuples FROM pg_class "
+			                   "WHERE relname = 'o_test_gin';")[0][0]
+
 		con = node.connect(autocommit=True)
 		con.execute("SET min_parallel_index_scan_size = 0;")
 		con.execute("VACUUM o_test_gin;")
+		self.assertEqual(reltuples(), 10000)
+		con.execute("DELETE FROM o_test_gin WHERE id > 4000;")
+		con.execute("VACUUM o_test_gin;")
+		self.assertEqual(reltuples(), 4000)
 		con.execute("VACUUM ANALYZE o_test_gin;")
+		self.assertEqual(reltuples(), 4000)
 		con.close()
 		node.stop()
 
