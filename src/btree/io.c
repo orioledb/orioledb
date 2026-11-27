@@ -29,7 +29,7 @@
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "catalog/free_extents.h"
-#include "catalog/o_sys_cache.h"
+#include "catalog/o_tablespaces.h"
 #include "recovery/recovery.h"
 #include "s3/headers.h"
 #include "s3/worker.h"
@@ -282,24 +282,30 @@ btree_smgr_filename(BTreeDescr *desc, off_t offset, uint32 chkpNum)
 }
 
 /*
- * Ensure the data directory for this tree exists.
+ * Ensure the data directory for the tree with these oids exists.
  *
  * A primary tree can resolve to the database's default tablespace
  * even when the table lives in a user tablespace, and nothing else
  * may have created that default directory yet.
  * See https://github.com/orioledb/orioledb/issues/986
  */
-static void
-btree_smgr_ensure_dir(BTreeDescr *desc)
+void
+btree_ensure_dir(ORelOids oids)
 {
 	char	   *prefix,
 			   *db_prefix;
 
-	o_get_prefixes_for_tablespace(desc->oids.datoid, desc->oids.spcoid,
+	o_get_prefixes_for_tablespace(oids.datoid, oids.spcoid,
 								  &prefix, &db_prefix);
 	o_verify_dir_exists_or_create(prefix, NULL, NULL);
 	o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
 	pfree(db_prefix);
+}
+
+static void
+btree_smgr_ensure_dir(BTreeDescr *desc)
+{
+	btree_ensure_dir(desc->oids);
 }
 
 static File

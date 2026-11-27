@@ -47,6 +47,7 @@ extern void btree_close_smgr(BTreeDescr *descr);
 extern char *btree_filename(OIndexKey key, int segno, uint32 chkpNum);
 extern char *btree_smgr_filename(BTreeDescr *desc, off_t offset,
 								 uint32 chkpNum);
+extern void btree_ensure_dir(ORelOids oids);
 extern void btree_smgr_writeback(BTreeDescr *desc, uint32 chkpNum,
 								 off_t offset, int amount);
 extern void btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length);
