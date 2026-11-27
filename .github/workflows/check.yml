@@ -273,7 +273,7 @@ jobs:
             ./postgresql/src/test/**/regression.diffs
             ./postgresql/src/test/**/isolation_filtered.diffs
             ./postgresql/dump_diff_*.txt
-          retention-days: 2
+          retention-days: 21
           if-no-files-found: ignore
 
       - name: Upload tests logs
@@ -291,7 +291,7 @@ jobs:
             ./postgresql/rep_pg.log
             ./postgresql/src/test/**/tmp_check/*.dump
             ./postgresql/src/test/**/tmp_check/log/*
-          retention-days: 2
+          retention-days: 21
           if-no-files-found: ignore
 
       - name: Show stuck processes
