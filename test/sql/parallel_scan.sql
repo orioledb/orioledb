@@ -863,6 +863,69 @@ SELECT * FROM
 RESET enable_material;
 COMMIT;
 
+-- Parallel bitmap scans whose quals mix native and bridged indexes return the
+-- same rows as a sequential scan.
+BEGIN;
+CREATE TABLE o_test_parallel_bitmap_mixed (
+	id int8 PRIMARY KEY,
+	a int8 NOT NULL,
+	b int8 NOT NULL,
+	c int8 NOT NULL
+) USING orioledb WITH (index_bridging);
+INSERT INTO o_test_parallel_bitmap_mixed
+	SELECT g, g % 1000, g % 997, g % 991 FROM generate_series(1, 20000) g;
+CREATE INDEX o_test_parallel_bitmap_mixed_a
+	ON o_test_parallel_bitmap_mixed (a);
+CREATE INDEX o_test_parallel_bitmap_mixed_b
+	ON o_test_parallel_bitmap_mixed USING btree (b) WITH (orioledb_index = off);
+CREATE INDEX o_test_parallel_bitmap_mixed_c
+	ON o_test_parallel_bitmap_mixed USING btree (c) WITH (orioledb_index = off);
+ANALYZE o_test_parallel_bitmap_mixed;
+
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+SET LOCAL enable_indexonlyscan = off;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 0;
+SET LOCAL min_parallel_index_scan_size = 0;
+SET LOCAL max_parallel_workers_per_gather = 3;
+
+-- native OR bridged
+EXPLAIN (COSTS OFF)
+	SELECT count(*), sum(id) FROM o_test_parallel_bitmap_mixed
+		WHERE (a < 50 OR b < 50) AND sqrt(id::float8) >= 0;
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap_mixed
+	WHERE (a < 50 OR b < 50) AND sqrt(id::float8) >= 0;
+
+-- bridged OR bridged
+EXPLAIN (COSTS OFF)
+	SELECT count(*), sum(id) FROM o_test_parallel_bitmap_mixed
+		WHERE (b < 50 OR c < 50) AND sqrt(id::float8) >= 0;
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap_mixed
+	WHERE (b < 50 OR c < 50) AND sqrt(id::float8) >= 0;
+
+-- native AND bridged; a lower cpu_operator_cost makes the planner pick a
+-- parallel BitmapAnd
+SET LOCAL cpu_operator_cost = 0.01;
+EXPLAIN (COSTS OFF)
+	SELECT count(*), sum(id) FROM o_test_parallel_bitmap_mixed
+		WHERE a < 60 AND b < 60 AND sqrt(id::float8) >= 0;
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap_mixed
+	WHERE a < 60 AND b < 60 AND sqrt(id::float8) >= 0;
+
+-- the same quals with a sequential scan
+SET LOCAL enable_seqscan = on;
+SET LOCAL enable_bitmapscan = off;
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap_mixed
+	WHERE (a < 50 OR b < 50) AND sqrt(id::float8) >= 0;
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap_mixed
+	WHERE (b < 50 OR c < 50) AND sqrt(id::float8) >= 0;
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap_mixed
+	WHERE a < 60 AND b < 60 AND sqrt(id::float8) >= 0;
+COMMIT;
+
 -- Parallel ordered scan on primary index with non-leading PK columns.
 -- PK (c, a) on table (a, b, c): leaf tuples store columns in table order,
 -- nonLeafKeys in index key order.  The ordered-scan assertion must compare
