@@ -18,6 +18,7 @@
 #include "btree/check.h"
 #include "btree/io.h"
 #include "btree/page_chunks.h"
+#include "btree/scan.h"
 #include "catalog/free_extents.h"
 #include "catalog/sys_trees.h"
 #include "checkpoint/checkpoint.h"
@@ -57,13 +58,20 @@ typedef struct
 	OBTreeFindPageContext context;
 } BTreeCheckStatus;
 
+/* How many times check_btree() looks again while extents keep moving */
+#define CHECK_EXTENTS_MAX_ATTEMPTS 100
+
 static int	file_extent_cmp(const void *p1, const void *p2);
 static void check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 							 OInMemoryBlkno parentPagenum);
 static void add_extent(ExtentsArray *arr, FileExtent extent);
-static bool check_extents(ExtentsArray *busy, ExtentsArray *free);
+static bool check_extents(ExtentsArray *busy, ExtentsArray *free,
+						  bool report);
+static bool check_file_length(uint64 data_file_len, ExtentsArray *busy,
+							  ExtentsArray *free, bool report);
 static void get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
-							 bool force_file_check, uint32 chkp_num);
+							 uint32 chkp_num);
+static bool check_checkpoint_image(BTreeDescr *desc);
 static void get_free_extents_from_file(SeqBufTag *tag, off_t offset,
 									   ExtentsArray *free_extents,
 									   bool compressed, bool should_exists);
@@ -83,10 +91,10 @@ check_btree(BTreeDescr *desc, bool force_file_check, bool wait_for_checkpoint)
 	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
 	BTreeCheckStatus status;
 	ExtentsArray free_extents;
-	uint64		data_file_len = pg_atomic_read_u64(&metaPageBlkno->datafileLength[0]);	/* Fix for S3 mode */
 	bool		is_compressed = OCompressIsValid(desc->compress);
 	uint32		checkpoint_number = 0;
 	bool		copy_blkno;
+	int			attempt;
 
 	memset(&status, 0, sizeof(BTreeCheckStatus));
 	memset(&free_extents, 0, sizeof(ExtentsArray));
@@ -101,92 +109,114 @@ check_btree(BTreeDescr *desc, bool force_file_check, bool wait_for_checkpoint)
 	 * on that transient.
 	 */
 	status.emit_transient_notices = !wait_for_checkpoint;
-	init_page_find_context(&status.context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
 
 	/*
-	 * get_checkpoint_number() returns false while the checkpointer holds the
-	 * per-tree state.  With wait_for_checkpoint, retry until it moves past;
-	 * otherwise the caller is a debug entry point and gets the legacy NOTICE.
+	 * The tree's pages and its free stream are read one after the other, and
+	 * page writes do not wait for us: a page rewritten in between is seen at
+	 * its old extent, which the stream already lists as free, while its new
+	 * extent is gone from the stream.  So a mismatch only counts if no extent
+	 * moved while we looked; otherwise look again.
 	 */
-	while (!get_checkpoint_number(desc, desc->rootInfo.rootPageBlkno,
-								  &checkpoint_number, &copy_blkno))
+	for (attempt = 1;; attempt++)
 	{
-		if (!wait_for_checkpoint)
-		{
-			elog(NOTICE, "Tree is under checkpoint now");
-			return false;
-		}
+		uint64		changes = pg_atomic_read_u64(&metaPageBlkno->extentsChangeCount);
+		uint64		data_file_len;
+		bool		matches;
+
+		init_page_find_context(&status.context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
 
 		/*
-		 * Holding the per-tree lock here would block the checkpointer we are
-		 * waiting on, so drop it across the latch wait and reacquire after.
-		 * Sys trees serialize against the checkpointer via oSysTreesLock.
+		 * get_checkpoint_number() returns false while the checkpointer holds
+		 * the per-tree state.  With wait_for_checkpoint, retry until it moves
+		 * past; otherwise the caller is a debug entry point and gets the
+		 * legacy NOTICE.
 		 */
-		if (is_sys_tree)
-			LWLockRelease(&checkpoint_state->oSysTreesLock);
-		else
-			o_tables_rel_unlock_extended(&desc->oids, AccessExclusiveLock, true);
+		while (!get_checkpoint_number(desc, desc->rootInfo.rootPageBlkno,
+									  &checkpoint_number, &copy_blkno))
+		{
+			if (!wait_for_checkpoint)
+			{
+				elog(NOTICE, "Tree is under checkpoint now");
+				return false;
+			}
+
+			/*
+			 * Holding the per-tree lock here would block the checkpointer we
+			 * are waiting on, so drop it across the latch wait and reacquire
+			 * after. Sys trees serialize against the checkpointer via
+			 * oSysTreesLock.
+			 */
+			if (is_sys_tree)
+				LWLockRelease(&checkpoint_state->oSysTreesLock);
+			else
+				o_tables_rel_unlock_extended(&desc->oids, AccessExclusiveLock, true);
+			(void) WaitLatch(MyLatch,
+							 WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
+							 10L, WAIT_EVENT_PG_SLEEP);
+			ResetLatch(MyLatch);
+			CHECK_FOR_INTERRUPTS();
+			if (is_sys_tree)
+				LWLockAcquire(&checkpoint_state->oSysTreesLock, LW_EXCLUSIVE);
+			else
+				o_tables_rel_lock_extended(&desc->oids, AccessExclusiveLock, true);
+		}
+
+		Assert(checkpoint_number > 0);
+
+		/* Fix for S3 mode */
+		data_file_len = pg_atomic_read_u64(&metaPageBlkno->datafileLength[0]);
+
+		check_walk_btree(&status, desc->rootInfo.rootPageBlkno, OInvalidInMemoryBlkno);
+
+		if (status.hasError)
+			return false;
+
+		if (desc->storageType != BTreeStoragePersistence)
+			return true;
+
+		/* get free file extents */
+		get_free_extents(desc, &free_extents, checkpoint_number - 1);
+
+		matches = check_extents(&status.busy, &free_extents, false) &&
+			check_file_length(data_file_len, &status.busy, &free_extents, false);
+		if (matches)
+			break;
+
+		if (pg_atomic_read_u64(&metaPageBlkno->extentsChangeCount) == changes ||
+			attempt >= CHECK_EXTENTS_MAX_ATTEMPTS)
+		{
+			/* Again, to say what does not match */
+			(void) check_extents(&status.busy, &free_extents, true);
+			(void) check_file_length(data_file_len, &status.busy, &free_extents, true);
+			status.hasError = true;
+			break;
+		}
+
+		status.busy.size = status.busy.blocksCount = 0;
+		free_extents.size = free_extents.blocksCount = 0;
 		(void) WaitLatch(MyLatch,
 						 WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
 						 10L, WAIT_EVENT_PG_SLEEP);
 		ResetLatch(MyLatch);
 		CHECK_FOR_INTERRUPTS();
-		if (is_sys_tree)
-			LWLockAcquire(&checkpoint_state->oSysTreesLock, LW_EXCLUSIVE);
-		else
-			o_tables_rel_lock_extended(&desc->oids, AccessExclusiveLock, true);
-	}
-
-	Assert(checkpoint_number > 0);
-
-	check_walk_btree(&status, desc->rootInfo.rootPageBlkno, OInvalidInMemoryBlkno);
-
-	if (status.hasError)
-		return false;
-
-	if (desc->storageType != BTreeStoragePersistence)
-		return true;
-
-	/* get free file extents */
-	get_free_extents(desc, &free_extents, force_file_check,
-					 checkpoint_number - 1);
-
-	if (status.hasError)
-		return false;
-
-	/* check extents */
-	status.hasError = !check_extents(&status.busy, &free_extents);
-
-	if (status.hasError)
-		return false;
-
-	if (data_file_len > status.busy.blocksCount + free_extents.blocksCount)
-	{
-		elog(NOTICE, "Not used file blocks from " UINT64_FORMAT " to " UINT64_FORMAT,
-			 status.busy.blocksCount + free_extents.blocksCount,
-			 data_file_len);
-		status.hasError = true;
-	}
-	else if (data_file_len < status.busy.blocksCount + free_extents.blocksCount)
-	{
-		elog(NOTICE, "Excess file blocks from " UINT64_FORMAT " to " UINT64_FORMAT,
-			 data_file_len,
-			 status.busy.blocksCount + free_extents.blocksCount);
-		status.hasError = true;
 	}
 
 	/* frees allocated bytes */
-	if (status.busy.size > 0)
-	{
-		Assert(status.busy.extents != NULL);
+	if (status.busy.extents != NULL)
 		pfree(status.busy.extents);
-	}
-
-	if (free_extents.size > 0)
-	{
-		Assert(free_extents.extents != NULL);
+	if (free_extents.extents != NULL)
 		pfree(free_extents.extents);
-	}
+
+	if (status.hasError)
+		return false;
+
+	/*
+	 * Validate the checkpoint image separately; it can be older than the live
+	 * tree checked above.
+	 */
+	if (force_file_check && !orioledb_s3_mode &&
+		!check_checkpoint_image(desc))
+		status.hasError = true;
 
 	if (checkpoint_number > 1)
 	{
@@ -270,11 +300,11 @@ foreach_extent_append(BTreeDescr *desc, FileExtent extent, void *arg)
 }
 
 /*
- * Gets free file extents for an index.
+ * Gets the extents the tree's free stream still holds: what the free buffer
+ * has yet to read, and what is freed for the coming checkpoints.
  */
 static void
-get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
-				 bool force_file_check, uint32 chkp_num)
+get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents, uint32 chkp_num)
 {
 	SeqBufTag	chkp_tag;
 	bool		is_compressed = OCompressIsValid(desc->compress);
@@ -282,53 +312,8 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 	chkp_tag.key.oids = desc->oids;
 	chkp_tag.key.oids.spcoid = desc->oids.spcoid;
 
-	if (force_file_check)
+	if (!is_compressed)
 	{
-		bool		found;
-		uint32		num;
-		uint32		map_num;
-
-		/*
-		 * Reads free blocks from map file.
-		 */
-		chkp_tag.type = 'm';
-		chkp_tag.num = o_get_latest_chkp_num(desc->oids.datoid,
-											 desc->oids.relnode,
-											 desc->oids.spcoid,
-											 chkp_num,
-											 &found);
-
-		get_free_extents_from_file(&chkp_tag, sizeof(CheckpointFileHeader),
-								   free_extents, is_compressed, found);
-
-		/*
-		 * The map file only knows what was free when it was written.  Every
-		 * extent freed since -- by the bgwriter rewriting a page, by a merge,
-		 * by a copy-blkno rewrite -- is in a .tmp file or still buffered in
-		 * the matching desc->tmpBuf[], and without them each of those shows
-		 * up as an "Extent ... is neither free nor busy" against a tree that
-		 * is perfectly sound.  The branch below already reads both for the
-		 * non-forced path; do the same here.
-		 */
-		map_num = chkp_tag.num;
-		for (num = map_num; num <= chkp_num; num++)
-		{
-			SeqBufTag	tmp_tag = chkp_tag;
-
-			tmp_tag.num = num + 1;
-			tmp_tag.type = 't';
-			get_free_extents_from_file(&tmp_tag, 0, free_extents,
-									   is_compressed, false);
-			get_free_extents_from_seqbuf_pending(&desc->tmpBuf[(num + 1) % 2],
-												 &tmp_tag, free_extents,
-												 is_compressed);
-		}
-	}
-	else if (!is_compressed)
-	{
-		/*
-		 * Reads free blocks as normal process for uncompressed index.
-		 */
 		off_t		freebuf_offset;
 		uint32		num;
 
@@ -366,7 +351,6 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 	else
 	{
 		/*
-		 * Reads free blocks as normal process for compressed index.
 		 * foreach_free_extent reads from in-memory free extent trees, which
 		 * contain extents from consumed .tmp files.  We also need to read any
 		 * unconsumed .tmp files.
@@ -387,6 +371,189 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 												 true);
 		}
 	}
+}
+
+/*
+ * Appends the extents of the checkpoint image pages under the downlink.
+ */
+static bool
+get_image_extents(BTreeDescr *desc, uint64 downlink, ExtentsArray *busy)
+{
+	char		pg_attribute_aligned(sizeof(uint32)) buf[ORIOLEDB_BLCKSZ];
+	Page		p = (Page) buf;
+	FileExtent	extent;
+	BTreePageItemLocator loc;
+	bool		result = true;
+
+	check_stack_depth();
+	CHECK_FOR_INTERRUPTS();
+
+	if (!FileExtentLenIsValid(DOWNLINK_GET_DISK_LEN(downlink)))
+	{
+		elog(NOTICE, "Checkpoint image downlink %lu %u has an invalid length",
+			 (unsigned long) DOWNLINK_GET_DISK_OFF(downlink),
+			 (unsigned) DOWNLINK_GET_DISK_LEN(downlink));
+		return false;
+	}
+
+	if (read_page_from_disk(desc, buf, downlink, &extent) != OReadPageResultOk)
+	{
+		elog(NOTICE, "Could not read checkpoint image page %lu %u",
+			 (unsigned long) extent.off, (unsigned) extent.len);
+		return false;
+	}
+	add_extent(busy, extent);
+
+	if (O_PAGE_IS(p, LEAF))
+		return true;
+
+	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
+	{
+		BTreeNonLeafTuphdr *tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+
+		if (!DOWNLINK_IS_ON_DISK(tuphdr->downlink))
+		{
+			elog(NOTICE, "Checkpoint image page %lu %u has a downlink not on disk",
+				 (unsigned long) extent.off, (unsigned) extent.len);
+			result = false;
+			continue;
+		}
+		if (!get_image_extents(desc, tuphdr->downlink, busy))
+			result = false;
+	}
+	return result;
+}
+
+/*
+ * Validates the last checkpoint's on-disk state: the image pages and the free
+ * extents listed in the map file must cover the data file up to the map's
+ * datafileLength exactly once.  That image can be older than the live tree;
+ * the check verifies that recovery would start from a self-consistent
+ * snapshot.
+ *
+ * The map is the free space of that image, not of the live tree: pages
+ * written since have taken extents it lists, and the live free stream lists
+ * them in another order.  The image itself stays put while we hold it.
+ */
+static bool
+check_checkpoint_image(BTreeDescr *desc)
+{
+	BTreeSeqScan *hold;
+	uint32		chkp_num;
+	SeqBufTag	tag;
+	CheckpointFileHeader header;
+	ExtentsArray image,
+				map;
+	bool		found;
+	bool		result = true;
+	char	   *filename;
+	File		file;
+
+	memset(&image, 0, sizeof(ExtentsArray));
+	memset(&map, 0, sizeof(ExtentsArray));
+	memset(&tag, 0, sizeof(SeqBufTag));
+
+	/*
+	 * Which map describes the image is what the checkpoints recorded, not
+	 * what files exist: a map file a checkpoint has not finished has its
+	 * header unwritten, and whatever the seq buf page held there.  A tree
+	 * loaded after checkpoint N gets its map N + 1 at once, and keeps it so
+	 * if checkpoint N + 1 skips the tree.  The checkpoint that wrote the tree
+	 * records that after marking the tree done, so wait for a checkpoint that
+	 * has just written it to finish.
+	 */
+	while (true)
+	{
+		hold = btree_hold_checkpoint_image(desc, &chkp_num);
+		pg_read_barrier();
+		if (chkp_num <= checkpoint_state->lastCheckpointNumber)
+			break;
+		free_btree_seq_scan(hold);
+		(void) WaitLatch(MyLatch,
+						 WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
+						 10L, WAIT_EVENT_PG_SLEEP);
+		ResetLatch(MyLatch);
+		CHECK_FOR_INTERRUPTS();
+	}
+
+	tag.key.oids = desc->oids;
+	tag.type = 'm';
+	tag.num = o_get_latest_chkp_num(desc->oids.datoid,
+									desc->oids.relnode,
+									desc->oids.spcoid,
+									chkp_num, &found);
+
+	filename = get_seq_buf_filename(&tag);
+	file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
+	if (file < 0)
+	{
+		/* A tree no checkpoint has written yet has no map */
+		if (found)
+		{
+			elog(NOTICE, "%s does not exist", filename);
+			result = false;
+		}
+		pfree(filename);
+		free_btree_seq_scan(hold);
+		return result;
+	}
+
+	if (OFileRead(file, (Pointer) &header, sizeof(header), 0,
+				  WAIT_EVENT_DATA_FILE_READ) != sizeof(header))
+	{
+		elog(NOTICE, "Could not read the header of %s", filename);
+		FileClose(file);
+		pfree(filename);
+		free_btree_seq_scan(hold);
+		return false;
+	}
+	FileClose(file);
+
+	if (!found)
+	{
+		/* Not written by a checkpoint: what is there is no header */
+		pfree(filename);
+		free_btree_seq_scan(hold);
+		return true;
+	}
+
+	if (DiskDownlinkIsValid(header.rootDownlink) &&
+		!FileExtentLenIsValid(DOWNLINK_GET_DISK_LEN(header.rootDownlink)))
+	{
+		elog(NOTICE, "%s has an invalid root downlink", filename);
+		pfree(filename);
+		free_btree_seq_scan(hold);
+		return false;
+	}
+	get_free_extents_from_file(&tag, sizeof(CheckpointFileHeader), &map,
+							   OCompressIsValid(desc->compress), true);
+	if (header.numFreeBlocks != map.size)
+	{
+		elog(NOTICE, "%s header counts " UINT64_FORMAT " free extents, the file has " UINT64_FORMAT,
+			 filename, header.numFreeBlocks, map.size);
+		result = false;
+	}
+
+	if (DiskDownlinkIsValid(header.rootDownlink) &&
+		!get_image_extents(desc, header.rootDownlink, &image))
+		result = false;
+
+	if (result &&
+		!(check_extents(&image, &map, true) &&
+		  check_file_length(header.datafileLength, &image, &map, true)))
+	{
+		elog(NOTICE, "%s does not match the image of checkpoint %u",
+			 filename, tag.num);
+		result = false;
+	}
+
+	free_btree_seq_scan(hold);
+	pfree(filename);
+	if (image.extents)
+		pfree(image.extents);
+	if (map.extents)
+		pfree(map.extents);
+	return result;
 }
 
 /*
@@ -484,11 +651,38 @@ get_free_extents_from_seqbuf_pending(SeqBufDescPrivate *seqBuf,
 }
 
 /*
+ * Returns true if the busy and free extents together are as long as the
+ * data file.
+ */
+static bool
+check_file_length(uint64 data_file_len, ExtentsArray *busy, ExtentsArray *free,
+				  bool report)
+{
+	uint64		len = busy->blocksCount + free->blocksCount;
+
+	if (data_file_len > len)
+	{
+		if (report)
+			elog(NOTICE, "Not used file blocks from " UINT64_FORMAT " to " UINT64_FORMAT,
+				 len, data_file_len);
+		return false;
+	}
+	if (data_file_len < len)
+	{
+		if (report)
+			elog(NOTICE, "Excess file blocks from " UINT64_FORMAT " to " UINT64_FORMAT,
+				 data_file_len, len);
+		return false;
+	}
+	return true;
+}
+
+/*
  * Returns true if the busy and free extents array do not intersect and have no
  * holes.
  */
 static bool
-check_extents(ExtentsArray *busy, ExtentsArray *free)
+check_extents(ExtentsArray *busy, ExtentsArray *free, bool report)
 {
 	FileExtent	cur;
 	uint64		b,
@@ -509,18 +703,20 @@ check_extents(ExtentsArray *busy, ExtentsArray *free)
 
 		while (b < busy->size && next_off > busy->extents[b].off)
 		{
-			elog(NOTICE, "Excess busy extent %lu %u",
-				 (unsigned long) busy->extents[b].off,
-				 (unsigned) busy->extents[b].len);
+			if (report)
+				elog(NOTICE, "Excess busy extent %lu %u",
+					 (unsigned long) busy->extents[b].off,
+					 (unsigned) busy->extents[b].len);
 			result = false;
 			b++;
 		}
 
 		while (f < free->size && next_off > free->extents[f].off)
 		{
-			elog(NOTICE, "Excess free extent %lu %u",
-				 (unsigned long) free->extents[f].off,
-				 (unsigned) free->extents[f].len);
+			if (report)
+				elog(NOTICE, "Excess free extent %lu %u",
+					 (unsigned long) free->extents[f].off,
+					 (unsigned) free->extents[f].len);
 			result = false;
 			f++;
 		}
@@ -532,9 +728,10 @@ check_extents(ExtentsArray *busy, ExtentsArray *free)
 		{
 			if (next_off != busy->extents[b].off)
 			{
-				elog(NOTICE, "Extent %lu %u is neither free nor busy",
-					 (unsigned long) (next_off),
-					 (unsigned) (busy->extents[b].off - next_off));
+				if (report)
+					elog(NOTICE, "Extent %lu %u is neither free nor busy",
+						 (unsigned long) (next_off),
+						 (unsigned) (busy->extents[b].off - next_off));
 				result = false;
 			}
 			cur = busy->extents[b++];
@@ -543,9 +740,10 @@ check_extents(ExtentsArray *busy, ExtentsArray *free)
 		{
 			if (next_off != free->extents[f].off)
 			{
-				elog(NOTICE, "Extent %lu %u is neither free nor busy",
-					 (unsigned long) (next_off),
-					 (unsigned) (free->extents[f].off - next_off));
+				if (report)
+					elog(NOTICE, "Extent %lu %u is neither free nor busy",
+						 (unsigned long) (next_off),
+						 (unsigned) (free->extents[f].off - next_off));
 				result = false;
 			}
 			cur = free->extents[f++];

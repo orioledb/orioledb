@@ -1228,6 +1228,7 @@ get_free_disk_extent(BTreeDescr *desc, uint32 chkpNum,
 		add_free_extents_from_tmp(desc, remove_old_checkpoint_files);
 		*extent = get_extent(desc, FileExtentLen(page_size));
 	}
+	pg_atomic_fetch_add_u64(&BTREE_GET_META(desc)->extentsChangeCount, 1);
 
 	return FileExtentIsValid(*extent);
 }
@@ -2269,6 +2270,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 					err = true;
 				}
 				page_desc->fileExtent.len = new_len;
+				pg_atomic_fetch_add_u64(&BTREE_GET_META(desc)->extentsChangeCount, 1);
 			}
 
 			*dirty_parent = old_len != new_len;

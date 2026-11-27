@@ -2797,6 +2797,23 @@ make_btree_seq_scan(BTreeDescr *desc, OSnapshot *oSnapshot, void *poscan)
 	return make_btree_seq_scan_internal(desc, oSnapshot, NULL, NULL, NULL, poscan);
 }
 
+/*
+ * Keeps the on-disk image of the tree's current checkpoint from being
+ * overwritten, the way a sequential scan reading it does, without reading
+ * anything.  *chkpNum is that checkpoint.  Release with free_btree_seq_scan().
+ */
+BTreeSeqScan *
+btree_hold_checkpoint_image(BTreeDescr *desc, uint32 *chkpNum)
+{
+	BTreeSeqScan *scan = make_btree_seq_scan_internal(desc,
+													  &o_in_progress_snapshot,
+													  NULL, NULL, NULL, NULL);
+
+	init_checkpoint_number(scan);
+	*chkpNum = scan->checkpointNumber;
+	return scan;
+}
+
 BTreeSeqScan *
 make_btree_seq_scan_cb(BTreeDescr *desc, OSnapshot *oSnapshot,
 					   BTreeSeqScanCallbacks *cb, void *arg)

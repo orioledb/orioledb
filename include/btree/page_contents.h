@@ -43,6 +43,13 @@ typedef struct
 	pg_atomic_uint64 bridge_ctid;
 	pg_atomic_uint32 leafPagesNum;
 
+	/*
+	 * Bumped whenever a page takes or gives back a file extent, or free
+	 * extents move between the free stream's files and trees.  Lets
+	 * check_btree() tell a tree that is not sound from one it read in motion.
+	 */
+	pg_atomic_uint64 extentsChangeCount;
+
 	/* Number of running sequential scans depending on the checkpoint number */
 	pg_atomic_uint32 numSeqScans[NUM_SEQ_SCANS_ARRAY_SIZE];
 
